@@ -492,22 +492,22 @@ use bioprism_repair::{
 use bioprism_research::{
     adjudicate_glioma_assay_evidence, adjudicate_glioma_multimodal_contradictions,
     admit_glioma_decision_actions, allocate_glioma_assays, analyze_causal_sensitivity,
-    analyze_federated_benchmark, analyze_federated_mechanism_transport,
-    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
-    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
-    analyze_glioma_computation_reproducibility, analyze_glioma_dose_response,
-    analyze_glioma_federated_instrument_consensus, analyze_glioma_instrument_batch_stability,
-    analyze_glioma_instrument_multichannel_concordance, analyze_glioma_latent_factors,
-    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_intervention_value,
-    analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
-    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
-    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
-    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
-    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
-    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
-    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
-    analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_federated_benchmark, analyze_federated_benchmark_power,
+    analyze_federated_mechanism_transport, analyze_glioma_causal_contrast,
+    analyze_glioma_clonal_evolution, analyze_glioma_clone_panel_outcomes,
+    analyze_glioma_combination_synergy, analyze_glioma_computation_reproducibility,
+    analyze_glioma_dose_response, analyze_glioma_federated_instrument_consensus,
+    analyze_glioma_instrument_batch_stability, analyze_glioma_instrument_multichannel_concordance,
+    analyze_glioma_latent_factors, analyze_glioma_mechanism_identifiability,
+    analyze_glioma_mechanism_intervention_value, analyze_glioma_mechanism_invariance,
+    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
+    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
+    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
+    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -656,12 +656,12 @@ use bioprism_research::{
     EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
     ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
-    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedInstrumentConsensusRequest,
-    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedMechanismSite,
-    FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
-    FidelityCandidate, FidelityObservation, GliomaActionCandidate,
-    GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
+    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
+    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
+    FederatedMechanismSite, FederatedMechanismTransportCampaignRequest,
+    FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
+    GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
     GliomaAutonomousResearchEngineRequest, GliomaCausalClaimAdjudicationRequest,
     GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
     GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
@@ -2677,6 +2677,7 @@ impl Server {
             "glioma_federated_benchmark_consensus" => {
                 self.glioma_federated_benchmark_consensus(&arguments)
             }
+            "glioma_federated_benchmark_power" => self.glioma_federated_benchmark_power(&arguments),
             "glioma_federated_interpretation" => self.glioma_federated_interpretation(&arguments),
             "glioma_federated_benchmark_site_plan" => {
                 self.glioma_federated_benchmark_site_plan(&arguments)
@@ -13128,6 +13129,43 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated benchmark consensus: {error}"))
+    }
+
+    /// Estimate whether aggregate-only site summaries have enough information for a benchmark
+    /// interpretation. This is a sufficiency gate, not a clinical or operational decision.
+    fn glioma_federated_benchmark_power(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedBenchmarkPowerRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_benchmark_power requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated benchmark power request: {error}"))?;
+        let sites: Vec<FederatedBenchmarkSite> = serde_json::from_value(
+            arguments
+                .get("sites")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_benchmark_power requires sites".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated benchmark power sites: {error}"))?;
+        let output = analyze_federated_benchmark_power(&request, &sites)
+            .map_err(|error| format!("glioma federated benchmark power refused: {error}"))?;
+        serde_json::to_value(json!({
+            "power": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_federated_benchmark_site_plan",
+                "glioma_federated_benchmark_consensus",
+                "glioma_federated_benchmark_campaign_execute"
+            ],
+            "guarantees": [
+                "only aggregate site scores, uncertainty, replicate counts, and artifact boundaries cross this route",
+                "inverse-uncertainty information, conservative signal-to-noise, power proxy, heterogeneity, and leave-one-site-out influence are deterministic",
+                "underpowered, heterogeneous, influence-dominated, and binding-mismatched sites remain explicit evidence gaps",
+                "the route performs no site dispatch, raw-data movement, instrument action, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated benchmark power: {error}"))
     }
 
     /// Join a local P10 closure interpretation with aggregate-only P12 consortium consensus.
@@ -53728,6 +53766,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_mission_execute",
                 "glioma_multi_fidelity_campaign_execute",
                 "glioma_federated_benchmark_consensus",
+                "glioma_federated_benchmark_power",
                 "glioma_federated_interpretation",
                 "glioma_federated_benchmark_site_plan",
                 "glioma_federated_mechanism_transport",
@@ -65037,6 +65076,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "properties": {
                 "request": {"type": "object", "description": "FederatedBenchmarkRequest1@1 with capability/world/metric binding, model and site/replicate floors, effect/signal thresholds, heterogeneity, spread, and influence bounds."},
                 "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedBenchmarkSite1@1 aggregate-only site scores with local artifact references; raw observations remain local."}
+            },
+            "required": ["request", "sites"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_benchmark_power",
+        "description": "Estimate aggregate-only federated preclinical glioma benchmark sufficiency from permitted site summaries. Computes inverse-uncertainty information, pooled signal-to-noise, a conservative power proxy, between-site heterogeneity, and leave-one-site-out influence; underpowered and unstable evidence remains explicit and no site or clinical action is dispatched.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkPowerRequest1@1 with benchmark binding, site/replicate floors, target effect, power/SNR, heterogeneity, and influence gates."},
+                "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedBenchmarkSite1@1 aggregate-only site score summaries and local artifact references."}
             },
             "required": ["request", "sites"]
         }

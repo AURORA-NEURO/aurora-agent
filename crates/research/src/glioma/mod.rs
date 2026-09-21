@@ -691,8 +691,8 @@ pub use programs::p11_research_object_release::{
     ReplayExecutionFailure, ReplayObservation, ReplayObservationStatus, ReplayTask,
 };
 pub use programs::p12_federated_benchmarking::{
-    analyze_federated_benchmark, analyze_federated_mechanism_transport,
-    execute_federated_benchmark_adaptive_campaign,
+    analyze_federated_benchmark, analyze_federated_benchmark_power,
+    analyze_federated_mechanism_transport, execute_federated_benchmark_adaptive_campaign,
     execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
     execute_federated_benchmark_operating_cycle,
     execute_federated_benchmark_operating_cycle_dry_run,
@@ -713,6 +713,9 @@ pub use programs::p12_federated_benchmarking::{
     FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycle,
     FederatedBenchmarkOperatingCycleDisposition, FederatedBenchmarkOperatingCycleError,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPlanDisposition,
+    FederatedBenchmarkPower, FederatedBenchmarkPowerContribution,
+    FederatedBenchmarkPowerDisposition, FederatedBenchmarkPowerError,
+    FederatedBenchmarkPowerRequest, FederatedBenchmarkPowerSiteDisposition,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSiteDisposition,
     FederatedBenchmarkSitePlan, FederatedBenchmarkSitePlannerError,
     FederatedBenchmarkSitePlannerRequest, FederatedInterpretationDisposition,

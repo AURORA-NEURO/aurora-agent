@@ -374,6 +374,8 @@ crates/research/src/glioma/
                                              P10 cross-family interpretation gate to adaptive research frontier and operator handoff
     p12_federated_benchmarking/consensus.rs
                                              P12 aggregate-only multi-site benchmark consensus with robust pooling and influence bounds
+    p12_federated_benchmarking/power.rs
+                                             P12 aggregate-only benchmark sufficiency gate with information, conservative power, heterogeneity, and influence analysis
     p12_federated_benchmarking/campaign.rs
                                              P12 autonomous aggregate-only benchmark follow-up campaign with deterministic replanning
     p12_federated_benchmarking/operating_cycle.rs
@@ -1002,6 +1004,12 @@ selected portfolio into typed follow-up actions, runs the bounded campaign throu
 seam, and reports projected consensus separately from observed consensus. Qualified, negative,
 heterogeneous, partial, blocked, and no-admissible-plan outcomes remain explicit, so a favorable
 projection can never masquerade as a measured consortium result.
+P12 now also exposes federated benchmark power sufficiency
+(`glioma_federated_benchmark_power`). It combines inverse-uncertainty site information,
+replicate floors, pooled signal-to-noise, a conservative fixed-point power proxy, between-site
+heterogeneity, and leave-one-site-out influence. Underpowered, binding-mismatched, heterogeneous,
+and influential site sets remain evidence gaps for site expansion or replication; the analyzer
+never moves raw data or turns benchmark sufficiency into a clinical decision.
 The replication-to-federation bridge (`execute_validation_replication_transport`) closes the next
 workflow boundary. It accepts only a validated independent-site replication run, converts its
 non-origin study summaries into aggregate mechanism sites, and invokes the bounded P12 transport

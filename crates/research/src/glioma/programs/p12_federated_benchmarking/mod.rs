@@ -8,6 +8,7 @@ pub mod consensus;
 pub mod federated_interpretation;
 pub mod mechanism_transport;
 pub mod operating_cycle;
+pub mod power;
 pub mod replication_transport;
 pub mod site_planner;
 pub mod transport_campaign;
@@ -41,6 +42,12 @@ pub use mechanism_transport::{
     analyze_federated_mechanism_transport, FederatedMechanismContribution, FederatedMechanismSite,
     FederatedMechanismTransportAnalysis, FederatedMechanismTransportDisposition,
     FederatedMechanismTransportError, FederatedMechanismTransportRequest, FederatedModelCoverage,
+};
+pub use power::{
+    analyze_federated_benchmark_power, FederatedBenchmarkPower,
+    FederatedBenchmarkPowerContribution, FederatedBenchmarkPowerDisposition,
+    FederatedBenchmarkPowerError, FederatedBenchmarkPowerRequest,
+    FederatedBenchmarkPowerSiteDisposition,
 };
 
 pub use transport_campaign::{
