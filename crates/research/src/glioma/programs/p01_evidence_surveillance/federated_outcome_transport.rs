@@ -187,7 +187,7 @@ fn expected_attestation(
         .map_err(|error| FederatedOutcomeTransportError::Digest(error.to_string()))
 }
 
-fn digest_input(report: &FederatedOutcomeTransportReport) -> serde_json::Value {
+pub(crate) fn digest_input(report: &FederatedOutcomeTransportReport) -> serde_json::Value {
     serde_json::json!({
         "feature_id": report.feature_id,
         "output_schema": report.output_schema,

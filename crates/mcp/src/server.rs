@@ -526,14 +526,14 @@ use bioprism_research::{
     certify_decision_omissions, close_glioma_claims_to_experiments, cluster_glioma_evidence,
     compile_decision_action_graph, compile_decision_context,
     compile_federated_glioma_execution_handoff, compile_glioma_computation_interpretation_frontier,
-    compile_glioma_computation_workflow, compile_glioma_federated_outcome_transport,
-    compile_glioma_knowledge_actions, compile_glioma_knowledge_closure,
-    compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps,
-    compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
-    compile_glioma_mechanism_workflow, compile_glioma_multi_study_mechanism_workflow,
-    compile_glioma_multimodal_research_object, compile_glioma_protocol_evidence_surface,
-    compile_glioma_replication_protocol, compile_local_research_workflow,
-    compile_mechanism_action_plan, compile_multi_study_knowledge,
+    compile_glioma_computation_workflow, compile_glioma_federated_evidence_operating_cycle,
+    compile_glioma_federated_outcome_transport, compile_glioma_knowledge_actions,
+    compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
+    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
+    compile_glioma_mechanism_validation_protocol, compile_glioma_mechanism_workflow,
+    compile_glioma_multi_study_mechanism_workflow, compile_glioma_multimodal_research_object,
+    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
+    compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
     compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
     control_glioma_mechanism_prospective_batch, design_glioma_contrast_panel,
     design_glioma_robust_experiment, design_preclinical_experiment,
@@ -693,7 +693,8 @@ use bioprism_research::{
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
     FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
-    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
+    FederatedEvidenceOperatingCycleRequest, FederatedEvidenceShiftRequest,
+    FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
     FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
     FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
@@ -2559,6 +2560,9 @@ impl Server {
             }
             "glioma_federated_outcome_transport" => {
                 self.glioma_federated_outcome_transport(&arguments)
+            }
+            "glioma_federated_evidence_operating_cycle" => {
+                self.glioma_federated_evidence_operating_cycle(&arguments)
             }
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
@@ -10073,6 +10077,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode federated outcome transport report: {error}"))
+    }
+
+    /// Compile the ranked next-action portfolio for a federated preclinical glioma evidence
+    /// cycle. This binds transport, calibration, and reconciliation reports by digest and remains
+    /// advisory: it cannot execute assays, move raw data, or promote a biological conclusion.
+    fn glioma_federated_evidence_operating_cycle(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedEvidenceOperatingCycleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_evidence_operating_cycle requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid federated evidence operating-cycle request: {error}")
+            })?;
+        let cycle = compile_glioma_federated_evidence_operating_cycle(&request)
+            .map_err(|error| format!("federated evidence operating cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "next_routes": [
+                "glioma_federated_evidence_acquisition_policy",
+                "glioma_evidence_verification_gate",
+                "glioma_long_horizon_evidence_calibration",
+                "glioma_multisite_outcome_reconciliation",
+                "glioma_evidence_knowledge_bridge"
+            ],
+            "guarantees": [
+                "transport, calibration, and reconciliation inputs are validated and bound by content digest",
+                "next actions are deterministically ranked, budgeted, prerequisite-aware, and omitted work remains visible",
+                "negative, contradictory, unknown, stale, partial, and under-quorum evidence remains explicit",
+                "the cycle is A0 advisory planning only and cannot execute assays, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode federated evidence operating cycle: {error}"))
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55466,6 +55505,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_knowledge_bridge",
                 "glioma_long_horizon_evidence_calibration",
                 "glioma_federated_outcome_transport",
+                "glioma_federated_evidence_operating_cycle",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65733,6 +65773,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FederatedOutcomeTransportRequest1@1 with aggregate site bundles, consortium claim/scope contract, attestation hashes, capability/purpose policy, quality and freshness floors, quorum requirements, and revocation lists."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_evidence_operating_cycle",
+        "description": "Compile the ranked next-action portfolio for a federated preclinical glioma evidence cycle. Validates and binds aggregate transport, long-horizon calibration, and multi-site reconciliation reports by digest; ranks bounded acquisition, omission verification, calibration refresh, contradiction, replication, negative-result preservation, and typed-knowledge handoff actions; preserves uncertainty and action-budget omissions. Advisory A0 planning only: it does not execute assays, move raw data, infer causality, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedEvidenceOperatingCycleRequest1@1 with objective/epoch/action budget, aggregate FederatedOutcomeTransportReport1@1, optional LongHorizonCalibrationAnalysis1@1 and MultiSiteOutcomeReconciliation1@1, and reconciliation requirement policy."}
             },
             "required": ["request"]
         }

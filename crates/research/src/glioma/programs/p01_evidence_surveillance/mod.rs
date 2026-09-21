@@ -14,6 +14,7 @@ pub mod evidence_knowledge_bridge;
 pub mod evidence_stream;
 pub mod federated_acquisition_policy;
 pub mod federated_execution_handoff;
+pub mod federated_operating_cycle;
 pub mod federated_outcome_transport;
 pub mod federated_shift;
 pub mod long_horizon_calibration;
@@ -88,6 +89,11 @@ pub use federated_execution_handoff::{
     compile_federated_glioma_execution_handoff, FederatedExecutionHandoff,
     FederatedExecutionHandoffError, FederatedExecutionHandoffReport,
     FederatedExecutionHandoffRequest, FederatedHandoffApproval, HandoffDisposition, HandoffEffect,
+};
+pub use federated_operating_cycle::{
+    compile_glioma_federated_evidence_operating_cycle, FederatedCycleAction,
+    FederatedCycleActionKind, FederatedCycleDisposition, FederatedEvidenceOperatingCycle,
+    FederatedEvidenceOperatingCycleError, FederatedEvidenceOperatingCycleRequest,
 };
 pub use federated_outcome_transport::{
     compile_glioma_federated_outcome_transport, FederatedOutcomeBundle,
