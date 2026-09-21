@@ -147,7 +147,7 @@ impl MechanismEvidenceAssimilation {
                     || record.posterior_milli > 1_000
                     || record.earliest_posterior_milli > 1_000
                     || record.latest_posterior_milli > 1_000
-                    || !canonical(&record.observed_snapshot_order)
+                    || !unique_nonempty(&record.observed_snapshot_order)
                     || record.observed_snapshot_order.is_empty()
                     || record.supported_snapshot_count
                         + record.contradicted_snapshot_count
