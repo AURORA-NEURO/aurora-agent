@@ -32,6 +32,7 @@ pub mod robust_portfolio;
 pub mod robustness_stress;
 pub mod state_filter;
 pub mod state_smoother;
+pub mod workflow_assurance;
 
 pub use action_planner::{
     compile_mechanism_action_plan, GliomaMechanismActionPlanner, MechanismActionPlan,
@@ -205,6 +206,12 @@ pub use state_smoother::{
     smooth_glioma_mechanism_states, MechanismStateSmoothPosterior,
     MechanismStateSmootherDisposition, MechanismStateSmootherError, MechanismStateSmootherRequest,
     MechanismStateSmootherResult, MechanismStateTransitionSupport,
+};
+pub use workflow_assurance::{
+    assure_glioma_mechanism_workflow, MechanismAssuranceDecision, MechanismAssuranceDisposition,
+    MechanismAssuranceStatus, MechanismSafetyEvidenceState, MechanismSafetyObservation,
+    MechanismWorkflowAssuranceError, MechanismWorkflowAssurancePlan,
+    MechanismWorkflowAssurancePolicy, MechanismWorkflowAssuranceRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MechanismExploration;
