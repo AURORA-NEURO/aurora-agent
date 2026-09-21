@@ -515,10 +515,10 @@ use bioprism_research::{
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
     assimilate_glioma_acquisition_feedback, assimilate_glioma_knowledge_action_outcomes,
-    attribute_glioma_multimodal_quality_root_cause, bridge_glioma_knowledge_actions,
-    build_glioma_multimodal_ingestion_manifest, build_research_object_manifest,
-    calibrate_glioma_beliefs_prospectively, calibrate_glioma_decision_value,
-    calibrate_glioma_evidence, calibrate_glioma_mechanisms,
+    assimilate_glioma_mechanism_evidence, attribute_glioma_multimodal_quality_root_cause,
+    bridge_glioma_knowledge_actions, build_glioma_multimodal_ingestion_manifest,
+    build_research_object_manifest, calibrate_glioma_beliefs_prospectively,
+    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
     calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
     certify_decision_omissions, close_glioma_claims_to_experiments, cluster_glioma_evidence,
     compile_decision_action_graph, compile_decision_context,
@@ -715,8 +715,9 @@ use bioprism_research::{
     MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
     MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
-    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
-    MechanismHypothesis, MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
+    MechanismEvidenceAssimilationRequest, MechanismFeatureObservation, MechanismGraphEdge,
+    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
     MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
     MechanismOperatingCycleRequest, MechanismRequest, MechanismSignature,
     MechanismStateFilterRequest, MechanismStateSmootherRequest,
@@ -2623,6 +2624,9 @@ impl Server {
                 self.glioma_mechanism_intervention_value(&arguments)
             }
             "glioma_mechanism_bayesian_update" => self.glioma_mechanism_bayesian_update(&arguments),
+            "glioma_mechanism_evidence_assimilation" => {
+                self.glioma_mechanism_evidence_assimilation(&arguments)
+            }
             "glioma_mechanism_state_filter" => self.glioma_mechanism_state_filter(&arguments),
             "glioma_mechanism_state_smoother" => self.glioma_mechanism_state_smoother(&arguments),
             "glioma_mechanism_consensus" => self.glioma_mechanism_consensus(&arguments),
@@ -11942,6 +11946,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma Bayesian mechanism update: {error}"))
+    }
+
+    /// Assimilate digest-bound Bayesian mechanism snapshots across study epochs without
+    /// converting posterior state into an observed causal result.
+    fn glioma_mechanism_evidence_assimilation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismEvidenceAssimilationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_evidence_assimilation requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism assimilation request: {error}"))?;
+        let assimilation = assimilate_glioma_mechanism_evidence(&request)
+            .map_err(|error| format!("glioma mechanism evidence assimilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "assimilation": assimilation,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_mechanism_discriminate",
+                "glioma_mechanism_action_plan",
+                "glioma_mechanism_operating_cycle"
+            ],
+            "guarantees": [
+                "recency weighting is integer deterministic and snapshot digests remain bound",
+                "mechanisms absent from a later snapshot remain explicit omissions",
+                "negative, contradicted, unresolved, and posterior-trend states remain separate",
+                "the route performs no assay, instrument execution, raw-data movement, federation, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism evidence assimilation: {error}"))
     }
 
     /// Filter a transition-aware longitudinal mechanism posterior from local preclinical
@@ -54732,6 +54764,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_invariance",
                 "glioma_mechanism_intervention_value",
                 "glioma_mechanism_bayesian_update",
+                "glioma_mechanism_evidence_assimilation",
                 "glioma_mechanism_state_filter",
                 "glioma_mechanism_state_smoother",
                 "glioma_mechanism_consensus",
@@ -65639,6 +65672,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "MechanismFeatureObservation1@1 local preclinical feature observations with artifact references."}
             },
             "required": ["request", "hypotheses", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_evidence_assimilation",
+        "description": "Assimilate digest-bound Bayesian mechanism snapshots across preclinical study epochs with deterministic recency weighting. Retains mechanisms missing from later coverage, reports posterior trend and supported/contradicted/unresolved counts, preserves negative evidence, and emits a bounded next-action frontier without treating posterior state as an observed causal result.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismEvidenceAssimilationRequest1@1 with ordered MechanismEvidenceSnapshot1@1 updates, recency decay, posterior thresholds, snapshot bound, and negative-result policy."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

@@ -13,6 +13,7 @@ pub mod counterfactual;
 pub mod discrimination;
 pub mod discrimination_campaign;
 pub mod ensemble_counterfactual;
+pub mod evidence_assimilation;
 pub mod graph_propagation;
 pub mod identifiability;
 pub mod intervention_value;
@@ -89,6 +90,12 @@ pub use ensemble_counterfactual::{
     simulate_glioma_counterfactual_ensemble, CounterfactualEnsembleRequest, CounterfactualModel,
     EnsembleCounterfactualError, EnsembleDirection, EnsembleDisposition, EnsembleModelResult,
     EnsembleTargetSummary, MechanismCounterfactualEnsemble,
+};
+pub use evidence_assimilation::{
+    assimilate_glioma_mechanism_evidence, AssimilatedMechanismRecord, AssimilatedMechanismStatus,
+    MechanismEvidenceAssimilation, MechanismEvidenceAssimilationDisposition,
+    MechanismEvidenceAssimilationError, MechanismEvidenceAssimilationRequest,
+    MechanismEvidenceSnapshot,
 };
 pub use graph_propagation::{
     propagate_glioma_mechanism_graph, MechanismGraphDisposition, MechanismGraphEdge,

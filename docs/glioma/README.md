@@ -100,6 +100,8 @@ crates/research/src/glioma/
                                              P03 local, schema/version, duplicate, and modality/model admission before harmonization
   programs/p04_decision_context/context_replay.rs
                                              P04 epoch-aware decision-context replay with promotion, retirement, negative, and unresolved action partitions
+  programs/p05_mechanism_exploration/evidence_assimilation.rs
+                                             P05 recency-weighted, contradiction-preserving mechanism evidence assimilation across study epochs
   programs/p03_multimodal_ingestion_qc/operating_cycle.rs
                                              P03 ingestion/QC, surface admission, and operator-handoff cycle
   programs/p07_protocol_simulation/scientific_frontier.rs
