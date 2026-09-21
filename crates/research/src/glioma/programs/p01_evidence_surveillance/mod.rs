@@ -7,6 +7,7 @@ pub mod acquisition_campaign;
 pub mod calibration;
 pub mod campaign;
 pub mod contradiction_cut;
+pub mod evidence_cluster;
 pub mod federated_shift;
 pub mod novelty_radar;
 pub mod operating_cycle;
@@ -43,6 +44,10 @@ pub use contradiction_cut::{
     plan_glioma_evidence_contradiction_cut, ContradictionAuditSelection, ContradictionConflict,
     ContradictionCut, ContradictionCutDisposition, ContradictionCutError, ContradictionCutRequest,
     ContradictionEvidence, EvidencePolarity,
+};
+pub use evidence_cluster::{
+    cluster_glioma_evidence, EvidenceCluster, EvidenceClusterDisposition, EvidenceClusterError,
+    EvidenceClusterIndex, EvidenceClusterMember, EvidenceClusterRequest, EvidenceClusterVerdict,
 };
 
 pub use acquisition::{

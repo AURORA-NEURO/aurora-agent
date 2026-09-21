@@ -516,7 +516,7 @@ use bioprism_research::{
     attribute_glioma_multimodal_quality_root_cause, bridge_glioma_knowledge_actions,
     build_research_object_manifest, calibrate_glioma_decision_value, calibrate_glioma_evidence,
     calibrate_glioma_mechanisms, calibrate_glioma_multimodal_quality_transport,
-    calibrate_glioma_multimodal_reliability, certify_decision_omissions,
+    calibrate_glioma_multimodal_reliability, certify_decision_omissions, cluster_glioma_evidence,
     compile_decision_action_graph, compile_decision_context,
     compile_glioma_computation_interpretation_frontier, compile_glioma_computation_workflow,
     compile_glioma_knowledge_actions, compile_glioma_knowledge_closure,
@@ -656,17 +656,18 @@ use bioprism_research::{
     DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
     DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
     EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceExecutionMode, EvidenceFusionRequest, EvidenceNoveltyRadarRequest,
-    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
-    EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
-    ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
-    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
-    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
-    FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedContinualAgentRequest,
-    FederatedContinualKnowledgeRequest, FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite,
-    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
-    FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
+    EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFusionRequest,
+    EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
+    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
+    EvidenceTemporalShiftRequest, EvidenceTriangulationRequest, ExperimentArm,
+    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
+    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
+    FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
+    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedInstrumentConsensusRequest,
+    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedKnowledgeRequest,
+    FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate,
     GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
@@ -2493,6 +2494,7 @@ impl Server {
             }
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
+            "glioma_evidence_cluster_index" => self.glioma_evidence_cluster_index(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
             "glioma_evidence_temporal_shift" => self.glioma_evidence_temporal_shift(&arguments),
@@ -9585,6 +9587,35 @@ impl Server {
             .map_err(|error| format!("glioma evidence qualification refused: {error}"))?;
         serde_json::to_value(output)
             .map_err(|error| format!("cannot encode glioma evidence qualification: {error}"))
+    }
+
+    /// Group local preclinical evidence by claim scope and modality, collapse exact artifact
+    /// copies, and preserve source-independence, negative, and contradictory states for P02/P10.
+    fn glioma_evidence_cluster_index(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceClusterRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_cluster_index requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence cluster request: {error}"))?;
+        let output = cluster_glioma_evidence(&request)
+            .map_err(|error| format!("glioma evidence clustering refused: {error}"))?;
+        serde_json::to_value(json!({
+            "clusters": output,
+            "next_routes": [
+                "glioma_knowledge_compile",
+                "glioma_evidence_triangulate",
+                "glioma_replication_closure_frontier"
+            ],
+            "guarantees": [
+                "exact artifact copies never count as independent evidence",
+                "support, negative, contradictory, stale, unknown, and unmeasured states remain explicit",
+                "cluster identities and scores are deterministic and content-addressed",
+                "the route performs no retrieval, raw-data movement, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence cluster index: {error}"))
     }
 
     /// Detect changes between local evidence snapshots and compile bounded review actions for a
@@ -54058,6 +54089,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_scientific_frontier_execute",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
+                "glioma_evidence_cluster_index",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_novelty_radar",
                 "glioma_evidence_temporal_shift",
@@ -64164,6 +64196,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values."}
             },
             "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_cluster_index",
+        "description": "Cluster local preclinical glioma evidence by claim scope, modality, and model; collapse exact artifact copies; score source independence; and retain support, negative, contradictory, stale, unknown, and unmeasured states for typed-knowledge and replication routing. It never retrieves sources, moves raw data, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceClusterRequest1@1 with local EvidenceRecord1@1 values, quality/independence thresholds, cluster bound, and duplicate policy."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

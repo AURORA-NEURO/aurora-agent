@@ -18,6 +18,8 @@ crates/research/src/glioma/
   mod.rs                                   public program API and ownership boundary
   catalog.rs                               12 programs × 32 feature slots = 384 product features
   evidence.rs                              P01 evidence qualification
+  programs/p01_evidence_surveillance/evidence_cluster.rs
+                                             P01 claim-scope evidence clustering, exact-artifact deduplication, and source-independence scoring
   programs/p02_evidence_knowledge/knowledge_graph.rs
                                              P02 scoped claim graph and support/contradiction synthesis
   programs/p02_evidence_knowledge/knowledge_drift.rs
