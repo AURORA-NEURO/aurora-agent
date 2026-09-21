@@ -27,6 +27,7 @@ pub mod multi_fidelity_control;
 pub mod multi_study_workflow;
 pub mod operating_cycle;
 pub mod pathway_activity;
+pub mod prospective_controller;
 pub mod robust_portfolio;
 pub mod robustness_stress;
 pub mod state_filter;
@@ -175,6 +176,14 @@ pub use pathway_activity::{
     PathwayActivityDirection, PathwayActivityDisposition, PathwayActivityEdge,
     PathwayActivityError, PathwayActivityNode, PathwayActivityObservation, PathwayActivityRecord,
     PathwayActivityRequest,
+};
+pub use prospective_controller::{
+    control_glioma_mechanism_prospective_batch, MechanismProspectiveControllerError,
+    MechanismProspectiveControllerPlan, MechanismProspectiveControllerRequest,
+    MechanismProspectiveDisposition, MechanismProspectiveObservation, MechanismProspectiveOutcome,
+    MechanismProspectiveResourceCapacity, MechanismProspectiveResourceUsage,
+    MechanismProspectiveTaskDecision, MechanismProspectiveTaskPolicy,
+    MechanismProspectiveTaskStatus,
 };
 pub use robust_portfolio::{
     plan_glioma_robust_intervention_portfolio, PortfolioDirection, RobustInterventionCandidate,

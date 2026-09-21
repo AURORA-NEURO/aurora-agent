@@ -425,6 +425,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p05_mechanism_exploration::feedback_replan::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::mechanism_workflow::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::multi_study_workflow::FEATURE_ID,
+        crate::glioma::programs::p05_mechanism_exploration::prospective_controller::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::fidelity_bridge::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::robustness_stress::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::calibration::FEATURE_ID,
