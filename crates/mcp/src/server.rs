@@ -584,7 +584,7 @@ use bioprism_research::{
     interpret_glioma_federated_closure, interpret_glioma_replication_closure,
     monitor_prospective_knowledge, optimize_glioma_decision_value,
     optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
-    plan_federated_benchmark_sites, plan_glioma_active_learning,
+    plan_federated_benchmark_sites, plan_federated_continual_agent, plan_glioma_active_learning,
     plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
     plan_glioma_adaptive_panel, plan_glioma_adaptive_research_frontier,
     plan_glioma_adaptive_workflow, plan_glioma_blocked_randomization,
@@ -663,10 +663,10 @@ use bioprism_research::{
     FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
     FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
     FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedContinualKnowledgeRequest,
-    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedInstrumentConsensusRequest,
-    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedKnowledgeRequest,
-    FederatedKnowledgeSiteClaim, FederatedMechanismSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedContinualAgentRequest,
+    FederatedContinualKnowledgeRequest, FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite,
+    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
+    FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate,
     GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
@@ -2519,6 +2519,7 @@ impl Server {
             "glioma_federated_continual_knowledge" => {
                 self.glioma_federated_continual_knowledge(&arguments)
             }
+            "glioma_federated_continual_agent" => self.glioma_federated_continual_agent(&arguments),
             "glioma_federated_knowledge" => self.glioma_federated_knowledge(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
@@ -10183,6 +10184,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated-continual knowledge: {error}"))
+    }
+
+    /// Rank bounded research actions from federated continual knowledge. This creates a plan only;
+    /// execution still requires the local dispatcher, policy, and any physical authorization.
+    fn glioma_federated_continual_agent(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedContinualAgentRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_continual_agent requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated-continual agent request: {error}"))?;
+        let output = plan_federated_continual_agent(&request)
+            .map_err(|error| format!("glioma federated-continual agent refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_knowledge_action_dispatch",
+                "glioma_federated_continual_knowledge",
+                "glioma_knowledge_closure"
+            ],
+            "guarantees": [
+                "priority combines information value, coverage debt, contradiction pressure, trend, confidence debt, and site influence",
+                "budget, dependency, autonomy, and physical-effect authorization gates are explicit",
+                "quarantine and approval-required actions are never silently selected for execution",
+                "the route performs no retrieval, raw-data movement, instrument action, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated-continual agent plan: {error}"))
     }
 
     /// Compare aggregate typed-knowledge summaries across institutions while preserving local
@@ -53949,6 +53980,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multi_study_knowledge",
                 "glioma_prospective_knowledge_monitor",
                 "glioma_federated_continual_knowledge",
+                "glioma_federated_continual_agent",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
@@ -64262,6 +64294,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FederatedContinualKnowledgeRequest1@1 with aggregate-only FederatedContinualObservation1@1 values, semantic digests, epoch/site quorum floors, support/drift/outlier gates, required modality/model coverage, and claim bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_continual_agent",
+        "description": "Plan bounded autonomous research actions from federated continual glioma knowledge. Scores information value, coverage debt, contradiction/trend pressure, confidence debt, and site influence, then applies budget, dependency, autonomy, physical-effect, approval, and quarantine gates. Returns a typed plan only; it never executes instruments, moves raw data, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedContinualAgentRequest1@1 with objective-bound FederatedContinualKnowledge1@1, candidate actions, costs, dependencies, autonomy/authorization metadata, budget, and action capacity."}
             },
             "required": ["request"]
         }

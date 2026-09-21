@@ -9,6 +9,7 @@ pub mod claim_frontier;
 pub mod closure;
 pub mod composition;
 pub mod consistency;
+pub mod continual_agent;
 pub mod dispatch;
 pub mod federated_continual;
 pub mod federated_knowledge;
@@ -88,6 +89,11 @@ pub use consistency::{
     compile_glioma_knowledge_consistency, KnowledgeConsistencyClaimDisposition,
     KnowledgeConsistencyClaimScore, KnowledgeConsistencyClosure, KnowledgeConsistencyDisposition,
     KnowledgeConsistencyError, KnowledgeConsistencyRequest,
+};
+pub use continual_agent::{
+    plan_federated_continual_agent, FederatedAgentActionKind, FederatedAgentCandidate,
+    FederatedAgentDecision, FederatedAgentDisposition, FederatedAgentPlanItem,
+    FederatedContinualAgentError, FederatedContinualAgentPlan, FederatedContinualAgentRequest,
 };
 pub use federated_continual::{
     analyze_federated_continual_knowledge, FederatedContinualClaim,
