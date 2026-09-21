@@ -399,6 +399,8 @@ crates/research/src/glioma/
                                              P09 replayable multimodal computation DAG execution
     p09_reproducible_computation/reproducibility.rs
                                              P09 repeated-run reproducibility gate for deterministic digests, numerical drift, runtime drift, and task coverage
+    p09_reproducible_computation/lineage.rs
+                                             P09 artifact-lineage join and dependency-safe recomputation frontier for failed, stale, and negative computation nodes
     p09_reproducible_computation/planning.rs
                                              P09 budgeted computation-portfolio planning with prerequisite closure
     p09_reproducible_computation/portfolio_execution.rs

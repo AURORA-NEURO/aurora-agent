@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod campaign;
 pub mod execution;
 pub mod interpretation_frontier;
+pub mod lineage;
 pub mod operating_cycle;
 pub mod placement;
 pub mod planning;
@@ -54,6 +55,12 @@ pub use interpretation_frontier::{
     execute_glioma_computation_interpretation_frontier, ComputationInterpretationFrontier,
     ComputationInterpretationFrontierDisposition, ComputationInterpretationFrontierError,
     ComputationInterpretationFrontierRequest, ComputationInterpretationFrontierRun,
+};
+
+pub use lineage::{
+    join_glioma_computation_lineage, ComputationLineage, ComputationLineageDisposition,
+    ComputationLineageError, ComputationLineageNode, ComputationLineageNodeStatus,
+    ComputationLineageRequest,
 };
 
 pub use campaign::{

@@ -142,7 +142,7 @@ silently bypass an earlier wave's omission, provenance, safety, or replay gate.
 - Downstream edges: P10 interpretation, P11 release, and P12 federated benchmark aggregation.
 - Promotion gate: byte-stable canonicalization, resource termination, crash/retry recovery,
   negative-result retention, and independent replay.
-- Current implementation: 12/32 slots. Next wave: placement optimization, artifact lineage joins,
+- Current implementation: 13/32 slots. Next wave: placement optimization, artifact lineage joins,
   and adaptive robustness-guided recomputation.
 
 ### P10 — `p10_interpretation_replication`

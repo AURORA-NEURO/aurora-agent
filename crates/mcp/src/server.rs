@@ -588,7 +588,7 @@ use bioprism_research::{
     gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
     govern_glioma_decision_loop, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     interpret_glioma_federated_closure, interpret_glioma_replication_closure,
-    join_glioma_evidence_frontier, monitor_prospective_knowledge,
+    join_glioma_computation_lineage, join_glioma_evidence_frontier, monitor_prospective_knowledge,
     negotiate_glioma_knowledge_protocol, negotiate_glioma_multimodal_knowledge_protocol,
     optimize_glioma_decision_value, optimize_glioma_protocol_branches,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
@@ -644,36 +644,36 @@ use bioprism_research::{
     ClosedLoopFrontierRequest, ClosureInterpretationRequest, CombinationObservation,
     CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
     ComputationExecutionRequest, ComputationInterpretationEvidenceGateRequest,
-    ComputationInterpretationFrontierRequest, ComputationPlacementRequest,
-    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ComputationRecoveryRequest,
-    ComputationReproducibilityRequest, ComputationReproducibilityRun, ConcordanceRequest,
-    ConsensusRequest, ContradictionAdjudicationRequest, ContradictionCutRequest,
-    ContradictionEvidence, ContrastDesignRequest, CounterfactualEnsembleRequest,
-    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
-    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionAdmissionRequest,
-    DecisionBranchCampaignRequest, DecisionBranchEvidenceRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextReplayRequest,
-    DecisionContextRequest, DecisionLoopGovernorRequest, DecisionMissionBridgeRequest,
-    DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
-    DecisionValueCalibrationRequest, DecisionValueRequest, DesignAction, DesignMechanism,
-    DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
-    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
-    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
-    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
-    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
-    DryRunFederatedMechanismTransportExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
-    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
-    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
-    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
-    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
-    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor,
-    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
-    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
-    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
-    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceClusterRequest,
-    EvidenceExecutionMode, EvidenceFrontierJoinRequest, EvidenceFusionRequest,
-    EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
+    ComputationInterpretationFrontierRequest, ComputationLineageRequest,
+    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
+    ComputationRecoveryRequest, ComputationReproducibilityRequest, ComputationReproducibilityRun,
+    ConcordanceRequest, ConsensusRequest, ContradictionAdjudicationRequest,
+    ContradictionCutRequest, ContradictionEvidence, ContrastDesignRequest,
+    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
+    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
+    DecisionAdmissionRequest, DecisionBranchCampaignRequest, DecisionBranchEvidenceRequest,
+    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
+    DecisionContextReplayRequest, DecisionContextRequest, DecisionLoopGovernorRequest,
+    DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
+    DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
+    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    DriftSurveillanceRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
+    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
+    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
+    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
+    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
+    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
+    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
+    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
+    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
+    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
+    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFrontierJoinRequest,
+    EvidenceFusionRequest, EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
     EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
     EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
     ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
@@ -2353,6 +2353,7 @@ impl Server {
                 self.glioma_multimodal_operating_cycle(&arguments)
             }
             "glioma_computation_execute" => self.glioma_computation_execute(&arguments),
+            "glioma_computation_lineage" => self.glioma_computation_lineage(&arguments),
             "glioma_computation_reproducibility" => {
                 self.glioma_computation_reproducibility(&arguments)
             }
@@ -6901,6 +6902,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation execution: {error}"))
+    }
+
+    /// Join a typed computation DAG with its local results and expose the smallest
+    /// dependency-safe recomputation frontier.
+    fn glioma_computation_lineage(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationLineageRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_computation_lineage requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma computation lineage request: {error}"))?;
+        let lineage = join_glioma_computation_lineage(&request)
+            .map_err(|error| format!("glioma computation lineage refused: {error}"))?;
+        serde_json::to_value(json!({
+            "lineage": lineage,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_computation_execute",
+                "glioma_computation_placement",
+                "glioma_computation_recovery_execute"
+            ],
+            "guarantees": [
+                "task, dependency, result, schema, replay, and local-artifact relationships are explicit",
+                "failed, partial, missing, stale, and negative nodes expand to a deterministic recomputation frontier",
+                "reusable tasks remain separate from the frontier and can be replayed only under caller policy",
+                "the route performs no worker execution, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation lineage: {error}"))
     }
 
     /// Gate a completed local computation on repeated replay stability. The route consumes only
@@ -54734,6 +54765,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_readiness_gate",
                 "glioma_multimodal_operating_cycle",
                 "glioma_computation_execute",
+                "glioma_computation_lineage",
                 "glioma_computation_reproducibility",
                 "glioma_computation_portfolio_plan",
                 "glioma_computation_placement",
@@ -63928,6 +63960,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ComputationExecutionRequest1@1 containing ComputationTask1@1 DAG nodes, replay identity, cache, and resource bounds."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_lineage",
+        "description": "Join a typed preclinical glioma computation DAG with local results and expose a dependency-safe recomputation frontier. Detects missing results, schema drift, non-local artifacts, nondeterministic tasks, partial/failed/negative outcomes, and blocked descendants without executing workers or moving raw data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationLineageRequest1@1 containing a replay identity, bounded ComputationTask1@1 DAG, local ComputationTaskResult1@1 rows, determinism/locality policies, and frontier bound."}
             },
             "required": ["request"]
         }
