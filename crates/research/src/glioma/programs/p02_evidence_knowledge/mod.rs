@@ -10,6 +10,7 @@ pub mod closure;
 pub mod composition;
 pub mod consistency;
 pub mod dispatch;
+pub mod federated_continual;
 pub mod federated_knowledge;
 pub mod gap_compiler;
 pub mod knowledge_drift;
@@ -87,6 +88,13 @@ pub use consistency::{
     compile_glioma_knowledge_consistency, KnowledgeConsistencyClaimDisposition,
     KnowledgeConsistencyClaimScore, KnowledgeConsistencyClosure, KnowledgeConsistencyDisposition,
     KnowledgeConsistencyError, KnowledgeConsistencyRequest,
+};
+pub use federated_continual::{
+    analyze_federated_continual_knowledge, FederatedContinualClaim,
+    FederatedContinualClaimDisposition, FederatedContinualDisposition, FederatedContinualKnowledge,
+    FederatedContinualKnowledgeError, FederatedContinualKnowledgeRequest,
+    FederatedContinualObservation, FederatedContinualTrend, FederatedEpochConsensus,
+    FederatedEpochDisposition,
 };
 pub use federated_knowledge::{
     analyze_federated_knowledge, FederatedKnowledge, FederatedKnowledgeAction,

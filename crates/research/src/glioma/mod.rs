@@ -73,7 +73,8 @@ pub use programs::p01_evidence_surveillance::{
     TriangulatedClaim, TriangulatedClaimVerdict,
 };
 pub use programs::p02_evidence_knowledge::{
-    analyze_federated_knowledge, bridge_glioma_knowledge_actions, compile_glioma_knowledge_actions,
+    analyze_federated_continual_knowledge, analyze_federated_knowledge,
+    bridge_glioma_knowledge_actions, compile_glioma_knowledge_actions,
     compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
     compile_glioma_knowledge_gaps, compile_multi_study_knowledge, compile_typed_knowledge,
     compose_knowledge_graph, detect_glioma_knowledge_drift, execute_glioma_autonomous_gap_cycle,
@@ -85,7 +86,11 @@ pub use programs::p02_evidence_knowledge::{
     BeliefRevisionDecisionKind, BeliefRevisionDisposition, BeliefRevisionError,
     BeliefRevisionRequest, BridgedKnowledgeCandidate, CompiledActionDisposition,
     CompiledResearchAction, DryRunKnowledgeActionExecutor,
-    DryRunKnowledgeResolutionCampaignExecutor, FederatedKnowledge, FederatedKnowledgeAction,
+    DryRunKnowledgeResolutionCampaignExecutor, FederatedContinualClaim,
+    FederatedContinualClaimDisposition, FederatedContinualDisposition, FederatedContinualKnowledge,
+    FederatedContinualKnowledgeError, FederatedContinualKnowledgeRequest,
+    FederatedContinualObservation, FederatedContinualTrend, FederatedEpochConsensus,
+    FederatedEpochDisposition, FederatedKnowledge, FederatedKnowledgeAction,
     FederatedKnowledgeDisposition, FederatedKnowledgeError, FederatedKnowledgeKind,
     FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FrontierActionKind,
     KnowledgeActionBridge, KnowledgeActionBridgeError, KnowledgeActionBridgeRequest,

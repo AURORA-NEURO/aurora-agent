@@ -30,6 +30,8 @@ crates/research/src/glioma/
                                              P02 explicit multi-study claim alignment with pooled support and influence diagnostics
   programs/p02_evidence_knowledge/prospective_monitor.rs
                                              P02 sequential high-throughput claim drift, change-point, persistence, and multiplicity monitoring
+  programs/p02_evidence_knowledge/federated_continual.rs
+                                             P02 robust aggregate-only federated continual consensus with quorum and influence gates
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs
@@ -491,7 +493,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
-| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, explicit multi-study alignment and influence diagnostics, prospective change-point monitoring with multiplicity control, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
+| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, explicit multi-study alignment and influence diagnostics, prospective change-point monitoring with multiplicity control, robust aggregate-only federated continual consensus, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, pairwise identifiability analysis with quality/risk/budget-gated feature selection, cross-model mechanistic invariance and transport-stable panel selection, calibrated trust-discounted posterior action selection, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
@@ -779,6 +781,11 @@ baselines, computes bounded cumulative drift and change points, applies persiste
 multiplicity gates, and routes review, acquisition, or quarantine actions. A single noisy event
 cannot promote a claim; negative, contradictory, unresolved, and missing-coverage states remain
 first-class outputs for the next autonomous cycle.
+Federated continual knowledge (`glioma_federated_continual_knowledge`) fuses aggregate-only
+observations across sites and release epochs with robust medians, quorum floors, outlier-site
+diagnostics, and leave-one-site-out influence. Conflicting semantic digests fail closed, export
+and preclinical-only policies are enforced before analysis, and negative or contested epochs are
+kept visible instead of being averaged into a false consensus.
 Federated typed-knowledge consensus (`glioma_federated_knowledge`) now compares independent
 site summaries without exporting source text. It pools support, contradiction, confidence, and
 disposition mass, reports site-specific disagreement and leave-one-site-out influence, and emits
