@@ -15,6 +15,7 @@ pub mod discrimination_campaign;
 pub mod ensemble_counterfactual;
 pub mod graph_propagation;
 pub mod identifiability;
+pub mod invariance;
 pub mod mechanism_dynamics;
 pub mod operating_cycle;
 pub mod pathway_activity;
@@ -98,6 +99,12 @@ pub use identifiability::{
     IdentifiabilityFeatureUtility, IdentifiabilityMechanism, MechanismIdentifiability,
     MechanismIdentifiabilityDisposition, MechanismIdentifiabilityError,
     MechanismIdentifiabilityRequest, MechanismPairIdentifiability,
+};
+pub use invariance::{
+    analyze_glioma_mechanism_invariance, InvarianceMechanism, MechanismInvariance,
+    MechanismInvarianceContext, MechanismInvarianceDisposition, MechanismInvarianceError,
+    MechanismInvariancePair, MechanismInvarianceRequest, MechanismInvarianceSignatureScore,
+    MechanismInvarianceUtility, MechanismSignature,
 };
 pub use mechanism_dynamics::{
     simulate_glioma_mechanism_dynamics, MechanismDynamicsDisposition, MechanismDynamicsEdge,

@@ -108,6 +108,8 @@ crates/research/src/glioma/
                                              P05 source-weighted consensus across imaging, pathway, clonal, and computational evidence with conflict and leave-one-source-out sensitivity
   programs/p05_mechanism_exploration/identifiability.rs
                                              P05 pairwise mechanism-identifiability frontier with quality/risk/budget-gated feature selection
+  programs/p05_mechanism_exploration/invariance.rs
+                                             P05 cross-model mechanistic invariance frontier with transport-stability and bounded panel selection
   programs/p06_experiment_design/adaptive_panel.rs
                                              P06 mechanism-aware multi-assay panel selection with Gini information gain, correlation-group diversity, risk, feasibility, and budget gates
     programs/p06_experiment_design/replication_plan.rs
@@ -458,7 +460,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |
-| P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, pairwise identifiability analysis with quality/risk/budget-gated feature selection, calibrated trust-discounted posterior action selection, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
+| P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, pairwise identifiability analysis with quality/risk/budget-gated feature selection, cross-model mechanistic invariance and transport-stable panel selection, calibrated trust-discounted posterior action selection, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, an end-to-end plan/execute/replan cycle, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, evolution-aware clone campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
@@ -916,6 +918,15 @@ high-risk features remain blocked rather than silently entering the frontier, wh
 pairs become negative evidence and route to the next assay or model refinement. The result is a
 deterministic planning artifact for the autonomous engine; it never treats predicted separation as
 measured biology, executes an assay, or makes a clinical decision.
+
+P05 now also exposes a cross-model mechanism-invariance frontier
+(`glioma_mechanism_invariance`). It evaluates signed mechanism predictions across weighted
+preclinical contexts, combining per-mechanism direction consistency, pairwise separation, and
+transport stability. A greedy panel selector admits only signatures that clear the invariance and
+separation floors while respecting quality, risk, cost, budget, and panel-size gates. Contextual
+reversals, missing coverage, and unresolved mechanism pairs become explicit negative evidence for
+the autonomous engine to route into model refinement or independent replication; predicted
+invariance is never treated as measured biology or a clinical conclusion.
 
 P05 now also exposes deterministic mechanism calibration
 (`calibrate_glioma_mechanisms`). It scores competing mechanism probabilities against typed local

@@ -496,15 +496,15 @@ use bioprism_research::{
     analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
     analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors,
-    analyze_glioma_mechanism_identifiability, analyze_glioma_mediation,
-    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
-    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
-    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
-    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
-    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
-    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
-    analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_invariance,
+    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
+    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
+    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
+    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -675,11 +675,11 @@ use bioprism_research::{
     InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetExecutionRequest,
     InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest,
     InstrumentPreflightRequest, InstrumentResearchFrontierRequest, InstrumentScienceLoopRequest,
-    InterpretationSynthesisRequest, KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest,
-    KnowledgeActionDispatchRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
-    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeCompositionRequest,
-    KnowledgeConsistencyRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    InterpretationSynthesisRequest, InvarianceMechanism, KnowledgeActionBridgeRequest,
+    KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest, KnowledgeActionPlan,
+    KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate,
+    KnowledgeCompositionRequest, KnowledgeConsistencyRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -688,7 +688,8 @@ use bioprism_research::{
     MechanismDiscriminatorAction, MechanismDynamicsEdge, MechanismDynamicsIntervention,
     MechanismDynamicsNode, MechanismDynamicsRequest, MechanismFeatureObservation,
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
-    MechanismIdentifiabilityRequest, MechanismOperatingCycleRequest, MechanismRequest,
+    MechanismIdentifiabilityRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
+    MechanismOperatingCycleRequest, MechanismRequest, MechanismSignature,
     MechanismStateFilterRequest, MechanismStateSmootherRequest,
     MechanismValidationExecutionRequest, MechanismValidationPlanRequest,
     MechanismValidationProtocolCompileRequest, MediationObservation, MediationRequest,
@@ -2519,6 +2520,7 @@ impl Server {
             "glioma_mechanism_dynamics" => self.glioma_mechanism_dynamics(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
             "glioma_mechanism_identifiability" => self.glioma_mechanism_identifiability(&arguments),
+            "glioma_mechanism_invariance" => self.glioma_mechanism_invariance(&arguments),
             "glioma_mechanism_bayesian_update" => self.glioma_mechanism_bayesian_update(&arguments),
             "glioma_mechanism_state_filter" => self.glioma_mechanism_state_filter(&arguments),
             "glioma_mechanism_state_smoother" => self.glioma_mechanism_state_smoother(&arguments),
@@ -10747,6 +10749,62 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism identifiability: {error}"))
+    }
+
+    /// Score cross-model mechanistic invariance and select a bounded signature panel. This is
+    /// transportability planning only; it never executes an assay or makes a clinical decision.
+    fn glioma_mechanism_invariance(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismInvarianceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_invariance requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism-invariance request: {error}"))?;
+        let contexts: Vec<MechanismInvarianceContext> = serde_json::from_value(
+            arguments
+                .get("contexts")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_invariance requires contexts".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma invariance contexts: {error}"))?;
+        let mechanisms: Vec<InvarianceMechanism> = serde_json::from_value(
+            arguments
+                .get("mechanisms")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_invariance requires mechanisms".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma invariance mechanisms: {error}"))?;
+        let signatures: Vec<MechanismSignature> = serde_json::from_value(
+            arguments
+                .get("signatures")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_invariance requires signatures".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism signatures: {error}"))?;
+        let mut request = request;
+        request.contexts = contexts;
+        request.mechanisms = mechanisms;
+        request.signatures = signatures;
+        let output = analyze_glioma_mechanism_invariance(&request)
+            .map_err(|error| format!("glioma mechanism invariance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "invariance": output,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_mechanism_identifiability",
+                "glioma_mechanism_discriminate",
+                "plan_glioma_replication"
+            ],
+            "guarantees": [
+                "directional consistency and mechanism separation are weighted across declared preclinical contexts",
+                "context-reversing signatures remain below the invariance floor rather than being promoted",
+                "panel selection is bounded by quality, risk, cost, budget, and pair coverage",
+                "the route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism invariance: {error}"))
     }
 
     /// Update competing mechanism posteriors from typed local preclinical observations. This
@@ -53359,6 +53417,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
                 "glioma_mechanism_identifiability",
+                "glioma_mechanism_invariance",
                 "glioma_mechanism_bayesian_update",
                 "glioma_mechanism_state_filter",
                 "glioma_mechanism_state_smoother",
@@ -63868,6 +63927,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "features": {"type": "array", "items": {"type": "object"}, "description": "IdentifiabilityFeature1@1 typed feature predictions with quality, cost, and risk metadata."}
             },
             "required": ["request", "mechanisms", "features"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_invariance",
+        "description": "Score whether typed preclinical glioma mechanistic signatures remain directionally stable and discriminative across declared model systems, then select a bounded transportable panel. The route preserves context gaps, reversals, quality/risk/budget blocks, negative evidence, and uncertainty; it plans analysis only and never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismInvarianceRequest1@1 with objective, invariance/separation floors, quality/risk gates, budget, and panel bound."},
+                "contexts": {"type": "array", "items": {"type": "object"}, "description": "MechanismInvarianceContext1@1 weighted preclinical model-system contexts."},
+                "mechanisms": {"type": "array", "items": {"type": "object"}, "description": "InvarianceMechanism1@1 competing mechanism identities."},
+                "signatures": {"type": "array", "items": {"type": "object"}, "description": "MechanismSignature1@1 context-by-mechanism signed predictions with quality, cost, and risk."}
+            },
+            "required": ["request", "contexts", "mechanisms", "signatures"]
         }
     }));
     definitions.push(json!({
