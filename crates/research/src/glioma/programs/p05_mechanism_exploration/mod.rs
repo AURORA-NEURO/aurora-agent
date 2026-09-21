@@ -15,6 +15,7 @@ pub mod discrimination;
 pub mod discrimination_campaign;
 pub mod ensemble_counterfactual;
 pub mod evidence_assimilation;
+pub mod feedback_replan;
 pub mod fidelity_bridge;
 pub mod graph_propagation;
 pub mod identifiability;
@@ -105,6 +106,12 @@ pub use evidence_assimilation::{
     MechanismEvidenceAssimilation, MechanismEvidenceAssimilationDisposition,
     MechanismEvidenceAssimilationError, MechanismEvidenceAssimilationRequest,
     MechanismEvidenceSnapshot,
+};
+pub use feedback_replan::{
+    replan_glioma_mechanism_feedback, MechanismFeedbackActionScore, MechanismFeedbackCandidate,
+    MechanismFeedbackDecision, MechanismFeedbackObservation, MechanismFeedbackOutcome,
+    MechanismFeedbackReplan, MechanismFeedbackReplanDisposition, MechanismFeedbackReplanError,
+    MechanismFeedbackReplanRequest,
 };
 pub use fidelity_bridge::{
     bridge_glioma_mechanism_fidelity, MechanismFidelityBridge, MechanismFidelityBridgeDisposition,

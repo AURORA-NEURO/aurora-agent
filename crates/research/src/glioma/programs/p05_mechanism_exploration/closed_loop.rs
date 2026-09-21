@@ -112,7 +112,7 @@ fn unique_nonempty(values: &[String]) -> bool {
         && values.iter().collect::<BTreeSet<_>>().len() == values.len()
 }
 
-fn digest_input(plan: &MechanismClosedLoopPlan) -> serde_json::Value {
+pub(crate) fn digest_input(plan: &MechanismClosedLoopPlan) -> serde_json::Value {
     serde_json::json!({
         "feature_id": plan.feature_id,
         "output_schema": plan.output_schema,

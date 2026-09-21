@@ -615,14 +615,14 @@ use bioprism_research::{
     prioritize_knowledge_frontier, promote_glioma_closed_loop_frontier,
     propagate_glioma_mechanism_graph, qualify_evidence, rank_glioma_evidence_novelty,
     reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
-    replay_glioma_decision_context, revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
-    schedule_glioma_computation_placement, schedule_glioma_frontier_campaign,
-    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
-    simulate_glioma_protocol, simulate_glioma_protocol_scenario_ensemble,
-    smooth_glioma_mechanism_states, snapshot_glioma_evidence_stream,
-    stress_glioma_mechanism_robustness, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
-    synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    replan_glioma_mechanism_feedback, replay_glioma_decision_context, revise_glioma_beliefs,
+    route_glioma_multimodal_evidence_gaps, schedule_glioma_computation_placement,
+    schedule_glioma_frontier_campaign, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
+    simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
+    snapshot_glioma_evidence_stream, stress_glioma_mechanism_robustness, surveil_glioma_evidence,
+    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog,
     verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
@@ -724,8 +724,9 @@ use bioprism_research::{
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
     MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
     MechanismEvidenceAssimilationRequest, MechanismFeatureObservation,
-    MechanismFidelityBridgeRequest, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
-    MechanismHypothesis, MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
+    MechanismFeedbackReplanRequest, MechanismFidelityBridgeRequest, MechanismGraphEdge,
+    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
     MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
     MechanismOperatingCycleRequest, MechanismRequest, MechanismRobustnessStressRequest,
     MechanismSignature, MechanismStateFilterRequest, MechanismStateSmootherRequest,
@@ -2642,6 +2643,7 @@ impl Server {
             "glioma_mechanism_multi_fidelity_control" => {
                 self.glioma_mechanism_multi_fidelity_control(&arguments)
             }
+            "glioma_mechanism_feedback_replan" => self.glioma_mechanism_feedback_replan(&arguments),
             "glioma_mechanism_fidelity_bridge" => self.glioma_mechanism_fidelity_bridge(&arguments),
             "glioma_mechanism_robustness_stress" => {
                 self.glioma_mechanism_robustness_stress(&arguments)
@@ -12121,6 +12123,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multi-fidelity control plan: {error}"))
+    }
+
+    /// Replan a bounded mechanism frontier from typed local outcomes while retaining
+    /// contradictions, uncertainty, and missing feedback as first-class workflow state.
+    fn glioma_mechanism_feedback_replan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismFeedbackReplanRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_feedback_replan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism feedback replan request: {error}"))?;
+        let replan = replan_glioma_mechanism_feedback(&request)
+            .map_err(|error| format!("glioma mechanism feedback replan refused: {error}"))?;
+        serde_json::to_value(json!({
+            "replan": replan,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_mechanism_action_plan",
+                "glioma_mechanism_operating_cycle",
+                "glioma_mechanism_closed_loop"
+            ],
+            "guarantees": [
+                "contradictions, unresolved outcomes, supported outcomes, and missing feedback remain explicit",
+                "only validated local artifact references can influence the deterministic replan",
+                "budget, risk, action-count, and approval gates run before downstream dispatch",
+                "the route performs no assay, instrument execution, raw-data movement, federation, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism feedback replan: {error}"))
     }
 
     /// Bridge mechanism prediction/observation residuals across model systems and expose the
@@ -55094,6 +55126,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_evidence_assimilation",
                 "glioma_mechanism_closed_loop",
                 "glioma_mechanism_multi_fidelity_control",
+                "glioma_mechanism_feedback_replan",
                 "glioma_mechanism_fidelity_bridge",
                 "glioma_mechanism_robustness_stress",
                 "glioma_mechanism_state_filter",
@@ -66060,6 +66093,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultiFidelityControlRequest1@1 with assimilated mechanism evidence, a fidelity bridge, strict model-system escalation candidates, budget, risk, information-gain, transport-gain, and approval gates."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_feedback_replan",
+        "description": "Replan a preclinical glioma mechanism frontier from typed local returned outcomes. Contradictions raise discrimination pressure, supported outcomes shift toward bounded validation, unresolved and missing outcomes remain explicit, and budget, risk, action-count, and approval gates apply without executing biology or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismFeedbackReplanRequest1@1 with a prior closed-loop plan, typed action candidates, local observation artifacts, outcome labels, budget, priority/risk bounds, and approval policy."}
             },
             "required": ["request"]
         }
