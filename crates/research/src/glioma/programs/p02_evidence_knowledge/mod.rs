@@ -6,6 +6,7 @@ pub mod action_outcome_assimilation;
 pub mod autonomous_cycle;
 pub mod belief_revision;
 pub mod campaign;
+pub mod claim_evidence_reconciliation;
 pub mod claim_experiment_closure;
 pub mod claim_frontier;
 pub mod closure;
@@ -80,6 +81,11 @@ pub use action_outcome_assimilation::{
     ActionOutcomeAssimilationItem, ActionOutcomeSnapshot, KnowledgeActionOutcomeAssimilation,
     KnowledgeActionOutcomeAssimilationRequest, OutcomeAssimilationDecision,
     OutcomeAssimilationDisposition,
+};
+pub use claim_evidence_reconciliation::{
+    reconcile_glioma_claim_evidence, ClaimEvidenceReconciliation, ClaimEvidenceReconciliationError,
+    ClaimEvidenceReconciliationRequest, ClaimReconciliationDecision,
+    ClaimReconciliationDisposition, ClaimReconciliationRow,
 };
 pub use claim_experiment_closure::{
     close_glioma_claims_to_experiments, ClaimExperimentClosure, ClaimExperimentClosureDisposition,

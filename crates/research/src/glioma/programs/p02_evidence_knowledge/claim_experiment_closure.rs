@@ -112,7 +112,7 @@ fn canonical<T: Ord>(values: &[T]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
-fn digest_input(output: &ClaimExperimentClosure) -> serde_json::Value {
+pub(crate) fn digest_input(output: &ClaimExperimentClosure) -> serde_json::Value {
     serde_json::json!({
         "feature_id": output.feature_id,
         "output_schema": output.output_schema,

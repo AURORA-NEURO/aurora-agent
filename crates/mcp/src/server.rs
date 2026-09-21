@@ -607,13 +607,13 @@ use bioprism_research::{
     plan_glioma_validation_replication_gate, plan_glioma_workflow, plan_glioma_workflow_recovery,
     preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
     propagate_glioma_mechanism_graph, qualify_evidence, rank_glioma_evidence_novelty,
-    register_glioma_spatial_samples, revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
-    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
-    simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
-    snapshot_glioma_evidence_stream, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
-    synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    reconcile_glioma_claim_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
+    route_glioma_multimodal_evidence_gaps, schedule_glioma_computation_placement,
+    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
+    simulate_glioma_protocol, simulate_glioma_protocol_scenario_ensemble,
+    smooth_glioma_mechanism_states, snapshot_glioma_evidence_stream, surveil_glioma_evidence,
+    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog,
     verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
@@ -629,11 +629,11 @@ use bioprism_research::{
     BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
     BeliefRevisionRequest, BlockedRandomizationRequest, CalibratedMechanismCampaignRequest,
     CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
-    CarryoverSequenceRequest, CausalContrastRequest, ClaimExperimentClosureRequest,
-    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
-    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
-    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
-    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
+    CarryoverSequenceRequest, CausalContrastRequest, ClaimEvidenceReconciliationRequest,
+    ClaimExperimentClosureRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
+    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
+    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
+    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
     ClosureInterpretationRequest, CombinationObservation, CombinationSynergyRequest,
     ComputationCandidate, ComputationExecutionMode, ComputationExecutionRequest,
     ComputationInterpretationEvidenceGateRequest, ComputationInterpretationFrontierRequest,
@@ -2555,6 +2555,9 @@ impl Server {
                 self.glioma_knowledge_action_outcome_assimilation(&arguments)
             }
             "glioma_claim_experiment_closure" => self.glioma_claim_experiment_closure(&arguments),
+            "glioma_claim_evidence_reconciliation" => {
+                self.glioma_claim_evidence_reconciliation(&arguments)
+            }
             "glioma_multimodal_knowledge_workflow" => {
                 self.glioma_multimodal_knowledge_workflow(&arguments)
             }
@@ -10605,6 +10608,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma claim-experiment closure: {error}"))
+    }
+
+    /// Reconcile quantified closure support against the prior typed claim state. This route
+    /// promotes only stronger evidence and keeps downgrades, nulls, and contradictions reviewable.
+    fn glioma_claim_evidence_reconciliation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClaimEvidenceReconciliationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_claim_evidence_reconciliation requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma claim-evidence reconciliation request: {error}")
+            })?;
+        let output = reconcile_glioma_claim_evidence(&request)
+            .map_err(|error| format!("glioma claim-evidence reconciliation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "reconciliation": output,
+            "next_routes": [
+                "glioma_belief_revision",
+                "glioma_knowledge_frontier",
+                "glioma_knowledge_action_compile",
+                "glioma_knowledge_synthesis_operating_cycle"
+            ],
+            "guarantees": [
+                "promotions require quantified closure support and never overwrite a claim silently",
+                "partial, negative, contradictory, and unresolved results remain explicit review work",
+                "the supplied prior knowledge and closure digests must match before reconciliation",
+                "the route performs no retrieval, raw-data movement, instrument execution, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma claim-evidence reconciliation: {error}"))
     }
 
     /// Synchronize the local action DAG against study-level multimodal readiness and choose a
@@ -54444,6 +54477,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_workflow_recovery",
                 "glioma_knowledge_action_outcome_assimilation",
                 "glioma_claim_experiment_closure",
+                "glioma_claim_evidence_reconciliation",
                 "glioma_research_workflow_admission",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
@@ -64901,6 +64935,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ClaimExperimentClosureRequest1@1 with TypedKnowledge1@1, ActionOutcomeSnapshot1@1 rows, local EvidenceRecord1@1 rows, coverage requirements, score threshold, and completion policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_claim_evidence_reconciliation",
+        "description": "Reconcile a quantified claim-to-experiment closure against prior typed glioma knowledge. Promotes stronger support, retains stable beliefs, downgrades insufficient support, and routes negative or contradictory results for explicit review without silently replacing scientific state. It never infers causality, moves raw data, executes instruments, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClaimEvidenceReconciliationRequest1@1 with prior TypedKnowledge1@1, ClaimExperimentClosure1@1 derived from it, promotion/downgrade thresholds, and claim bound."}
             },
             "required": ["request"]
         }
