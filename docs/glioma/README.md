@@ -26,6 +26,8 @@ crates/research/src/glioma/
                                              P01 prospective idempotent evidence stream snapshots with late-event handling, trend summaries, and negative frontiers
   programs/p01_evidence_surveillance/prospective_triage.rs
                                              P01 researcher-capacity-aware prospective evidence triage with contradiction, coverage, staleness, and budget routing
+  programs/p01_evidence_surveillance/researcher_workbench.rs
+                                             P01 local researcher evidence workbench with typed query filters, explainable ranking, facets, and omission handling
   programs/p01_evidence_surveillance/federated_acquisition_policy.rs
                                              P01 consortium-aware site assignment with independence, quorum, budget, privacy, and local-raw-data gates
   programs/p01_evidence_surveillance/evidence_frontier_join.rs
@@ -571,7 +573,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
-| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, researcher-capacity-aware prospective triage, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
+| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, local researcher evidence workbench, researcher-capacity-aware prospective triage, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, explicit multi-study alignment and influence diagnostics, prospective change-point monitoring with multiplicity control, robust aggregate-only federated continual consensus, autonomous evidence-to-action ranking with budget/dependency/autonomy gates, local dependency-wave workflow compilation with checkpoint/compensation planning, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |

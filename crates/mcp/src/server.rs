@@ -617,15 +617,16 @@ use bioprism_research::{
     plan_glioma_validation_replication_gate, plan_glioma_workflow, plan_glioma_workflow_recovery,
     preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
     promote_glioma_closed_loop_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
-    rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
-    replan_glioma_mechanism_feedback, replay_glioma_decision_context, revise_glioma_beliefs,
-    route_glioma_multimodal_evidence_gaps, schedule_glioma_computation_placement,
-    schedule_glioma_frontier_campaign, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
-    simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
-    snapshot_glioma_evidence_stream, stress_glioma_mechanism_robustness, surveil_glioma_evidence,
-    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    query_glioma_evidence_workbench, rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence,
+    register_glioma_spatial_samples, replan_glioma_mechanism_feedback,
+    replay_glioma_decision_context, revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
+    schedule_glioma_computation_placement, schedule_glioma_frontier_campaign,
+    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
+    simulate_glioma_protocol, simulate_glioma_protocol_scenario_ensemble,
+    smooth_glioma_mechanism_states, snapshot_glioma_evidence_stream,
+    stress_glioma_mechanism_robustness, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
+    synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog,
     verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
@@ -682,7 +683,7 @@ use bioprism_research::{
     EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceProspectiveTriageRequest,
     EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
     EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
-    ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
+    EvidenceWorkbenchRequest, ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
     FederatedAcquisitionPolicyRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
@@ -2534,6 +2535,9 @@ impl Server {
             "glioma_evidence_stream_snapshot" => self.glioma_evidence_stream_snapshot(&arguments),
             "glioma_evidence_prospective_triage" => {
                 self.glioma_evidence_prospective_triage(&arguments)
+            }
+            "glioma_evidence_researcher_workbench" => {
+                self.glioma_evidence_researcher_workbench(&arguments)
             }
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
@@ -9843,6 +9847,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma prospective evidence triage: {error}"))
+    }
+
+    /// Rank caller-supplied local typed evidence for a researcher while preserving every
+    /// negative, contradictory, stale, uncertain, and filtered record as an explicit omission.
+    /// This is an interaction surface, not a conclusion engine: it never retrieves sources,
+    /// moves raw data, runs an assay, or makes a clinical decision.
+    fn glioma_evidence_researcher_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceWorkbenchRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_researcher_workbench requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma researcher workbench request: {error}"))?;
+        let plan = query_glioma_evidence_workbench(&request)
+            .map_err(|error| format!("glioma researcher workbench refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "next_routes": [
+                "glioma_evidence_prospective_triage",
+                "glioma_evidence_acquisition_plan",
+                "glioma_knowledge_protocol_gateway"
+            ],
+            "guarantees": [
+                "the workbench ranks only caller-supplied local typed evidence and never creates a scientific conclusion",
+                "negative, contradicted, uncertain, stale, and filtered records remain explicit with omission reasons",
+                "raw source bytes remain local and the route performs no retrieval, federation side effect, assay, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma researcher evidence workbench: {error}"))
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55229,6 +55261,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_novelty_adjudication",
                 "glioma_evidence_stream_snapshot",
                 "glioma_evidence_prospective_triage",
+                "glioma_evidence_researcher_workbench",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65419,6 +65452,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceProspectiveTriageRequest1@1 with an EvidenceStreamSnapshot1@1, review observations, reviewer capacities, current epoch, and priority/coverage/freshness/queue/budget policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_researcher_workbench",
+        "description": "Provide a local single-study preclinical glioma evidence workbench for researchers. Applies deterministic claim/scope term matching, modality/model/source/state filters, quality/reproducibility/freshness floors, explainable ranking, facet summaries, explicit negative/contradictory/uncertain omissions, and a bounded handoff without retrieving sources, moving raw data, or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceWorkbenchRequest1@1 with local EvidenceRecord1@1 values, researcher/query terms, typed filters, freshness/quality bounds, result limit, state inclusion policy, and sort order."}
             },
             "required": ["request"]
         }

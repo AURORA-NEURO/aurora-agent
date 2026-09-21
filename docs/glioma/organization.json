@@ -63,6 +63,7 @@
     "novelty_adjudication": "crates/research/src/glioma/programs/p01_evidence_surveillance/novelty_adjudication.rs",
     "evidence_stream": "crates/research/src/glioma/programs/p01_evidence_surveillance/evidence_stream.rs",
     "prospective_evidence_triage": "crates/research/src/glioma/programs/p01_evidence_surveillance/prospective_triage.rs",
+    "researcher_workbench": "crates/research/src/glioma/programs/p01_evidence_surveillance/researcher_workbench.rs",
     "federated_acquisition_policy": "crates/research/src/glioma/programs/p01_evidence_surveillance/federated_acquisition_policy.rs",
     "evidence_frontier_join": "crates/research/src/glioma/programs/p01_evidence_surveillance/evidence_frontier_join.rs",
     "multimodal_gap_router": "crates/research/src/glioma/programs/p01_evidence_surveillance/multimodal_gap_router.rs",

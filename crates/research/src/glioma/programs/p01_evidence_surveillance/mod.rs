@@ -20,6 +20,7 @@ pub mod novelty_radar;
 pub mod operating_cycle;
 pub mod priority;
 pub mod prospective_triage;
+pub mod researcher_workbench;
 pub mod surveillance;
 pub mod temporal_shift;
 pub mod triangulation;
@@ -127,6 +128,11 @@ pub use prospective_triage::{
     EvidenceProspectiveTriageRequest, EvidenceTriageActionKind, EvidenceTriageDecision,
     EvidenceTriageDisposition, EvidenceTriageReviewObservation, EvidenceTriageReviewState,
     EvidenceTriageReviewerCapacity, EvidenceTriageReviewerLoad, EvidenceTriageStatus,
+};
+pub use researcher_workbench::{
+    query_glioma_evidence_workbench, EvidenceWorkbenchDisposition, EvidenceWorkbenchError,
+    EvidenceWorkbenchHit, EvidenceWorkbenchOmission, EvidenceWorkbenchPlan,
+    EvidenceWorkbenchRequest, EvidenceWorkbenchSort,
 };
 pub use surveillance::{
     surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind, EvidenceSurveillance,
