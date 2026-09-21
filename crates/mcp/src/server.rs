@@ -490,9 +490,10 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    adjudicate_glioma_assay_evidence, adjudicate_glioma_multimodal_contradictions,
-    admit_glioma_decision_actions, admit_glioma_research_workflow, allocate_glioma_assays,
-    analyze_causal_sensitivity, analyze_federated_benchmark, analyze_federated_benchmark_power,
+    adjudicate_glioma_assay_evidence, adjudicate_glioma_evidence_novelty,
+    adjudicate_glioma_multimodal_contradictions, admit_glioma_decision_actions,
+    admit_glioma_research_workflow, allocate_glioma_assays, analyze_causal_sensitivity,
+    analyze_federated_benchmark, analyze_federated_benchmark_power,
     analyze_federated_continual_knowledge, analyze_federated_evidence_shifts,
     analyze_federated_knowledge, analyze_federated_mechanism_transport,
     analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
@@ -713,16 +714,16 @@ use bioprism_research::{
     MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
     MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
-    MultimodalRequest, MultimodalWorkflowRequest, PathwayActivityDefinition,
-    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
-    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveKnowledgeRequest,
-    ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
-    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
-    ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest, ProtocolTransportGateRequest,
-    QualityAdaptiveCampaignRequest, QualityExecutionMode, QualityExecutionRequest,
-    QualityRecoveryRequest, QualityRemediationRequest, QualityRootCauseRequest,
-    QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    MultimodalRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
+    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
+    PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
+    ProspectiveKnowledgeRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
+    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
+    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
+    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
+    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
+    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
+    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2495,6 +2496,9 @@ impl Server {
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
             "glioma_evidence_cluster_index" => self.glioma_evidence_cluster_index(&arguments),
+            "glioma_evidence_novelty_adjudication" => {
+                self.glioma_evidence_novelty_adjudication(&arguments)
+            }
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
             "glioma_evidence_temporal_shift" => self.glioma_evidence_temporal_shift(&arguments),
@@ -9616,6 +9620,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence cluster index: {error}"))
+    }
+
+    /// Adjudicate whether candidate local glioma evidence is novel, an extension, a replication,
+    /// an exact duplicate, an explicit contradiction, or unresolved against a baseline corpus.
+    fn glioma_evidence_novelty_adjudication(&self, arguments: &Value) -> Result<Value, String> {
+        let request: NoveltyAdjudicationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_novelty_adjudication requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma novelty adjudication request: {error}"))?;
+        let output = adjudicate_glioma_evidence_novelty(&request)
+            .map_err(|error| format!("glioma novelty adjudication refused: {error}"))?;
+        serde_json::to_value(json!({
+            "adjudication": output,
+            "next_routes": [
+                "glioma_knowledge_compile",
+                "glioma_knowledge_belief_revision",
+                "glioma_evidence_triangulate",
+                "glioma_replication_closure_frontier"
+            ],
+            "guarantees": [
+                "novelty is compared against an explicit baseline rather than inferred from citation count",
+                "exact duplicates, replications, scope extensions, contradictions, and unresolved states remain distinct",
+                "contradiction requires explicit typed state and is never inferred from wording alone",
+                "the route performs no retrieval, raw-data movement, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma novelty adjudication: {error}"))
     }
 
     /// Detect changes between local evidence snapshots and compile bounded review actions for a
@@ -54090,6 +54122,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
                 "glioma_evidence_cluster_index",
+                "glioma_evidence_novelty_adjudication",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_novelty_radar",
                 "glioma_evidence_temporal_shift",
@@ -64205,6 +64238,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceClusterRequest1@1 with local EvidenceRecord1@1 values, quality/independence thresholds, cluster bound, and duplicate policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_novelty_adjudication",
+        "description": "Compare typed candidate preclinical glioma evidence against an explicit baseline and classify each candidate as novel, scope extension, replication, contradiction, duplicate, or unresolved. Contradiction requires explicit state; the route never infers it from wording, retrieves sources, moves raw data, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "NoveltyAdjudicationRequest1@1 with baseline/candidate typed records, tokenized domain metadata, quality/novelty/contradiction floors, and item bound."}
             },
             "required": ["request"]
         }

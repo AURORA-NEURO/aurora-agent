@@ -20,6 +20,8 @@ crates/research/src/glioma/
   evidence.rs                              P01 evidence qualification
   programs/p01_evidence_surveillance/evidence_cluster.rs
                                              P01 claim-scope evidence clustering, exact-artifact deduplication, and source-independence scoring
+  programs/p01_evidence_surveillance/novelty_adjudication.rs
+                                             P01 explicit baseline-vs-candidate novelty, replication, scope-extension, duplicate, and contradiction adjudication
   programs/p02_evidence_knowledge/knowledge_graph.rs
                                              P02 scoped claim graph and support/contradiction synthesis
   programs/p02_evidence_knowledge/knowledge_drift.rs

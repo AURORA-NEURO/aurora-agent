@@ -9,6 +9,7 @@ pub mod campaign;
 pub mod contradiction_cut;
 pub mod evidence_cluster;
 pub mod federated_shift;
+pub mod novelty_adjudication;
 pub mod novelty_radar;
 pub mod operating_cycle;
 pub mod priority;
@@ -48,6 +49,11 @@ pub use contradiction_cut::{
 pub use evidence_cluster::{
     cluster_glioma_evidence, EvidenceCluster, EvidenceClusterDisposition, EvidenceClusterError,
     EvidenceClusterIndex, EvidenceClusterMember, EvidenceClusterRequest, EvidenceClusterVerdict,
+};
+pub use novelty_adjudication::{
+    adjudicate_glioma_evidence_novelty, NoveltyAdjudication, NoveltyAdjudicationDisposition,
+    NoveltyAdjudicationError, NoveltyAdjudicationItem, NoveltyAdjudicationRecord,
+    NoveltyAdjudicationRequest, NoveltyAdjudicationVerdict,
 };
 
 pub use acquisition::{
