@@ -108,6 +108,7 @@
     "protocol_multistudy_fusion": "crates/research/src/glioma/programs/p07_protocol_simulation/multistudy_fusion.rs",
     "protocol_transport_gate": "crates/research/src/glioma/programs/p07_protocol_simulation/transport_gate.rs",
     "instrument_preflight": "crates/research/src/glioma/programs/p08_instrument_robotics/preflight.rs",
+    "instrument_signal_extraction": "crates/research/src/glioma/programs/p08_instrument_robotics/signal_extraction.rs",
     "instrument_execution": "crates/research/src/glioma/programs/p08_instrument_robotics/execution.rs",
     "instrument_campaign": "crates/research/src/glioma/programs/p08_instrument_robotics/campaign.rs",
     "instrument_assay_adjudication": "crates/research/src/glioma/programs/p08_instrument_robotics/assay_adjudication.rs",

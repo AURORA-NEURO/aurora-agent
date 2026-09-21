@@ -200,6 +200,8 @@ crates/research/src/glioma/
                                              P03 bounded metadata-only ingestion/QC campaign with defect-aware replanning
   programs/p08_instrument_robotics/calibration.rs
                                              P08 robust control calibration and Theil-Sen instrument drift detection
+  programs/p08_instrument_robotics/signal_extraction.rs
+                                             P08 local median-baseline signal extraction with quality, drift, noise, and peak gates
   programs/p06_experiment_design/adaptive_allocation.rs
   programs/p06_experiment_design/adaptive_allocation_campaign.rs
                                              P06 bounded posterior-aware replicate-allocation campaign with local batch execution and replanning
@@ -308,6 +310,8 @@ crates/research/src/glioma/
                                              P08 governed instrument-to-science loop with assay evidence adjudication and next research actions
     p08_instrument_robotics/research_frontier.rs
                                              P08 status-aware handoff from qualified, negative, and unresolved assay outcomes into executable computation, replication, and falsification missions
+    p08_instrument_robotics/signal_extraction.rs
+                                             P08 bounded value-only endpoint extraction for local instrument traces before assay adjudication
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
     p09_reproducible_computation/execution.rs
@@ -463,7 +467,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, pairwise identifiability analysis with quality/risk/budget-gated feature selection, cross-model mechanistic invariance and transport-stable panel selection, calibrated trust-discounted posterior action selection, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, an end-to-end plan/execute/replan cycle, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, evolution-aware clone campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
-| P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
+| P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, local median-baseline signal extraction, drift/noise/peak quality gates, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, robustness-debt-driven re-analysis, selective failed-frontier recovery, omission-stress robustness suite, and computation-to-interpretation/replication routing |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, cross-site verdicts, guarded adaptive-frontier execution, bounded resynthesis campaigns, and computation-evidence adjudication |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence, dependency-aware replay, accountable release gating, and operator handoff |
@@ -1024,6 +1028,11 @@ qualified calibration, live interlock telemetry, typed operation parameters, ope
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The
 MCP route only emits the plan; a local gateway must re-verify authorization before any hardware
 effect, and missing telemetry remains unresolved rather than imputed.
+P08 also exposes bounded local signal extraction (`glioma_instrument_signal_extract`). It converts
+value-only instrument points into replay-stable endpoint candidates using local median baselines,
+robust residual noise, quality and drift gates, and spacing-constrained peak selection. Rejected
+points, drifting channels, no-signal channels, and raw-trace locality remain explicit; extraction
+does not become assay evidence until the existing QC adjudicator accepts it.
 P08 now also includes guarded plan execution (`execute_glioma_instrument_plan`). A caller-owned
 gateway is rechecked for authorization and live interlocks before every operation; transient
 failures are bounded by retries, partial effects and negative outcomes halt the plan, and an

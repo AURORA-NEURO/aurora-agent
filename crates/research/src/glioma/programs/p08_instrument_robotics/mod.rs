@@ -13,6 +13,7 @@ pub mod operating_cycle;
 pub mod preflight;
 pub mod research_frontier;
 pub mod science_loop;
+pub mod signal_extraction;
 
 pub use assay_adjudication::{
     adjudicate_glioma_assay_evidence, AssayEvidenceDisposition, AssayEvidenceError,
@@ -81,6 +82,11 @@ pub use research_frontier::{
 pub use science_loop::{
     execute_glioma_instrument_science_loop, InstrumentScienceLoop,
     InstrumentScienceLoopDisposition, InstrumentScienceLoopError, InstrumentScienceLoopRequest,
+};
+pub use signal_extraction::{
+    extract_glioma_instrument_signal, InstrumentSignalChannel, InstrumentSignalExtraction,
+    InstrumentSignalPeak, InstrumentSignalPoint, SignalChannelDisposition,
+    SignalExtractionDisposition, SignalExtractionError, SignalExtractionRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::InstrumentRobotics;

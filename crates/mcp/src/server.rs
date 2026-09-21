@@ -570,25 +570,25 @@ use bioprism_research::{
     execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
     execute_glioma_sequential_campaign, execute_glioma_validation_campaign,
     execute_glioma_validation_replication_campaign, execute_validation_replication_transport,
-    explore_mechanisms, filter_glioma_mechanism_states, forecast_glioma_multimodal_quality,
-    fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
-    glioma_program_catalog, govern_glioma_decision_loop, harmonize_glioma_multimodal_batches,
-    harmonize_multimodal_inputs, interpret_glioma_federated_closure,
-    interpret_glioma_replication_closure, optimize_glioma_decision_value,
-    optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
-    plan_federated_benchmark_sites, plan_glioma_active_learning,
-    plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
-    plan_glioma_adaptive_panel, plan_glioma_adaptive_research_frontier,
-    plan_glioma_adaptive_workflow, plan_glioma_blocked_randomization,
-    plan_glioma_carryover_sequence, plan_glioma_clone_continuation,
-    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
-    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
-    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
-    plan_glioma_information_design, plan_glioma_mechanism_validation,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
-    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
-    plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
-    plan_glioma_protocol_compensation, plan_glioma_replication,
+    explore_mechanisms, extract_glioma_instrument_signal, filter_glioma_mechanism_states,
+    forecast_glioma_multimodal_quality, fuse_glioma_protocol_evidence,
+    gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
+    govern_glioma_decision_loop, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    interpret_glioma_federated_closure, interpret_glioma_replication_closure,
+    optimize_glioma_decision_value, optimize_glioma_protocol_branches,
+    plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
+    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
+    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_panel,
+    plan_glioma_adaptive_research_frontier, plan_glioma_adaptive_workflow,
+    plan_glioma_blocked_randomization, plan_glioma_carryover_sequence,
+    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
+    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
+    plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
+    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
+    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
+    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
+    plan_glioma_power_stress_surface, plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
@@ -675,12 +675,12 @@ use bioprism_research::{
     InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetExecutionRequest,
     InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest,
     InstrumentPreflightRequest, InstrumentResearchFrontierRequest, InstrumentScienceLoopRequest,
-    InterpretationSynthesisRequest, InvarianceMechanism, KnowledgeActionBridgeRequest,
-    KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest, KnowledgeActionPlan,
-    KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate,
-    KnowledgeCompositionRequest, KnowledgeConsistencyRequest, KnowledgeFrontier,
-    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
-    KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
+    InstrumentSignalPoint, InterpretationSynthesisRequest, InvarianceMechanism,
+    KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest,
+    KnowledgeActionPlan, KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest,
+    KnowledgeActionTemplate, KnowledgeCompositionRequest, KnowledgeConsistencyRequest,
+    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation,
+    KnowledgeRequest, KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
     MechanismCandidate, MechanismConsensusRequest, MechanismDiscrimination,
@@ -714,16 +714,16 @@ use bioprism_research::{
     RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
     RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
     ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
-    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
-    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
-    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
-    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
-    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
-    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
-    TypedKnowledge, ValidationBatchAssessmentRequest, ValidationCampaignRequest,
-    ValidationReplicationCampaignRequest, ValidationReplicationGateRequest,
-    ValidationReplicationTransportRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest,
+    SignalExtractionRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
+    SpatialNicheRequest, SpatialPropagationRequest, SpatialRegistrationCell,
+    SpatialRegistrationRequest, StateTransitionObservation, StateTransitionRequest,
+    StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
+    StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
+    TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
+    ValidationCampaignRequest, ValidationReplicationCampaignRequest,
+    ValidationReplicationGateRequest, ValidationReplicationTransportRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2608,6 +2608,7 @@ impl Server {
             }
             "glioma_multi_fidelity_optimize" => self.glioma_multi_fidelity_optimize(&arguments),
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
+            "glioma_instrument_signal_extract" => self.glioma_instrument_signal_extract(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_instrument_fleet_schedule" => self.glioma_instrument_fleet_schedule(&arguments),
             "glioma_instrument_fleet_execute" => self.glioma_instrument_fleet_execute(&arguments),
@@ -12228,6 +12229,43 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument calibration: {error}"))
+    }
+
+    /// Extract quality- and drift-gated signal endpoints from value-only local instrument points.
+    /// This route never touches hardware or promotes a signal to scientific evidence by itself.
+    fn glioma_instrument_signal_extract(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SignalExtractionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_signal_extract requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma signal-extraction request: {error}"))?;
+        let points: Vec<InstrumentSignalPoint> = serde_json::from_value(
+            arguments
+                .get("points")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_signal_extract requires points".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument signal points: {error}"))?;
+        let output = extract_glioma_instrument_signal(&request, &points)
+            .map_err(|error| format!("glioma instrument signal extraction refused: {error}"))?;
+        serde_json::to_value(json!({
+            "signal_extraction": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_instrument_assay_adjudicate",
+                "glioma_instrument_science_loop_execute",
+                "glioma_mechanism_discriminate"
+            ],
+            "guarantees": [
+                "local median baselines and robust residual noise remain replay-stable",
+                "quality, spacing, drift, and signal gates preserve blocked channels and negative evidence",
+                "raw traces remain behind the institution-local gateway and only bounded summaries cross this route",
+                "the route performs no hardware, biological, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument signal extraction: {error}"))
     }
 
     /// Compile an interlocked, authorization-bound instrument plan. The route never dispatches
@@ -53464,6 +53502,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_robust_active_learning_campaign_execute",
                 "glioma_multi_fidelity_optimize",
                 "glioma_instrument_calibration",
+                "glioma_instrument_signal_extract",
                 "glioma_instrument_preflight",
                 "glioma_instrument_fleet_schedule",
                 "glioma_instrument_fleet_execute",
@@ -64475,6 +64514,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "runs": {"type": "array", "items": {"type": "object"}, "description": "CalibrationRun1@1 local de-identified control measurements with sequence indices and artifact references."}
             },
             "required": ["request", "runs"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_signal_extract",
+        "description": "Extract bounded preclinical glioma instrument endpoints from value-only local points using local median baselines, robust residual noise, quality gates, drift detection, and spacing-constrained peak selection. It preserves rejected channels and negative signal states, keeps raw traces behind the institution-local gateway, and never executes hardware or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SignalExtractionRequest1@1 with instrument/model binding, baseline window, quality/peak/drift thresholds, spacing, and peak-count bounds."},
+                "points": {"type": "array", "items": {"type": "object"}, "description": "InstrumentSignalPoint1@1 value-only local points with channel, sequence, quality, and de-identified artifact boundary."}
+            },
+            "required": ["request", "points"]
         }
     }));
     definitions.push(json!({

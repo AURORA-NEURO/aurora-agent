@@ -521,7 +521,8 @@ pub use programs::p08_instrument_robotics::{
     execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
     execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
     execute_glioma_instrument_research_frontier, execute_glioma_instrument_science_loop,
-    preflight_glioma_instrument, schedule_glioma_instrument_fleet, AdaptiveInstrumentCampaign,
+    extract_glioma_instrument_signal, preflight_glioma_instrument,
+    schedule_glioma_instrument_fleet, AdaptiveInstrumentCampaign,
     AdaptiveInstrumentCampaignDisposition, AdaptiveInstrumentCampaignError,
     AdaptiveInstrumentCampaignRequest, AdaptiveInstrumentCandidate, AdaptiveInstrumentDecision,
     AssayEvidenceDisposition, AssayEvidenceError, AssayEvidenceObservation, AssayEvidenceRecord,
@@ -548,7 +549,10 @@ pub use programs::p08_instrument_robotics::{
     InstrumentResearchFrontier, InstrumentResearchFrontierDisposition,
     InstrumentResearchFrontierError, InstrumentResearchFrontierRequest,
     InstrumentResearchFrontierRun, InstrumentScienceLoop, InstrumentScienceLoopDisposition,
-    InstrumentScienceLoopError, InstrumentScienceLoopRequest,
+    InstrumentScienceLoopError, InstrumentScienceLoopRequest, InstrumentSignalChannel,
+    InstrumentSignalExtraction, InstrumentSignalPeak, InstrumentSignalPoint,
+    SignalChannelDisposition, SignalExtractionDisposition, SignalExtractionError,
+    SignalExtractionRequest,
 };
 pub use programs::p09_reproducible_computation::{
     assess_glioma_robustness, compile_glioma_computation_interpretation_frontier,
