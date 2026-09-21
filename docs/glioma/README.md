@@ -202,6 +202,8 @@ crates/research/src/glioma/
                                              P08 robust control calibration and Theil-Sen instrument drift detection
   programs/p08_instrument_robotics/signal_extraction.rs
                                              P08 local median-baseline signal extraction with quality, drift, noise, and peak gates
+  programs/p08_instrument_robotics/batch_stability.rs
+                                             P08 prospective cross-run endpoint stability with coverage, dispersion, noise, peak, and drift gates
   programs/p06_experiment_design/adaptive_allocation.rs
   programs/p06_experiment_design/adaptive_allocation_campaign.rs
                                              P06 bounded posterior-aware replicate-allocation campaign with local batch execution and replanning
@@ -312,6 +314,8 @@ crates/research/src/glioma/
                                              P08 status-aware handoff from qualified, negative, and unresolved assay outcomes into executable computation, replication, and falsification missions
     p08_instrument_robotics/signal_extraction.rs
                                              P08 bounded value-only endpoint extraction for local instrument traces before assay adjudication
+    p08_instrument_robotics/batch_stability.rs
+                                             P08 high-throughput reproducibility gate for extracted endpoints before autonomous promotion
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
     p09_reproducible_computation/execution.rs
@@ -467,7 +471,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, pairwise identifiability analysis with quality/risk/budget-gated feature selection, cross-model mechanistic invariance and transport-stable panel selection, calibrated trust-discounted posterior action selection, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, an end-to-end plan/execute/replan cycle, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, evolution-aware clone campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
-| P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, local median-baseline signal extraction, drift/noise/peak quality gates, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
+| P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, local median-baseline signal extraction, prospective cross-run endpoint stability, drift/noise/peak quality gates, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, robustness-debt-driven re-analysis, selective failed-frontier recovery, omission-stress robustness suite, and computation-to-interpretation/replication routing |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, cross-site verdicts, guarded adaptive-frontier execution, bounded resynthesis campaigns, and computation-evidence adjudication |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence, dependency-aware replay, accountable release gating, and operator handoff |
@@ -1033,6 +1037,11 @@ value-only instrument points into replay-stable endpoint candidates using local 
 robust residual noise, quality and drift gates, and spacing-constrained peak selection. Rejected
 points, drifting channels, no-signal channels, and raw-trace locality remain explicit; extraction
 does not become assay evidence until the existing QC adjudicator accepts it.
+P08 also exposes prospective batch stability (`glioma_instrument_batch_stability`). It aligns
+value-only extraction summaries across repeated instrument runs and gates endpoint promotion on
+coverage, robust amplitude dispersion, noise, peak support, and first-to-last run drift. An
+unstable or under-covered channel remains negative evidence for recalibration, replication, or
+mechanism follow-up rather than being silently promoted by the autonomous engine.
 P08 now also includes guarded plan execution (`execute_glioma_instrument_plan`). A caller-owned
 gateway is rechecked for authorization and live interlocks before every operation; transient
 failures are bounded by retries, partial effects and negative outcomes halt the plan, and an

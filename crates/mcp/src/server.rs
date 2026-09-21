@@ -495,16 +495,17 @@ use bioprism_research::{
     analyze_federated_benchmark, analyze_federated_mechanism_transport,
     analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
     analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
-    analyze_glioma_dose_response, analyze_glioma_latent_factors,
-    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_invariance,
-    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
-    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
-    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
-    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
-    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
-    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
-    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_dose_response, analyze_glioma_instrument_batch_stability,
+    analyze_glioma_latent_factors, analyze_glioma_mechanism_identifiability,
+    analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
+    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
+    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
+    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
+    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
+    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
+    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
+    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
+    analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -675,12 +676,13 @@ use bioprism_research::{
     InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetExecutionRequest,
     InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest,
     InstrumentPreflightRequest, InstrumentResearchFrontierRequest, InstrumentScienceLoopRequest,
-    InstrumentSignalPoint, InterpretationSynthesisRequest, InvarianceMechanism,
-    KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest,
-    KnowledgeActionPlan, KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest,
-    KnowledgeActionTemplate, KnowledgeCompositionRequest, KnowledgeConsistencyRequest,
-    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation,
-    KnowledgeRequest, KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
+    InstrumentSignalPoint, InstrumentSignalRun, InterpretationSynthesisRequest,
+    InvarianceMechanism, KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest,
+    KnowledgeActionDispatchRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
+    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeCompositionRequest,
+    KnowledgeConsistencyRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
     MechanismCandidate, MechanismConsensusRequest, MechanismDiscrimination,
@@ -715,11 +717,11 @@ use bioprism_research::{
     RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
     ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
     SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest,
-    SignalExtractionRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
-    SpatialNicheRequest, SpatialPropagationRequest, SpatialRegistrationCell,
-    SpatialRegistrationRequest, StateTransitionObservation, StateTransitionRequest,
-    StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
-    StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    SignalBatchStabilityRequest, SignalExtractionRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
+    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
+    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
+    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
     TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
     ValidationCampaignRequest, ValidationReplicationCampaignRequest,
@@ -2609,6 +2611,9 @@ impl Server {
             "glioma_multi_fidelity_optimize" => self.glioma_multi_fidelity_optimize(&arguments),
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_signal_extract" => self.glioma_instrument_signal_extract(&arguments),
+            "glioma_instrument_batch_stability" => {
+                self.glioma_instrument_batch_stability(&arguments)
+            }
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_instrument_fleet_schedule" => self.glioma_instrument_fleet_schedule(&arguments),
             "glioma_instrument_fleet_execute" => self.glioma_instrument_fleet_execute(&arguments),
@@ -12266,6 +12271,43 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument signal extraction: {error}"))
+    }
+
+    /// Evaluate prospective cross-run endpoint stability from local extraction summaries. This
+    /// route never touches hardware and never promotes an endpoint without stability gates.
+    fn glioma_instrument_batch_stability(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SignalBatchStabilityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_batch_stability requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma batch-stability request: {error}"))?;
+        let runs: Vec<InstrumentSignalRun> = serde_json::from_value(
+            arguments
+                .get("runs")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_batch_stability requires runs".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma signal runs: {error}"))?;
+        let output = analyze_glioma_instrument_batch_stability(&request, &runs)
+            .map_err(|error| format!("glioma instrument batch stability refused: {error}"))?;
+        serde_json::to_value(json!({
+            "batch_stability": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_instrument_assay_adjudicate",
+                "glioma_instrument_science_loop_execute",
+                "glioma_replication_campaign_execute"
+            ],
+            "guarantees": [
+                "channel coverage, robust dispersion, noise, peak-score, and run-drift gates are explicit",
+                "underpowered or unstable endpoints remain blocked rather than promoted",
+                "only value-only extraction summaries cross the route and raw traces remain local",
+                "the route performs no hardware, biological, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument batch stability: {error}"))
     }
 
     /// Compile an interlocked, authorization-bound instrument plan. The route never dispatches
@@ -53503,6 +53545,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multi_fidelity_optimize",
                 "glioma_instrument_calibration",
                 "glioma_instrument_signal_extract",
+                "glioma_instrument_batch_stability",
                 "glioma_instrument_preflight",
                 "glioma_instrument_fleet_schedule",
                 "glioma_instrument_fleet_execute",
@@ -64526,6 +64569,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "points": {"type": "array", "items": {"type": "object"}, "description": "InstrumentSignalPoint1@1 value-only local points with channel, sequence, quality, and de-identified artifact boundary."}
             },
             "required": ["request", "points"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_batch_stability",
+        "description": "Evaluate prospective cross-run stability of preclinical glioma instrument endpoints from typed extraction summaries. Measures channel coverage, robust amplitude dispersion, noise, peak-score support, and first-to-last run drift, preserving blocked channels and negative evidence; it never executes hardware, moves raw traces, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SignalBatchStabilityRequest1@1 with instrument binding, run floor, coverage/noise/dispersion/drift gates, and peak-score floor."},
+                "runs": {"type": "array", "items": {"type": "object"}, "description": "InstrumentSignalRun1@1 ordered local extraction summaries from the signal-extraction route."}
+            },
+            "required": ["request", "runs"]
         }
     }));
     definitions.push(json!({

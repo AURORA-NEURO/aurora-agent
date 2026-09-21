@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod adaptive_campaign;
 pub mod assay_adjudication;
+pub mod batch_stability;
 pub mod calibration;
 pub mod campaign;
 pub mod execution;
@@ -19,6 +20,11 @@ pub use assay_adjudication::{
     adjudicate_glioma_assay_evidence, AssayEvidenceDisposition, AssayEvidenceError,
     AssayEvidenceObservation, AssayEvidenceRecord, AssayEvidenceRequest,
     InstrumentAssayEvidenceAssessment,
+};
+pub use batch_stability::{
+    analyze_glioma_instrument_batch_stability, BatchStabilityDisposition, BatchStabilityError,
+    ChannelStability, ChannelStabilityDisposition, InstrumentBatchStability, InstrumentSignalRun,
+    SignalBatchStabilityRequest,
 };
 
 pub use adaptive_campaign::{
