@@ -58,6 +58,8 @@ crates/research/src/glioma/
                                              P02 execution-facing workflow admission with typed routes, local-data boundaries, and stop conditions
   programs/p02_evidence_knowledge/workflow_recovery.rs
                                              P02 checkpoint-aware recovery and resume planning with safe replay, bounded retry, and operator holds
+  programs/p02_evidence_knowledge/action_outcome_assimilation.rs
+                                             P02 idempotent action-outcome assimilation with explicit conflicts, failure retention, and evidence reconciliation
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs

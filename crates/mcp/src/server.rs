@@ -514,18 +514,19 @@ use bioprism_research::{
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
-    assimilate_glioma_acquisition_feedback, attribute_glioma_multimodal_quality_root_cause,
-    bridge_glioma_knowledge_actions, build_research_object_manifest,
-    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
-    calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
-    certify_decision_omissions, cluster_glioma_evidence, compile_decision_action_graph,
-    compile_decision_context, compile_federated_glioma_execution_handoff,
-    compile_glioma_computation_interpretation_frontier, compile_glioma_computation_workflow,
-    compile_glioma_knowledge_actions, compile_glioma_knowledge_closure,
-    compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps,
-    compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
-    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
-    compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
+    assimilate_glioma_acquisition_feedback, assimilate_glioma_knowledge_action_outcomes,
+    attribute_glioma_multimodal_quality_root_cause, bridge_glioma_knowledge_actions,
+    build_research_object_manifest, calibrate_glioma_decision_value, calibrate_glioma_evidence,
+    calibrate_glioma_mechanisms, calibrate_glioma_multimodal_quality_transport,
+    calibrate_glioma_multimodal_reliability, certify_decision_omissions, cluster_glioma_evidence,
+    compile_decision_action_graph, compile_decision_context,
+    compile_federated_glioma_execution_handoff, compile_glioma_computation_interpretation_frontier,
+    compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
+    compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
+    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
+    compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
+    compile_glioma_replication_protocol, compile_local_research_workflow,
+    compile_mechanism_action_plan, compile_multi_study_knowledge,
     compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
     detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
@@ -696,11 +697,12 @@ use bioprism_research::{
     InstrumentPreflightRequest, InstrumentResearchFrontierRequest, InstrumentScienceLoopRequest,
     InstrumentSignalPoint, InstrumentSignalRun, InterpretationSynthesisRequest,
     InvarianceMechanism, KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest,
-    KnowledgeActionDispatchRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
-    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeClosureRequest,
-    KnowledgeCompositionRequest, KnowledgeConsistencyRequest, KnowledgeDriftRequest,
-    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation,
-    KnowledgeRequest, KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
+    KnowledgeActionDispatchRequest, KnowledgeActionOutcomeAssimilationRequest, KnowledgeActionPlan,
+    KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate,
+    KnowledgeClosureRequest, KnowledgeCompositionRequest, KnowledgeConsistencyRequest,
+    KnowledgeDriftRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, LocalWorkflowRequest,
     MechanismActionPlannerConfig, MechanismCalibration, MechanismCalibrationObservation,
     MechanismCalibrationRequest, MechanismCandidate, MechanismConsensusRequest,
@@ -2548,6 +2550,9 @@ impl Server {
             "glioma_federated_continual_agent" => self.glioma_federated_continual_agent(&arguments),
             "glioma_local_research_workflow" => self.glioma_local_research_workflow(&arguments),
             "glioma_workflow_recovery" => self.glioma_workflow_recovery(&arguments),
+            "glioma_knowledge_action_outcome_assimilation" => {
+                self.glioma_knowledge_action_outcome_assimilation(&arguments)
+            }
             "glioma_multimodal_knowledge_workflow" => {
                 self.glioma_multimodal_knowledge_workflow(&arguments)
             }
@@ -10533,6 +10538,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma workflow recovery: {error}"))
+    }
+
+    /// Assimilate retry, duplicate, failed, and conflicting knowledge-action results without
+    /// silently replacing prior evidence. This route only returns a reconciled state.
+    fn glioma_knowledge_action_outcome_assimilation(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: KnowledgeActionOutcomeAssimilationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_knowledge_action_outcome_assimilation requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma knowledge action outcome assimilation request: {error}")
+            })?;
+        let output = assimilate_glioma_knowledge_action_outcomes(&request).map_err(|error| {
+            format!("glioma knowledge action outcome assimilation refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "assimilation": output,
+            "next_routes": [
+                "glioma_knowledge_compile",
+                "glioma_knowledge_frontier",
+                "glioma_knowledge_action_dispatch"
+            ],
+            "guarantees": [
+                "identical retries are idempotent and prior non-failed results are not erased by a failed callback",
+                "conflicting action and evidence identities remain explicit for adjudication",
+                "records are canonicalized and digest-checked before downstream compilation",
+                "the route performs no retrieval, raw-data movement, execution, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| {
+            format!("cannot encode glioma knowledge action outcome assimilation: {error}")
+        })
     }
 
     /// Synchronize the local action DAG against study-level multimodal readiness and choose a
@@ -54370,6 +54410,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_local_research_workflow",
                 "glioma_multimodal_knowledge_workflow",
                 "glioma_workflow_recovery",
+                "glioma_knowledge_action_outcome_assimilation",
                 "glioma_research_workflow_admission",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
@@ -64805,6 +64846,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "WorkflowRecoveryRequest1@1 with LocalResearchWorkflow1@1, checkpoint/failure observations, retry budget, resume policy, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_action_outcome_assimilation",
+        "description": "Reconcile prior and incoming preclinical glioma knowledge-action outcomes across retries, duplicate callbacks, failed attempts, and contradictory evidence identities. Emits a canonical, digest-checked state with explicit accepted, retained, duplicate, conflict, and blocked partitions for downstream knowledge compilation. It never silently selects a scientific winner, moves raw data, executes actions, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeActionOutcomeAssimilationRequest1@1 with objective/plan/selection digests, prior and incoming action snapshots, evidence records, bounds, and failed-result retention policy."}
             },
             "required": ["request"]
         }

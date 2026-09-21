@@ -2,6 +2,7 @@
 
 pub mod action_bridge;
 pub mod action_compiler;
+pub mod action_outcome_assimilation;
 pub mod autonomous_cycle;
 pub mod belief_revision;
 pub mod campaign;
@@ -73,6 +74,12 @@ pub use belief_revision::{
     BeliefRevisionRequest,
 };
 
+pub use action_outcome_assimilation::{
+    assimilate_glioma_knowledge_action_outcomes, ActionOutcomeAssimilationError,
+    ActionOutcomeAssimilationItem, ActionOutcomeSnapshot, KnowledgeActionOutcomeAssimilation,
+    KnowledgeActionOutcomeAssimilationRequest, OutcomeAssimilationDecision,
+    OutcomeAssimilationDisposition,
+};
 pub use claim_frontier::{
     prioritize_knowledge_frontier, FrontierActionKind, KnowledgeFrontier,
     KnowledgeFrontierDisposition, KnowledgeFrontierError, KnowledgeFrontierRequest,
