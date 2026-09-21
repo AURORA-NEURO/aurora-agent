@@ -324,6 +324,8 @@ crates/research/src/glioma/
                                              P09 leave-one-batch/row-out robustness battery
     p09_reproducible_computation/execution.rs
                                              P09 replayable multimodal computation DAG execution
+    p09_reproducible_computation/reproducibility.rs
+                                             P09 repeated-run reproducibility gate for deterministic digests, numerical drift, runtime drift, and task coverage
     p09_reproducible_computation/planning.rs
                                              P09 budgeted computation-portfolio planning with prerequisite closure
     p09_reproducible_computation/portfolio_execution.rs
@@ -1103,6 +1105,12 @@ typed multimodal DAGs in stable topological order, reuses only replay-keyed loca
 enforces cost budgets, retries transient worker failures, and preserves negative, partial, failed,
 and skipped tasks. The dry-run worker emits synthetic artifacts; production containers, GPUs, and
 schedulers remain behind a caller-owned executor.
+P09 now also exposes repeated-run computation reproducibility
+(`glioma_computation_reproducibility`). It compares institution-local replay summaries by shared
+replay identity, gates deterministic tasks on byte-identical output digests, and gates numerical
+tasks on explicit effect and runtime drift thresholds. Partial, failed, undercovered, drifted,
+and high-uncertainty tasks remain negative or unresolved evidence for the autonomous engine rather
+than being promoted because a worker returned successfully; only typed summaries cross the route.
 P09 now also includes computation-portfolio planning (`glioma_computation_portfolio_plan`). It
 scores declared multimodal analyses by information gain, uncertainty reduction, coverage debt, and
 resource penalties; closes prerequisite DAGs in deterministic order; and hands the existing

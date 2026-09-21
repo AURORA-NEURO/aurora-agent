@@ -10,6 +10,7 @@ pub mod placement;
 pub mod planning;
 pub mod portfolio_execution;
 pub mod recovery_campaign;
+pub mod reproducibility;
 pub mod robustness;
 pub mod robustness_guided;
 pub mod workflow;
@@ -30,6 +31,14 @@ pub use recovery_campaign::{
     execute_glioma_computation_recovery, ComputationRecoveryCampaign,
     ComputationRecoveryDisposition, ComputationRecoveryError, ComputationRecoveryRequest,
     ComputationRecoveryStopReason,
+};
+
+pub use reproducibility::{
+    analyze_glioma_computation_reproducibility, ComputationReproducibility,
+    ComputationReproducibilityDisposition, ComputationReproducibilityError,
+    ComputationReproducibilityRequest, ComputationReproducibilityRun,
+    ComputationReproducibilityTaskObservation, ComputationRunOutcome,
+    ComputationTaskReproducibilityDisposition, ComputationTaskReproducibilitySummary,
 };
 
 pub use execution::{
