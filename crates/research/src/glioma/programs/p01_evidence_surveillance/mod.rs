@@ -13,6 +13,7 @@ pub mod evidence_frontier_join;
 pub mod evidence_knowledge_bridge;
 pub mod evidence_stream;
 pub mod federated_acquisition_policy;
+pub mod federated_batch_scheduler;
 pub mod federated_execution_handoff;
 pub mod federated_operating_cycle;
 pub mod federated_outcome_transport;
@@ -84,6 +85,11 @@ pub use evidence_stream::{
     snapshot_glioma_evidence_stream, EvidenceStreamClaim, EvidenceStreamClaimTrend,
     EvidenceStreamDisposition, EvidenceStreamError, EvidenceStreamEvent, EvidenceStreamRequest,
     EvidenceStreamSnapshot,
+};
+pub use federated_batch_scheduler::{
+    schedule_glioma_federated_evidence_batch, FederatedBatchActionDecision, FederatedBatchDecision,
+    FederatedBatchDisposition, FederatedBatchSchedule, FederatedBatchSchedulerError,
+    FederatedBatchSchedulerRequest,
 };
 pub use federated_execution_handoff::{
     compile_federated_glioma_execution_handoff, FederatedExecutionHandoff,

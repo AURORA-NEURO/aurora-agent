@@ -624,12 +624,13 @@ use bioprism_research::{
     reconcile_glioma_multisite_outcomes, register_glioma_spatial_samples,
     replan_glioma_mechanism_feedback, replay_glioma_decision_context, revise_glioma_beliefs,
     route_glioma_multimodal_evidence_gaps, schedule_glioma_computation_placement,
-    schedule_glioma_frontier_campaign, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
-    simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
-    snapshot_glioma_evidence_stream, stress_glioma_mechanism_robustness, surveil_glioma_evidence,
-    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    schedule_glioma_federated_evidence_batch, schedule_glioma_frontier_campaign,
+    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
+    simulate_glioma_protocol, simulate_glioma_protocol_scenario_ensemble,
+    smooth_glioma_mechanism_states, snapshot_glioma_evidence_stream,
+    stress_glioma_mechanism_robustness, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
+    synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, verify_glioma_evidence,
     verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
@@ -688,13 +689,13 @@ use bioprism_research::{
     EvidenceRequest, EvidenceStreamRequest, EvidenceSurveillanceRequest,
     EvidenceTemporalShiftRequest, EvidenceTriangulationRequest, EvidenceVerificationRequest,
     EvidenceWorkbenchRequest, ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
-    FederatedAcquisitionPolicyRequest, FederatedBenchmarkAdaptiveCampaignRequest,
-    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
-    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
-    FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
-    FederatedEvidenceOperatingCycleRequest, FederatedEvidenceShiftRequest,
-    FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
+    FederatedAcquisitionPolicyRequest, FederatedBatchSchedulerRequest,
+    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
+    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
+    FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedContinualAgentRequest,
+    FederatedContinualKnowledgeRequest, FederatedEvidenceOperatingCycleRequest,
+    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
     FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
     FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
@@ -2564,6 +2565,7 @@ impl Server {
             "glioma_federated_evidence_operating_cycle" => {
                 self.glioma_federated_evidence_operating_cycle(&arguments)
             }
+            "glioma_federated_batch_scheduler" => self.glioma_federated_batch_scheduler(&arguments),
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
             }
@@ -10112,6 +10114,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode federated evidence operating cycle: {error}"))
+    }
+
+    /// Schedule multiple advisory federation cycles for prospective high-throughput operation.
+    /// The scheduler validates every cycle, applies fairness and route quotas, and returns
+    /// explicit deferred/rejected work without executing any action.
+    fn glioma_federated_batch_scheduler(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedBatchSchedulerRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_batch_scheduler requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid federated batch scheduler request: {error}"))?;
+        let schedule = schedule_glioma_federated_evidence_batch(&request)
+            .map_err(|error| format!("federated batch scheduler refused: {error}"))?;
+        serde_json::to_value(json!({
+            "schedule": schedule,
+            "next_routes": [
+                "glioma_federated_evidence_operating_cycle",
+                "glioma_federated_evidence_acquisition_policy",
+                "glioma_evidence_verification_gate"
+            ],
+            "guarantees": [
+                "each input cycle is digest-validated before scheduling",
+                "eligible cycles receive deterministic fairness opportunities and route/cycle/global quotas are explicit",
+                "blocked or held cycles are rejected, dependency-prefix violations are deferred, and every omitted candidate remains visible",
+                "the schedule is advisory planning only and cannot execute assays, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode federated batch schedule: {error}"))
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55506,6 +55538,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_long_horizon_evidence_calibration",
                 "glioma_federated_outcome_transport",
                 "glioma_federated_evidence_operating_cycle",
+                "glioma_federated_batch_scheduler",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65784,6 +65817,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FederatedEvidenceOperatingCycleRequest1@1 with objective/epoch/action budget, aggregate FederatedOutcomeTransportReport1@1, optional LongHorizonCalibrationAnalysis1@1 and MultiSiteOutcomeReconciliation1@1, and reconciliation requirement policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_batch_scheduler",
+        "description": "Schedule multiple digest-bound advisory glioma federation cycles for prospective high-throughput operation. Validates every cycle, gives eligible cycles deterministic fairness opportunities, enforces per-cycle/per-route/global quotas, admits dependency-safe action prefixes, and keeps deferred or rejected candidates visible. It schedules only; it does not execute assays, move raw data, infer causality, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBatchSchedulerRequest1@1 with digest-bound FederatedEvidenceOperatingCycle1@1 values, schedule epoch, global action budget, per-cycle quota, and per-route quota."}
             },
             "required": ["request"]
         }

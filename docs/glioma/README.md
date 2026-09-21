@@ -42,6 +42,8 @@ crates/research/src/glioma/
                                              P01 aggregate-only outcome export with attestation, revocation, freshness, locality, and independent-quorum gates
   programs/p01_evidence_surveillance/federated_operating_cycle.rs
                                              P01 ranked autonomous federation cycle from transport, calibration, reconciliation, omissions, and negative-result signals
+  programs/p01_evidence_surveillance/federated_batch_scheduler.rs
+                                             P01 prospective high-throughput cycle scheduler with fairness, route quotas, dependency prefixes, and explicit capacity omissions
   programs/p01_evidence_surveillance/federated_acquisition_policy.rs
                                              P01 consortium-aware site assignment with independence, quorum, budget, privacy, and local-raw-data gates
   programs/p01_evidence_surveillance/evidence_frontier_join.rs
@@ -1472,3 +1474,9 @@ prior-weighted predictions, scores lower-tail utility plus expected information,
 disagreement, contradictory replicates, unsupported models, and safety/resource ceilings as
 explicit product states. This gives a glioma program lead a defensible assay queue when models
 disagree instead of a brittle single-model ranking.
+The batch scheduler (`schedule_glioma_federated_evidence_batch`) coordinates many advisory cycles
+for prospective high-throughput operation. It validates every cycle digest, rejects blocked or held
+cycles, gives each eligible cycle a deterministic opportunity, enforces per-cycle and per-route
+quotas, admits only dependency-safe action prefixes, and records every deferred candidate. Capacity
+or throughput therefore never becomes a reason to hide scientific uncertainty or to execute a
+physical action without its downstream authorization.
