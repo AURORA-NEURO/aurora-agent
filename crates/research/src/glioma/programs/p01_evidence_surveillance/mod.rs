@@ -11,6 +11,7 @@ pub mod novelty_radar;
 pub mod operating_cycle;
 pub mod priority;
 pub mod surveillance;
+pub mod temporal_shift;
 pub mod triangulation;
 
 pub use novelty_radar::{
@@ -69,6 +70,11 @@ pub use surveillance::{
     surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind, EvidenceSurveillance,
     EvidenceSurveillanceAction, EvidenceSurveillanceActionKind, EvidenceSurveillanceDisposition,
     EvidenceSurveillanceError, EvidenceSurveillanceRequest,
+};
+pub use temporal_shift::{
+    detect_glioma_evidence_temporal_shifts, EvidenceTemporalObservation, EvidenceTemporalShift,
+    EvidenceTemporalShiftAction, EvidenceTemporalShiftDisposition, EvidenceTemporalShiftError,
+    EvidenceTemporalShiftKind, EvidenceTemporalShiftRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::EvidenceSurveillance;

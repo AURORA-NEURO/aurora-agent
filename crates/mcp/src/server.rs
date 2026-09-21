@@ -522,12 +522,12 @@ use bioprism_research::{
     compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
     compile_glioma_replication_protocol, compile_mechanism_action_plan, compile_typed_knowledge,
     compose_knowledge_graph, design_glioma_contrast_panel, design_glioma_robust_experiment,
-    design_preclinical_experiment, discriminate_mechanisms, dry_run_adaptive_instrument_executor,
-    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
-    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
-    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
-    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
-    execute_federated_benchmark_operating_cycle_dry_run,
+    design_preclinical_experiment, detect_glioma_evidence_temporal_shifts, discriminate_mechanisms,
+    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
+    dry_run_glioma_research, dry_run_instrument_executor_from_request,
+    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
+    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
+    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -653,15 +653,16 @@ use bioprism_research::{
     EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
     EvidenceExecutionMode, EvidenceFusionRequest, EvidenceNoveltyRadarRequest,
     EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
-    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
-    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
-    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
-    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
-    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
-    FederatedMechanismSite, FederatedMechanismTransportCampaignRequest,
-    FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
-    GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
+    EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
+    ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
+    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
+    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
+    FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedInstrumentConsensusRequest,
+    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedMechanismSite,
+    FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
+    FidelityCandidate, FidelityObservation, GliomaActionCandidate,
+    GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
     GliomaAutonomousResearchEngineRequest, GliomaCausalClaimAdjudicationRequest,
     GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
     GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
@@ -2485,6 +2486,7 @@ impl Server {
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
+            "glioma_evidence_temporal_shift" => self.glioma_evidence_temporal_shift(&arguments),
             "glioma_evidence_priority" => self.glioma_evidence_priority(&arguments),
             "glioma_evidence_acquisition_plan" => self.glioma_evidence_acquisition_plan(&arguments),
             "glioma_evidence_acquisition_campaign_execute" => {
@@ -9622,6 +9624,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence novelty radar: {error}"))
+    }
+
+    /// Detect weighted prospective shifts and reversals in aggregate preclinical glioma evidence.
+    /// The result is a bounded re-review signal, not an autonomous biological conclusion.
+    fn glioma_evidence_temporal_shift(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceTemporalShiftRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_temporal_shift requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence temporal-shift request: {error}"))?;
+        let output = detect_glioma_evidence_temporal_shifts(&request)
+            .map_err(|error| format!("glioma evidence temporal-shift analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "temporal_shift": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_evidence_refresh_campaign",
+                "glioma_knowledge_compile",
+                "glioma_mechanism_autopilot_execute"
+            ],
+            "guarantees": [
+                "baseline and recent windows use deterministic inverse-uncertainty and replicate weighting",
+                "emergent, reversing, stable, contradictory, and under-observed trajectories remain distinct",
+                "only aggregate, local, preclinical observations are accepted; source bytes never cross MCP",
+                "the route proposes re-review or replanning and performs no external retrieval, instrument action, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence temporal shift: {error}"))
     }
 
     /// Rank concrete refresh, resolution, measurement, revalidation, coverage, and replication
@@ -53658,6 +53690,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_qualify",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_novelty_radar",
+                "glioma_evidence_temporal_shift",
                 "glioma_evidence_priority",
                 "glioma_evidence_acquisition_plan",
                 "glioma_evidence_acquisition_campaign_execute",
@@ -63772,6 +63805,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceNoveltyRadarRequest1@1 with a bounded preclinical-only source snapshot, canonical term/domain/claim corpora, freshness window, quality and novelty floors, and action limit."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_temporal_shift",
+        "description": "Detect weighted prospective shifts and reversals in aggregate preclinical glioma evidence across baseline and recent windows. Uses replicate/quality/inverse-uncertainty weighting, reports heterogeneity and under-observed windows, and emits bounded re-review or replanning actions without fetching sources, moving raw data, executing biology, or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceTemporalShiftRequest1@1 with snapshot identity, as-of tick, baseline/recent windows, observation floor, change/priority gates, and local preclinical observation summaries."}
             },
             "required": ["request"]
         }
