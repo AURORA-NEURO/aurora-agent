@@ -105,6 +105,11 @@ fn digest_input(output: &LocalResearchWorkflow) -> serde_json::Value {
     })
 }
 
+#[cfg(test)]
+pub(crate) fn digest_input_for_recovery(output: &LocalResearchWorkflow) -> serde_json::Value {
+    digest_input(output)
+}
+
 impl LocalResearchWorkflow {
     pub fn validate(&self) -> Result<(), LocalWorkflowError> {
         let ids = self

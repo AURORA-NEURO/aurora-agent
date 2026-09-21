@@ -23,6 +23,7 @@ pub mod selection_cycle;
 pub mod study_alignment;
 pub mod workflow_admission;
 pub mod workflow_compile;
+pub mod workflow_recovery;
 
 pub use gap_compiler::{
     compile_glioma_knowledge_gaps, KnowledgeGapClaimMapping, KnowledgeGapCompilerError,
@@ -147,6 +148,11 @@ pub use workflow_admission::{
 pub use workflow_compile::{
     compile_local_research_workflow, LocalResearchWorkflow, LocalWorkflowDisposition,
     LocalWorkflowError, LocalWorkflowRequest, LocalWorkflowStep,
+};
+pub use workflow_recovery::{
+    plan_glioma_workflow_recovery, WorkflowObservedStatus, WorkflowRecoveryAction,
+    WorkflowRecoveryDecision, WorkflowRecoveryDisposition, WorkflowRecoveryError,
+    WorkflowRecoveryPlan, WorkflowRecoveryRequest, WorkflowStepObservation,
 };
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};

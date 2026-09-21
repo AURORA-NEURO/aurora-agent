@@ -603,10 +603,10 @@ use bioprism_research::{
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
-    plan_glioma_validation_replication_gate, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, rank_glioma_evidence_novelty, register_glioma_spatial_samples,
-    revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
+    plan_glioma_validation_replication_gate, plan_glioma_workflow, plan_glioma_workflow_recovery,
+    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, rank_glioma_evidence_novelty,
+    register_glioma_spatial_samples, revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
     schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
     simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
@@ -747,7 +747,7 @@ use bioprism_research::{
     TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
     ValidationCampaignRequest, ValidationReplicationCampaignRequest,
     ValidationReplicationGateRequest, ValidationReplicationTransportRequest,
-    WorkflowAdmissionRequest,
+    WorkflowAdmissionRequest, WorkflowRecoveryRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2547,6 +2547,7 @@ impl Server {
             }
             "glioma_federated_continual_agent" => self.glioma_federated_continual_agent(&arguments),
             "glioma_local_research_workflow" => self.glioma_local_research_workflow(&arguments),
+            "glioma_workflow_recovery" => self.glioma_workflow_recovery(&arguments),
             "glioma_multimodal_knowledge_workflow" => {
                 self.glioma_multimodal_knowledge_workflow(&arguments)
             }
@@ -10503,6 +10504,35 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma local research workflow: {error}"))
+    }
+
+    /// Reconcile a local workflow with checkpoint and failure observations and emit only safe
+    /// resume/replay actions. No step is executed by this route.
+    fn glioma_workflow_recovery(&self, arguments: &Value) -> Result<Value, String> {
+        let request: WorkflowRecoveryRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_workflow_recovery requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma workflow recovery request: {error}"))?;
+        let output = plan_glioma_workflow_recovery(&request)
+            .map_err(|error| format!("glioma workflow recovery refused: {error}"))?;
+        serde_json::to_value(json!({
+            "recovery": output,
+            "next_routes": [
+                "glioma_local_research_workflow",
+                "glioma_knowledge_action_dispatch",
+                "glioma_knowledge_synthesis_operating_cycle"
+            ],
+            "guarantees": [
+                "completed steps with valid checkpoints are not replayed",
+                "retryable failures use bounded compensation and retry budgets",
+                "running, terminal, unknown, and dependency-blocked steps remain held for an operator",
+                "the route performs no retrieval, raw-data movement, execution, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma workflow recovery: {error}"))
     }
 
     /// Synchronize the local action DAG against study-level multimodal readiness and choose a
@@ -54339,6 +54369,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_continual_agent",
                 "glioma_local_research_workflow",
                 "glioma_multimodal_knowledge_workflow",
+                "glioma_workflow_recovery",
                 "glioma_research_workflow_admission",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
@@ -64763,6 +64794,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "LocalWorkflowRequest1@1 with objective-bound FederatedContinualAgentPlan1@1, step/wave bounds, retry/checkpoint policy, and approval policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_workflow_recovery",
+        "description": "Reconcile a local preclinical glioma workflow against explicit checkpoint and failure observations. Emits safe resume, idempotent replay, compensate-then-retry, and operator-hold actions without replaying completed work or executing any step.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "WorkflowRecoveryRequest1@1 with LocalResearchWorkflow1@1, checkpoint/failure observations, retry budget, resume policy, and artifact requirement."}
             },
             "required": ["request"]
         }
