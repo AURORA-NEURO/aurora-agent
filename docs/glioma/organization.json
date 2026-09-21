@@ -223,6 +223,7 @@
     "program_scheduler": "crates/research/src/glioma/programs/p07_protocol_simulation/program_scheduler.rs",
     "mechanism_discovery_engine": "crates/research/src/glioma/programs/p07_protocol_simulation/mechanism_discovery_engine.rs",
     "organization_validator": "tools/validate_glioma_organization.py",
+    "program_plan": "docs/glioma/PROGRAM_PLAN.md",
     "documentation": "docs/glioma",
     "mcp": "crates/mcp/src/server.rs"
   },

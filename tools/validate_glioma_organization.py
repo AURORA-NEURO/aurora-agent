@@ -56,7 +56,7 @@ def validate(root: Path) -> dict:
         fail("organization.json must declare exactly 384 executable feature slots")
 
     roots = organization.get("roots", {})
-    for key in ("engine", "programs", "contracts", "mcp", "organization_validator"):
+    for key in ("engine", "programs", "contracts", "mcp", "organization_validator", "program_plan"):
         value = roots.get(key)
         if not isinstance(value, str) or not value.strip():
             fail(f"organization root {key!r} is missing")
