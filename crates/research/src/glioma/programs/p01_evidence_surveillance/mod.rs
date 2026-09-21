@@ -19,6 +19,7 @@ pub mod novelty_adjudication;
 pub mod novelty_radar;
 pub mod operating_cycle;
 pub mod priority;
+pub mod prospective_triage;
 pub mod surveillance;
 pub mod temporal_shift;
 pub mod triangulation;
@@ -119,6 +120,13 @@ pub use priority::{
     prioritize_glioma_evidence, EvidencePriorityAction, EvidencePriorityActionKind,
     EvidencePriorityDisposition, EvidencePriorityError, EvidencePriorityPlan,
     EvidencePriorityRequest, EvidencePriorityWeights,
+};
+pub use prospective_triage::{
+    plan_glioma_prospective_evidence_triage, EvidenceProspectiveTriageError,
+    EvidenceProspectiveTriagePlan, EvidenceProspectiveTriagePolicy,
+    EvidenceProspectiveTriageRequest, EvidenceTriageActionKind, EvidenceTriageDecision,
+    EvidenceTriageDisposition, EvidenceTriageReviewObservation, EvidenceTriageReviewState,
+    EvidenceTriageReviewerCapacity, EvidenceTriageReviewerLoad, EvidenceTriageStatus,
 };
 pub use surveillance::{
     surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind, EvidenceSurveillance,

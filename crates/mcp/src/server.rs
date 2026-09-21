@@ -609,15 +609,15 @@ use bioprism_research::{
     plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
     plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
     plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
-    plan_glioma_protocol_compensation, plan_glioma_replication,
-    plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
-    plan_glioma_research_object_migration, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
-    plan_glioma_sequential_design, plan_glioma_validation_replication_gate, plan_glioma_workflow,
-    plan_glioma_workflow_recovery, preflight_glioma_instrument, prioritize_glioma_evidence,
-    prioritize_knowledge_frontier, promote_glioma_closed_loop_frontier,
-    propagate_glioma_mechanism_graph, qualify_evidence, rank_glioma_evidence_novelty,
-    reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
+    plan_glioma_prospective_evidence_triage, plan_glioma_protocol_compensation,
+    plan_glioma_replication, plan_glioma_replication_closure_frontier,
+    plan_glioma_replication_continuation, plan_glioma_research_object_migration,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_scientific_frontier, plan_glioma_sequential_design,
+    plan_glioma_validation_replication_gate, plan_glioma_workflow, plan_glioma_workflow_recovery,
+    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
+    promote_glioma_closed_loop_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
+    rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
     replan_glioma_mechanism_feedback, replay_glioma_decision_context, revise_glioma_beliefs,
     route_glioma_multimodal_evidence_gaps, schedule_glioma_computation_placement,
     schedule_glioma_frontier_campaign, schedule_glioma_instrument_fleet, select_glioma_actions,
@@ -679,8 +679,8 @@ use bioprism_research::{
     EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
     EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceClusterRequest,
     EvidenceExecutionMode, EvidenceFrontierJoinRequest, EvidenceFusionRequest,
-    EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
-    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
+    EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceProspectiveTriageRequest,
+    EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
     EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
     ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
     FederatedAcquisitionPolicyRequest, FederatedBenchmarkAdaptiveCampaignRequest,
@@ -2532,6 +2532,9 @@ impl Server {
                 self.glioma_evidence_novelty_adjudication(&arguments)
             }
             "glioma_evidence_stream_snapshot" => self.glioma_evidence_stream_snapshot(&arguments),
+            "glioma_evidence_prospective_triage" => {
+                self.glioma_evidence_prospective_triage(&arguments)
+            }
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
             }
@@ -9809,6 +9812,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence stream snapshot: {error}"))
+    }
+
+    /// Turn a prospective evidence stream frontier into a researcher-capacity-aware review queue.
+    /// This route assigns work and exposes omissions; it does not create evidence or dispatch
+    /// retrieval on its own.
+    fn glioma_evidence_prospective_triage(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceProspectiveTriageRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_prospective_triage requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma prospective evidence triage request: {error}")
+            })?;
+        let plan = plan_glioma_prospective_evidence_triage(&request)
+            .map_err(|error| format!("glioma prospective evidence triage refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_knowledge_protocol_gateway",
+                "glioma_evidence_acquisition_plan",
+                "glioma_evidence_operating_cycle"
+            ],
+            "guarantees": [
+                "contradiction, negative evidence, coverage debt, declining trends, and stale claims receive deterministic urgency",
+                "researcher capacity, queue depth, review budget, suppression, and current-resolution states are explicit",
+                "a review queue never promotes evidence or claims; source bytes remain local to the institution",
+                "the route performs no retrieval, raw-data movement, federation side effect, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma prospective evidence triage: {error}"))
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55194,6 +55228,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_cluster_index",
                 "glioma_evidence_novelty_adjudication",
                 "glioma_evidence_stream_snapshot",
+                "glioma_evidence_prospective_triage",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65373,6 +65408,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceStreamRequest1@1 with ordered value-only events, expected next epoch, event/claim bounds, quality floor, lag bound, and trend threshold."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_prospective_triage",
+        "description": "Turn a prospective local glioma evidence-stream snapshot into a researcher-capacity-aware review queue. Scores contradiction, negative evidence, coverage debt, declining trends, and staleness; assigns reviewers deterministically; enforces queue and budget limits; preserves suppression and current-resolution states; and never promotes evidence or performs retrieval, raw-data movement, federation, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceProspectiveTriageRequest1@1 with an EvidenceStreamSnapshot1@1, review observations, reviewer capacities, current epoch, and priority/coverage/freshness/queue/budget policy."}
             },
             "required": ["request"]
         }

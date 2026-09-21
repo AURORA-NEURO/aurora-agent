@@ -121,7 +121,7 @@ fn weight(event: &EvidenceStreamEvent) -> u16 {
     ((u32::from(event.quality_milli) * u32::from(event.reproducibility_milli)) / 1_000) as u16
 }
 
-fn digest_input(output: &EvidenceStreamSnapshot) -> serde_json::Value {
+pub(crate) fn digest_input(output: &EvidenceStreamSnapshot) -> serde_json::Value {
     serde_json::json!({
         "feature_id": output.feature_id,
         "output_schema": output.output_schema,
