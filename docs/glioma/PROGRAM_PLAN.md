@@ -51,8 +51,8 @@ silently bypass an earlier wave's omission, provenance, safety, or replay gate.
 - Downstream edges: every program; P02 is the typed handoff between evidence and execution.
 - Promotion gate: explicit support/contradiction/unknown states, dependency-closed plans,
   preclinical boundary, deterministic branch selection, and honest omission reporting.
-- Current implementation: 27/32 slots. Next wave: closed-loop experiment frontier promotion
-  and prospective belief calibration.
+- Current implementation: 28/32 slots. Next wave: prospective belief calibration and
+  campaign-level claim frontier execution.
 
 ### P03 — `p03_multimodal_ingestion_qc`
 

@@ -64,6 +64,8 @@ crates/research/src/glioma/
                                              P02 claim-to-experiment closure with coverage scoring, negative-result retention, and next-action routing
   programs/p02_evidence_knowledge/claim_evidence_reconciliation.rs
                                              P02 belief promotion, retention, downgrade, and review gate after experimental closure
+  programs/p02_evidence_knowledge/closed_loop_frontier.rs
+                                             P02 deterministic budget-bounded promotion of reconciled claims into next research actions
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs

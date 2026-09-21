@@ -606,14 +606,15 @@ use bioprism_research::{
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
     plan_glioma_validation_replication_gate, plan_glioma_workflow, plan_glioma_workflow_recovery,
     preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
-    propagate_glioma_mechanism_graph, qualify_evidence, rank_glioma_evidence_novelty,
-    reconcile_glioma_claim_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    route_glioma_multimodal_evidence_gaps, schedule_glioma_computation_placement,
-    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
-    simulate_glioma_protocol, simulate_glioma_protocol_scenario_ensemble,
-    smooth_glioma_mechanism_states, snapshot_glioma_evidence_stream, surveil_glioma_evidence,
-    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    promote_glioma_closed_loop_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
+    rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
+    revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
+    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
+    simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
+    snapshot_glioma_evidence_stream, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
+    synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog,
     verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
@@ -634,18 +635,19 @@ use bioprism_research::{
     CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
     ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
     ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
-    ClosureInterpretationRequest, CombinationObservation, CombinationSynergyRequest,
-    ComputationCandidate, ComputationExecutionMode, ComputationExecutionRequest,
-    ComputationInterpretationEvidenceGateRequest, ComputationInterpretationFrontierRequest,
-    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
-    ComputationRecoveryRequest, ComputationReproducibilityRequest, ComputationReproducibilityRun,
-    ConcordanceRequest, ConsensusRequest, ContradictionAdjudicationRequest,
-    ContradictionCutRequest, ContradictionEvidence, ContrastDesignRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
-    DecisionAdmissionRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
-    DecisionLoopGovernorRequest, DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
+    ClosedLoopFrontierRequest, ClosureInterpretationRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
+    ComputationExecutionRequest, ComputationInterpretationEvidenceGateRequest,
+    ComputationInterpretationFrontierRequest, ComputationPlacementRequest,
+    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ComputationRecoveryRequest,
+    ComputationReproducibilityRequest, ComputationReproducibilityRun, ConcordanceRequest,
+    ConsensusRequest, ContradictionAdjudicationRequest, ContradictionCutRequest,
+    ContradictionEvidence, ContrastDesignRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionAdmissionRequest,
+    DecisionBranchCampaignRequest, DecisionBranchPlannerRequest, DecisionContext,
+    DecisionContextCampaignRequest, DecisionContextRequest, DecisionLoopGovernorRequest,
+    DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
     DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
     DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
     DriftSurveillanceRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
@@ -2558,6 +2560,7 @@ impl Server {
             "glioma_claim_evidence_reconciliation" => {
                 self.glioma_claim_evidence_reconciliation(&arguments)
             }
+            "glioma_closed_loop_frontier" => self.glioma_closed_loop_frontier(&arguments),
             "glioma_multimodal_knowledge_workflow" => {
                 self.glioma_multimodal_knowledge_workflow(&arguments)
             }
@@ -10638,6 +10641,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma claim-evidence reconciliation: {error}"))
+    }
+
+    /// Promote reconciled claims into ranked next research actions without executing them.
+    fn glioma_closed_loop_frontier(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClosedLoopFrontierRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_closed_loop_frontier requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma closed-loop frontier request: {error}"))?;
+        let output = promote_glioma_closed_loop_frontier(&request)
+            .map_err(|error| format!("glioma closed-loop frontier refused: {error}"))?;
+        serde_json::to_value(json!({
+            "frontier": output,
+            "next_routes": [
+                "glioma_knowledge_action_compile",
+                "glioma_local_research_workflow",
+                "glioma_knowledge_action_dispatch"
+            ],
+            "guarantees": [
+                "negative, contradictory, downgraded, and unresolved claims become explicit research actions",
+                "candidate ordering is deterministic and budget bounded",
+                "this route only plans research work; it does not execute instruments or move raw data",
+                "the route performs no causal inference or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma closed-loop frontier: {error}"))
     }
 
     /// Synchronize the local action DAG against study-level multimodal readiness and choose a
@@ -54478,6 +54509,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_action_outcome_assimilation",
                 "glioma_claim_experiment_closure",
                 "glioma_claim_evidence_reconciliation",
+                "glioma_closed_loop_frontier",
                 "glioma_research_workflow_admission",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
@@ -64946,6 +64978,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ClaimEvidenceReconciliationRequest1@1 with prior TypedKnowledge1@1, ClaimExperimentClosure1@1 derived from it, promotion/downgrade thresholds, and claim bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_closed_loop_frontier",
+        "description": "Promote reconciled preclinical glioma claims into a deterministic, budget-bounded next-work frontier. Maps promotions, stable claims, downgrades, nulls, contradictions, and unresolved claims to confirmation, evidence-gap, contradiction-resolution, negative-result, or uncertainty-reduction actions. Planning only: it never executes instruments, moves raw data, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClosedLoopFrontierRequest1@1 with ClaimEvidenceReconciliation1@1, budget, action bound, priority threshold, stable-claim policy, and execution-effect policy."}
             },
             "required": ["request"]
         }

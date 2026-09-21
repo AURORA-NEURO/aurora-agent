@@ -359,6 +359,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p02_evidence_knowledge::action_outcome_assimilation::FEATURE_ID,
         crate::glioma::programs::p02_evidence_knowledge::claim_experiment_closure::FEATURE_ID,
         crate::glioma::programs::p02_evidence_knowledge::claim_evidence_reconciliation::FEATURE_ID,
+        crate::glioma::programs::p02_evidence_knowledge::closed_loop_frontier::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::concordance::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::dropout_stress::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::drift_surveillance::FEATURE_ID,

@@ -9,6 +9,7 @@ pub mod campaign;
 pub mod claim_evidence_reconciliation;
 pub mod claim_experiment_closure;
 pub mod claim_frontier;
+pub mod closed_loop_frontier;
 pub mod closure;
 pub mod composition;
 pub mod consistency;
@@ -96,6 +97,11 @@ pub use claim_frontier::{
     prioritize_knowledge_frontier, FrontierActionKind, KnowledgeFrontier,
     KnowledgeFrontierDisposition, KnowledgeFrontierError, KnowledgeFrontierRequest,
     KnowledgeFrontierScore, KnowledgeFrontierWeights,
+};
+pub use closed_loop_frontier::{
+    promote_glioma_closed_loop_frontier, ClosedLoopFrontier, ClosedLoopFrontierDisposition,
+    ClosedLoopFrontierError, ClosedLoopFrontierRequest, FrontierPromotionActionKind,
+    FrontierPromotionCandidate,
 };
 pub use closure::{
     compile_glioma_knowledge_closure, KnowledgeClaimClosure, KnowledgeClosure,
