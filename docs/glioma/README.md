@@ -182,6 +182,8 @@ crates/research/src/glioma/
                                              P01 snapshot delta surveillance and prioritized evidence review actions
   programs/p01_evidence_surveillance/temporal_shift.rs
                                              P01 prospective weighted baseline/recent shift and reversal detection with explicit under-observation and heterogeneity
+  programs/p01_evidence_surveillance/federated_shift.rs
+                                             P01 aggregate-only multi-site evidence-shift consensus with heterogeneity and leave-site-out influence gates
   programs/p01_evidence_surveillance/priority.rs
                                              P01 recency/state/coverage action queue for the next autonomous cycle
   programs/p01_evidence_surveillance/acquisition.rs
@@ -608,6 +610,11 @@ inverse-uncertainty weighting, detects emergent signals and reversals, exposes t
 heterogeneity, and refuses to promote under-observed windows. The output is a bounded re-review
 or replanning action for the autonomous engine; it does not infer an unmeasured mechanism or
 make a clinical decision.
+P01 now also compares those trajectories across institutions (`glioma_federated_evidence_shift`).
+It pools only typed baseline/recent summaries, measures direction consensus, heterogeneity, and
+leave-one-site-out influence, and distinguishes a consortium-wide shift from a site-specific
+effect. Quorum, privacy, preclinical-only, and influence gates are explicit; raw sources remain
+local and a qualified shift routes to knowledge refresh, mechanism review, or replication planning.
 The execution bridge (`execute_glioma_evidence_acquisition_campaign`) consumes only that
 content-addressed plan, orders prerequisites before dependants, retries transient adapter faults,
 and records completed, negative, partial, unknown, failed, budget-blocked, and dependency-blocked

@@ -493,21 +493,22 @@ use bioprism_research::{
     adjudicate_glioma_assay_evidence, adjudicate_glioma_multimodal_contradictions,
     admit_glioma_decision_actions, allocate_glioma_assays, analyze_causal_sensitivity,
     analyze_federated_benchmark, analyze_federated_benchmark_power,
-    analyze_federated_mechanism_transport, analyze_glioma_causal_contrast,
-    analyze_glioma_clonal_evolution, analyze_glioma_clone_panel_outcomes,
-    analyze_glioma_combination_synergy, analyze_glioma_computation_reproducibility,
-    analyze_glioma_dose_response, analyze_glioma_federated_instrument_consensus,
-    analyze_glioma_instrument_batch_stability, analyze_glioma_instrument_multichannel_concordance,
-    analyze_glioma_latent_factors, analyze_glioma_mechanism_identifiability,
-    analyze_glioma_mechanism_intervention_value, analyze_glioma_mechanism_invariance,
-    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
-    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
-    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
-    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
-    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
-    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
-    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_federated_evidence_shifts, analyze_federated_mechanism_transport,
+    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
+    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
+    analyze_glioma_computation_reproducibility, analyze_glioma_dose_response,
+    analyze_glioma_federated_instrument_consensus, analyze_glioma_instrument_batch_stability,
+    analyze_glioma_instrument_multichannel_concordance, analyze_glioma_latent_factors,
+    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_intervention_value,
+    analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
+    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
+    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
+    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
+    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
+    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
+    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
+    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
+    analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -658,8 +659,9 @@ use bioprism_research::{
     FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
     FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
     FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedInstrumentConsensusRequest,
-    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedMechanismSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedEvidenceShiftRequest,
+    FederatedEvidenceShiftSite, FederatedInstrumentConsensusRequest, FederatedInstrumentSite,
+    FederatedInterpretationRequest, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate,
     GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
@@ -2487,6 +2489,7 @@ impl Server {
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
             "glioma_evidence_temporal_shift" => self.glioma_evidence_temporal_shift(&arguments),
+            "glioma_federated_evidence_shift" => self.glioma_federated_evidence_shift(&arguments),
             "glioma_evidence_priority" => self.glioma_evidence_priority(&arguments),
             "glioma_evidence_acquisition_plan" => self.glioma_evidence_acquisition_plan(&arguments),
             "glioma_evidence_acquisition_campaign_execute" => {
@@ -9654,6 +9657,44 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence temporal shift: {error}"))
+    }
+
+    /// Compare institution-local temporal summaries for a claim without moving source data.
+    /// This is a continual evidence-consensus gate, not a benchmark or clinical decision.
+    fn glioma_federated_evidence_shift(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedEvidenceShiftRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_evidence_shift requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated evidence-shift request: {error}"))?;
+        let sites: Vec<FederatedEvidenceShiftSite> = serde_json::from_value(
+            arguments
+                .get("sites")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_evidence_shift requires sites".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated evidence-shift sites: {error}"))?;
+        let output = analyze_federated_evidence_shifts(&request, &sites).map_err(|error| {
+            format!("glioma federated evidence-shift analysis refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "federated_shift": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_knowledge_compile",
+                "glioma_mechanism_autopilot_execute",
+                "glioma_validation_replication_gate"
+            ],
+            "guarantees": [
+                "only typed site summaries, uncertainty, replicate counts, quality, and artifact boundaries cross this route",
+                "consortium-wide emergence, reversal, site-specific change, stability, heterogeneity, and influence remain distinct",
+                "raw sources, specimen data, human data, instrument actions, and clinical decisions remain outside the route",
+                "a qualified shift is a bounded downstream research action, never an asserted biological truth"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated evidence shift: {error}"))
     }
 
     /// Rank concrete refresh, resolution, measurement, revalidation, coverage, and replication
@@ -53691,6 +53732,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_surveillance",
                 "glioma_evidence_novelty_radar",
                 "glioma_evidence_temporal_shift",
+                "glioma_federated_evidence_shift",
                 "glioma_evidence_priority",
                 "glioma_evidence_acquisition_plan",
                 "glioma_evidence_acquisition_campaign_execute",
@@ -63818,6 +63860,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "EvidenceTemporalShiftRequest1@1 with snapshot identity, as-of tick, baseline/recent windows, observation floor, change/priority gates, and local preclinical observation summaries."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_evidence_shift",
+        "description": "Compare institution-local temporal summaries for preclinical glioma claims without moving raw sources. Computes weighted consortium shifts, direction consensus, heterogeneity, leave-one-site-out influence, and bounded downstream re-review/replanning actions; site-specific and unresolved signals remain explicit and no instrument or clinical action is dispatched.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedEvidenceShiftRequest1@1 with consortium quorum, consensus/change thresholds, heterogeneity/influence ceilings, and action capacity."},
+                "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedEvidenceShiftSite1@1 aggregate-only local baseline/recent summaries with privacy declarations and artifact references."}
+            },
+            "required": ["request", "sites"]
         }
     }));
     definitions.push(json!({

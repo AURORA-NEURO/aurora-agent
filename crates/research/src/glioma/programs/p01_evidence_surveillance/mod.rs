@@ -7,6 +7,7 @@ pub mod acquisition_campaign;
 pub mod calibration;
 pub mod campaign;
 pub mod contradiction_cut;
+pub mod federated_shift;
 pub mod novelty_radar;
 pub mod operating_cycle;
 pub mod priority;
@@ -55,6 +56,11 @@ pub use acquisition_campaign::{
     EvidenceAcquisitionCampaignError, EvidenceAcquisitionCampaignRequest,
     EvidenceAcquisitionCampaignStopReason, EvidenceAcquisitionExecutionFailure,
     EvidenceAcquisitionExecutor, EvidenceAcquisitionResult, EvidenceAcquisitionResultDisposition,
+};
+pub use federated_shift::{
+    analyze_federated_evidence_shifts, FederatedEvidenceShift, FederatedEvidenceShiftAction,
+    FederatedEvidenceShiftDisposition, FederatedEvidenceShiftError, FederatedEvidenceShiftKind,
+    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite,
 };
 pub use operating_cycle::{
     execute_glioma_evidence_operating_cycle, execute_glioma_evidence_operating_cycle_dry_run,
