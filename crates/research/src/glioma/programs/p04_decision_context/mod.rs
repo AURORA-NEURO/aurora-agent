@@ -9,6 +9,7 @@ pub mod branch_campaign;
 pub mod branch_planner;
 pub mod campaign;
 pub mod context_compiler;
+pub mod context_replay;
 pub mod decision_cycle;
 pub mod decision_loop_governor;
 pub mod mission_bridge;
@@ -61,6 +62,12 @@ pub use campaign::{
 pub use context_compiler::{
     compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,
     DecisionContextDisposition, DecisionContextError, DecisionContextRequest,
+};
+pub use context_replay::{
+    replay_glioma_decision_context, DecisionContextActionOutcome,
+    DecisionContextActionOutcomeStatus, DecisionContextEpoch, DecisionContextReplay,
+    DecisionContextReplayDisposition, DecisionContextReplayError, DecisionContextReplayRequest,
+    DecisionContextReplayTransition,
 };
 pub use decision_cycle::{
     execute_glioma_decision_operating_cycle, DecisionOperatingCycle,

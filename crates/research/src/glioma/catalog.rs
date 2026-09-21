@@ -396,6 +396,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p03_multimodal_ingestion_qc::readiness_gate::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::operating_cycle::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::context_compiler::FEATURE_ID,
+        crate::glioma::programs::p04_decision_context::context_replay::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::admission_gate::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::value_optimizer::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::value_calibration::FEATURE_ID,

@@ -98,6 +98,8 @@ crates/research/src/glioma/
                                              P03 executed ingestion/QC to downstream research-surface admission
   programs/p03_multimodal_ingestion_qc/ingestion_manifest.rs
                                              P03 local, schema/version, duplicate, and modality/model admission before harmonization
+  programs/p04_decision_context/context_replay.rs
+                                             P04 epoch-aware decision-context replay with promotion, retirement, negative, and unresolved action partitions
   programs/p03_multimodal_ingestion_qc/operating_cycle.rs
                                              P03 ingestion/QC, surface admission, and operator-handoff cycle
   programs/p07_protocol_simulation/scientific_frontier.rs

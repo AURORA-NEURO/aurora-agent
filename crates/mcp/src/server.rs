@@ -611,7 +611,7 @@ use bioprism_research::{
     preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
     promote_glioma_closed_loop_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
     rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
-    revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
+    replay_glioma_decision_context, revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
     schedule_glioma_computation_placement, schedule_glioma_frontier_campaign,
     schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
     simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
@@ -649,8 +649,8 @@ use bioprism_research::{
     CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
     DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionAdmissionRequest,
     DecisionBranchCampaignRequest, DecisionBranchPlannerRequest, DecisionContext,
-    DecisionContextCampaignRequest, DecisionContextRequest, DecisionLoopGovernorRequest,
-    DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
+    DecisionContextCampaignRequest, DecisionContextReplayRequest, DecisionContextRequest,
+    DecisionLoopGovernorRequest, DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
     DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
     DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
     DriftSurveillanceRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
@@ -2598,6 +2598,7 @@ impl Server {
                 self.glioma_knowledge_synthesis_operating_cycle(&arguments)
             }
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
+            "glioma_decision_context_replay" => self.glioma_decision_context_replay(&arguments),
             "glioma_decision_admission_gate" => self.glioma_decision_admission_gate(&arguments),
             "glioma_decision_value_optimizer" => self.glioma_decision_value_optimizer(&arguments),
             "glioma_decision_value_calibrator" => self.glioma_decision_value_calibrator(&arguments),
@@ -11305,6 +11306,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision context: {error}"))
+    }
+
+    /// Replay successive decision contexts against explicit local action outcomes so stale plans
+    /// are retired before autonomous routing and negative results remain visible.
+    fn glioma_decision_context_replay(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionContextReplayRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_context_replay requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-context replay request: {error}"))?;
+        let replay = replay_glioma_decision_context(&request)
+            .map_err(|error| format!("glioma decision-context replay refused: {error}"))?;
+        serde_json::to_value(json!({
+            "replay": replay,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_decision_admission_gate",
+                "glioma_decision_action_graph",
+                "glioma_decision_operating_cycle"
+            ],
+            "guarantees": [
+                "successive context snapshots are digest-bound and ordered by epoch",
+                "promoted, retired, stable, negative, and unresolved actions remain explicit",
+                "unknown, failed, and blocked outcomes prevent an automatic ready disposition",
+                "the route performs no retrieval, assay, instrument execution, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-context replay: {error}"))
     }
 
     /// Gate generated research actions before autonomous execution.
@@ -54683,6 +54714,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_autonomous_gap_cycle",
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
+                "glioma_decision_context_replay",
                 "glioma_decision_admission_gate",
                 "glioma_decision_value_optimizer",
                 "glioma_decision_value_calibrator",
@@ -65354,6 +65386,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
             },
             "required": ["request", "knowledge"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_context_replay",
+        "description": "Replay digest-bound preclinical glioma decision-context snapshots across study epochs against explicit local action outcomes. Identifies promoted, retired, stable, completed, negative, and unresolved actions so stale plans cannot silently execute; unknown, failed, and blocked outcomes prevent a ready disposition. It performs no retrieval, assay, instrument execution, raw-data movement, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionContextReplayRequest1@1 with ordered DecisionContextEpoch1@1 snapshots, local action outcomes, promotion threshold, epoch bound, and negative-result policy."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
