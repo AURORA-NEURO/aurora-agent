@@ -6,6 +6,7 @@ pub mod adaptive_branch_campaign;
 pub mod adaptive_controller;
 pub mod admission_gate;
 pub mod branch_campaign;
+pub mod branch_evidence;
 pub mod branch_planner;
 pub mod campaign;
 pub mod context_compiler;
@@ -46,6 +47,12 @@ pub use branch_campaign::{
     execute_glioma_decision_branch_campaign, BranchExecutionDisposition, DecisionBranchCampaign,
     DecisionBranchCampaignDisposition, DecisionBranchCampaignError, DecisionBranchCampaignRequest,
     DecisionBranchCampaignStopReason, DecisionBranchExecution,
+};
+pub use branch_evidence::{
+    assimilate_glioma_decision_branch_evidence, DecisionBranchEvidence,
+    DecisionBranchEvidenceDisposition, DecisionBranchEvidenceError, DecisionBranchEvidenceOutcome,
+    DecisionBranchEvidenceOutcomeStatus, DecisionBranchEvidenceRecord,
+    DecisionBranchEvidenceRequest, DecisionBranchEvidenceStatus,
 };
 pub use branch_planner::{
     plan_glioma_decision_branches, DecisionBranchPlan, DecisionBranchPlanDisposition,

@@ -73,13 +73,13 @@ silently bypass an earlier wave's omission, provenance, safety, or replay gate.
 - Product contract: bounded context compilation, value optimization, admission, action graphs,
   branch planning, omission certification, and campaign control.
 - Primary artifacts: `DecisionContext`, `DecisionActionGraph`, `DecisionOmissionCertificate`,
-  and adaptive branch campaigns.
+  `DecisionBranchEvidence`, and adaptive branch campaigns.
 - Downstream edges: P05 mechanism actions, P06 experiment design, P07 protocol simulation, and
   P08 instrument preflight.
 - Promotion gate: every action has typed prerequisites, value/risk budget, unresolved context,
   and a falsifiable stop condition.
-- Current implementation: 15/32 slots. Next wave: branch evidence assimilation and decision
-  context replay across study epochs.
+- Current implementation: 16/32 slots. Next wave: branch evidence assimilation across richer
+  outcome types and decision-context replay across study epochs.
 
 ### P05 — `p05_mechanism_exploration`
 

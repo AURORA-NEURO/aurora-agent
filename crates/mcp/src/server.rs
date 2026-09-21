@@ -514,12 +514,12 @@ use bioprism_research::{
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
-    assimilate_glioma_acquisition_feedback, assimilate_glioma_knowledge_action_outcomes,
-    assimilate_glioma_mechanism_evidence, attribute_glioma_multimodal_quality_root_cause,
-    bridge_glioma_knowledge_actions, bridge_glioma_mechanism_fidelity,
-    build_glioma_multimodal_ingestion_manifest, build_research_object_manifest,
-    calibrate_glioma_beliefs_prospectively, calibrate_glioma_decision_value,
-    calibrate_glioma_evidence, calibrate_glioma_mechanisms,
+    assimilate_glioma_acquisition_feedback, assimilate_glioma_decision_branch_evidence,
+    assimilate_glioma_knowledge_action_outcomes, assimilate_glioma_mechanism_evidence,
+    attribute_glioma_multimodal_quality_root_cause, bridge_glioma_knowledge_actions,
+    bridge_glioma_mechanism_fidelity, build_glioma_multimodal_ingestion_manifest,
+    build_research_object_manifest, calibrate_glioma_beliefs_prospectively,
+    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
     calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
     certify_decision_omissions, close_glioma_claims_to_experiments, cluster_glioma_evidence,
     compile_decision_action_graph, compile_decision_context,
@@ -650,28 +650,29 @@ use bioprism_research::{
     ContradictionEvidence, ContrastDesignRequest, CounterfactualEnsembleRequest,
     CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
     DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionAdmissionRequest,
-    DecisionBranchCampaignRequest, DecisionBranchPlannerRequest, DecisionContext,
-    DecisionContextCampaignRequest, DecisionContextReplayRequest, DecisionContextRequest,
-    DecisionLoopGovernorRequest, DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
-    DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
-    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DriftSurveillanceRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
-    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
-    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
-    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
-    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
-    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
-    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
-    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
-    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
-    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFrontierJoinRequest,
-    EvidenceFusionRequest, EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
+    DecisionBranchCampaignRequest, DecisionBranchEvidenceRequest, DecisionBranchPlannerRequest,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextReplayRequest,
+    DecisionContextRequest, DecisionLoopGovernorRequest, DecisionMissionBridgeRequest,
+    DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
+    DecisionValueCalibrationRequest, DecisionValueRequest, DesignAction, DesignMechanism,
+    DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
+    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
+    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
+    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
+    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunFederatedMechanismTransportExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
+    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
+    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
+    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
+    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
+    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor,
+    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
+    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
+    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceClusterRequest,
+    EvidenceExecutionMode, EvidenceFrontierJoinRequest, EvidenceFusionRequest,
+    EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
     EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
     EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
     ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
@@ -2602,6 +2603,7 @@ impl Server {
             }
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_context_replay" => self.glioma_decision_context_replay(&arguments),
+            "glioma_decision_branch_evidence" => self.glioma_decision_branch_evidence(&arguments),
             "glioma_decision_admission_gate" => self.glioma_decision_admission_gate(&arguments),
             "glioma_decision_value_optimizer" => self.glioma_decision_value_optimizer(&arguments),
             "glioma_decision_value_calibrator" => self.glioma_decision_value_calibrator(&arguments),
@@ -11346,6 +11348,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision-context replay: {error}"))
+    }
+
+    /// Assimilate explicit local outcomes into a planned decision-branch frontier, preserving
+    /// contradicted, blocked, unobserved, and inconclusive branches for the next research cycle.
+    fn glioma_decision_branch_evidence(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionBranchEvidenceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_branch_evidence requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-branch evidence request: {error}"))?;
+        let evidence = assimilate_glioma_decision_branch_evidence(&request)
+            .map_err(|error| format!("glioma decision-branch evidence refused: {error}"))?;
+        serde_json::to_value(json!({
+            "evidence": evidence,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_decision_admission_gate",
+                "glioma_decision_branch_plan",
+                "glioma_decision_operating_cycle"
+            ],
+            "guarantees": [
+                "every planned branch remains explicit after local outcome assimilation",
+                "contradicted, failed, blocked, inconclusive, and unobserved evidence is preserved",
+                "frontier ordering is deterministic and confirmed selection requires the configured confidence gate",
+                "the route performs no retrieval, assay, instrument execution, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-branch evidence: {error}"))
     }
 
     /// Gate generated research actions before autonomous execution.
@@ -54811,6 +54843,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
                 "glioma_decision_context_replay",
+                "glioma_decision_branch_evidence",
                 "glioma_decision_admission_gate",
                 "glioma_decision_value_optimizer",
                 "glioma_decision_value_calibrator",
@@ -65494,6 +65527,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DecisionContextReplayRequest1@1 with ordered DecisionContextEpoch1@1 snapshots, local action outcomes, promotion threshold, epoch bound, and negative-result policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_branch_evidence",
+        "description": "Assimilate explicit local outcomes into a planned preclinical glioma decision-branch frontier. Scores forecast/observation agreement, preserves contradicted, failed, blocked, inconclusive, and unobserved branches, and returns a deterministic next-frontier without executing research actions or making clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionBranchEvidenceRequest1@1 with a digest-bound DecisionBranchPlan1@1, bounded branch outcomes, confidence threshold, and negative-result policy."}
             },
             "required": ["request"]
         }
