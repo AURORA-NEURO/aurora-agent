@@ -607,12 +607,13 @@ use bioprism_research::{
     plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
     plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
-    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_scientific_frontier, plan_glioma_sequential_design,
-    plan_glioma_validation_replication_gate, plan_glioma_workflow, plan_glioma_workflow_recovery,
-    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
-    promote_glioma_closed_loop_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
-    rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
+    plan_glioma_research_object_migration, plan_glioma_robust_active_learning,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
+    plan_glioma_sequential_design, plan_glioma_validation_replication_gate, plan_glioma_workflow,
+    plan_glioma_workflow_recovery, preflight_glioma_instrument, prioritize_glioma_evidence,
+    prioritize_knowledge_frontier, promote_glioma_closed_loop_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, rank_glioma_evidence_novelty,
+    reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
     replay_glioma_decision_context, revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
     schedule_glioma_computation_placement, schedule_glioma_frontier_campaign,
     schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
@@ -748,17 +749,18 @@ use bioprism_research::{
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
-    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
-    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
-    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
-    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
-    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest,
-    SignalBatchStabilityRequest, SignalExtractionRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    ReplicationStudy, ResearchObjectMigrationRequest, ResearchObjectRequest,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
+    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
+    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
+    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
+    SequentialCampaignRequest, SequentialDesignRequest, SignalBatchStabilityRequest,
+    SignalExtractionRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
+    SpatialNicheRequest, SpatialPropagationRequest, SpatialRegistrationCell,
+    SpatialRegistrationRequest, StateTransitionObservation, StateTransitionRequest,
+    StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
+    StratifiedObservation, TemporalFusionRequest, TemporalObservation,
     TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
     ValidationCampaignRequest, ValidationReplicationCampaignRequest,
@@ -2809,6 +2811,9 @@ impl Server {
             "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
             "glioma_multimodal_research_object_prepare" => {
                 self.glioma_multimodal_research_object_prepare(&arguments)
+            }
+            "glioma_research_object_migration_plan" => {
+                self.glioma_research_object_migration_plan(&arguments)
             }
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
@@ -14667,6 +14672,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal research-object bundle: {error}"))
+    }
+
+    /// Check a multimodal research object against a target schema edition without mutating or
+    /// rewriting artifacts.
+    fn glioma_research_object_migration_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ResearchObjectMigrationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_research_object_migration_plan requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma research-object migration request: {error}")
+            })?;
+        let plan = plan_glioma_research_object_migration(&request)
+            .map_err(|error| format!("glioma research-object migration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "migration": plan,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_multimodal_research_object_prepare",
+                "glioma_replay_campaign_execute",
+                "glioma_research_object_release_gate"
+            ],
+            "guarantees": [
+                "lossless metadata rewrites, explicit recomputation, and blocked migrations remain distinct",
+                "content hashes and provenance are preserved whenever a decision claims preservation",
+                "semantic-loss budgets and required-modality omissions fail closed",
+                "the route performs no artifact rewrite, upload, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma research-object migration plan: {error}"))
     }
 
     /// Evaluate replay and review evidence before a preclinical research object enters signing.
@@ -55045,7 +55080,8 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_object_release_gate",
                 "glioma_release_operating_cycle",
                 "glioma_research_object_prepare",
-                "glioma_multimodal_research_object_prepare"
+                "glioma_multimodal_research_object_prepare",
+                "glioma_research_object_migration_plan"
             ],
             "cli_entrypoints": [],
             "status": "available"
@@ -66897,6 +66933,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultimodalResearchObjectRequest1@1 containing ResearchObjectRequest1@1, bounded modality artifact inputs, required modalities, semantic-loss bound, alignment policy, and input limit."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_object_migration_plan",
+        "description": "Check a multimodal preclinical glioma research object against a target schema edition. Produces lossless metadata rewrites, explicit local-artifact recomputation, or fail-closed blocks with provenance and semantic-loss reasoning; it never mutates, uploads, signs, or clinically interprets artifacts.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ResearchObjectMigrationRequest1@1 containing a validated MultimodalResearchObject1@1 bundle, target object/schema versions, accepted source versions, semantic-loss bound, and recomputation policy."}
             },
             "required": ["request"]
         }

@@ -2,6 +2,7 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod migration;
 pub mod multimodal_bundle;
 pub mod operating_cycle;
 pub mod release_gate;
@@ -19,6 +20,11 @@ pub use release_gate::{
     ReleaseGateStatus, ReleaseReviewAttestation, ReleaseReviewDecision,
 };
 
+pub use migration::{
+    plan_glioma_research_object_migration, ResearchObjectMigrationAction,
+    ResearchObjectMigrationDecision, ResearchObjectMigrationDisposition,
+    ResearchObjectMigrationError, ResearchObjectMigrationPlan, ResearchObjectMigrationRequest,
+};
 pub use multimodal_bundle::{
     compile_glioma_multimodal_research_object, MultimodalResearchObjectBundle,
     MultimodalResearchObjectDisposition, MultimodalResearchObjectEntry,

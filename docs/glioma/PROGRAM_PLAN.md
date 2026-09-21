@@ -167,7 +167,7 @@ silently bypass an earlier wave's omission, provenance, safety, or replay gate.
 - Downstream edges: P12 federation and every upstream program's publication handoff.
 - Promotion gate: complete provenance, methods/limitations, replay evidence, policy-compliant
   localization, signed checksums, and negative-result disclosure.
-- Current implementation: 5/32 slots. Next wave: multimodal object packaging, migration checks,
+- Current implementation: 6/32 slots. Next wave: multimodal object packaging, migration checks,
   dependency closure, and long-horizon archival replay.
 
 ### P12 — `p12_federated_benchmarking`
