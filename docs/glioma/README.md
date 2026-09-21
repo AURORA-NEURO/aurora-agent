@@ -20,6 +20,8 @@ crates/research/src/glioma/
   evidence.rs                              P01 evidence qualification
   programs/p02_evidence_knowledge/knowledge_graph.rs
                                              P02 scoped claim graph and support/contradiction synthesis
+  programs/p02_evidence_knowledge/knowledge_drift.rs
+                                             P02 prospective typed-knowledge snapshot drift and bounded downstream replanning
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs
@@ -751,6 +753,12 @@ claim score, contradiction edges impose bounded penalties, negative claims are e
 deletion, and contested rivals remain visible with adjudication actions. Claims that cannot clear
 the support closure emit evidence-acquisition actions for P01/P02 rather than being silently
 promoted into a downstream workflow.
+Knowledge drift detection (`glioma_knowledge_drift`) now compares two validated typed-knowledge
+snapshots after each evidence cycle. It classifies claim additions, removals, strengthening,
+weakening, contradiction, resolution, and stability, then emits priority-gated actions for
+consistency closure, gap compilation, or mechanism replanning. The transition is bound to both
+snapshot digests, preserves negative and unresolved states, and never treats confidence drift as
+causal or clinical evidence.
 P04 now includes decision-context compilation (`compile_decision_context`) that converts those
 gaps into typed A1 candidates for coverage closure, contradiction replication, negative-result
 falsification, evidence resolution, or mechanism validation; the existing action selector then

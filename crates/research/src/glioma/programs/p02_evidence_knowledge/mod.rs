@@ -10,6 +10,7 @@ pub mod composition;
 pub mod consistency;
 pub mod dispatch;
 pub mod gap_compiler;
+pub mod knowledge_drift;
 pub mod knowledge_graph;
 pub mod operating_cycle;
 pub mod selection_cycle;
@@ -77,6 +78,10 @@ pub use consistency::{
     compile_glioma_knowledge_consistency, KnowledgeConsistencyClaimDisposition,
     KnowledgeConsistencyClaimScore, KnowledgeConsistencyClosure, KnowledgeConsistencyDisposition,
     KnowledgeConsistencyError, KnowledgeConsistencyRequest,
+};
+pub use knowledge_drift::{
+    detect_glioma_knowledge_drift, KnowledgeDrift, KnowledgeDriftAction, KnowledgeDriftDisposition,
+    KnowledgeDriftError, KnowledgeDriftKind, KnowledgeDriftRequest,
 };
 pub use knowledge_graph::{
     compile_typed_knowledge, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,

@@ -523,12 +523,13 @@ use bioprism_research::{
     compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
     compile_glioma_replication_protocol, compile_mechanism_action_plan, compile_typed_knowledge,
     compose_knowledge_graph, design_glioma_contrast_panel, design_glioma_robust_experiment,
-    design_preclinical_experiment, detect_glioma_evidence_temporal_shifts, discriminate_mechanisms,
-    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
-    dry_run_glioma_research, dry_run_instrument_executor_from_request,
-    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
-    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
-    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    design_preclinical_experiment, detect_glioma_evidence_temporal_shifts,
+    detect_glioma_knowledge_drift, discriminate_mechanisms, dry_run_adaptive_instrument_executor,
+    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
+    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
+    execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -686,8 +687,8 @@ use bioprism_research::{
     InvarianceMechanism, KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest,
     KnowledgeActionDispatchRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
     KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeCompositionRequest,
-    KnowledgeConsistencyRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeConsistencyRequest, KnowledgeDriftRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -2504,6 +2505,7 @@ impl Server {
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
             "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
             "glioma_knowledge_consistency" => self.glioma_knowledge_consistency(&arguments),
+            "glioma_knowledge_drift" => self.glioma_knowledge_drift(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_knowledge_gap_compile" => self.glioma_knowledge_gap_compile(&arguments),
@@ -10019,6 +10021,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge consistency closure: {error}"))
+    }
+
+    /// Compare two validated typed-knowledge snapshots and route material claim drift for bounded
+    /// revalidation or replanning. This is a knowledge-state transition, not a causal conclusion.
+    fn glioma_knowledge_drift(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeDriftRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_drift requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-drift request: {error}"))?;
+        let output = detect_glioma_knowledge_drift(&request)
+            .map_err(|error| format!("glioma knowledge-drift analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "drift": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_knowledge_consistency",
+                "glioma_knowledge_gap_compile",
+                "glioma_mechanism_autopilot_execute"
+            ],
+            "guarantees": [
+                "only validated typed-knowledge claim snapshots are compared",
+                "claim additions, removals, strengthening, weakening, contradiction, resolution, and stability remain distinct",
+                "priority-gated transitions and negative evidence remain explicit",
+                "the route performs no retrieval, raw-data movement, causal inference, instrument action, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge drift: {error}"))
     }
 
     /// Revise an explicit preclinical claim-conflict graph into a bounded consistent portfolio.
@@ -53743,6 +53775,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_compile",
                 "glioma_knowledge_compose",
                 "glioma_knowledge_consistency",
+                "glioma_knowledge_drift",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
                 "glioma_knowledge_gap_compile",
@@ -63988,6 +64021,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "KnowledgeConsistencyRequest1@1 containing a validated TypedKnowledge1@1, explicit KnowledgeRelation1@1 records, support/conflict thresholds, and relation-strength bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_drift",
+        "description": "Compare two validated typed-knowledge snapshots for prospective preclinical glioma research. Detects claim additions, removals, strengthening, weakening, contradiction, resolution, and stability, then emits priority-gated downstream revalidation or replanning actions while preserving negative and unresolved states.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeDriftRequest1@1 containing objective-bound previous/current TypedKnowledge snapshots, confidence/priority gates, and action capacity."}
             },
             "required": ["request"]
         }
