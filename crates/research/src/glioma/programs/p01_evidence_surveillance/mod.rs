@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod acquisition;
 pub mod acquisition_campaign;
+pub mod acquisition_feedback;
 pub mod calibration;
 pub mod campaign;
 pub mod contradiction_cut;
@@ -33,6 +34,11 @@ pub use triangulation::{
     TriangulatedClaimVerdict,
 };
 
+pub use acquisition_feedback::{
+    assimilate_glioma_acquisition_feedback, AcquisitionFeedbackDecision, AcquisitionFeedbackError,
+    AcquisitionFeedbackReport, AcquisitionFeedbackRequest, AcquisitionFeedbackRow,
+    AcquisitionOutcome, AcquisitionOutcomeStatus,
+};
 pub use calibration::{
     calibrate_glioma_evidence, CalibrationBin, CalibrationBinDisposition,
     EvidenceCalibrationAnalysis, EvidenceCalibrationDisposition, EvidenceCalibrationError,

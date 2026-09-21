@@ -514,17 +514,18 @@ use bioprism_research::{
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
-    attribute_glioma_multimodal_quality_root_cause, bridge_glioma_knowledge_actions,
-    build_research_object_manifest, calibrate_glioma_decision_value, calibrate_glioma_evidence,
-    calibrate_glioma_mechanisms, calibrate_glioma_multimodal_quality_transport,
-    calibrate_glioma_multimodal_reliability, certify_decision_omissions, cluster_glioma_evidence,
-    compile_decision_action_graph, compile_decision_context,
-    compile_glioma_computation_interpretation_frontier, compile_glioma_computation_workflow,
-    compile_glioma_knowledge_actions, compile_glioma_knowledge_closure,
-    compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps,
-    compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
-    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
-    compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
+    assimilate_glioma_acquisition_feedback, attribute_glioma_multimodal_quality_root_cause,
+    bridge_glioma_knowledge_actions, build_research_object_manifest,
+    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
+    calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
+    certify_decision_omissions, cluster_glioma_evidence, compile_decision_action_graph,
+    compile_decision_context, compile_glioma_computation_interpretation_frontier,
+    compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
+    compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
+    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
+    compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
+    compile_glioma_replication_protocol, compile_local_research_workflow,
+    compile_mechanism_action_plan, compile_multi_study_knowledge,
     compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
     detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
@@ -613,17 +614,17 @@ use bioprism_research::{
     snapshot_glioma_evidence_stream, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
     synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog,
-    verify_glioma_multimodal_quality_recovery, ActionPortfolioExecutionRequest,
-    ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
-    ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
-    AdaptiveArmObservation, AdaptiveCloneCampaignRequest, AdaptiveDecisionBranchCampaignRequest,
-    AdaptiveDecisionControllerRequest, AdaptiveDoseSurfaceRequest,
-    AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
-    AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
-    AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
-    AdaptiveMechanismPolicyRequest, AdaptivePanelRequest, AnalysisDataset, AnalysisRequest,
-    AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
-    AutonomousProgramCycleRequest, AutonomousProtocolControllerRequest,
+    verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
+    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
+    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveCloneCampaignRequest,
+    AdaptiveDecisionBranchCampaignRequest, AdaptiveDecisionControllerRequest,
+    AdaptiveDoseSurfaceRequest, AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest,
+    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    AdaptiveInstrumentCampaignRequest, AdaptiveInterpretationCampaignRequest,
+    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AdaptivePanelRequest,
+    AnalysisDataset, AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest,
+    AutonomousGapCycleRequest, AutonomousProgramCycleRequest, AutonomousProtocolControllerRequest,
     BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
     BeliefRevisionRequest, BlockedRandomizationRequest, CalibratedMechanismCampaignRequest,
     CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
@@ -2510,6 +2511,9 @@ impl Server {
             "glioma_evidence_frontier_join" => self.glioma_evidence_frontier_join(&arguments),
             "glioma_multimodal_evidence_gap_router" => {
                 self.glioma_multimodal_evidence_gap_router(&arguments)
+            }
+            "glioma_evidence_acquisition_feedback" => {
+                self.glioma_evidence_acquisition_feedback(&arguments)
             }
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
@@ -9776,6 +9780,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode multimodal evidence-gap plan: {error}"))
+    }
+
+    /// Assimilate explicit site-local acquisition outcomes back into typed P01 evidence. Failed,
+    /// duplicate, unauthorized, and protected outcomes remain visible but never become support.
+    fn glioma_evidence_acquisition_feedback(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AcquisitionFeedbackRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_acquisition_feedback requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid acquisition feedback request: {error}"))?;
+        let output = assimilate_glioma_acquisition_feedback(&request)
+            .map_err(|error| format!("acquisition feedback refused: {error}"))?;
+        serde_json::to_value(json!({
+            "feedback": output,
+            "next_routes": [
+                "glioma_evidence_frontier_join",
+                "glioma_evidence_stream_snapshot",
+                "glioma_evidence_novelty_adjudication"
+            ],
+            "guarantees": [
+                "only explicit completed or negative local outcomes with valid artifacts enter evidence",
+                "failed, cancelled, expired, duplicate, unauthorized, and protected outcomes remain non-evidence",
+                "outcome identity and plan binding are idempotent and deterministic",
+                "the route performs no retrieval, raw-data movement, assay execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode acquisition feedback: {error}"))
     }
 
     /// Detect changes between local evidence snapshots and compile bounded review actions for a
@@ -54255,6 +54286,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
+                "glioma_evidence_acquisition_feedback",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_novelty_radar",
                 "glioma_evidence_temporal_shift",
@@ -64425,6 +64457,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultimodalGapRouterRequest1@1 with EvidenceFrontierClaim1@1 values, required modalities/models, action bound, and priority floor."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_acquisition_feedback",
+        "description": "Assimilate explicit site-local preclinical glioma acquisition outcomes into typed P01 evidence. Completed and negative outcomes with valid local artifacts re-enter the frontier; failed, cancelled, expired, duplicate, unauthorized, low-quality, and protected outcomes remain non-evidence and auditable.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AcquisitionFeedbackRequest1@1 with immutable planned actions, local outcome envelopes, epoch, quality floors, and raw-data locality policy."}
             },
             "required": ["request"]
         }
