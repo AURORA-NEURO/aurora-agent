@@ -21,6 +21,8 @@ pub mod frontier_campaign;
 pub mod gap_compiler;
 pub mod knowledge_drift;
 pub mod knowledge_graph;
+pub mod knowledge_protocol_gateway;
+pub mod multimodal_protocol_gateway;
 pub mod multimodal_workflow;
 pub mod operating_cycle;
 pub mod prospective_belief_calibration;
@@ -150,6 +152,14 @@ pub use knowledge_drift::{
 pub use knowledge_graph::{
     compile_typed_knowledge, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,
     KnowledgeError, KnowledgeRequest, TypedKnowledge,
+};
+pub use knowledge_protocol_gateway::{
+    negotiate_glioma_knowledge_protocol, KnowledgeProtocolGatewayError,
+    KnowledgeProtocolNegotiation, KnowledgeProtocolRequest,
+};
+pub use multimodal_protocol_gateway::{
+    negotiate_glioma_multimodal_knowledge_protocol, MultimodalKnowledgeProtocolRequest,
+    MultimodalProtocolDisposition, MultimodalProtocolGatewayError, MultimodalProtocolNegotiation,
 };
 pub use multimodal_workflow::{
     compile_multimodal_knowledge_workflow, ModalityWorkflowObservation,

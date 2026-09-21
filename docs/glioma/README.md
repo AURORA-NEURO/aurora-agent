@@ -70,6 +70,10 @@ crates/research/src/glioma/
                                              P02 prospective Brier/calibration scoring with omission-aware confidence updates
   programs/p02_evidence_knowledge/frontier_campaign.rs
                                              P02 campaign-level batching of frontier actions into budgeted, review-gated execution rounds
+  programs/p02_evidence_knowledge/knowledge_protocol_gateway.rs
+                                             P02 typed-knowledge capability negotiation with raw-data and clinical-boundary enforcement
+  programs/p02_evidence_knowledge/multimodal_protocol_gateway.rs
+                                             P02 multimodal typed-knowledge negotiation with explicit degraded modality branches
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs

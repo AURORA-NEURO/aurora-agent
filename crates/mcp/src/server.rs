@@ -586,22 +586,23 @@ use bioprism_research::{
     gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
     govern_glioma_decision_loop, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     interpret_glioma_federated_closure, interpret_glioma_replication_closure,
-    join_glioma_evidence_frontier, monitor_prospective_knowledge, optimize_glioma_decision_value,
-    optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
-    plan_federated_benchmark_sites, plan_federated_continual_agent,
-    plan_federated_glioma_evidence_acquisition, plan_glioma_active_learning,
-    plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
-    plan_glioma_adaptive_panel, plan_glioma_adaptive_research_frontier,
-    plan_glioma_adaptive_workflow, plan_glioma_blocked_randomization,
-    plan_glioma_carryover_sequence, plan_glioma_clone_continuation,
-    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
-    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
-    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
-    plan_glioma_information_design, plan_glioma_mechanism_validation,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
-    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
-    plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
-    plan_glioma_protocol_compensation, plan_glioma_replication,
+    join_glioma_evidence_frontier, monitor_prospective_knowledge,
+    negotiate_glioma_knowledge_protocol, negotiate_glioma_multimodal_knowledge_protocol,
+    optimize_glioma_decision_value, optimize_glioma_protocol_branches,
+    plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
+    plan_federated_continual_agent, plan_federated_glioma_evidence_acquisition,
+    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
+    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_panel,
+    plan_glioma_adaptive_research_frontier, plan_glioma_adaptive_workflow,
+    plan_glioma_blocked_randomization, plan_glioma_carryover_sequence,
+    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
+    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
+    plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
+    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
+    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
+    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
+    plan_glioma_power_stress_surface, plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
@@ -705,7 +706,7 @@ use bioprism_research::{
     KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate,
     KnowledgeClosureRequest, KnowledgeCompositionRequest, KnowledgeConsistencyRequest,
     KnowledgeDriftRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeGapCompilerRequest, KnowledgeProtocolRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, LocalWorkflowRequest,
     MechanismActionPlannerConfig, MechanismCalibration, MechanismCalibrationObservation,
@@ -724,17 +725,17 @@ use bioprism_research::{
     MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultiStudyKnowledgeRequest,
     MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
     MultimodalExecutionMode, MultimodalGapRouterRequest, MultimodalIngestionCampaignRequest,
-    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
-    MultimodalRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
-    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
-    PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
-    ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
-    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
-    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
-    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    MultimodalKnowledgeProtocolRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
+    MultimodalReadinessRequest, MultimodalRequest, MultimodalWorkflowRequest,
+    NoveltyAdjudicationRequest, PathwayActivityDefinition, PathwayActivityObservation,
+    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
+    PowerStressSurfaceRequest, ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest,
+    ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
+    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
+    ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest, ProtocolTransportGateRequest,
+    QualityAdaptiveCampaignRequest, QualityExecutionMode, QualityExecutionRequest,
+    QualityRecoveryRequest, QualityRemediationRequest, QualityRootCauseRequest,
+    QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
     ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
@@ -2567,6 +2568,12 @@ impl Server {
                 self.glioma_prospective_belief_calibration(&arguments)
             }
             "glioma_frontier_campaign" => self.glioma_frontier_campaign(&arguments),
+            "glioma_knowledge_protocol_gateway" => {
+                self.glioma_knowledge_protocol_gateway(&arguments)
+            }
+            "glioma_multimodal_knowledge_protocol_gateway" => {
+                self.glioma_multimodal_knowledge_protocol_gateway(&arguments)
+            }
             "glioma_multimodal_knowledge_workflow" => {
                 self.glioma_multimodal_knowledge_workflow(&arguments)
             }
@@ -10729,6 +10736,64 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma frontier campaign: {error}"))
+    }
+
+    /// Negotiate typed-knowledge capabilities and export boundaries before exchange.
+    fn glioma_knowledge_protocol_gateway(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeProtocolRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_protocol_gateway requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge protocol request: {error}"))?;
+        let output = negotiate_glioma_knowledge_protocol(&request)
+            .map_err(|error| format!("glioma knowledge protocol negotiation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "negotiation": output,
+            "next_routes": [
+                "glioma_knowledge_compile",
+                "glioma_federated_knowledge",
+                "glioma_knowledge_action_dispatch"
+            ],
+            "guarantees": [
+                "only typed claims, aggregate metrics, digests, and provenance metadata can be exported",
+                "raw data, identifiers, clinical decisions, and instrument commands are denied",
+                "federation remains policy bounded and raw data remains local"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge protocol negotiation: {error}"))
+    }
+
+    /// Negotiate multimodal typed-knowledge exchange with explicit degraded modality coverage.
+    fn glioma_multimodal_knowledge_protocol_gateway(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MultimodalKnowledgeProtocolRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_knowledge_protocol_gateway requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma multimodal protocol request: {error}"))?;
+        let output = negotiate_glioma_multimodal_knowledge_protocol(&request).map_err(|error| {
+            format!("glioma multimodal knowledge protocol negotiation refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "negotiation": output,
+            "next_routes": [
+                "glioma_multimodal_knowledge_workflow",
+                "glioma_knowledge_compile",
+                "glioma_local_research_workflow"
+            ],
+            "guarantees": [
+                "missing modalities and capabilities select an explicit degraded branch",
+                "study identifiers are unique and raw data remains local",
+                "the route performs no execution, raw-data movement, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| {
+            format!("cannot encode glioma multimodal knowledge protocol negotiation: {error}")
+        })
     }
 
     /// Synchronize the local action DAG against study-level multimodal readiness and choose a
@@ -54572,6 +54637,8 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_closed_loop_frontier",
                 "glioma_prospective_belief_calibration",
                 "glioma_frontier_campaign",
+                "glioma_knowledge_protocol_gateway",
+                "glioma_multimodal_knowledge_protocol_gateway",
                 "glioma_research_workflow_admission",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
@@ -65073,6 +65140,28 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FrontierCampaignRequest1@1 with ClosedLoopFrontier1@1, round budget, round/action bounds, and review-block policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_protocol_gateway",
+        "description": "Negotiate typed glioma knowledge capabilities and export boundaries before local or federated exchange. Allows typed claims, aggregate metrics, content digests, and provenance metadata while denying raw data, identifiers, clinical decisions, and instrument commands.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeProtocolRequest1@1 with offered/required capabilities, requested export fields, local-data boundary, and federation policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_knowledge_protocol_gateway",
+        "description": "Negotiate multimodal typed-knowledge exchange across glioma studies and explicitly select a degraded branch when required modalities or capabilities are missing. Raw data remains local and no execution occurs.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalKnowledgeProtocolRequest1@1 with study IDs, required/available modalities, capabilities, policy, and local-data boundary."}
             },
             "required": ["request"]
         }
