@@ -12,6 +12,7 @@ pub mod evidence_cluster;
 pub mod evidence_frontier_join;
 pub mod evidence_stream;
 pub mod federated_acquisition_policy;
+pub mod federated_execution_handoff;
 pub mod federated_shift;
 pub mod multimodal_gap_router;
 pub mod novelty_adjudication;
@@ -69,6 +70,11 @@ pub use evidence_stream::{
     snapshot_glioma_evidence_stream, EvidenceStreamClaim, EvidenceStreamClaimTrend,
     EvidenceStreamDisposition, EvidenceStreamError, EvidenceStreamEvent, EvidenceStreamRequest,
     EvidenceStreamSnapshot,
+};
+pub use federated_execution_handoff::{
+    compile_federated_glioma_execution_handoff, FederatedExecutionHandoff,
+    FederatedExecutionHandoffError, FederatedExecutionHandoffReport,
+    FederatedExecutionHandoffRequest, FederatedHandoffApproval, HandoffDisposition, HandoffEffect,
 };
 pub use multimodal_gap_router::{
     route_glioma_multimodal_evidence_gaps, MultimodalGapAction, MultimodalGapActionKind,

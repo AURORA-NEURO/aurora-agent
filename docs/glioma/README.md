@@ -32,6 +32,8 @@ crates/research/src/glioma/
                                              P01 smallest cross-modality/model acquisition set for closing unresolved evidence context
   programs/p01_evidence_surveillance/acquisition_feedback.rs
                                              P01 idempotent site-local outcome assimilation into typed positive/negative frontier evidence
+  programs/p01_evidence_surveillance/federated_execution_handoff.rs
+                                             P01 approval-gated local adapter handoff with bounded autonomy, idempotency, and honest compensation
   programs/p02_evidence_knowledge/knowledge_graph.rs
                                              P02 scoped claim graph and support/contradiction synthesis
   programs/p02_evidence_knowledge/knowledge_drift.rs

@@ -519,13 +519,13 @@ use bioprism_research::{
     calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
     calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
     certify_decision_omissions, cluster_glioma_evidence, compile_decision_action_graph,
-    compile_decision_context, compile_glioma_computation_interpretation_frontier,
-    compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
-    compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
-    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
-    compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
-    compile_glioma_replication_protocol, compile_local_research_workflow,
-    compile_mechanism_action_plan, compile_multi_study_knowledge,
+    compile_decision_context, compile_federated_glioma_execution_handoff,
+    compile_glioma_computation_interpretation_frontier, compile_glioma_computation_workflow,
+    compile_glioma_knowledge_actions, compile_glioma_knowledge_closure,
+    compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps,
+    compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
+    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
+    compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
     compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
     detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
@@ -671,9 +671,9 @@ use bioprism_research::{
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
     FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
-    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedInstrumentConsensusRequest,
-    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedKnowledgeRequest,
-    FederatedKnowledgeSiteClaim, FederatedMechanismSite,
+    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
+    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
+    FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate,
     GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
@@ -2514,6 +2514,9 @@ impl Server {
             }
             "glioma_evidence_acquisition_feedback" => {
                 self.glioma_evidence_acquisition_feedback(&arguments)
+            }
+            "glioma_federated_execution_handoff" => {
+                self.glioma_federated_execution_handoff(&arguments)
             }
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
@@ -9807,6 +9810,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode acquisition feedback: {error}"))
+    }
+
+    /// Compile selected P01 actions into approval-gated site-local adapter handoffs. This route
+    /// does not open a network session or execute an assay; it only emits bounded requests.
+    fn glioma_federated_execution_handoff(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedExecutionHandoffRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_execution_handoff requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid federated execution handoff request: {error}"))?;
+        let output = compile_federated_glioma_execution_handoff(&request)
+            .map_err(|error| format!("federated execution handoff refused: {error}"))?;
+        serde_json::to_value(json!({
+            "handoff": output,
+            "next_routes": [
+                "glioma_evidence_acquisition_feedback",
+                "glioma_evidence_frontier_join"
+            ],
+            "guarantees": [
+                "only selected policy actions with valid site-local constraints become handoffs",
+                "exact action approvals, expiration, capacity, and idempotency remain explicit",
+                "partial execution is compensated by an honest local failure outcome rather than inferred support",
+                "the route does not contact sites, move raw data, run assays, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode federated execution handoff: {error}"))
     }
 
     /// Detect changes between local evidence snapshots and compile bounded review actions for a
@@ -54287,6 +54316,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
                 "glioma_evidence_acquisition_feedback",
+                "glioma_federated_execution_handoff",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_novelty_radar",
                 "glioma_evidence_temporal_shift",
@@ -64468,6 +64498,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "AcquisitionFeedbackRequest1@1 with immutable planned actions, local outcome envelopes, epoch, quality floors, and raw-data locality policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_execution_handoff",
+        "description": "Compile selected preclinical glioma acquisition actions into approval-gated site-local adapter handoffs. Exact action grants, expiry, capacity, autonomy tier, idempotency, and compensation are explicit; the route does not contact sites, move raw data, or execute assays.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedExecutionHandoffRequest1@1 with a FederatedEvidenceAcquisitionPolicy1@1, exact site/action approvals, execution epoch, handoff bound, and explicit-approval policy."}
             },
             "required": ["request"]
         }
