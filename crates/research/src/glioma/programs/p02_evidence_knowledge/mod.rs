@@ -20,6 +20,7 @@ pub mod operating_cycle;
 pub mod prospective_monitor;
 pub mod selection_cycle;
 pub mod study_alignment;
+pub mod workflow_compile;
 
 pub use gap_compiler::{
     compile_glioma_knowledge_gaps, KnowledgeGapClaimMapping, KnowledgeGapCompilerError,
@@ -129,6 +130,10 @@ pub use study_alignment::{
     compile_multi_study_knowledge, MultiStudyClaimDisposition, MultiStudyKnowledge,
     MultiStudyKnowledgeDisposition, MultiStudyKnowledgeError, MultiStudyKnowledgeRequest,
     MultiStudyKnowledgeRow, StudyClaimBinding, StudyClaimObservation, StudyKnowledgeSnapshot,
+};
+pub use workflow_compile::{
+    compile_local_research_workflow, LocalResearchWorkflow, LocalWorkflowDisposition,
+    LocalWorkflowError, LocalWorkflowRequest, LocalWorkflowStep,
 };
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};

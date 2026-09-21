@@ -523,15 +523,15 @@ use bioprism_research::{
     compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps,
     compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
     compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
-    compile_mechanism_action_plan, compile_multi_study_knowledge, compile_typed_knowledge,
-    compose_knowledge_graph, design_glioma_contrast_panel, design_glioma_robust_experiment,
-    design_preclinical_experiment, detect_glioma_evidence_temporal_shifts,
-    detect_glioma_knowledge_drift, discriminate_mechanisms, dry_run_adaptive_instrument_executor,
-    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
-    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
-    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
-    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
-    execute_federated_benchmark_operating_cycle_dry_run,
+    compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
+    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
+    design_glioma_robust_experiment, design_preclinical_experiment,
+    detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
+    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
+    dry_run_glioma_research, dry_run_instrument_executor_from_request,
+    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
+    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
+    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -694,14 +694,14 @@ use bioprism_research::{
     KnowledgeCompositionRequest, KnowledgeConsistencyRequest, KnowledgeDriftRequest,
     KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation,
     KnowledgeRequest, KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
-    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
-    MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
-    MechanismCandidate, MechanismConsensusRequest, MechanismDiscrimination,
-    MechanismDiscriminationCampaignRequest, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismDynamicsEdge, MechanismDynamicsIntervention,
-    MechanismDynamicsNode, MechanismDynamicsRequest, MechanismFeatureObservation,
-    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
-    MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
+    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, LocalWorkflowRequest,
+    MechanismActionPlannerConfig, MechanismCalibration, MechanismCalibrationObservation,
+    MechanismCalibrationRequest, MechanismCandidate, MechanismConsensusRequest,
+    MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
+    MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
+    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
+    MechanismHypothesis, MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
     MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
     MechanismOperatingCycleRequest, MechanismRequest, MechanismSignature,
     MechanismStateFilterRequest, MechanismStateSmootherRequest,
@@ -2520,6 +2520,7 @@ impl Server {
                 self.glioma_federated_continual_knowledge(&arguments)
             }
             "glioma_federated_continual_agent" => self.glioma_federated_continual_agent(&arguments),
+            "glioma_local_research_workflow" => self.glioma_local_research_workflow(&arguments),
             "glioma_federated_knowledge" => self.glioma_federated_knowledge(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
@@ -10214,6 +10215,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated-continual agent plan: {error}"))
+    }
+
+    /// Compile the selected autonomous frontier into local dependency waves with checkpoint and
+    /// compensation metadata. The local dispatcher remains the only effect boundary.
+    fn glioma_local_research_workflow(&self, arguments: &Value) -> Result<Value, String> {
+        let request: LocalWorkflowRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_local_research_workflow requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma local workflow request: {error}"))?;
+        let output = compile_local_research_workflow(&request)
+            .map_err(|error| format!("glioma local workflow compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "workflow": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_knowledge_action_dispatch",
+                "glioma_federated_continual_agent",
+                "glioma_knowledge_closure"
+            ],
+            "guarantees": [
+                "selected actions are dependency-closed before wave assignment",
+                "checkpoints, bounded retries, expected artifacts, and compensations are explicit",
+                "approval-required and omitted actions cannot silently enter a local workflow",
+                "the route performs no retrieval, raw-data movement, instrument action, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma local research workflow: {error}"))
     }
 
     /// Compare aggregate typed-knowledge summaries across institutions while preserving local
@@ -53981,6 +54012,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_prospective_knowledge_monitor",
                 "glioma_federated_continual_knowledge",
                 "glioma_federated_continual_agent",
+                "glioma_local_research_workflow",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
@@ -64305,6 +64337,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FederatedContinualAgentRequest1@1 with objective-bound FederatedContinualKnowledge1@1, candidate actions, costs, dependencies, autonomy/authorization metadata, budget, and action capacity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_local_research_workflow",
+        "description": "Compile a selected federated-continual research frontier into a local dependency DAG with deterministic parallel waves, bounded retries, checkpoints, compensations, critical-path cost, and explicit approval/omission states. Planning only: the local dispatcher owns effects, and this route never moves raw data, executes instruments, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "LocalWorkflowRequest1@1 with objective-bound FederatedContinualAgentPlan1@1, step/wave bounds, retry/checkpoint policy, and approval policy."}
             },
             "required": ["request"]
         }

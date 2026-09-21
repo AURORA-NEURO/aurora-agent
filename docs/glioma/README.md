@@ -34,6 +34,8 @@ crates/research/src/glioma/
                                              P02 robust aggregate-only federated continual consensus with quorum and influence gates
   programs/p02_evidence_knowledge/continual_agent.rs
                                              P02 federated-continual autonomous action ranking with budget/dependency/autonomy gates
+  programs/p02_evidence_knowledge/workflow_compile.rs
+                                             P02 local dependency-wave workflow compiler with checkpoints, retries, and compensation metadata
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs
@@ -495,7 +497,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
-| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, explicit multi-study alignment and influence diagnostics, prospective change-point monitoring with multiplicity control, robust aggregate-only federated continual consensus, autonomous evidence-to-action ranking with budget/dependency/autonomy gates, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
+| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, explicit multi-study alignment and influence diagnostics, prospective change-point monitoring with multiplicity control, robust aggregate-only federated continual consensus, autonomous evidence-to-action ranking with budget/dependency/autonomy gates, local dependency-wave workflow compilation with checkpoint/compensation planning, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, pairwise identifiability analysis with quality/risk/budget-gated feature selection, cross-model mechanistic invariance and transport-stable panel selection, calibrated trust-discounted posterior action selection, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
@@ -793,6 +795,10 @@ research-action frontier. It scores expected information against coverage debt, 
 trend, confidence, and site influence, then applies dependency, budget, autonomy, physical-effect,
 approval, and quarantine gates. It returns a typed plan for the local dispatcher; it does not
 silently execute a physical or cross-institution effect.
+The local workflow compiler (`glioma_local_research_workflow`) turns selected agent actions into
+deterministic dependency waves. It emits checkpoints, retry limits, expected artifacts,
+compensation kinds, critical-path length, and omitted/approval states so a local dispatcher can
+execute a replayable bounded workflow without silently admitting an incomplete frontier.
 Federated typed-knowledge consensus (`glioma_federated_knowledge`) now compares independent
 site summaries without exporting source text. It pools support, contradiction, confidence, and
 disposition mass, reports site-specific disagreement and leave-one-site-out influence, and emits
