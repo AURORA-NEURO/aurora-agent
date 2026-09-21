@@ -2,6 +2,7 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod dependency_closure;
 pub mod migration;
 pub mod multimodal_bundle;
 pub mod operating_cycle;
@@ -20,6 +21,11 @@ pub use release_gate::{
     ReleaseGateStatus, ReleaseReviewAttestation, ReleaseReviewDecision,
 };
 
+pub use dependency_closure::{
+    analyze_glioma_research_object_dependency_closure, DependencyClosureDisposition,
+    DependencyClosureError, DependencyClosureNode, DependencyClosureNodeStatus,
+    DependencyClosurePlan, DependencyClosureRequest,
+};
 pub use migration::{
     plan_glioma_research_object_migration, ResearchObjectMigrationAction,
     ResearchObjectMigrationDecision, ResearchObjectMigrationDisposition,

@@ -506,11 +506,11 @@ use bioprism_research::{
     analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
     analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
     analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
-    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
-    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
-    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
-    analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_pathway_activity, analyze_glioma_research_object_dependency_closure,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -657,24 +657,25 @@ use bioprism_research::{
     DecisionContextReplayRequest, DecisionContextRequest, DecisionLoopGovernorRequest,
     DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
     DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
-    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DriftSurveillanceRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
-    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
-    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
-    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
-    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
-    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
-    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
-    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
-    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
-    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFrontierJoinRequest,
-    EvidenceFusionRequest, EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
+    DependencyClosureRequest, DesignAction, DesignMechanism, DoseResponseObservation,
+    DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
+    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
+    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
+    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
+    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunFederatedMechanismTransportExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
+    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
+    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
+    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
+    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
+    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor,
+    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
+    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
+    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceClusterRequest,
+    EvidenceExecutionMode, EvidenceFrontierJoinRequest, EvidenceFusionRequest,
+    EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
     EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
     EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
     ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
@@ -2814,6 +2815,9 @@ impl Server {
             }
             "glioma_research_object_migration_plan" => {
                 self.glioma_research_object_migration_plan(&arguments)
+            }
+            "glioma_research_object_dependency_closure" => {
+                self.glioma_research_object_dependency_closure(&arguments)
             }
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
@@ -14702,6 +14706,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma research-object migration plan: {error}"))
+    }
+
+    /// Analyze transitive research-object artifact and program closure without fetching or
+    /// rewriting any artifact.
+    fn glioma_research_object_dependency_closure(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: DependencyClosureRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_research_object_dependency_closure requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma dependency-closure request: {error}"))?;
+        let closure = analyze_glioma_research_object_dependency_closure(&request)
+            .map_err(|error| format!("glioma dependency closure refused: {error}"))?;
+        serde_json::to_value(json!({
+            "closure": closure,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_research_object_migration_plan",
+                "glioma_research_object_dependency_closure",
+                "glioma_replay_campaign_execute",
+                "glioma_research_object_release_gate"
+            ],
+            "guarantees": [
+                "transitive artifact and program closure remains explicit",
+                "cycles, missing upstreams, orphaned artifacts, depth limits, and coverage omissions fail closed",
+                "the route performs no artifact fetch, raw-data movement, upload, signing, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma dependency closure: {error}"))
     }
 
     /// Evaluate replay and review evidence before a preclinical research object enters signing.
@@ -55081,7 +55116,8 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_release_operating_cycle",
                 "glioma_research_object_prepare",
                 "glioma_multimodal_research_object_prepare",
-                "glioma_research_object_migration_plan"
+                "glioma_research_object_migration_plan",
+                "glioma_research_object_dependency_closure"
             ],
             "cli_entrypoints": [],
             "status": "available"
@@ -66944,6 +66980,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ResearchObjectMigrationRequest1@1 containing a validated MultimodalResearchObject1@1 bundle, target object/schema versions, accepted source versions, semantic-loss bound, and recomputation policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_object_dependency_closure",
+        "description": "Analyze transitive artifact and program closure for a multimodal preclinical glioma research object. Detects cycles, missing upstreams, orphaned artifacts, depth overflow, and missing program coverage before replay or signing; it never fetches, rewrites, uploads, or clinically interprets data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DependencyClosureRequest1@1 containing a validated MultimodalResearchObject1@1 bundle, depth bound, required program set, and coverage policy."}
             },
             "required": ["request"]
         }

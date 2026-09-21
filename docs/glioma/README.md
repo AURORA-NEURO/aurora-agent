@@ -307,6 +307,8 @@ crates/research/src/glioma/
                                              P11 modality-coverage, semantic-loss, provenance-closure, and cross-modal alignment compiler
     p11_research_object_release/migration.rs
                                              P11 schema migration planner with lossless rewrites, explicit recomputation, and fail-closed compatibility checks
+    p11_research_object_release/dependency_closure.rs
+                                             P11 transitive artifact/program closure analysis with cycle, orphan, depth, and coverage gates
     p11_research_object_release/operating_cycle.rs
                                              P11 manifest replay, release gating, and accountable operator handoff
     p12_federated_benchmarking/

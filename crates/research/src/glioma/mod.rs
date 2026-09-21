@@ -782,10 +782,12 @@ pub use programs::p10_interpretation_replication::{
     ValidationReplicationGateRequest,
 };
 pub use programs::p11_research_object_release::{
-    compile_glioma_multimodal_research_object, evaluate_glioma_release_gate,
-    execute_glioma_release_operating_cycle, execute_glioma_release_operating_cycle_dry_run,
-    execute_glioma_replay_campaign, plan_glioma_research_object_migration,
-    DryRunReplayCampaignExecutor, GliomaReleaseOperatingCycle,
+    analyze_glioma_research_object_dependency_closure, compile_glioma_multimodal_research_object,
+    evaluate_glioma_release_gate, execute_glioma_release_operating_cycle,
+    execute_glioma_release_operating_cycle_dry_run, execute_glioma_replay_campaign,
+    plan_glioma_research_object_migration, DependencyClosureDisposition, DependencyClosureError,
+    DependencyClosureNode, DependencyClosureNodeStatus, DependencyClosurePlan,
+    DependencyClosureRequest, DryRunReplayCampaignExecutor, GliomaReleaseOperatingCycle,
     GliomaReleaseOperatingCycleDisposition, GliomaReleaseOperatingCycleError,
     GliomaReleaseOperatingCycleRequest, MultimodalResearchObjectBundle,
     MultimodalResearchObjectDisposition, MultimodalResearchObjectEntry,
