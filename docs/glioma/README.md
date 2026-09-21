@@ -104,6 +104,8 @@ crates/research/src/glioma/
                                              P04 branch-outcome assimilation with contradiction, blocked/unobserved preservation, and deterministic next-frontier ranking
   programs/p05_mechanism_exploration/evidence_assimilation.rs
                                              P05 recency-weighted, contradiction-preserving mechanism evidence assimilation across study epochs
+  programs/p05_mechanism_exploration/closed_loop.rs
+                                             P05 assimilated mechanism evidence to bounded contradiction/uncertainty-aware next-action frontier
   programs/p05_mechanism_exploration/fidelity_bridge.rs
                                              P05 cross-model prediction/observation residual transportability and low-fidelity frontier ranking
   programs/p05_mechanism_exploration/robustness_stress.rs

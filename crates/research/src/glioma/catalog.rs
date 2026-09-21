@@ -420,6 +420,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p05_mechanism_exploration::identifiability::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::invariance::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::evidence_assimilation::FEATURE_ID,
+        crate::glioma::programs::p05_mechanism_exploration::closed_loop::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::fidelity_bridge::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::robustness_stress::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::calibration::FEATURE_ID,

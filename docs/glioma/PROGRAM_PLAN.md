@@ -92,8 +92,8 @@ silently bypass an earlier wave's omission, provenance, safety, or replay gate.
   review, and P12 transport benchmarks.
 - Promotion gate: rival mechanisms remain visible, uncertainty is calibrated, interventions are
   preclinical research actions only, and counterfactual claims are not treated as observations.
-- Current implementation: 22/32 slots. Next wave: closed-loop mechanism evidence assimilation
-  and multi-fidelity state-space control.
+- Current implementation: 23/32 slots. Next wave: multi-fidelity state-space control and closed-loop
+  mechanism execution.
 
 ### P06 — `p06_experiment_design`
 

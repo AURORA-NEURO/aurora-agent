@@ -8,6 +8,7 @@ pub mod bayesian_update;
 pub mod calibrated_campaign;
 pub mod calibration;
 pub mod clonal_evolution;
+pub mod closed_loop;
 pub mod consensus;
 pub mod counterfactual;
 pub mod discrimination;
@@ -63,6 +64,11 @@ pub use clonal_evolution::{
     analyze_glioma_clonal_evolution, ClonalEdge, ClonalEvolutionDisposition, ClonalEvolutionError,
     ClonalEvolutionGraph, ClonalEvolutionRequest, ClonalNode, ClonalRelation, CloneMarker,
     CloneMarkerState, CloneProfile,
+};
+pub use closed_loop::{
+    plan_glioma_mechanism_closed_loop, MechanismClosedLoopActionScore,
+    MechanismClosedLoopCandidate, MechanismClosedLoopDecision, MechanismClosedLoopDisposition,
+    MechanismClosedLoopError, MechanismClosedLoopPlan, MechanismClosedLoopRequest,
 };
 pub use consensus::{
     compile_glioma_mechanism_consensus, MechanismConsensus, MechanismConsensusDisposition,

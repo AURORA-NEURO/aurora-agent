@@ -601,11 +601,11 @@ use bioprism_research::{
     plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
     plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
     plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
-    plan_glioma_instrument_recovery, plan_glioma_mechanism_validation,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
-    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
-    plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
-    plan_glioma_protocol_compensation, plan_glioma_replication,
+    plan_glioma_instrument_recovery, plan_glioma_mechanism_closed_loop,
+    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
+    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
+    plan_glioma_power_stress_surface, plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_research_object_migration, plan_glioma_robust_active_learning,
     plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
@@ -718,8 +718,8 @@ use bioprism_research::{
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, LocalWorkflowRequest,
     MechanismActionPlannerConfig, MechanismCalibration, MechanismCalibrationObservation,
-    MechanismCalibrationRequest, MechanismCandidate, MechanismConsensusRequest,
-    MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
+    MechanismCalibrationRequest, MechanismCandidate, MechanismClosedLoopRequest,
+    MechanismConsensusRequest, MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
     MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
     MechanismEvidenceAssimilationRequest, MechanismFeatureObservation,
@@ -2637,6 +2637,7 @@ impl Server {
             "glioma_mechanism_evidence_assimilation" => {
                 self.glioma_mechanism_evidence_assimilation(&arguments)
             }
+            "glioma_mechanism_closed_loop" => self.glioma_mechanism_closed_loop(&arguments),
             "glioma_mechanism_fidelity_bridge" => self.glioma_mechanism_fidelity_bridge(&arguments),
             "glioma_mechanism_robustness_stress" => {
                 self.glioma_mechanism_robustness_stress(&arguments)
@@ -12058,6 +12059,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism evidence assimilation: {error}"))
+    }
+
+    /// Convert assimilated mechanism evidence into a bounded, uncertainty-aware next-action
+    /// frontier. This route plans only; it never executes an assay or instrument action.
+    fn glioma_mechanism_closed_loop(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismClosedLoopRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_closed_loop requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism closed-loop request: {error}"))?;
+        let plan = plan_glioma_mechanism_closed_loop(&request)
+            .map_err(|error| format!("glioma mechanism closed-loop refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_mechanism_discriminate",
+                "glioma_mechanism_action_plan",
+                "glioma_mechanism_operating_cycle"
+            ],
+            "guarantees": [
+                "contradicted and unresolved mechanisms remain explicit and route to local information-gain actions",
+                "budget, risk, and action-count bounds are enforced before any downstream dispatch",
+                "negative evidence and uncertainty are preserved in the content-addressed plan",
+                "the route performs no assay, instrument execution, raw-data movement, federation, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism closed-loop plan: {error}"))
     }
 
     /// Bridge mechanism prediction/observation residuals across model systems and expose the
@@ -55029,6 +55060,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_intervention_value",
                 "glioma_mechanism_bayesian_update",
                 "glioma_mechanism_evidence_assimilation",
+                "glioma_mechanism_closed_loop",
                 "glioma_mechanism_fidelity_bridge",
                 "glioma_mechanism_robustness_stress",
                 "glioma_mechanism_state_filter",
@@ -65973,6 +66005,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MechanismEvidenceAssimilationRequest1@1 with ordered MechanismEvidenceSnapshot1@1 updates, recency decay, posterior thresholds, snapshot bound, and negative-result policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_closed_loop",
+        "description": "Turn digest-bound preclinical glioma mechanism evidence assimilation into a bounded next-action frontier. Scores typed local actions by expected information gain, posterior uncertainty, contradiction pressure, trend, reproducibility, cost, and risk; preserves negative evidence and explicit uncertainty; and never executes assays, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismClosedLoopRequest1@1 with an assimilated mechanism ledger, typed action candidates, budget, action-count, information-gain, and risk bounds."}
             },
             "required": ["request"]
         }
