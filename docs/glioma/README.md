@@ -24,6 +24,8 @@ crates/research/src/glioma/
                                              P02 prospective typed-knowledge snapshot drift and bounded downstream replanning
   programs/p02_evidence_knowledge/federated_knowledge.rs
                                              P02 aggregate-only multi-site typed-claim consensus with disagreement and influence gates
+  programs/p02_evidence_knowledge/closure.rs
+                                             P02 claim-to-evidence closure with modality/model/artifact coverage gates
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs
@@ -766,6 +768,12 @@ site summaries without exporting source text. It pools support, contradiction, c
 disposition mass, reports site-specific disagreement and leave-one-site-out influence, and emits
 bounded promotion, adjudication, or negative-result actions. A consensus summary is still a
 governed research state—not a causal conclusion—and raw data stays at the originating institution.
+Typed evidence closure (`glioma_knowledge_closure`) is the action-readiness gate after compilation:
+it reconciles every claim to caller-supplied evidence identifiers, measures independent-artifact,
+modality, and model-system coverage, and keeps missing references, negative evidence, uncertainty,
+and orphan artifacts explicit. Only claims that clear the declared closure floors can qualify for
+bounded downstream planning; the route never retrieves sources, moves raw data, executes an
+instrument, or makes a clinical decision.
 P04 now includes decision-context compilation (`compile_decision_context`) that converts those
 gaps into typed A1 candidates for coverage closure, contradiction replication, negative-result
 falsification, evidence resolution, or mechanism validation; the existing action selector then

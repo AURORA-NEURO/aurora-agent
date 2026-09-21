@@ -518,18 +518,18 @@ use bioprism_research::{
     calibrate_glioma_multimodal_reliability, certify_decision_omissions,
     compile_decision_action_graph, compile_decision_context,
     compile_glioma_computation_interpretation_frontier, compile_glioma_computation_workflow,
-    compile_glioma_knowledge_actions, compile_glioma_knowledge_consistency,
-    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
-    compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
-    compile_glioma_replication_protocol, compile_mechanism_action_plan, compile_typed_knowledge,
-    compose_knowledge_graph, design_glioma_contrast_panel, design_glioma_robust_experiment,
-    design_preclinical_experiment, detect_glioma_evidence_temporal_shifts,
-    detect_glioma_knowledge_drift, discriminate_mechanisms, dry_run_adaptive_instrument_executor,
-    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
-    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
-    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
-    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
-    execute_federated_benchmark_operating_cycle_dry_run,
+    compile_glioma_knowledge_actions, compile_glioma_knowledge_closure,
+    compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps,
+    compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
+    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
+    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
+    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
+    detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
+    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
+    dry_run_glioma_research, dry_run_instrument_executor_from_request,
+    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
+    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
+    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -686,10 +686,10 @@ use bioprism_research::{
     InstrumentSignalPoint, InstrumentSignalRun, InterpretationSynthesisRequest,
     InvarianceMechanism, KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest,
     KnowledgeActionDispatchRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
-    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeCompositionRequest,
-    KnowledgeConsistencyRequest, KnowledgeDriftRequest, KnowledgeFrontier,
-    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
-    KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
+    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeClosureRequest,
+    KnowledgeCompositionRequest, KnowledgeConsistencyRequest, KnowledgeDriftRequest,
+    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation,
+    KnowledgeRequest, KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
     MechanismCandidate, MechanismConsensusRequest, MechanismDiscrimination,
@@ -2506,6 +2506,7 @@ impl Server {
             "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
             "glioma_knowledge_consistency" => self.glioma_knowledge_consistency(&arguments),
             "glioma_knowledge_drift" => self.glioma_knowledge_drift(&arguments),
+            "glioma_knowledge_closure" => self.glioma_knowledge_closure(&arguments),
             "glioma_federated_knowledge" => self.glioma_federated_knowledge(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
@@ -10052,6 +10053,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge drift: {error}"))
+    }
+
+    /// Reconcile every compiled typed-knowledge claim to caller-supplied local evidence before
+    /// allowing bounded downstream planning. Missing references, coverage debt, negative records,
+    /// and orphan artifacts stay visible; this route never retrieves, moves, or executes data.
+    fn glioma_knowledge_closure(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeClosureRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_closure requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-closure request: {error}"))?;
+        let output = compile_glioma_knowledge_closure(&request)
+            .map_err(|error| format!("glioma knowledge-closure analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "closure": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_knowledge_consistency",
+                "glioma_knowledge_gap_compile",
+                "glioma_mechanism_autopilot_execute"
+            ],
+            "guarantees": [
+                "every claim is reconciled to caller-supplied evidence ids before closure can qualify",
+                "independent artifact, modality, and model coverage are explicit",
+                "missing references, negative evidence, and orphan evidence remain visible",
+                "the route performs no retrieval, raw-data movement, instrument action, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge closure: {error}"))
     }
 
     /// Compare aggregate typed-knowledge summaries across institutions while preserving local
@@ -53814,6 +53846,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_compose",
                 "glioma_knowledge_consistency",
                 "glioma_knowledge_drift",
+                "glioma_knowledge_closure",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
@@ -64085,6 +64118,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedKnowledgeSiteClaim1@1 aggregate-only typed claim summaries with statement/scope binding, source counts, privacy declarations, and artifact references."}
             },
             "required": ["request", "sites"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_closure",
+        "description": "Compile a typed evidence-closure gate for preclinical glioma knowledge. Reconciles every claim to caller-supplied evidence ids, measures independent artifact/modality/model coverage, preserves missing references, negative evidence, uncertainty, and orphan artifacts, and emits a qualified/partial/unresolved decision for bounded downstream planning. It never retrieves sources, moves raw data, executes instruments, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeClosureRequest1@1 with objective-bound TypedKnowledge1@1, local EvidenceRecord1@1 values, modality/model coverage floors, independent-artifact floor, support gate, and claim bound."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

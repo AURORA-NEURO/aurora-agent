@@ -6,6 +6,7 @@ pub mod autonomous_cycle;
 pub mod belief_revision;
 pub mod campaign;
 pub mod claim_frontier;
+pub mod closure;
 pub mod composition;
 pub mod consistency;
 pub mod dispatch;
@@ -68,6 +69,11 @@ pub use claim_frontier::{
     prioritize_knowledge_frontier, FrontierActionKind, KnowledgeFrontier,
     KnowledgeFrontierDisposition, KnowledgeFrontierError, KnowledgeFrontierRequest,
     KnowledgeFrontierScore, KnowledgeFrontierWeights,
+};
+pub use closure::{
+    compile_glioma_knowledge_closure, KnowledgeClaimClosure, KnowledgeClosure,
+    KnowledgeClosureClaimDisposition, KnowledgeClosureDisposition, KnowledgeClosureError,
+    KnowledgeClosureRequest,
 };
 pub use composition::{
     compose_knowledge_graph, KnowledgeComponentDisposition, KnowledgeComposition,

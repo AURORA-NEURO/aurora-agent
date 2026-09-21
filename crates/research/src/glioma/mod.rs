@@ -74,8 +74,9 @@ pub use programs::p01_evidence_surveillance::{
 };
 pub use programs::p02_evidence_knowledge::{
     analyze_federated_knowledge, bridge_glioma_knowledge_actions, compile_glioma_knowledge_actions,
-    compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps, compile_typed_knowledge,
-    compose_knowledge_graph, detect_glioma_knowledge_drift, execute_glioma_autonomous_gap_cycle,
+    compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
+    compile_glioma_knowledge_gaps, compile_typed_knowledge, compose_knowledge_graph,
+    detect_glioma_knowledge_drift, execute_glioma_autonomous_gap_cycle,
     execute_glioma_knowledge_action_dispatch, execute_glioma_knowledge_resolution_campaign,
     execute_glioma_knowledge_selection_cycle, execute_glioma_knowledge_synthesis_operating_cycle,
     prioritize_knowledge_frontier, revise_glioma_beliefs, AutonomousGapCycle,
@@ -94,7 +95,9 @@ pub use programs::p02_evidence_knowledge::{
     KnowledgeActionPlanDisposition, KnowledgeActionResultDisposition,
     KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleError,
     KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeClaim,
-    KnowledgeClaimDisposition, KnowledgeComponentDisposition, KnowledgeComposition,
+    KnowledgeClaimClosure, KnowledgeClaimDisposition, KnowledgeClosure,
+    KnowledgeClosureClaimDisposition, KnowledgeClosureDisposition, KnowledgeClosureError,
+    KnowledgeClosureRequest, KnowledgeComponentDisposition, KnowledgeComposition,
     KnowledgeCompositionComponent, KnowledgeCompositionDisposition, KnowledgeCompositionError,
     KnowledgeCompositionPath, KnowledgeCompositionRequest, KnowledgeConsistencyClaimDisposition,
     KnowledgeConsistencyClaimScore, KnowledgeConsistencyClosure, KnowledgeConsistencyDisposition,
