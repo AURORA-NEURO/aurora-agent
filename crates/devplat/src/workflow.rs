@@ -36,7 +36,9 @@ pub const DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION: &str =
 pub const DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-contract/0.1";
 pub const MAX_DOMAIN_WORKFLOW_GROUPS: usize = 128;
-pub const MAX_DOMAIN_WORKFLOW_TOOLS: usize = 256;
+// The callable catalogue has grown past the original 256-tool envelope. Keep the per-domain
+// bound high enough for complete catalogue validation while retaining a deterministic hard cap.
+pub const MAX_DOMAIN_WORKFLOW_TOOLS: usize = 512;
 pub const MAX_DOMAIN_WORKFLOW_STEPS: usize = 128;
 pub const MAX_DOMAIN_WORKFLOW_BYTES: usize = 20_000_000;
 pub const MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS: usize = 64;

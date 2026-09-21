@@ -16,6 +16,7 @@ pub mod federated_knowledge;
 pub mod gap_compiler;
 pub mod knowledge_drift;
 pub mod knowledge_graph;
+pub mod multimodal_workflow;
 pub mod operating_cycle;
 pub mod prospective_monitor;
 pub mod selection_cycle;
@@ -115,6 +116,12 @@ pub use knowledge_drift::{
 pub use knowledge_graph::{
     compile_typed_knowledge, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,
     KnowledgeError, KnowledgeRequest, TypedKnowledge,
+};
+pub use multimodal_workflow::{
+    compile_multimodal_knowledge_workflow, ModalityWorkflowObservation,
+    MultimodalKnowledgeWorkflow, MultimodalStudyReadiness, MultimodalWorkflowBarrier,
+    MultimodalWorkflowBarrierKind, MultimodalWorkflowBranch, MultimodalWorkflowBranchKind,
+    MultimodalWorkflowDisposition, MultimodalWorkflowError, MultimodalWorkflowRequest,
 };
 pub use operating_cycle::{
     execute_glioma_knowledge_synthesis_operating_cycle, KnowledgeSynthesisOperatingCycle,

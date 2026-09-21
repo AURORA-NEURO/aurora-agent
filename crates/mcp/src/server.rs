@@ -524,8 +524,8 @@ use bioprism_research::{
     compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
     compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
     compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
-    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
-    design_glioma_robust_experiment, design_preclinical_experiment,
+    compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
+    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
     detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
     dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
     dry_run_glioma_research, dry_run_instrument_executor_from_request,
@@ -712,15 +712,15 @@ use bioprism_research::{
     MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
     MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
-    MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
-    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    PowerStressSurfaceRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
-    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
-    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
-    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    MultimodalRequest, MultimodalWorkflowRequest, PathwayActivityDefinition,
+    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
+    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveKnowledgeRequest,
+    ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
+    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
+    ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest, ProtocolTransportGateRequest,
+    QualityAdaptiveCampaignRequest, QualityExecutionMode, QualityExecutionRequest,
+    QualityRecoveryRequest, QualityRemediationRequest, QualityRootCauseRequest,
+    QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
     ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
@@ -2521,6 +2521,9 @@ impl Server {
             }
             "glioma_federated_continual_agent" => self.glioma_federated_continual_agent(&arguments),
             "glioma_local_research_workflow" => self.glioma_local_research_workflow(&arguments),
+            "glioma_multimodal_knowledge_workflow" => {
+                self.glioma_multimodal_knowledge_workflow(&arguments)
+            }
             "glioma_federated_knowledge" => self.glioma_federated_knowledge(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
@@ -10245,6 +10248,35 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma local research workflow: {error}"))
+    }
+
+    /// Synchronize the local action DAG against study-level multimodal readiness and choose a
+    /// full, degraded, or acquire-coverage branch before computation or experiment execution.
+    fn glioma_multimodal_knowledge_workflow(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultimodalWorkflowRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_knowledge_workflow requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma multimodal workflow request: {error}"))?;
+        let output = compile_multimodal_knowledge_workflow(&request).map_err(|error| {
+            format!("glioma multimodal workflow synchronization refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "workflow": output,
+            "execution": "not_started",
+            "next_routes": [
+                "glioma_multimodal_qc",
+                "glioma_local_research_workflow",
+                "glioma_knowledge_action_dispatch"
+            ],
+            "guarantees": [
+                "study and action readiness are evaluated before downstream computation or experiment execution",
+                "full, degraded, and acquire-coverage branches are explicit and deterministically selected",
+                "missingness, low quality, non-exportable observations, and workflow approval are preserved as blocking conditions",
+                "the route performs no raw-data movement, instrument execution, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal knowledge workflow: {error}"))
     }
 
     /// Compare aggregate typed-knowledge summaries across institutions while preserving local
@@ -54013,6 +54045,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_continual_knowledge",
                 "glioma_federated_continual_agent",
                 "glioma_local_research_workflow",
+                "glioma_multimodal_knowledge_workflow",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
@@ -64348,6 +64381,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "LocalWorkflowRequest1@1 with objective-bound FederatedContinualAgentPlan1@1, step/wave bounds, retry/checkpoint policy, and approval policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_knowledge_workflow",
+        "description": "Synchronize a compiled local glioma research workflow against study-level multimodal readiness. Evaluates modality/model coverage, missingness, alignment, semantic quality, exportability, and preclinical boundaries, then selects a full, degraded, or acquire-coverage branch before computation or experiment execution. It never moves raw data, executes instruments, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalWorkflowRequest1@1 with objective-bound LocalResearchWorkflow1@1, value-only modality observations, required modality/model coverage, readiness thresholds, and degraded-branch policy."}
             },
             "required": ["request"]
         }
