@@ -136,7 +136,7 @@ fn unique_nonempty(values: &[String]) -> bool {
         && values.iter().collect::<BTreeSet<_>>().len() == values.len()
 }
 
-fn digest_input(output: &MechanismFeedbackReplan) -> serde_json::Value {
+pub(crate) fn digest_input(output: &MechanismFeedbackReplan) -> serde_json::Value {
     serde_json::json!({
         "feature_id": output.feature_id,
         "output_schema": output.output_schema,
