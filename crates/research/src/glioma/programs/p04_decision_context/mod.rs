@@ -13,6 +13,7 @@ pub mod context_compiler;
 pub mod context_replay;
 pub mod decision_cycle;
 pub mod decision_loop_governor;
+pub mod federated_decision_context;
 pub mod mission_bridge;
 pub mod omission_certificate;
 pub mod value_calibration;
@@ -84,6 +85,12 @@ pub use decision_loop_governor::{
     govern_glioma_decision_loop, DecisionLoopGovernorDisposition, DecisionLoopGovernorError,
     DecisionLoopGovernorRequest, DecisionLoopGovernorResult, DecisionLoopRound,
     DecisionLoopRoundAssessment, DecisionLoopRoundDisposition, DecisionLoopStopReason,
+};
+pub use federated_decision_context::{
+    aggregate_glioma_federated_decision_context, FederatedBranchDisposition,
+    FederatedBranchOutcome, FederatedDecisionBranchObservation, FederatedDecisionBranchSummary,
+    FederatedDecisionContextError, FederatedDecisionContextReport, FederatedDecisionContextRequest,
+    FederatedDecisionDisposition, FederatedDecisionSiteSummary,
 };
 pub use mission_bridge::{
     execute_glioma_decision_mission, DecisionMissionBridgeDisposition, DecisionMissionBridgeError,

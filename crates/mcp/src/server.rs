@@ -492,25 +492,26 @@ use bioprism_repair::{
 use bioprism_research::{
     adjudicate_glioma_assay_evidence, adjudicate_glioma_evidence_novelty,
     adjudicate_glioma_multimodal_contradictions, admit_glioma_decision_actions,
-    admit_glioma_research_workflow, allocate_glioma_assays, analyze_causal_sensitivity,
-    analyze_federated_benchmark, analyze_federated_benchmark_power,
-    analyze_federated_continual_knowledge, analyze_federated_evidence_shifts,
-    analyze_federated_knowledge, analyze_federated_mechanism_transport,
-    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
-    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
-    analyze_glioma_computation_reproducibility, analyze_glioma_dose_response,
-    analyze_glioma_federated_instrument_consensus, analyze_glioma_instrument_batch_stability,
-    analyze_glioma_instrument_multichannel_concordance, analyze_glioma_latent_factors,
-    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_intervention_value,
-    analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
-    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
-    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
-    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
-    analyze_glioma_pathway_activity, analyze_glioma_research_object_dependency_closure,
-    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
-    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
-    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
+    admit_glioma_research_workflow, aggregate_glioma_federated_decision_context,
+    allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
+    analyze_federated_benchmark_power, analyze_federated_continual_knowledge,
+    analyze_federated_evidence_shifts, analyze_federated_knowledge,
+    analyze_federated_mechanism_transport, analyze_glioma_causal_contrast,
+    analyze_glioma_clonal_evolution, analyze_glioma_clone_panel_outcomes,
+    analyze_glioma_combination_synergy, analyze_glioma_computation_reproducibility,
+    analyze_glioma_dose_response, analyze_glioma_federated_instrument_consensus,
+    analyze_glioma_instrument_batch_stability, analyze_glioma_instrument_multichannel_concordance,
+    analyze_glioma_latent_factors, analyze_glioma_mechanism_identifiability,
+    analyze_glioma_mechanism_intervention_value, analyze_glioma_mechanism_invariance,
+    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
+    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
+    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
+    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
+    analyze_glioma_research_object_dependency_closure, analyze_glioma_spatial_communication,
+    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
+    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
+    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
+    analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -695,8 +696,9 @@ use bioprism_research::{
     FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
     FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedContinualAgentRequest,
-    FederatedContinualKnowledgeRequest, FederatedEvidenceOperatingCycleRequest,
-    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
+    FederatedContinualKnowledgeRequest, FederatedDecisionContextRequest,
+    FederatedEvidenceOperatingCycleRequest, FederatedEvidenceShiftRequest,
+    FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
     FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
     FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
@@ -2653,6 +2655,9 @@ impl Server {
                 self.glioma_knowledge_synthesis_operating_cycle(&arguments)
             }
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
+            "glioma_federated_decision_context" => {
+                self.glioma_federated_decision_context(&arguments)
+            }
             "glioma_decision_context_replay" => self.glioma_decision_context_replay(&arguments),
             "glioma_decision_branch_evidence" => self.glioma_decision_branch_evidence(&arguments),
             "glioma_decision_admission_gate" => self.glioma_decision_admission_gate(&arguments),
@@ -11754,6 +11759,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision context: {error}"))
+    }
+
+    /// Aggregate site-local branch plans into a robust continual decision frontier. MCP receives
+    /// only digest-bound aggregate summaries; local raw data and execution authority stay at each
+    /// institution.
+    fn glioma_federated_decision_context(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedDecisionContextRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_decision_context requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated decision-context request: {error}"))?;
+        let report = aggregate_glioma_federated_decision_context(&request).map_err(|error| {
+            format!("glioma federated decision-context aggregation refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_decision_operating_cycle",
+                "glioma_federated_decision_context",
+                "glioma_decision_branch_plan",
+                "glioma_researcher_workbench"
+            ],
+            "guarantees": [
+                "only aggregate-only site summaries and content digests cross the federation boundary",
+                "independent-site quorum, quality, support, heterogeneity, and leave-one-site-out influence gates are explicit",
+                "negative, contradicted, failed, unknown, denied, and underpowered branches remain visible",
+                "the route produces a research-plan recommendation only and performs no retrieval, assay, instrument, raw-data, or clinical effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated decision context: {error}"))
     }
 
     /// Replay successive decision contexts against explicit local action outcomes so stale plans
@@ -55622,6 +55660,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_autonomous_gap_cycle",
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
+                "glioma_federated_decision_context",
                 "glioma_decision_context_replay",
                 "glioma_decision_branch_evidence",
                 "glioma_decision_admission_gate",
@@ -66441,6 +66480,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
             },
             "required": ["request", "knowledge"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_decision_context",
+        "description": "Aggregate digest-bound, aggregate-only branch summaries from independent glioma research sites into a robust continual decision frontier. Applies quality, quorum, support, heterogeneity, and leave-one-site-out influence gates; preserves negative, contradicted, failed, unknown, denied, and underpowered branches. It recommends a route but never executes an assay, instrument action, raw-data transfer, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedDecisionContextRequest1@1 with objective, epoch, site quorum, quality/support/robustness gates, and aggregate-only site branch summaries."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
