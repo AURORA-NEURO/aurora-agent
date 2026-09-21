@@ -497,15 +497,16 @@ use bioprism_research::{
     analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_federated_instrument_consensus,
     analyze_glioma_instrument_batch_stability, analyze_glioma_latent_factors,
-    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_invariance,
-    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
-    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
-    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
-    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
-    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
-    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
-    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_intervention_value,
+    analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
+    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
+    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
+    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
+    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
+    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
+    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
+    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
+    analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -691,7 +692,8 @@ use bioprism_research::{
     MechanismDiscriminatorAction, MechanismDynamicsEdge, MechanismDynamicsIntervention,
     MechanismDynamicsNode, MechanismDynamicsRequest, MechanismFeatureObservation,
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
-    MechanismIdentifiabilityRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
+    MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
+    MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
     MechanismOperatingCycleRequest, MechanismRequest, MechanismSignature,
     MechanismStateFilterRequest, MechanismStateSmootherRequest,
     MechanismValidationExecutionRequest, MechanismValidationPlanRequest,
@@ -2524,6 +2526,9 @@ impl Server {
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
             "glioma_mechanism_identifiability" => self.glioma_mechanism_identifiability(&arguments),
             "glioma_mechanism_invariance" => self.glioma_mechanism_invariance(&arguments),
+            "glioma_mechanism_intervention_value" => {
+                self.glioma_mechanism_intervention_value(&arguments)
+            }
             "glioma_mechanism_bayesian_update" => self.glioma_mechanism_bayesian_update(&arguments),
             "glioma_mechanism_state_filter" => self.glioma_mechanism_state_filter(&arguments),
             "glioma_mechanism_state_smoother" => self.glioma_mechanism_state_smoother(&arguments),
@@ -10815,6 +10820,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism invariance: {error}"))
+    }
+
+    /// Rank mechanistic perturbation assays by posterior-weighted separation and select a
+    /// bounded, non-redundant research portfolio. This route never dispatches biology.
+    fn glioma_mechanism_intervention_value(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismInterventionValueRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_intervention_value requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma intervention-value request: {error}"))?;
+        let candidates: Vec<MechanismInterventionCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_mechanism_intervention_value requires candidates".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma intervention-value candidates: {error}"))?;
+        let output = analyze_glioma_mechanism_intervention_value(&request, &candidates)
+            .map_err(|error| format!("glioma mechanism intervention value refused: {error}"))?;
+        serde_json::to_value(json!({
+            "intervention_value": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_mechanism_discriminate",
+                "glioma_mechanism_validation_plan",
+                "glioma_information_design"
+            ],
+            "guarantees": [
+                "posterior-weighted pairwise separation is discounted by declared prediction uncertainty",
+                "selection is bounded by feasibility, risk, cost, budget, and redundancy-group gates",
+                "low-information and high-uncertainty perturbations remain explicit deferred or negative evidence",
+                "the route only prioritizes preclinical assays and never executes biology or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma intervention value: {error}"))
     }
 
     /// Update competing mechanism posteriors from typed local preclinical observations. This
@@ -53535,6 +53573,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_discriminate",
                 "glioma_mechanism_identifiability",
                 "glioma_mechanism_invariance",
+                "glioma_mechanism_intervention_value",
                 "glioma_mechanism_bayesian_update",
                 "glioma_mechanism_state_filter",
                 "glioma_mechanism_state_smoother",
@@ -64061,6 +64100,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "signatures": {"type": "array", "items": {"type": "object"}, "description": "MechanismSignature1@1 context-by-mechanism signed predictions with quality, cost, and risk."}
             },
             "required": ["request", "contexts", "mechanisms", "signatures"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_intervention_value",
+        "description": "Rank candidate preclinical glioma perturbation assays by posterior-weighted pairwise mechanism separation, uncertainty penalty, feasibility, cost, risk, and redundancy, then select a bounded research portfolio. The route emits planning output only and never dispatches biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismInterventionValueRequest1@1 with model binding, budget, selection, disagreement, and risk gates."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "MechanismInterventionCandidate1@1 typed perturbation candidates with posterior predictions and assay economics."}
+            },
+            "required": ["request", "candidates"]
         }
     }));
     definitions.push(json!({

@@ -452,6 +452,8 @@ crates/research/src/glioma/
                                              P05 signed pathway activity inference with cross-modal confidence and bottleneck gates
     p05_mechanism_exploration/adaptive_policy.rs
                                              P05 finite-horizon model-uncertainty policy with Gini information gain and local execution loop
+    p05_mechanism_exploration/intervention_value.rs
+                                             P05 posterior-weighted perturbation value engine with uncertainty, risk, cost, feasibility, and redundancy gates
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -939,6 +941,14 @@ separation floors while respecting quality, risk, cost, budget, and panel-size g
 reversals, missing coverage, and unresolved mechanism pairs become explicit negative evidence for
 the autonomous engine to route into model refinement or independent replication; predicted
 invariance is never treated as measured biology or a clinical conclusion.
+
+P05 now also exposes a mechanism intervention-value engine
+(`glioma_mechanism_intervention_value`). It scores candidate perturbation assays by posterior-
+weighted pairwise separation between competing glioma mechanisms, subtracts declared prediction
+uncertainty, and applies feasibility, cost, risk, budget, disagreement, and redundancy-group
+gates before selecting a bounded next-assay portfolio. Candidates that cannot distinguish the
+current mechanism frontier remain deferred or negative evidence; the route is research planning
+only and never dispatches biology or makes a clinical decision.
 
 P05 now also exposes deterministic mechanism calibration
 (`calibrate_glioma_mechanisms`). It scores competing mechanism probabilities against typed local
