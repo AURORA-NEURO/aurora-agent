@@ -516,17 +516,18 @@ use bioprism_research::{
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
     assimilate_glioma_acquisition_feedback, assimilate_glioma_knowledge_action_outcomes,
     attribute_glioma_multimodal_quality_root_cause, bridge_glioma_knowledge_actions,
-    build_research_object_manifest, calibrate_glioma_decision_value, calibrate_glioma_evidence,
-    calibrate_glioma_mechanisms, calibrate_glioma_multimodal_quality_transport,
-    calibrate_glioma_multimodal_reliability, certify_decision_omissions,
-    close_glioma_claims_to_experiments, cluster_glioma_evidence, compile_decision_action_graph,
-    compile_decision_context, compile_federated_glioma_execution_handoff,
-    compile_glioma_computation_interpretation_frontier, compile_glioma_computation_workflow,
-    compile_glioma_knowledge_actions, compile_glioma_knowledge_closure,
-    compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps,
-    compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
-    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
-    compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
+    build_research_object_manifest, calibrate_glioma_beliefs_prospectively,
+    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
+    calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
+    certify_decision_omissions, close_glioma_claims_to_experiments, cluster_glioma_evidence,
+    compile_decision_action_graph, compile_decision_context,
+    compile_federated_glioma_execution_handoff, compile_glioma_computation_interpretation_frontier,
+    compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
+    compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
+    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
+    compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
+    compile_glioma_replication_protocol, compile_local_research_workflow,
+    compile_mechanism_action_plan, compile_multi_study_knowledge,
     compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
     detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
@@ -727,13 +728,14 @@ use bioprism_research::{
     MultimodalRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
     PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
     PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
-    ProspectiveKnowledgeRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
-    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
-    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
-    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
-    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
-    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
-    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
+    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
+    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
+    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
+    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2561,6 +2563,9 @@ impl Server {
                 self.glioma_claim_evidence_reconciliation(&arguments)
             }
             "glioma_closed_loop_frontier" => self.glioma_closed_loop_frontier(&arguments),
+            "glioma_prospective_belief_calibration" => {
+                self.glioma_prospective_belief_calibration(&arguments)
+            }
             "glioma_multimodal_knowledge_workflow" => {
                 self.glioma_multimodal_knowledge_workflow(&arguments)
             }
@@ -10669,6 +10674,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma closed-loop frontier: {error}"))
+    }
+
+    /// Score prospective belief forecasts against observed preclinical outcomes.
+    fn glioma_prospective_belief_calibration(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProspectiveBeliefCalibrationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_prospective_belief_calibration requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma prospective calibration request: {error}"))?;
+        let output = calibrate_glioma_beliefs_prospectively(&request)
+            .map_err(|error| format!("glioma prospective belief calibration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "calibration": output,
+            "next_routes": [
+                "glioma_claim_evidence_reconciliation",
+                "glioma_closed_loop_frontier",
+                "glioma_knowledge_frontier"
+            ],
+            "guarantees": [
+                "calibration uses only eligible observed outcomes and reports omitted observations",
+                "Brier loss and calibration error use deterministic fixed-point arithmetic",
+                "negative, contradicted, stale, and unmeasured outcomes cannot be silently converted into positive support",
+                "the route performs no retrieval, raw-data movement, instrument execution, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma prospective belief calibration: {error}"))
     }
 
     /// Synchronize the local action DAG against study-level multimodal readiness and choose a
@@ -54510,6 +54541,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_claim_experiment_closure",
                 "glioma_claim_evidence_reconciliation",
                 "glioma_closed_loop_frontier",
+                "glioma_prospective_belief_calibration",
                 "glioma_research_workflow_admission",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
@@ -64989,6 +65021,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ClosedLoopFrontierRequest1@1 with ClaimEvidenceReconciliation1@1, budget, action bound, priority threshold, stable-claim policy, and execution-effect policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_prospective_belief_calibration",
+        "description": "Evaluate prospective preclinical glioma belief forecasts against observed outcomes using omission-aware fixed-point Brier loss and calibration error. Returns calibrated, drifted, contradicted, or insufficient claim states for reconciliation and frontier planning. It never infers causality, moves raw data, executes instruments, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProspectiveBeliefCalibrationRequest1@1 with weighted epoch observations, predicted support, observed EvidenceState, minimum eligible observations, drift threshold, and claim bound."}
             },
             "required": ["request"]
         }

@@ -22,6 +22,7 @@ pub mod knowledge_drift;
 pub mod knowledge_graph;
 pub mod multimodal_workflow;
 pub mod operating_cycle;
+pub mod prospective_belief_calibration;
 pub mod prospective_monitor;
 pub mod selection_cycle;
 pub mod study_alignment;
@@ -154,6 +155,12 @@ pub use operating_cycle::{
     execute_glioma_knowledge_synthesis_operating_cycle, KnowledgeSynthesisOperatingCycle,
     KnowledgeSynthesisOperatingCycleDisposition, KnowledgeSynthesisOperatingCycleError,
     KnowledgeSynthesisOperatingCycleRequest,
+};
+pub use prospective_belief_calibration::{
+    calibrate_glioma_beliefs_prospectively, BeliefCalibrationClaim,
+    BeliefCalibrationClaimDisposition, BeliefForecastObservation, ProspectiveBeliefCalibration,
+    ProspectiveBeliefCalibrationDisposition, ProspectiveBeliefCalibrationError,
+    ProspectiveBeliefCalibrationRequest,
 };
 pub use prospective_monitor::{
     monitor_prospective_knowledge, ProspectiveKnowledgeAlert, ProspectiveKnowledgeDisposition,
