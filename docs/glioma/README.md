@@ -28,6 +28,8 @@ crates/research/src/glioma/
                                              P01 consortium-aware site assignment with independence, quorum, budget, privacy, and local-raw-data gates
   programs/p01_evidence_surveillance/evidence_frontier_join.rs
                                              P01 claim-scope frontier join routing support, negatives, contradictions, and sparse evidence to executable next actions
+  programs/p01_evidence_surveillance/multimodal_gap_router.rs
+                                             P01 smallest cross-modality/model acquisition set for closing unresolved evidence context
   programs/p02_evidence_knowledge/knowledge_graph.rs
                                              P02 scoped claim graph and support/contradiction synthesis
   programs/p02_evidence_knowledge/knowledge_drift.rs

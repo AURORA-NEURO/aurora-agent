@@ -605,8 +605,9 @@ use bioprism_research::{
     plan_glioma_validation_replication_gate, plan_glioma_workflow, preflight_glioma_instrument,
     prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
     qualify_evidence, rank_glioma_evidence_novelty, register_glioma_spatial_samples,
-    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
+    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
     simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
     snapshot_glioma_evidence_stream, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
@@ -715,7 +716,7 @@ use bioprism_research::{
     MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
     MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultiStudyKnowledgeRequest,
     MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
-    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
+    MultimodalExecutionMode, MultimodalGapRouterRequest, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
     PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
@@ -2507,6 +2508,9 @@ impl Server {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
             }
             "glioma_evidence_frontier_join" => self.glioma_evidence_frontier_join(&arguments),
+            "glioma_multimodal_evidence_gap_router" => {
+                self.glioma_multimodal_evidence_gap_router(&arguments)
+            }
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
             "glioma_evidence_temporal_shift" => self.glioma_evidence_temporal_shift(&arguments),
@@ -9745,6 +9749,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode evidence frontier join: {error}"))
+    }
+
+    /// Compile the smallest bounded cross-modality/model action set for unresolved preclinical
+    /// glioma claims. This is a plan-only route; adapters execute locally after policy approval.
+    fn glioma_multimodal_evidence_gap_router(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultimodalGapRouterRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_evidence_gap_router requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid multimodal evidence-gap request: {error}"))?;
+        let output = route_glioma_multimodal_evidence_gaps(&request)
+            .map_err(|error| format!("multimodal evidence-gap routing refused: {error}"))?;
+        serde_json::to_value(json!({
+            "gap_plan": output,
+            "next_routes": [
+                "glioma_federated_evidence_acquisition_policy",
+                "glioma_multimodal_quality_schedule",
+                "glioma_knowledge_compile"
+            ],
+            "guarantees": [
+                "the route selects only missing modality/model context and never invents observations",
+                "contradiction and negative frontiers use distinct resolution/replication actions",
+                "priority floors and action bounds prevent uncontrolled autonomous expansion",
+                "the route performs no retrieval, raw-data movement, assay execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode multimodal evidence-gap plan: {error}"))
     }
 
     /// Detect changes between local evidence snapshots and compile bounded review actions for a
@@ -54223,6 +54254,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_stream_snapshot",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
+                "glioma_multimodal_evidence_gap_router",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_novelty_radar",
                 "glioma_evidence_temporal_shift",
@@ -64382,6 +64414,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceFrontierJoinRequest1@1 with local EvidenceRecord1@1 values, quality/reproducibility floors, independent-source quorum, contradiction gate, and claim bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_evidence_gap_router",
+        "description": "Compile the smallest bounded cross-modality/model action set for unresolved preclinical glioma frontier claims. Routes orthogonal evidence, multimodal validation, contradiction resolution, and negative replication while respecting priority and capacity gates; it never invents observations or executes an assay.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalGapRouterRequest1@1 with EvidenceFrontierClaim1@1 values, required modalities/models, action bound, and priority floor."}
             },
             "required": ["request"]
         }

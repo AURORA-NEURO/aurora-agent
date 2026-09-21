@@ -38,7 +38,7 @@ silently bypass an earlier wave's omission, provenance, safety, or replay gate.
   and P10 replication/contradiction review.
 - Promotion gate: source identity, retrieval omission accounting, negative evidence retention,
   and replayable priority ranking.
-- Current implementation: 17/32 slots. Next wave: acquisition-result feedback into prospective
+- Current implementation: 18/32 slots. Next wave: acquisition-result feedback into prospective
   streams, bounded multi-site execution handoff, and evidence-to-knowledge closure.
 
 ### P02 — `p02_evidence_knowledge`

@@ -12,6 +12,7 @@ pub mod evidence_frontier_join;
 pub mod evidence_stream;
 pub mod federated_acquisition_policy;
 pub mod federated_shift;
+pub mod multimodal_gap_router;
 pub mod novelty_adjudication;
 pub mod novelty_radar;
 pub mod operating_cycle;
@@ -62,6 +63,11 @@ pub use evidence_stream::{
     snapshot_glioma_evidence_stream, EvidenceStreamClaim, EvidenceStreamClaimTrend,
     EvidenceStreamDisposition, EvidenceStreamError, EvidenceStreamEvent, EvidenceStreamRequest,
     EvidenceStreamSnapshot,
+};
+pub use multimodal_gap_router::{
+    route_glioma_multimodal_evidence_gaps, MultimodalGapAction, MultimodalGapActionKind,
+    MultimodalGapClaim, MultimodalGapDisposition, MultimodalGapRouterError,
+    MultimodalGapRouterPlan, MultimodalGapRouterRequest,
 };
 pub use novelty_adjudication::{
     adjudicate_glioma_evidence_novelty, NoveltyAdjudication, NoveltyAdjudicationDisposition,

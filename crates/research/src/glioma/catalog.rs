@@ -318,6 +318,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p01_evidence_surveillance::evidence_stream::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::federated_acquisition_policy::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::evidence_frontier_join::FEATURE_ID,
+        crate::glioma::programs::p01_evidence_surveillance::multimodal_gap_router::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::priority::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::acquisition::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::acquisition_campaign::FEATURE_ID,
