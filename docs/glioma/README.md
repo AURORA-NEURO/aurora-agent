@@ -34,6 +34,8 @@ crates/research/src/glioma/
                                              P01 local evidence verification gate for support, source independence, coverage, freshness, contradictions, and negative review
   programs/p01_evidence_surveillance/outcome_reconciliation.rs
                                              P01 aggregate-only multi-site outcome reconciliation with quorum, modality/model coverage, heterogeneity, influence, and routing gates
+  programs/p01_evidence_surveillance/evidence_knowledge_bridge.rs
+                                             P01 verification-to-P02 typed-knowledge handoff with claim alignment, omission accounting, and promotion gates
   programs/p01_evidence_surveillance/federated_acquisition_policy.rs
                                              P01 consortium-aware site assignment with independence, quorum, budget, privacy, and local-raw-data gates
   programs/p01_evidence_surveillance/evidence_frontier_join.rs
@@ -737,6 +739,12 @@ out influence, quorum, and modality/model coverage, then routes consistent suppo
 negative results, contradictions, replication work, or missing coverage. Raw measurements remain
 site-local, and any eligible contradiction is routed for resolution instead of being diluted by
 majority support.
+The evidence-to-knowledge bridge (`glioma_evidence_knowledge_bridge`) is the explicit P01→P02
+promotion boundary. It requires matching verification and typed-knowledge objectives, binds both
+content digests, aligns every claim's evidence identifiers, and emits claim-level admission,
+conditional, negative-preservation, contradiction, coverage, or hold decisions. Evidence that is
+stale, omitted, or absent from the verification surface remains an omission and cannot be promoted
+because a knowledge compiler happened to produce a claim for it.
 P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution

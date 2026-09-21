@@ -10,6 +10,7 @@ pub mod campaign;
 pub mod contradiction_cut;
 pub mod evidence_cluster;
 pub mod evidence_frontier_join;
+pub mod evidence_knowledge_bridge;
 pub mod evidence_stream;
 pub mod federated_acquisition_policy;
 pub mod federated_execution_handoff;
@@ -70,6 +71,11 @@ pub use evidence_frontier_join::{
     join_glioma_evidence_frontier, EvidenceFrontierAction, EvidenceFrontierClaim,
     EvidenceFrontierJoin, EvidenceFrontierJoinError, EvidenceFrontierJoinRequest,
     EvidenceFrontierVerdict,
+};
+pub use evidence_knowledge_bridge::{
+    bridge_glioma_evidence_to_knowledge, EvidenceKnowledgeBridge, EvidenceKnowledgeBridgeDecision,
+    EvidenceKnowledgeBridgeDisposition, EvidenceKnowledgeBridgeError,
+    EvidenceKnowledgeBridgeOmission, EvidenceKnowledgeBridgeRequest, EvidenceKnowledgeClaimLink,
 };
 pub use evidence_stream::{
     snapshot_glioma_evidence_stream, EvidenceStreamClaim, EvidenceStreamClaimTrend,

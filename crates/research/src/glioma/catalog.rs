@@ -340,6 +340,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p01_evidence_surveillance::multimodal_workbench::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::verification_gate::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::outcome_reconciliation::FEATURE_ID,
+        crate::glioma::programs::p01_evidence_surveillance::evidence_knowledge_bridge::FEATURE_ID,
         crate::glioma::programs::p02_evidence_knowledge::knowledge_graph::FEATURE_ID,
         crate::glioma::programs::p02_evidence_knowledge::consistency::FEATURE_ID,
         crate::glioma::programs::p02_evidence_knowledge::knowledge_drift::FEATURE_ID,

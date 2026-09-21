@@ -517,10 +517,10 @@ use bioprism_research::{
     assimilate_glioma_acquisition_feedback, assimilate_glioma_decision_branch_evidence,
     assimilate_glioma_knowledge_action_outcomes, assimilate_glioma_mechanism_evidence,
     assure_glioma_mechanism_workflow, attribute_glioma_multimodal_quality_root_cause,
-    bridge_glioma_knowledge_actions, bridge_glioma_mechanism_fidelity,
-    build_glioma_multimodal_ingestion_manifest, build_research_object_manifest,
-    calibrate_glioma_beliefs_prospectively, calibrate_glioma_decision_value,
-    calibrate_glioma_evidence, calibrate_glioma_mechanisms,
+    bridge_glioma_evidence_to_knowledge, bridge_glioma_knowledge_actions,
+    bridge_glioma_mechanism_fidelity, build_glioma_multimodal_ingestion_manifest,
+    build_research_object_manifest, calibrate_glioma_beliefs_prospectively,
+    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
     calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
     certify_decision_omissions, close_glioma_claims_to_experiments, cluster_glioma_evidence,
     compile_decision_action_graph, compile_decision_context,
@@ -681,29 +681,30 @@ use bioprism_research::{
     EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
     EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceClusterRequest,
     EvidenceExecutionMode, EvidenceFrontierJoinRequest, EvidenceFusionRequest,
-    EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceProspectiveTriageRequest,
-    EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
-    EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
-    EvidenceVerificationRequest, EvidenceWorkbenchRequest, ExperimentArm,
-    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedAcquisitionPolicyRequest,
-    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
-    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
-    FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedContinualAgentRequest,
-    FederatedContinualKnowledgeRequest, FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite,
-    FederatedExecutionHandoffRequest, FederatedInstrumentConsensusRequest, FederatedInstrumentSite,
-    FederatedInterpretationRequest, FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim,
-    FederatedMechanismSite, FederatedMechanismTransportCampaignRequest,
-    FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
-    FrontierCampaignRequest, GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest,
-    GliomaAutonomousCampaignRequest, GliomaAutonomousResearchEngineRequest,
-    GliomaCausalClaimAdjudicationRequest, GliomaComputationCampaignRequest,
-    GliomaComputationOperatingCycleRequest, GliomaComputationWorkflowRequest,
-    GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest,
-    GliomaEvidenceOperatingCycleRequest, GliomaExperimentFrontierRequest,
-    GliomaIntentMissionRequest, GliomaInterpretationOperatingCycleRequest,
-    GliomaMechanismAutopilotRequest, GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest,
-    GliomaMissionRequest, GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
+    EvidenceKnowledgeBridgeRequest, EvidenceNoveltyRadarRequest, EvidencePriorityRequest,
+    EvidenceProspectiveTriageRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
+    EvidenceRequest, EvidenceStreamRequest, EvidenceSurveillanceRequest,
+    EvidenceTemporalShiftRequest, EvidenceTriangulationRequest, EvidenceVerificationRequest,
+    EvidenceWorkbenchRequest, ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
+    FederatedAcquisitionPolicyRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
+    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
+    FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
+    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
+    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
+    FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
+    FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
+    FidelityCandidate, FidelityObservation, FrontierCampaignRequest, GliomaActionCandidate,
+    GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
+    GliomaAutonomousResearchEngineRequest, GliomaCausalClaimAdjudicationRequest,
+    GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
+    GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
+    GliomaEvidenceGatedResearchRequest, GliomaEvidenceOperatingCycleRequest,
+    GliomaExperimentFrontierRequest, GliomaIntentMissionRequest,
+    GliomaInterpretationOperatingCycleRequest, GliomaMechanismAutopilotRequest,
+    GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
+    GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
     GliomaMultimodalSensitivityRequest, GliomaProgramSchedulerRequest,
     GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
@@ -2550,6 +2551,7 @@ impl Server {
             "glioma_multisite_outcome_reconciliation" => {
                 self.glioma_multisite_outcome_reconciliation(&arguments)
             }
+            "glioma_evidence_knowledge_bridge" => self.glioma_evidence_knowledge_bridge(&arguments),
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
             }
@@ -9977,6 +9979,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode multi-site outcome reconciliation: {error}"))
+    }
+
+    /// Join the local evidence-verification gate to typed P02 knowledge without allowing an
+    /// omitted, stale, contradictory, or unmapped record to be promoted by the workflow engine.
+    fn glioma_evidence_knowledge_bridge(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceKnowledgeBridgeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_knowledge_bridge requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid evidence-knowledge bridge request: {error}"))?;
+        let bridge = bridge_glioma_evidence_to_knowledge(&request)
+            .map_err(|error| format!("evidence-knowledge bridge refused: {error}"))?;
+        serde_json::to_value(json!({
+            "bridge": bridge,
+            "next_routes": [
+                "glioma_knowledge_protocol_gateway",
+                "glioma_multimodal_evidence_gap_router",
+                "glioma_federated_evidence_acquisition_policy",
+                "plan_glioma_evidence_contradiction_cut",
+                "glioma_evidence_verification_gate"
+            ],
+            "guarantees": [
+                "every typed-knowledge claim is aligned to the verification report digest and evidence identifiers",
+                "stale, omitted, unmapped, negative, uncertain, and contradictory evidence remains visible with deterministic decisions",
+                "only verified support can be admitted to the knowledge gateway; this surface never infers causality or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode evidence-knowledge bridge: {error}"))
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55367,6 +55399,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_researcher_workbench",
                 "glioma_evidence_verification_gate",
                 "glioma_multisite_outcome_reconciliation",
+                "glioma_evidence_knowledge_bridge",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65601,6 +65634,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultiSiteOutcomeReconciliationRequest1@1 with aggregate site observations, claim/scope filters, required or minimum modality/model coverage, quorum and heterogeneity thresholds, freshness/quality floors, and bounded claim output."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_knowledge_bridge",
+        "description": "Join the local preclinical glioma evidence-verification report to typed P02 knowledge. Aligns every claim and evidence identifier, exposes stale/omitted/unmapped/negative/uncertain/contradictory evidence, and admits only verified support to the knowledge gateway; it never infers causality, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceKnowledgeBridgeRequest1@1 with matching objective, EvidenceVerificationReport1@1, TypedKnowledge1@1, verified/conditional policy, and claim bound."}
             },
             "required": ["request"]
         }
