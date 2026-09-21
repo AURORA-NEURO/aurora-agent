@@ -581,20 +581,21 @@ use bioprism_research::{
     gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
     govern_glioma_decision_loop, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     interpret_glioma_federated_closure, interpret_glioma_replication_closure,
-    optimize_glioma_decision_value, optimize_glioma_protocol_branches,
-    plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
-    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
-    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_panel,
-    plan_glioma_adaptive_research_frontier, plan_glioma_adaptive_workflow,
-    plan_glioma_blocked_randomization, plan_glioma_carryover_sequence,
-    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
-    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
-    plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
-    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
-    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
-    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
-    plan_glioma_power_stress_surface, plan_glioma_protocol_compensation, plan_glioma_replication,
+    monitor_prospective_knowledge, optimize_glioma_decision_value,
+    optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
+    plan_federated_benchmark_sites, plan_glioma_active_learning,
+    plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
+    plan_glioma_adaptive_panel, plan_glioma_adaptive_research_frontier,
+    plan_glioma_adaptive_workflow, plan_glioma_blocked_randomization,
+    plan_glioma_carryover_sequence, plan_glioma_clone_continuation,
+    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
+    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
+    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
+    plan_glioma_information_design, plan_glioma_mechanism_validation,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
+    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
+    plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
+    plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
@@ -711,13 +712,14 @@ use bioprism_research::{
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    PowerStressSurfaceRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
-    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
-    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
-    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
-    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
-    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
-    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    PowerStressSurfaceRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
+    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
+    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
+    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
+    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2509,6 +2511,9 @@ impl Server {
             "glioma_knowledge_drift" => self.glioma_knowledge_drift(&arguments),
             "glioma_knowledge_closure" => self.glioma_knowledge_closure(&arguments),
             "glioma_multi_study_knowledge" => self.glioma_multi_study_knowledge(&arguments),
+            "glioma_prospective_knowledge_monitor" => {
+                self.glioma_prospective_knowledge_monitor(&arguments)
+            }
             "glioma_federated_knowledge" => self.glioma_federated_knowledge(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
@@ -10117,6 +10122,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multi-study knowledge: {error}"))
+    }
+
+    /// Monitor an ordered stream of typed claim observations for bounded prospective drift.
+    /// Change points route to review or acquisition; contradictory states are quarantined.
+    fn glioma_prospective_knowledge_monitor(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProspectiveKnowledgeRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_prospective_knowledge_monitor requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma prospective knowledge request: {error}"))?;
+        let output = monitor_prospective_knowledge(&request)
+            .map_err(|error| format!("glioma prospective knowledge monitoring refused: {error}"))?;
+        serde_json::to_value(json!({
+            "monitor": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_knowledge_closure",
+                "glioma_knowledge_consistency",
+                "glioma_knowledge_gap_compile"
+            ],
+            "guarantees": [
+                "change detection is sequential, bounded, and claim-key scoped",
+                "multiplicity-adjusted signals and persistence gates prevent a single noisy event from promotion",
+                "negative, contradictory, unresolved, and missing-coverage states remain explicit",
+                "the route performs no retrieval, raw-data movement, instrument action, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma prospective knowledge monitor: {error}"))
     }
 
     /// Compare aggregate typed-knowledge summaries across institutions while preserving local
@@ -53881,6 +53914,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_drift",
                 "glioma_knowledge_closure",
                 "glioma_multi_study_knowledge",
+                "glioma_prospective_knowledge_monitor",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
@@ -64172,6 +64206,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultiStudyKnowledgeRequest1@1 with objective-bound StudyKnowledgeSnapshot1@1 values, explicit StudyClaimBinding1@1 keys, coverage floors, equivalence/agreement gates, and claim bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_prospective_knowledge_monitor",
+        "description": "Monitor an ordered stream of typed preclinical glioma claim observations. Computes claim-specific baselines, bounded cumulative drift, change points, persistence-gated review alerts, acquisition/quarantine routes, and multiplicity-adjusted signals while preserving negative, contradictory, unresolved, and coverage-debt states. It never retrieves sources, moves raw data, executes instruments, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProspectiveKnowledgeRequest1@1 with canonical typed events, baseline/minimum windows, drift threshold, persistence gate, required modality/model coverage, and claim bound."}
             },
             "required": ["request"]
         }

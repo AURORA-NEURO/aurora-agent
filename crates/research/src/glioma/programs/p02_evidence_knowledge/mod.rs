@@ -15,6 +15,7 @@ pub mod gap_compiler;
 pub mod knowledge_drift;
 pub mod knowledge_graph;
 pub mod operating_cycle;
+pub mod prospective_monitor;
 pub mod selection_cycle;
 pub mod study_alignment;
 
@@ -104,6 +105,11 @@ pub use operating_cycle::{
     execute_glioma_knowledge_synthesis_operating_cycle, KnowledgeSynthesisOperatingCycle,
     KnowledgeSynthesisOperatingCycleDisposition, KnowledgeSynthesisOperatingCycleError,
     KnowledgeSynthesisOperatingCycleRequest,
+};
+pub use prospective_monitor::{
+    monitor_prospective_knowledge, ProspectiveKnowledgeAlert, ProspectiveKnowledgeDisposition,
+    ProspectiveKnowledgeError, ProspectiveKnowledgeEvent, ProspectiveKnowledgeMonitor,
+    ProspectiveKnowledgeRequest, ProspectiveKnowledgeRow, ProspectiveKnowledgeTrend,
 };
 pub use study_alignment::{
     compile_multi_study_knowledge, MultiStudyClaimDisposition, MultiStudyKnowledge,
