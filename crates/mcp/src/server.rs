@@ -617,16 +617,16 @@ use bioprism_research::{
     plan_glioma_validation_replication_gate, plan_glioma_workflow, plan_glioma_workflow_recovery,
     preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
     promote_glioma_closed_loop_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
-    query_glioma_evidence_workbench, rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence,
-    register_glioma_spatial_samples, replan_glioma_mechanism_feedback,
-    replay_glioma_decision_context, revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
-    schedule_glioma_computation_placement, schedule_glioma_frontier_campaign,
-    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
-    simulate_glioma_protocol, simulate_glioma_protocol_scenario_ensemble,
-    smooth_glioma_mechanism_states, snapshot_glioma_evidence_stream,
-    stress_glioma_mechanism_robustness, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
-    synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    query_glioma_evidence_workbench, query_glioma_multimodal_researcher_workbench,
+    rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
+    replan_glioma_mechanism_feedback, replay_glioma_decision_context, revise_glioma_beliefs,
+    route_glioma_multimodal_evidence_gaps, schedule_glioma_computation_placement,
+    schedule_glioma_frontier_campaign, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
+    simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
+    snapshot_glioma_evidence_stream, stress_glioma_mechanism_robustness, surveil_glioma_evidence,
+    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog,
     verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
@@ -745,16 +745,17 @@ use bioprism_research::{
     MultimodalIngestionCampaignRequest, MultimodalIngestionManifestRequest,
     MultimodalKnowledgeProtocolRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
     MultimodalReadinessRequest, MultimodalRequest, MultimodalResearchObjectRequest,
-    MultimodalWorkflowRequest, NoveltyAdjudicationRequest, PathwayActivityDefinition,
-    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
-    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveBeliefCalibrationRequest,
-    ProspectiveKnowledgeRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
-    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
-    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
-    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
-    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
-    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
-    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    MultimodalWorkbenchRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
+    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
+    PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
+    ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
+    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
+    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
+    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
+    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2538,6 +2539,9 @@ impl Server {
             }
             "glioma_evidence_researcher_workbench" => {
                 self.glioma_evidence_researcher_workbench(&arguments)
+            }
+            "glioma_multimodal_researcher_workbench" => {
+                self.glioma_multimodal_researcher_workbench(&arguments)
             }
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
@@ -9875,6 +9879,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma researcher evidence workbench: {error}"))
+    }
+
+    /// Build a bounded cross-study, multimodal evidence panel for researcher inspection. The
+    /// route preserves disagreements and coverage gaps; it does not pool raw measurements or
+    /// promote a panel into a causal or clinical conclusion.
+    fn glioma_multimodal_researcher_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultimodalWorkbenchRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_researcher_workbench requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma multimodal researcher workbench request: {error}")
+            })?;
+        let plan = query_glioma_multimodal_researcher_workbench(&request)
+            .map_err(|error| format!("glioma multimodal researcher workbench refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "next_routes": [
+                "glioma_multimodal_knowledge_protocol_gateway",
+                "glioma_multimodal_evidence_gap_router",
+                "glioma_evidence_prospective_triage"
+            ],
+            "guarantees": [
+                "panels contain only caller-supplied local preclinical evidence with explicit study and modality identities",
+                "negative, contradicted, uncertain, stale, filtered, and under-covered records remain visible with omission reasons",
+                "representative selection is deterministic and preserves coverage targets without pooling raw measurements or making a clinical decision"
+            ]
+        }))
+        .map_err(|error| {
+            format!("cannot encode glioma multimodal researcher workbench: {error}")
+        })
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55262,6 +55297,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_stream_snapshot",
                 "glioma_evidence_prospective_triage",
                 "glioma_evidence_researcher_workbench",
+                "glioma_multimodal_researcher_workbench",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65463,6 +65499,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceWorkbenchRequest1@1 with local EvidenceRecord1@1 values, researcher/query terms, typed filters, freshness/quality bounds, result limit, state inclusion policy, and sort order."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_researcher_workbench",
+        "description": "Build deterministic cross-study multimodal preclinical glioma evidence panels for researcher inspection. Preserves study, modality, model, quality, freshness, negative, contradictory, uncertain, and coverage-gap states; selects bounded representatives without pooling raw measurements, retrieving sources, or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalWorkbenchRequest1@1 with explicit study/observation/claim grouping, local EvidenceRecord1@1 values, coverage targets, filters, panel/representative bounds, and sort order."}
             },
             "required": ["request"]
         }

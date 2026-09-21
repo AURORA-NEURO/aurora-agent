@@ -15,6 +15,7 @@ pub mod federated_acquisition_policy;
 pub mod federated_execution_handoff;
 pub mod federated_shift;
 pub mod multimodal_gap_router;
+pub mod multimodal_workbench;
 pub mod novelty_adjudication;
 pub mod novelty_radar;
 pub mod operating_cycle;
@@ -82,6 +83,12 @@ pub use multimodal_gap_router::{
     route_glioma_multimodal_evidence_gaps, MultimodalGapAction, MultimodalGapActionKind,
     MultimodalGapClaim, MultimodalGapDisposition, MultimodalGapRouterError,
     MultimodalGapRouterPlan, MultimodalGapRouterRequest,
+};
+pub use multimodal_workbench::{
+    query_glioma_multimodal_researcher_workbench, MultimodalWorkbenchDisposition,
+    MultimodalWorkbenchError, MultimodalWorkbenchOmission, MultimodalWorkbenchPanel,
+    MultimodalWorkbenchPlan, MultimodalWorkbenchRecord, MultimodalWorkbenchRequest,
+    MultimodalWorkbenchSort, MultimodalWorkbenchStudySummary,
 };
 pub use novelty_adjudication::{
     adjudicate_glioma_evidence_novelty, NoveltyAdjudication, NoveltyAdjudicationDisposition,
