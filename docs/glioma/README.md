@@ -30,6 +30,8 @@ crates/research/src/glioma/
                                              P01 local researcher evidence workbench with typed query filters, explainable ranking, facets, and omission handling
   programs/p01_evidence_surveillance/multimodal_workbench.rs
                                              P01 cross-study multimodal evidence panels with coverage, disagreement, representative selection, and gap routing
+  programs/p01_evidence_surveillance/verification_gate.rs
+                                             P01 local evidence verification gate for support, source independence, coverage, freshness, contradictions, and negative review
   programs/p01_evidence_surveillance/federated_acquisition_policy.rs
                                              P01 consortium-aware site assignment with independence, quorum, budget, privacy, and local-raw-data gates
   programs/p01_evidence_surveillance/evidence_frontier_join.rs
@@ -575,7 +577,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
-| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, local and multimodal researcher evidence workbenches, researcher-capacity-aware prospective triage, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
+| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, local and multimodal researcher evidence workbenches, evidence verification gates, researcher-capacity-aware prospective triage, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, explicit multi-study alignment and influence diagnostics, prospective change-point monitoring with multiplicity control, robust aggregate-only federated continual consensus, autonomous evidence-to-action ranking with budget/dependency/autonomy gates, local dependency-wave workflow compilation with checkpoint/compensation planning, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |
@@ -721,6 +723,11 @@ representatives while preserving study, modality, model, freshness, quality, neg
 contradiction coverage, reports a deterministic coverage matrix, and routes under-covered panels
 to the multimodal gap compiler. It never pools raw measurements or upgrades a panel into a causal
 or clinical conclusion.
+The evidence verification gate (`glioma_evidence_verification_gate`) is the promotion boundary
+before P02 knowledge compilation. It requires configurable support counts, independent source
+families, multimodal/model coverage, quality/reproducibility floors, freshness, and explicit
+negative/contradiction policy. Failed gates produce typed blocking findings and remediation routes;
+they cannot be converted into confidence by the autonomous engine.
 P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution

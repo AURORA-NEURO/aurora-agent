@@ -627,7 +627,7 @@ use bioprism_research::{
     simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
     snapshot_glioma_evidence_stream, stress_glioma_mechanism_robustness, surveil_glioma_evidence,
     surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
-    update_glioma_mechanism_posterior, validate_feature_catalog,
+    update_glioma_mechanism_posterior, validate_feature_catalog, verify_glioma_evidence,
     verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
     ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
@@ -683,26 +683,26 @@ use bioprism_research::{
     EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceProspectiveTriageRequest,
     EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
     EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
-    EvidenceWorkbenchRequest, ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
-    FederatedAcquisitionPolicyRequest, FederatedBenchmarkAdaptiveCampaignRequest,
-    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
-    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
-    FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
-    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
-    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
-    FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
-    FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
-    FidelityCandidate, FidelityObservation, FrontierCampaignRequest, GliomaActionCandidate,
-    GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
-    GliomaAutonomousResearchEngineRequest, GliomaCausalClaimAdjudicationRequest,
-    GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
-    GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
-    GliomaEvidenceGatedResearchRequest, GliomaEvidenceOperatingCycleRequest,
-    GliomaExperimentFrontierRequest, GliomaIntentMissionRequest,
-    GliomaInterpretationOperatingCycleRequest, GliomaMechanismAutopilotRequest,
-    GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
-    GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
+    EvidenceVerificationRequest, EvidenceWorkbenchRequest, ExperimentArm,
+    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedAcquisitionPolicyRequest,
+    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
+    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
+    FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedContinualAgentRequest,
+    FederatedContinualKnowledgeRequest, FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite,
+    FederatedExecutionHandoffRequest, FederatedInstrumentConsensusRequest, FederatedInstrumentSite,
+    FederatedInterpretationRequest, FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim,
+    FederatedMechanismSite, FederatedMechanismTransportCampaignRequest,
+    FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
+    FrontierCampaignRequest, GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest,
+    GliomaAutonomousCampaignRequest, GliomaAutonomousResearchEngineRequest,
+    GliomaCausalClaimAdjudicationRequest, GliomaComputationCampaignRequest,
+    GliomaComputationOperatingCycleRequest, GliomaComputationWorkflowRequest,
+    GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest,
+    GliomaEvidenceOperatingCycleRequest, GliomaExperimentFrontierRequest,
+    GliomaIntentMissionRequest, GliomaInterpretationOperatingCycleRequest,
+    GliomaMechanismAutopilotRequest, GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest,
+    GliomaMissionRequest, GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
     GliomaMultimodalSensitivityRequest, GliomaProgramSchedulerRequest,
     GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
@@ -2542,6 +2542,9 @@ impl Server {
             }
             "glioma_multimodal_researcher_workbench" => {
                 self.glioma_multimodal_researcher_workbench(&arguments)
+            }
+            "glioma_evidence_verification_gate" => {
+                self.glioma_evidence_verification_gate(&arguments)
             }
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
@@ -9910,6 +9913,36 @@ impl Server {
         .map_err(|error| {
             format!("cannot encode glioma multimodal researcher workbench: {error}")
         })
+    }
+
+    /// Verify whether a local typed glioma evidence surface can enter knowledge/workflow
+    /// planning. The gate exposes support debt, source independence, coverage debt,
+    /// contradictions, negatives, and uncertainty without inferring a scientific conclusion.
+    fn glioma_evidence_verification_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceVerificationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_verification_gate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence verification request: {error}"))?;
+        let report = verify_glioma_evidence(&request)
+            .map_err(|error| format!("glioma evidence verification refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "next_routes": [
+                "glioma_knowledge_protocol_gateway",
+                "glioma_multimodal_evidence_gap_router",
+                "glioma_evidence_acquisition_plan",
+                "plan_glioma_evidence_contradiction_cut"
+            ],
+            "guarantees": [
+                "verification requires typed local preclinical evidence and never infers contradiction or causality from wording",
+                "support, independent source diversity, modality/model coverage, freshness, negatives, uncertainty, and contradictions are explicit gate inputs",
+                "a failed gate cannot promote a claim; remediation routes are bounded and raw source bytes remain local"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence verification report: {error}"))
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55298,6 +55331,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_prospective_triage",
                 "glioma_evidence_researcher_workbench",
                 "glioma_multimodal_researcher_workbench",
+                "glioma_evidence_verification_gate",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65510,6 +65544,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultimodalWorkbenchRequest1@1 with explicit study/observation/claim grouping, local EvidenceRecord1@1 values, coverage targets, filters, panel/representative bounds, and sort order."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_verification_gate",
+        "description": "Verify whether local typed preclinical glioma evidence has sufficient support, independent source diversity, modality/model coverage, freshness, and explicit negative/contradiction handling to enter knowledge or workflow planning. Returns blocking findings and bounded remediation routes; it never infers causality, retrieves sources, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceVerificationRequest1@1 with claim/scope terms, local EvidenceRecord1@1 values, quality/reproducibility/freshness floors, coverage/source quorum, and contradiction/negative policies."}
             },
             "required": ["request"]
         }

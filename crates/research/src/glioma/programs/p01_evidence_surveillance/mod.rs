@@ -25,6 +25,7 @@ pub mod researcher_workbench;
 pub mod surveillance;
 pub mod temporal_shift;
 pub mod triangulation;
+pub mod verification_gate;
 
 pub use novelty_radar::{
     rank_glioma_evidence_novelty, EvidenceNoveltyAction, EvidenceNoveltyActionDisposition,
@@ -150,6 +151,11 @@ pub use temporal_shift::{
     detect_glioma_evidence_temporal_shifts, EvidenceTemporalObservation, EvidenceTemporalShift,
     EvidenceTemporalShiftAction, EvidenceTemporalShiftDisposition, EvidenceTemporalShiftError,
     EvidenceTemporalShiftKind, EvidenceTemporalShiftRequest,
+};
+pub use verification_gate::{
+    verify_glioma_evidence, EvidenceVerificationDisposition, EvidenceVerificationError,
+    EvidenceVerificationFinding, EvidenceVerificationOmission, EvidenceVerificationReport,
+    EvidenceVerificationRequest, EvidenceVerificationSeverity,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::EvidenceSurveillance;
