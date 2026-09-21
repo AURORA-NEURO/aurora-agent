@@ -21,6 +21,7 @@ pub mod operating_cycle;
 pub mod prospective_monitor;
 pub mod selection_cycle;
 pub mod study_alignment;
+pub mod workflow_admission;
 pub mod workflow_compile;
 
 pub use gap_compiler::{
@@ -137,6 +138,11 @@ pub use study_alignment::{
     compile_multi_study_knowledge, MultiStudyClaimDisposition, MultiStudyKnowledge,
     MultiStudyKnowledgeDisposition, MultiStudyKnowledgeError, MultiStudyKnowledgeRequest,
     MultiStudyKnowledgeRow, StudyClaimBinding, StudyClaimObservation, StudyKnowledgeSnapshot,
+};
+pub use workflow_admission::{
+    admit_glioma_research_workflow, AdmittedResearchAction, ResearchAdmissionDisposition,
+    ResearchAdmissionGate, ResearchAdmissionRoute, ResearchWorkflowAdmission,
+    WorkflowAdmissionError, WorkflowAdmissionRequest,
 };
 pub use workflow_compile::{
     compile_local_research_workflow, LocalResearchWorkflow, LocalWorkflowDisposition,

@@ -335,6 +335,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p02_evidence_knowledge::continual_agent::FEATURE_ID,
         crate::glioma::programs::p02_evidence_knowledge::workflow_compile::FEATURE_ID,
         crate::glioma::programs::p02_evidence_knowledge::multimodal_workflow::FEATURE_ID,
+        crate::glioma::programs::p02_evidence_knowledge::workflow_admission::FEATURE_ID,
         crate::glioma::programs::p02_evidence_knowledge::belief_revision::FEATURE_ID,
         crate::glioma::programs::p02_evidence_knowledge::claim_frontier::FEATURE_ID,
         crate::glioma::programs::p02_evidence_knowledge::composition::FEATURE_ID,

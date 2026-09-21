@@ -38,6 +38,8 @@ crates/research/src/glioma/
                                              P02 local dependency-wave workflow compiler with checkpoints, retries, and compensation metadata
   programs/p02_evidence_knowledge/multimodal_workflow.rs
                                              P02 adaptive multimodal workflow synchronization with study readiness, missingness barriers, and branch selection
+  programs/p02_evidence_knowledge/workflow_admission.rs
+                                             P02 execution-facing workflow admission with typed routes, local-data boundaries, and stop conditions
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs

@@ -491,8 +491,8 @@ use bioprism_repair::{
 };
 use bioprism_research::{
     adjudicate_glioma_assay_evidence, adjudicate_glioma_multimodal_contradictions,
-    admit_glioma_decision_actions, allocate_glioma_assays, analyze_causal_sensitivity,
-    analyze_federated_benchmark, analyze_federated_benchmark_power,
+    admit_glioma_decision_actions, admit_glioma_research_workflow, allocate_glioma_assays,
+    analyze_causal_sensitivity, analyze_federated_benchmark, analyze_federated_benchmark_power,
     analyze_federated_continual_knowledge, analyze_federated_evidence_shifts,
     analyze_federated_knowledge, analyze_federated_mechanism_transport,
     analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
@@ -740,6 +740,7 @@ use bioprism_research::{
     TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
     ValidationCampaignRequest, ValidationReplicationCampaignRequest,
     ValidationReplicationGateRequest, ValidationReplicationTransportRequest,
+    WorkflowAdmissionRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2523,6 +2524,9 @@ impl Server {
             "glioma_local_research_workflow" => self.glioma_local_research_workflow(&arguments),
             "glioma_multimodal_knowledge_workflow" => {
                 self.glioma_multimodal_knowledge_workflow(&arguments)
+            }
+            "glioma_research_workflow_admission" => {
+                self.glioma_research_workflow_admission(&arguments)
             }
             "glioma_federated_knowledge" => self.glioma_federated_knowledge(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
@@ -10277,6 +10281,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal knowledge workflow: {error}"))
+    }
+
+    /// Turn the selected multimodal branch into bounded, typed downstream route admissions.
+    /// This remains an admission decision: the local dispatcher and instrument gateways own all
+    /// effects, and every action carries explicit stop conditions.
+    fn glioma_research_workflow_admission(&self, arguments: &Value) -> Result<Value, String> {
+        let request: WorkflowAdmissionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_research_workflow_admission requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma workflow admission request: {error}"))?;
+        let output = admit_glioma_research_workflow(&request)
+            .map_err(|error| format!("glioma workflow admission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "admission": output,
+            "execution": "not_started",
+            "next_routes": [
+                "glioma_knowledge_action_dispatch",
+                "glioma_multimodal_qc",
+                "glioma_computation_workflow",
+                "glioma_instrument_preflight"
+            ],
+            "guarantees": [
+                "only synchronized actions with explicit dependency and barrier state are admitted",
+                "degraded branches carry a coverage stop condition into downstream interpretation",
+                "approval-required, non-exportable, and incomplete workflow actions remain blocked",
+                "the route performs no retrieval, raw-data movement, instrument execution, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma workflow admission: {error}"))
     }
 
     /// Compare aggregate typed-knowledge summaries across institutions while preserving local
@@ -54046,6 +54080,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_continual_agent",
                 "glioma_local_research_workflow",
                 "glioma_multimodal_knowledge_workflow",
+                "glioma_research_workflow_admission",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
@@ -64392,6 +64427,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultimodalWorkflowRequest1@1 with objective-bound LocalResearchWorkflow1@1, value-only modality observations, required modality/model coverage, readiness thresholds, and degraded-branch policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_workflow_admission",
+        "description": "Admit a synchronized glioma workflow into typed downstream research routes. Converts the selected full or degraded branch into dependency-ordered action admissions with route types, local-data boundaries, explicit approval stops, provenance and budget termination gates, and negative-result preservation. It never dispatches, moves raw data, executes instruments, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "WorkflowAdmissionRequest1@1 with objective-bound MultimodalKnowledgeWorkflow1@1, complete LocalWorkflowStep1@1 rows, action bound, degraded-branch policy, and local-data boundary policy."}
             },
             "required": ["request"]
         }
