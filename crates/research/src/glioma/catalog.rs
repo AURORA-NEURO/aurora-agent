@@ -382,6 +382,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p04_decision_context::decision_cycle::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::mission_bridge::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::discrimination::FEATURE_ID,
+        crate::glioma::programs::p05_mechanism_exploration::identifiability::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::calibration::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::consensus::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::discrimination_campaign::FEATURE_ID,

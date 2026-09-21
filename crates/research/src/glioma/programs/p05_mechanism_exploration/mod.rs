@@ -14,6 +14,7 @@ pub mod discrimination;
 pub mod discrimination_campaign;
 pub mod ensemble_counterfactual;
 pub mod graph_propagation;
+pub mod identifiability;
 pub mod mechanism_dynamics;
 pub mod operating_cycle;
 pub mod pathway_activity;
@@ -91,6 +92,12 @@ pub use graph_propagation::{
     propagate_glioma_mechanism_graph, MechanismGraphDisposition, MechanismGraphEdge,
     MechanismGraphError, MechanismGraphNode, MechanismGraphPropagation, MechanismGraphRelation,
     MechanismGraphRequest, MechanismNodeScore,
+};
+pub use identifiability::{
+    analyze_glioma_mechanism_identifiability, IdentifiabilityFeature,
+    IdentifiabilityFeatureUtility, IdentifiabilityMechanism, MechanismIdentifiability,
+    MechanismIdentifiabilityDisposition, MechanismIdentifiabilityError,
+    MechanismIdentifiabilityRequest, MechanismPairIdentifiability,
 };
 pub use mechanism_dynamics::{
     simulate_glioma_mechanism_dynamics, MechanismDynamicsDisposition, MechanismDynamicsEdge,

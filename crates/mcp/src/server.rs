@@ -495,7 +495,8 @@ use bioprism_research::{
     analyze_federated_benchmark, analyze_federated_mechanism_transport,
     analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
     analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
-    analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
+    analyze_glioma_dose_response, analyze_glioma_latent_factors,
+    analyze_glioma_mechanism_identifiability, analyze_glioma_mediation,
     analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
     analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
     analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
@@ -669,15 +670,16 @@ use bioprism_research::{
     GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
     GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
-    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
-    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
-    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
-    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InstrumentResearchFrontierRequest,
-    InstrumentScienceLoopRequest, InterpretationSynthesisRequest, KnowledgeActionBridgeRequest,
-    KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest, KnowledgeActionPlan,
-    KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate,
-    KnowledgeCompositionRequest, KnowledgeConsistencyRequest, KnowledgeFrontier,
-    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    HarmonizationVector, IdentifiabilityFeature, IdentifiabilityMechanism,
+    InformationDesignRequest, InstrumentCampaignRequest, InstrumentExecutionMode,
+    InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetExecutionRequest,
+    InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest,
+    InstrumentPreflightRequest, InstrumentResearchFrontierRequest, InstrumentScienceLoopRequest,
+    InterpretationSynthesisRequest, KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest,
+    KnowledgeActionDispatchRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
+    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeCompositionRequest,
+    KnowledgeConsistencyRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -686,23 +688,23 @@ use bioprism_research::{
     MechanismDiscriminatorAction, MechanismDynamicsEdge, MechanismDynamicsIntervention,
     MechanismDynamicsNode, MechanismDynamicsRequest, MechanismFeatureObservation,
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
-    MechanismOperatingCycleRequest, MechanismRequest, MechanismStateFilterRequest,
-    MechanismStateSmootherRequest, MechanismValidationExecutionRequest,
-    MechanismValidationPlanRequest, MechanismValidationProtocolCompileRequest,
-    MediationObservation, MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest,
-    ModalityPortfolioRequest, ModalityVector, MultiFidelityCampaignRequest,
-    MultiFidelityOptimizationRequest, MultimodalDecisionGateRequest, MultimodalExecutionMode,
-    MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
-    MultimodalReadinessRequest, MultimodalRequest, PathwayActivityDefinition,
-    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
-    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveQualityRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
-    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
-    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
-    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    MechanismIdentifiabilityRequest, MechanismOperatingCycleRequest, MechanismRequest,
+    MechanismStateFilterRequest, MechanismStateSmootherRequest,
+    MechanismValidationExecutionRequest, MechanismValidationPlanRequest,
+    MechanismValidationProtocolCompileRequest, MediationObservation, MediationRequest,
+    MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
+    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultimodalDecisionGateRequest,
+    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
+    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
+    MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
+    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
+    PowerStressSurfaceRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
+    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
+    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
+    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
+    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
+    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
+    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2516,6 +2518,7 @@ impl Server {
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_mechanism_dynamics" => self.glioma_mechanism_dynamics(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
+            "glioma_mechanism_identifiability" => self.glioma_mechanism_identifiability(&arguments),
             "glioma_mechanism_bayesian_update" => self.glioma_mechanism_bayesian_update(&arguments),
             "glioma_mechanism_state_filter" => self.glioma_mechanism_state_filter(&arguments),
             "glioma_mechanism_state_smoother" => self.glioma_mechanism_state_smoother(&arguments),
@@ -10698,6 +10701,52 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism discrimination: {error}"))
+    }
+
+    /// Compute which declared mechanism pairs remain indistinguishable and select affordable
+    /// discriminating features. This is local analysis only; it never executes an assay.
+    fn glioma_mechanism_identifiability(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismIdentifiabilityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_identifiability requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism-identifiability request: {error}"))?;
+        let mechanisms: Vec<IdentifiabilityMechanism> =
+            serde_json::from_value(arguments.get("mechanisms").cloned().ok_or_else(|| {
+                "glioma_mechanism_identifiability requires mechanisms".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma identifiability mechanisms: {error}"))?;
+        let features: Vec<IdentifiabilityFeature> = serde_json::from_value(
+            arguments
+                .get("features")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_identifiability requires features".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma identifiability features: {error}"))?;
+        let mut request = request;
+        request.mechanisms = mechanisms;
+        request.features = features;
+        let output = analyze_glioma_mechanism_identifiability(&request)
+            .map_err(|error| format!("glioma mechanism identifiability refused: {error}"))?;
+        serde_json::to_value(json!({
+            "identifiability": output,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_mechanism_discriminate",
+                "glioma_information_design",
+                "glioma_mechanism_dynamics"
+            ],
+            "guarantees": [
+                "pairwise mechanism separation is computed from typed local predictions and feature quality",
+                "observationally indistinguishable pairs remain unresolved rather than being over-ranked",
+                "feature selection is bounded by risk, quality, cost, budget, and explicit pair coverage",
+                "the route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism identifiability: {error}"))
     }
 
     /// Update competing mechanism posteriors from typed local preclinical observations. This
@@ -53309,6 +53358,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
+                "glioma_mechanism_identifiability",
                 "glioma_mechanism_bayesian_update",
                 "glioma_mechanism_state_filter",
                 "glioma_mechanism_state_smoother",
@@ -63805,6 +63855,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "actions": {"type": "array", "items": {"type": "object"}, "description": "MechanismDiscriminatorAction1@1 candidate assays with per-mechanism predictions, cost, feasibility, and uncertainty."}
             },
             "required": ["request", "hypotheses", "observations", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_identifiability",
+        "description": "Quantify which declared preclinical glioma mechanism pairs remain observationally indistinguishable from typed feature predictions, then select an affordable quality- and risk-gated feature set that can resolve the largest unresolved frontier. The route preserves blocked features, negative evidence, budget limits, and uncertainty; it plans analysis only and never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismIdentifiabilityRequest1@1 with objective, model system, identifiability floor, quality/risk gates, budget, and selection bound."},
+                "mechanisms": {"type": "array", "items": {"type": "object"}, "description": "IdentifiabilityMechanism1@1 competing preclinical mechanism priors."},
+                "features": {"type": "array", "items": {"type": "object"}, "description": "IdentifiabilityFeature1@1 typed feature predictions with quality, cost, and risk metadata."}
+            },
+            "required": ["request", "mechanisms", "features"]
         }
     }));
     definitions.push(json!({
