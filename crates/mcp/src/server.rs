@@ -610,12 +610,12 @@ use bioprism_research::{
     promote_glioma_closed_loop_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
     rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
     revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
-    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
-    simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
-    snapshot_glioma_evidence_stream, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
-    synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    schedule_glioma_computation_placement, schedule_glioma_frontier_campaign,
+    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
+    simulate_glioma_protocol, simulate_glioma_protocol_scenario_ensemble,
+    smooth_glioma_mechanism_states, snapshot_glioma_evidence_stream, surveil_glioma_evidence,
+    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog,
     verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
@@ -680,7 +680,7 @@ use bioprism_research::{
     FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
     FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
-    FidelityCandidate, FidelityObservation, GliomaActionCandidate,
+    FidelityCandidate, FidelityObservation, FrontierCampaignRequest, GliomaActionCandidate,
     GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
     GliomaAutonomousResearchEngineRequest, GliomaCausalClaimAdjudicationRequest,
     GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
@@ -2566,6 +2566,7 @@ impl Server {
             "glioma_prospective_belief_calibration" => {
                 self.glioma_prospective_belief_calibration(&arguments)
             }
+            "glioma_frontier_campaign" => self.glioma_frontier_campaign(&arguments),
             "glioma_multimodal_knowledge_workflow" => {
                 self.glioma_multimodal_knowledge_workflow(&arguments)
             }
@@ -10700,6 +10701,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma prospective belief calibration: {error}"))
+    }
+
+    /// Batch the selected frontier into review-gated, budgeted rounds for local workflow admission.
+    fn glioma_frontier_campaign(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FrontierCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_frontier_campaign requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma frontier campaign request: {error}"))?;
+        let output = schedule_glioma_frontier_campaign(&request)
+            .map_err(|error| format!("glioma frontier campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": output,
+            "next_routes": [
+                "glioma_local_research_workflow",
+                "glioma_workflow_recovery",
+                "glioma_knowledge_action_dispatch"
+            ],
+            "guarantees": [
+                "round budgets and action capacities are enforced before workflow admission",
+                "review-gated claims block campaign rounds when policy requires it",
+                "deferred work remains explicit and can be resumed in a later campaign",
+                "the route performs no retrieval, raw-data movement, instrument execution, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma frontier campaign: {error}"))
     }
 
     /// Synchronize the local action DAG against study-level multimodal readiness and choose a
@@ -54542,6 +54571,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_claim_evidence_reconciliation",
                 "glioma_closed_loop_frontier",
                 "glioma_prospective_belief_calibration",
+                "glioma_frontier_campaign",
                 "glioma_research_workflow_admission",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
@@ -65032,6 +65062,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ProspectiveBeliefCalibrationRequest1@1 with weighted epoch observations, predicted support, observed EvidenceState, minimum eligible observations, drift threshold, and claim bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_frontier_campaign",
+        "description": "Batch a selected closed-loop glioma frontier into deterministic, budgeted, review-gated campaign rounds for local workflow admission. Preserves deferred candidates and review holds; it never executes instruments, moves raw data, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FrontierCampaignRequest1@1 with ClosedLoopFrontier1@1, round budget, round/action bounds, and review-block policy."}
             },
             "required": ["request"]
         }

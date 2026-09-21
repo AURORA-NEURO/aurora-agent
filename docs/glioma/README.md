@@ -68,6 +68,8 @@ crates/research/src/glioma/
                                              P02 deterministic budget-bounded promotion of reconciled claims into next research actions
   programs/p02_evidence_knowledge/prospective_belief_calibration.rs
                                              P02 prospective Brier/calibration scoring with omission-aware confidence updates
+  programs/p02_evidence_knowledge/frontier_campaign.rs
+                                             P02 campaign-level batching of frontier actions into budgeted, review-gated execution rounds
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs

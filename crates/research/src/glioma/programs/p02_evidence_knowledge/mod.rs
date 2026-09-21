@@ -17,6 +17,7 @@ pub mod continual_agent;
 pub mod dispatch;
 pub mod federated_continual;
 pub mod federated_knowledge;
+pub mod frontier_campaign;
 pub mod gap_compiler;
 pub mod knowledge_drift;
 pub mod knowledge_graph;
@@ -136,6 +137,11 @@ pub use federated_knowledge::{
     analyze_federated_knowledge, FederatedKnowledge, FederatedKnowledgeAction,
     FederatedKnowledgeDisposition, FederatedKnowledgeError, FederatedKnowledgeKind,
     FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim,
+};
+pub use frontier_campaign::{
+    schedule_glioma_frontier_campaign, FrontierCampaign, FrontierCampaignDisposition,
+    FrontierCampaignError, FrontierCampaignRequest, FrontierCampaignRound,
+    FrontierCampaignRoundStatus,
 };
 pub use knowledge_drift::{
     detect_glioma_knowledge_drift, KnowledgeDrift, KnowledgeDriftAction, KnowledgeDriftDisposition,
