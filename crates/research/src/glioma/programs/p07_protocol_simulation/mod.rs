@@ -45,10 +45,12 @@ pub mod simulator;
 pub mod transport_gate;
 
 pub use action_execution::{
-    execute_glioma_action_portfolio, ActionExecutionDisposition, ActionExecutionFailure,
-    ActionExecutionResult, ActionPortfolioExecution, ActionPortfolioExecutionDisposition,
-    ActionPortfolioExecutionError, ActionPortfolioExecutionRequest, ActionPortfolioStopReason,
-    DryRunGliomaActionExecutor, GliomaActionExecutor,
+    execute_glioma_action_portfolio, execute_glioma_action_portfolio_with_context,
+    ActionExecutionDisposition, ActionExecutionFailure, ActionExecutionResult,
+    ActionPortfolioExecution, ActionPortfolioExecutionDisposition, ActionPortfolioExecutionError,
+    ActionPortfolioExecutionRequest, ActionPortfolioStopReason, DryRunGliomaActionExecutor,
+    GliomaActionArtifactInput, GliomaActionExecutionContext, GliomaActionExecutor,
+    GliomaActionWorkflowScope,
 };
 
 pub use adaptive_scheduler::{

@@ -1140,6 +1140,11 @@ only returned typed artifacts into stage checkpoints, and replans downstream evi
 experiment, computation, replication, release, and federation work. Budget exhaustion, negative or
 partial outcomes, policy holds, executor failures, and no-progress states stop honestly; the MCP
 surface is a deterministic dry-run rehearsal while institution-local executors own real effects.
+Context-aware workers receive the researcher's complete local input references, the objective and
+research scope (all requested modalities and preclinical model systems), and only the typed
+artifacts from each action's direct prerequisites. Payloads remain in the institution's artifact
+store; this turns the stage graph into an actual dataflow boundary without giving the planner data
+access or collapsing a multi-model intent to the director's representative stage label.
 The adaptive workflow scheduler (`plan_glioma_adaptive_workflow`) adds a science-aware scheduling
 layer for long-running programs. It updates conservative action utility from qualified, negative,
 inconclusive, failed, and blocked observations; uses deterministic beam search to choose

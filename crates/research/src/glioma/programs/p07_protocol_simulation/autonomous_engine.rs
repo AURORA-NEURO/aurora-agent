@@ -509,6 +509,10 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::glioma::programs::p07_protocol_simulation::action_execution::{
+        ActionExecutionFailure, ActionExecutionResult, DryRunGliomaActionExecutor,
+        GliomaActionExecutionContext, GliomaActionExecutor,
+    };
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
     use bioprism_foundation::{AutonomyTier, PRECLINICAL_BOUNDARY};
     use bioprism_onco::OutputUse;
@@ -523,7 +527,10 @@ mod tests {
                 study_id: "engine-study".into(),
                 objective: "identify reproducible invasion mechanisms in organoids".into(),
                 output_uses: BTreeSet::from([OutputUse::CohortAnalysis]),
-                model_systems: BTreeSet::from([GliomaModelSystem::Organoid]),
+                model_systems: BTreeSet::from([
+                    GliomaModelSystem::CellLine,
+                    GliomaModelSystem::Organoid,
+                ]),
                 modalities: BTreeSet::from([
                     GliomaModality::Transcriptomics,
                     GliomaModality::Imaging,
@@ -577,6 +584,68 @@ mod tests {
             .iter()
             .any(|item| item.contains("synthetic-dry-run")));
         run.validate().unwrap();
+    }
+
+    #[derive(Default)]
+    struct ContextCapture {
+        calls: Vec<(String, GliomaActionExecutionContext)>,
+    }
+
+    impl GliomaActionExecutor for ContextCapture {
+        fn execute_action(
+            &mut self,
+            candidate: &crate::glioma_engine::GliomaActionCandidate,
+            attempt: u8,
+        ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+            DryRunGliomaActionExecutor.execute_action(candidate, attempt)
+        }
+
+        fn execute_action_with_context(
+            &mut self,
+            candidate: &crate::glioma_engine::GliomaActionCandidate,
+            context: &GliomaActionExecutionContext,
+            attempt: u8,
+        ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+            self.calls
+                .push((candidate.action_id.clone(), context.clone()));
+            self.execute_action(candidate, attempt)
+        }
+    }
+
+    #[test]
+    fn autonomous_engine_hands_local_inputs_and_prerequisite_outputs_to_workers() {
+        let request = request();
+        let mut executor = ContextCapture::default();
+        let run = execute_glioma_autonomous_research_engine(&request, &mut executor).unwrap();
+
+        assert!(!run.cycles.is_empty());
+        assert!(!executor.calls.is_empty());
+        assert!(executor.calls.iter().all(|(_, context)| {
+            context.source_artifacts == request.intent.input_artifacts
+                && context.scope.as_ref().is_some_and(|scope| {
+                    scope.research_id == request.intent.research_id
+                        && scope.study_id == request.intent.study_id
+                        && scope.objective == request.intent.objective
+                        && scope.modalities
+                            == request
+                                .intent
+                                .modalities
+                                .iter()
+                                .copied()
+                                .collect::<Vec<_>>()
+                        && scope.model_systems
+                            == request
+                                .intent
+                                .model_systems
+                                .iter()
+                                .copied()
+                                .collect::<Vec<_>>()
+                })
+        }));
+        assert!(executor.calls.iter().any(|(_, context)| {
+            !context.dependency_action_order.is_empty()
+                && context.dependency_artifacts.len() == context.dependency_action_order.len()
+        }));
     }
 
     #[test]

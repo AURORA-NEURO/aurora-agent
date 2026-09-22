@@ -7,9 +7,10 @@
 //! never opens a device connection, moves raw data, or makes a clinical decision.
 
 use crate::glioma_engine::{
-    select_glioma_actions, GliomaActionCandidate, GliomaActionSelection, GliomaSelectionConfig,
-    LocalArtifactRef,
+    select_glioma_actions, GliomaActionCandidate, GliomaActionSelection, GliomaModality,
+    GliomaModelSystem, GliomaSelectionConfig, LocalArtifactRef,
 };
+use bioprism_foundation::AutonomyTier;
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -50,6 +51,35 @@ pub struct ActionExecutionResult {
     pub negative_evidence: Vec<String>,
 }
 
+/// A local artifact produced by a completed prerequisite action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GliomaActionArtifactInput {
+    pub action_id: String,
+    pub artifact: LocalArtifactRef,
+}
+
+/// Local source and direct-prerequisite references available to an action worker.
+/// Payload bytes remain in the caller's local artifact store.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct GliomaActionExecutionContext {
+    pub scope: Option<GliomaActionWorkflowScope>,
+    pub source_artifacts: Vec<LocalArtifactRef>,
+    pub dependency_action_order: Vec<String>,
+    pub dependency_artifacts: Vec<GliomaActionArtifactInput>,
+}
+
+/// The full glioma research scope behind a stage action, for workers that fan a stage out across
+/// the declared modality and preclinical-model set rather than silently taking one representative.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GliomaActionWorkflowScope {
+    pub research_id: String,
+    pub study_id: String,
+    pub objective: String,
+    pub modalities: Vec<GliomaModality>,
+    pub model_systems: Vec<GliomaModelSystem>,
+    pub requested_autonomy: AutonomyTier,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionExecutionFailure {
     pub reason: String,
@@ -65,6 +95,17 @@ pub trait GliomaActionExecutor {
         candidate: &GliomaActionCandidate,
         attempt: u8,
     ) -> Result<ActionExecutionResult, ActionExecutionFailure>;
+
+    /// Context-aware hook for workers that resolve local source and prerequisite artifacts.
+    /// Existing executors remain compatible and retain their prior behavior by default.
+    fn execute_action_with_context(
+        &mut self,
+        candidate: &GliomaActionCandidate,
+        _context: &GliomaActionExecutionContext,
+        attempt: u8,
+    ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+        self.execute_action(candidate, attempt)
+    }
 }
 
 /// A deterministic executor for demos and integration tests.  It creates only synthetic local
@@ -352,7 +393,66 @@ pub fn execute_glioma_action_portfolio<E: GliomaActionExecutor + ?Sized>(
     request: &ActionPortfolioExecutionRequest,
     executor: &mut E,
 ) -> Result<ActionPortfolioExecution, ActionPortfolioExecutionError> {
+    execute_glioma_action_portfolio_with_context(request, &[], &[], None, executor)
+}
+
+/// Execute a portfolio while exposing source inputs and only each action's declared prerequisite
+/// artifacts to the institution-local worker. Payload bytes stay in the caller's artifact store.
+pub fn execute_glioma_action_portfolio_with_context<E: GliomaActionExecutor + ?Sized>(
+    request: &ActionPortfolioExecutionRequest,
+    source_artifacts: &[LocalArtifactRef],
+    completed_artifacts: &[GliomaActionArtifactInput],
+    scope: Option<&GliomaActionWorkflowScope>,
+    executor: &mut E,
+) -> Result<ActionPortfolioExecution, ActionPortfolioExecutionError> {
     validate_request(request)?;
+    let mut source_artifacts = source_artifacts.to_vec();
+    source_artifacts.sort_by(|left, right| {
+        left.artifact_id
+            .cmp(&right.artifact_id)
+            .then_with(|| left.content_hash.cmp(&right.content_hash))
+    });
+    if source_artifacts
+        .iter()
+        .any(|artifact| artifact.validate().is_err())
+        || source_artifacts
+            .windows(2)
+            .any(|pair| pair[0].artifact_id == pair[1].artifact_id)
+    {
+        return Err(ActionPortfolioExecutionError::InvalidRequest(
+            "source artifacts must be valid, local, and uniquely identified".into(),
+        ));
+    }
+    if scope.is_some_and(|scope| {
+        scope.research_id.trim().is_empty()
+            || scope.study_id.trim().is_empty()
+            || scope.objective.trim().is_empty()
+            || scope.modalities.is_empty()
+            || scope.model_systems.is_empty()
+            || !scope.modalities.windows(2).all(|pair| pair[0] < pair[1])
+            || !scope.model_systems.windows(2).all(|pair| pair[0] < pair[1])
+    }) {
+        return Err(ActionPortfolioExecutionError::InvalidRequest(
+            "workflow scope requires identities, objective, and canonical modality/model coverage"
+                .into(),
+        ));
+    }
+    let mut artifact_by_action = BTreeMap::<String, LocalArtifactRef>::new();
+    let mut initial_artifact_ids = BTreeSet::new();
+    for input in completed_artifacts {
+        if input.action_id.trim().is_empty()
+            || !request.completed_actions.contains(&input.action_id)
+            || input.artifact.validate().is_err()
+            || !initial_artifact_ids.insert(input.artifact.artifact_id.clone())
+            || artifact_by_action
+                .insert(input.action_id.clone(), input.artifact.clone())
+                .is_some()
+        {
+            return Err(ActionPortfolioExecutionError::InvalidRequest(
+                "completed prerequisite artifacts must be valid and uniquely bound to completed actions".into(),
+            ));
+        }
+    }
     let selection = select_glioma_actions(
         &request.candidates,
         &request.completed_actions,
@@ -417,9 +517,27 @@ pub fn execute_glioma_action_portfolio<E: GliomaActionExecutor + ?Sized>(
             stop_reason = ActionPortfolioStopReason::DependencyBlocked;
             continue;
         }
+        let dependency_artifacts = candidate
+            .depends_on
+            .iter()
+            .filter_map(|dependency| {
+                artifact_by_action.get(dependency).cloned().map(|artifact| {
+                    GliomaActionArtifactInput {
+                        action_id: dependency.clone(),
+                        artifact,
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let context = GliomaActionExecutionContext {
+            scope: scope.cloned(),
+            source_artifacts: source_artifacts.clone(),
+            dependency_action_order: candidate.depends_on.clone(),
+            dependency_artifacts,
+        };
         let mut accepted = None;
         for attempt in 1..=request.max_retries.saturating_add(1) {
-            match executor.execute_action(candidate, attempt) {
+            match executor.execute_action_with_context(candidate, &context, attempt) {
                 Ok(result) => {
                     let result =
                         provider_result(candidate, result, attempt, request.require_artifacts)?;
@@ -464,6 +582,9 @@ pub fn execute_glioma_action_portfolio<E: GliomaActionExecutor + ?Sized>(
             ))
         })?;
         statuses.insert(action_id.clone(), result.disposition);
+        if let Some(artifact) = &result.artifact {
+            artifact_by_action.insert(action_id.clone(), artifact.clone());
+        }
         results.push(result);
     }
 
@@ -591,6 +712,109 @@ mod tests {
             max_retries: 1,
             require_artifacts: true,
         }
+    }
+
+    fn local_artifact(id: &str) -> LocalArtifactRef {
+        LocalArtifactRef {
+            artifact_id: id.into(),
+            content_hash: ContentHash::of_bytes(id.as_bytes()),
+            content_type: "application/vnd.aurora.glioma.test+json".into(),
+            local_only: true,
+            contains_human_data: false,
+            contains_direct_identifiers: false,
+        }
+    }
+
+    #[derive(Default)]
+    struct ContextCapture {
+        contexts: BTreeMap<String, GliomaActionExecutionContext>,
+    }
+
+    impl GliomaActionExecutor for ContextCapture {
+        fn execute_action(
+            &mut self,
+            candidate: &GliomaActionCandidate,
+            attempt: u8,
+        ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+            DryRunGliomaActionExecutor.execute_action(candidate, attempt)
+        }
+
+        fn execute_action_with_context(
+            &mut self,
+            candidate: &GliomaActionCandidate,
+            context: &GliomaActionExecutionContext,
+            attempt: u8,
+        ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+            self.contexts
+                .insert(candidate.action_id.clone(), context.clone());
+            let mut result = self.execute_action(candidate, attempt)?;
+            if candidate.action_id == "first" {
+                result.disposition = ActionExecutionDisposition::Negative;
+                result.note = "synthetic assay produced a null finding".into();
+                result.negative_evidence = vec!["no effect in the synthetic fixture".into()];
+            }
+            Ok(result)
+        }
+    }
+
+    #[test]
+    fn local_artifacts_flow_only_across_declared_dependencies_including_negative_results() {
+        let mut first = candidate("first", 3, 800);
+        first.depends_on = vec!["prior-stage".into()];
+        let mut followup = candidate("followup", 3, 700);
+        followup.depends_on = vec!["first".into()];
+        let independent = candidate("independent", 3, 600);
+        let request = ActionPortfolioExecutionRequest {
+            completed_actions: BTreeSet::from(["prior-stage".into()]),
+            ..request(vec![first, followup, independent])
+        };
+        let source = local_artifact("source-study");
+        let prior = local_artifact("prior-stage-output");
+        let completed = vec![GliomaActionArtifactInput {
+            action_id: "prior-stage".into(),
+            artifact: prior.clone(),
+        }];
+        let mut executor = ContextCapture::default();
+
+        let run = execute_glioma_action_portfolio_with_context(
+            &request,
+            std::slice::from_ref(&source),
+            &completed,
+            None,
+            &mut executor,
+        )
+        .unwrap();
+
+        assert_eq!(
+            run.disposition,
+            ActionPortfolioExecutionDisposition::Completed
+        );
+        let first_context = &executor.contexts["first"];
+        assert_eq!(first_context.source_artifacts, vec![source.clone()]);
+        assert_eq!(first_context.dependency_action_order, vec!["prior-stage"]);
+        assert_eq!(first_context.dependency_artifacts[0].artifact, prior);
+
+        let followup_context = &executor.contexts["followup"];
+        assert_eq!(followup_context.dependency_action_order, vec!["first"]);
+        assert_eq!(
+            followup_context.dependency_artifacts[0]
+                .artifact
+                .artifact_id,
+            "dry-run-action:first"
+        );
+        assert_eq!(
+            run.results
+                .iter()
+                .find(|result| result.action_id == "first")
+                .unwrap()
+                .disposition,
+            ActionExecutionDisposition::Negative
+        );
+
+        let independent_context = &executor.contexts["independent"];
+        assert!(independent_context.dependency_action_order.is_empty());
+        assert!(independent_context.dependency_artifacts.is_empty());
+        assert_eq!(independent_context.source_artifacts, vec![source]);
     }
 
     #[test]

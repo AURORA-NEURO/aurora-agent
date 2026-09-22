@@ -7,8 +7,9 @@
 //! dry-run as biological evidence, or turns a stage completion into a clinical conclusion.
 
 use super::action_execution::{
-    execute_glioma_action_portfolio, ActionPortfolioExecution, ActionPortfolioExecutionError,
-    ActionPortfolioExecutionRequest, GliomaActionExecutor,
+    execute_glioma_action_portfolio_with_context, ActionPortfolioExecution,
+    ActionPortfolioExecutionError, ActionPortfolioExecutionRequest, GliomaActionArtifactInput,
+    GliomaActionExecutor, GliomaActionWorkflowScope,
 };
 use crate::glioma_engine::{
     compile_glioma_research, select_glioma_actions, GliomaActionCandidate, GliomaActionSelection,
@@ -593,7 +594,23 @@ fn run_director(
         if selection.selected_order.is_empty() {
             None
         } else {
-            let execution = execute_glioma_action_portfolio(
+            let completed_artifacts = request
+                .completed_checkpoints
+                .iter()
+                .map(|checkpoint| GliomaActionArtifactInput {
+                    action_id: checkpoint.stage_kind.stage_id().to_string(),
+                    artifact: checkpoint.artifact.clone(),
+                })
+                .collect::<Vec<_>>();
+            let scope = GliomaActionWorkflowScope {
+                research_id: request.intent.research_id.clone(),
+                study_id: request.intent.study_id.clone(),
+                objective: request.intent.objective.clone(),
+                modalities: request.intent.modalities.iter().copied().collect(),
+                model_systems: request.intent.model_systems.iter().copied().collect(),
+                requested_autonomy: request.intent.requested_autonomy,
+            };
+            let execution = execute_glioma_action_portfolio_with_context(
                 &ActionPortfolioExecutionRequest {
                     candidates: candidates.clone(),
                     completed_actions: completed_actions.clone(),
@@ -601,6 +618,9 @@ fn run_director(
                     max_retries: request.max_retries,
                     require_artifacts: request.require_artifacts,
                 },
+                &request.intent.input_artifacts,
+                &completed_artifacts,
+                Some(&scope),
                 executor,
             )
             .map_err(|error: ActionPortfolioExecutionError| {
