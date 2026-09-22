@@ -42,6 +42,7 @@ pub mod robust_active_learning_campaign;
 pub mod scenario_ensemble;
 pub mod scientific_frontier;
 pub mod simulator;
+pub mod stage_executor_adapter;
 pub mod transport_gate;
 
 pub use action_execution::{
@@ -240,6 +241,8 @@ pub use scenario_ensemble::{
     ProtocolScenarioEnsembleDisposition, ProtocolScenarioEnsembleError,
     ProtocolScenarioEnsembleRequest, ProtocolScenarioResult, ScenarioFailureClass,
 };
+
+pub use stage_executor_adapter::GliomaStageActionExecutor;
 
 pub use evidence_campaign::{
     execute_glioma_evidence_campaign, GliomaEvidenceCampaignDisposition,

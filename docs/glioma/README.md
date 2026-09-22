@@ -383,6 +383,8 @@ crates/research/src/glioma/
                                              P07 target-model transport gate with site/model support, information, heterogeneity, and negative-result preservation
     p07_protocol_simulation/action_execution.rs
                                              P07 dependency-safe action-portfolio execution
+    p07_protocol_simulation/stage_executor_adapter.rs
+                                             P07 bridge from director actions to typed local glioma stage workers
     p07_protocol_simulation/autonomous_campaign.rs
                                              P07 observation-driven campaign replanning over local actions
     p07_protocol_simulation/research_autopilot.rs
@@ -1084,6 +1086,12 @@ beam-selected autonomous batch. It runs assays, analyses, simulations, or approv
 actions in dependency order through a caller-owned executor, retries only declared transient
 failures, requires local typed artifacts when configured, and stops with explicit failed, partial,
 negative, or skipped outcomes instead of pretending the portfolio completed.
+`GliomaStageActionExecutor` adapts that director-facing worker contract to the existing typed
+`GliomaStageExecutor`. It binds one admitted intent, validates the scope and canonical source refs,
+checks every direct prerequisite against that stage's declared output schema, and dispatches only
+the compiled stage with its dependency hashes and replay identity. Institutions can implement the
+typed stage trait to connect local literature, omics, imaging, assay, or compute systems; the
+library adapter itself does not fetch data or claim those providers are bundled.
 P07 now also includes an observation-driven autonomous campaign controller
 (`execute_glioma_autonomous_campaign`). It keeps a bounded typed action registry, asks a local
 planner for new assays or analyses after each returned round, spends a hard research budget, and

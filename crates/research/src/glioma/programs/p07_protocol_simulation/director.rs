@@ -140,7 +140,7 @@ fn focus_target(focus: GliomaDirectorFocus) -> Option<GliomaStageKind> {
     }
 }
 
-fn stage_modality(kind: GliomaStageKind) -> GliomaModality {
+pub(super) fn stage_modality(kind: GliomaStageKind) -> GliomaModality {
     match kind {
         GliomaStageKind::IntentNormalization
         | GliomaStageKind::EvidenceSurveillance
