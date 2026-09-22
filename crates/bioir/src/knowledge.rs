@@ -81,6 +81,20 @@ impl EvidenceSynthesis {
             .verify_payload(payload)
             .map_err(KnowledgeError::Contract)
     }
+
+    /// Returns a digest for the complete, validated synthesis envelope.
+    ///
+    /// The artifact hash alone identifies the protected-payload projection.  This envelope
+    /// digest additionally binds the receipt's omissions/uncertainty and the policy decision,
+    /// giving replay and federation consumers one identity for the exact research decision
+    /// surface without exporting raw evidence bytes.
+    pub fn digest(&self, payload: &Value) -> Result<ContentHash, KnowledgeError> {
+        self.verify(payload)?;
+        let value = serde_json::to_value(self)
+            .map_err(|error| KnowledgeError::Serialization(error.to_string()))?;
+        ContentHash::of_value(&value)
+            .map_err(|error| KnowledgeError::Serialization(error.to_string()))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -433,5 +447,37 @@ mod tests {
             .compile(&right, &query)
             .unwrap();
         assert_eq!(a.artifact.content_hash, b.artifact.content_hash);
+    }
+
+    #[test]
+    fn synthesis_digest_binds_receipt_and_policy_to_artifact() {
+        let mut ledger = EvidenceLedger::new();
+        ledger
+            .insert(evidence("paper-1", &["institution-a"]))
+            .unwrap();
+        let query = ScopedRetrievalQuery {
+            query_id: "q-digest".into(),
+            intent: "retrieve".into(),
+            decision_time: Timestamp::parse("2025-01-01T00:00:00Z").unwrap(),
+            selected_evidence: Default::default(),
+            permitted_labels: Default::default(),
+            max_sources: 10,
+        };
+        let synthesis = KnowledgeCompiler::default()
+            .compile(&ledger, &query)
+            .unwrap();
+        let payload = json!({
+            "feature_id": FEATURE_ID,
+            "query_id": "q-digest",
+            "intent": "retrieve",
+            "decision_time": query.decision_time,
+            "references": [],
+            "omissions": synthesis.receipt.omissions.clone(),
+            "boundary": PRECLINICAL_BOUNDARY,
+        });
+        let digest = synthesis.digest(&payload).unwrap();
+        assert_eq!(digest, synthesis.digest(&payload).unwrap());
+        let tampered = json!({"tampered": true});
+        assert!(synthesis.digest(&tampered).is_err());
     }
 }

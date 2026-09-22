@@ -36,7 +36,9 @@ pub const DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION: &str =
 pub const DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-workflow-contract/0.1";
 pub const MAX_DOMAIN_WORKFLOW_GROUPS: usize = 128;
-pub const MAX_DOMAIN_WORKFLOW_TOOLS: usize = 256;
+// The callable catalogue has grown past the original 256-tool envelope. Keep the per-domain
+// bound high enough for complete catalogue validation while retaining a deterministic hard cap.
+pub const MAX_DOMAIN_WORKFLOW_TOOLS: usize = 512;
 pub const MAX_DOMAIN_WORKFLOW_STEPS: usize = 128;
 pub const MAX_DOMAIN_WORKFLOW_BYTES: usize = 20_000_000;
 pub const MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS: usize = 64;
@@ -1672,6 +1674,9 @@ pub fn verify_domain_workflow(
         if replayed.is_object() {
             let mut replay_mismatches = Vec::new();
             for field in [
+                "ok",
+                "schema",
+                "workflow",
                 "workflow_id",
                 "workflow_digest",
                 "catalog_digest",
@@ -1681,7 +1686,11 @@ pub fn verify_domain_workflow(
                 "evidence_plan",
                 "mission",
                 "selection",
+                "preflight",
                 "execution",
+                "guarantees",
+                "limitations",
+                "links",
             ] {
                 if instantiation.get(field) != replayed.get(field) {
                     let expected = instantiation.get(field).cloned().unwrap_or(Value::Null);
@@ -1773,17 +1782,30 @@ pub fn verify_domain_workflow_portfolio(
             "portfolio.workflow must be domain_workflow_portfolio".into(),
         ));
     }
-    let expected_portfolio_digest = portfolio
-        .get("portfolio_digest")
-        .and_then(Value::as_str)
-        .filter(|value| valid_digest(value))
-        .ok_or_else(|| {
-            DomainWorkflowError::InvalidRequest(
-                "portfolio.portfolio_digest must be a lowercase 64-character hexadecimal digest"
-                    .into(),
-            )
-        })?
-        .to_owned();
+    let expected_portfolio_digest = match portfolio.get("portfolio_digest") {
+        None | Some(Value::Null) => {
+            return Err(DomainWorkflowError::InvalidRequest(
+                "portfolio.portfolio_digest must be a non-empty string".into(),
+            ));
+        }
+        Some(value) => {
+            let value = value
+                .as_str()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    DomainWorkflowError::InvalidRequest(
+                        "portfolio.portfolio_digest must be a non-empty string".into(),
+                    )
+                })?;
+            if !valid_digest(value) {
+                return Err(DomainWorkflowError::InvalidRequest(
+                    "portfolio.portfolio_digest must be a 64-character hexadecimal digest in lowercase"
+                        .into(),
+                ));
+            }
+            value.to_owned()
+        }
+    };
     let mut portfolio_without_digest = Value::Object(portfolio.clone());
     {
         let Some(portfolio_object) = portfolio_without_digest.as_object_mut() else {

@@ -378,7 +378,7 @@ fn validate_request(
         || request.runs.len() > MAX_RUNS
     {
         return Err(invalid(
-            "request identity, closure, policy, locality, boundary, or run bounds are invalid",
+            "request identity, closure, policy, locality, boundary, or runs are invalid",
         ));
     }
     let mut ids = BTreeSet::new();
@@ -549,7 +549,7 @@ pub fn assure_prospective_release(
         .iter()
         .filter(|site| {
             site_state(site) == AssuranceDisposition::Blocked
-                && !request.required_site_order.contains(site)
+                && request.runs.iter().any(|run| &run.site_id == *site)
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -646,10 +646,16 @@ pub fn assure_prospective_release(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
+    let run_floor_unresolvable =
+        selected_run_order.len() + unresolved_run_order.len() < request.minimum_run_count as usize;
+    let run_floor_unresolved = selected_run_order.len() < request.minimum_run_count as usize;
+    let site_floor_unresolvable = selected_site_order.len() + unresolved_site_order.len()
+        < request.minimum_site_count as usize;
+    let site_floor_unresolved = selected_site_order.len() < request.minimum_site_count as usize;
     let disposition = if !request.policy_allow
         || !request.federation_allow
-        || selected_run_order.len() < request.minimum_run_count as usize
-        || selected_site_order.len() < request.minimum_site_count as usize
+        || run_floor_unresolvable
+        || site_floor_unresolvable
         || !missing_run_order.is_empty()
         || !missing_site_order.is_empty()
         || !blocked_run_order.is_empty()
@@ -660,6 +666,8 @@ pub fn assure_prospective_release(
         || !unresolved_site_order.is_empty()
         || !unresolved_artifact_order.is_empty()
         || selected_evidence_order.len() < evidence_order.len()
+        || run_floor_unresolved
+        || site_floor_unresolved
     {
         AssuranceDisposition::Unresolved
     } else {
