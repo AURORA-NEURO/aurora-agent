@@ -80,6 +80,7 @@ pub struct MultiStudyDecisionContextArtifact {
     pub epoch: u32,
     pub boundary: String,
     pub study_order: Vec<String>,
+    pub study_group: BTreeMap<String, String>,
     pub eligible_study_order: Vec<String>,
     pub omitted_study_order: Vec<String>,
     pub action_order: Vec<String>,
@@ -125,6 +126,7 @@ fn digest_input(output: &MultiStudyDecisionContextArtifact) -> serde_json::Value
         "epoch": output.epoch,
         "boundary": output.boundary,
         "study_order": output.study_order,
+        "study_group": output.study_group,
         "eligible_study_order": output.eligible_study_order,
         "omitted_study_order": output.omitted_study_order,
         "action_order": output.action_order,
@@ -147,6 +149,11 @@ impl MultiStudyDecisionContextArtifact {
             || self.epoch == 0
             || self.boundary != PRECLINICAL_BOUNDARY
             || !canonical(&self.study_order)
+            || self.study_group.keys().cloned().collect::<Vec<_>>() != self.study_order
+            || self
+                .study_group
+                .values()
+                .any(|group| group.trim().is_empty())
             || !canonical(&self.eligible_study_order)
             || !canonical(&self.omitted_study_order)
             || !canonical(&self.action_order)
@@ -210,13 +217,15 @@ impl MultiStudyDecisionContextArtifact {
             ));
         }
         let action_set = self.action_order.iter().cloned().collect::<BTreeSet<_>>();
-        if self
-            .frontier_order
-            .iter()
-            .any(|action| !action_set.contains(action))
-        {
+        if self.frontier_order.iter().any(|action_id| {
+            !action_set.contains(action_id)
+                || self.actions.iter().any(|entry| {
+                    entry.action.action_id == *action_id
+                        && entry.disposition != MultiStudyActionDisposition::Qualified
+                })
+        }) {
             return Err(MultiStudyContextError::InvalidOutput(
-                "frontier references an unknown action".into(),
+                "frontier references an unknown or unqualified action".into(),
             ));
         }
         let expected = ContentHash::of_value(&digest_input(self))
@@ -322,6 +331,10 @@ pub fn align_glioma_multi_study_context_artifacts(
         .iter()
         .map(|study| study.study_id.clone())
         .collect::<Vec<_>>();
+    let study_group = studies
+        .iter()
+        .map(|study| (study.study_id.clone(), study.independent_group.clone()))
+        .collect::<BTreeMap<_, _>>();
     let mut omissions = BTreeMap::new();
     let mut eligible = Vec::new();
     for study in &studies {
@@ -492,6 +505,7 @@ pub fn align_glioma_multi_study_context_artifacts(
         epoch: request.epoch,
         boundary: PRECLINICAL_BOUNDARY.into(),
         study_order,
+        study_group,
         eligible_study_order,
         omitted_study_order,
         action_order: actions

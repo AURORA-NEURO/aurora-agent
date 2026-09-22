@@ -611,29 +611,29 @@ use bioprism_research::{
     plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
     plan_glioma_instrument_recovery, plan_glioma_mechanism_closed_loop,
     plan_glioma_mechanism_multi_fidelity_control, plan_glioma_mechanism_validation,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
-    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
-    plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
-    plan_glioma_prospective_evidence_triage, plan_glioma_protocol_compensation,
-    plan_glioma_replication, plan_glioma_replication_closure_frontier,
-    plan_glioma_replication_continuation, plan_glioma_research_object_migration,
-    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_scientific_frontier, plan_glioma_sequential_design,
-    plan_glioma_validation_replication_gate, plan_glioma_workflow, plan_glioma_workflow_recovery,
-    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
-    promote_glioma_closed_loop_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
-    query_glioma_evidence_workbench, query_glioma_multimodal_researcher_workbench,
-    rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence,
-    reconcile_glioma_multisite_outcomes, register_glioma_spatial_samples,
-    replan_glioma_mechanism_feedback, replay_glioma_decision_context, revise_glioma_beliefs,
-    route_glioma_multimodal_evidence_gaps, schedule_glioma_computation_placement,
-    schedule_glioma_federated_evidence_batch, schedule_glioma_frontier_campaign,
-    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
-    simulate_glioma_protocol, simulate_glioma_protocol_scenario_ensemble,
-    smooth_glioma_mechanism_states, snapshot_glioma_evidence_stream,
-    stress_glioma_mechanism_robustness, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
-    synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_multi_study_workflow,
+    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
+    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
+    plan_glioma_power_stress_surface, plan_glioma_prospective_evidence_triage,
+    plan_glioma_protocol_compensation, plan_glioma_replication,
+    plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
+    plan_glioma_research_object_migration, plan_glioma_robust_active_learning,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
+    plan_glioma_sequential_design, plan_glioma_validation_replication_gate, plan_glioma_workflow,
+    plan_glioma_workflow_recovery, preflight_glioma_instrument, prioritize_glioma_evidence,
+    prioritize_knowledge_frontier, promote_glioma_closed_loop_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, query_glioma_evidence_workbench,
+    query_glioma_multimodal_researcher_workbench, rank_glioma_evidence_novelty,
+    reconcile_glioma_claim_evidence, reconcile_glioma_multisite_outcomes,
+    register_glioma_spatial_samples, replan_glioma_mechanism_feedback,
+    replay_glioma_decision_context, revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
+    schedule_glioma_computation_placement, schedule_glioma_federated_evidence_batch,
+    schedule_glioma_frontier_campaign, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
+    simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
+    snapshot_glioma_evidence_stream, stress_glioma_mechanism_robustness, surveil_glioma_evidence,
+    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, verify_glioma_evidence,
     verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
@@ -751,21 +751,22 @@ use bioprism_research::{
     MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
     MultiFidelityCampaignRequest, MultiFidelityControlRequest, MultiFidelityOptimizationRequest,
     MultiSiteOutcomeReconciliationRequest, MultiStudyContextRequest, MultiStudyKnowledgeRequest,
-    MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
-    MultimodalExecutionMode, MultimodalGapRouterRequest, MultimodalIngestionCampaignRequest,
-    MultimodalIngestionManifestRequest, MultimodalKnowledgeProtocolRequest,
-    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
-    MultimodalRequest, MultimodalResearchObjectRequest, MultimodalWorkbenchRequest,
-    MultimodalWorkflowRequest, NoveltyAdjudicationRequest, PathwayActivityDefinition,
-    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
-    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveBeliefCalibrationRequest,
-    ProspectiveKnowledgeRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
-    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
-    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
-    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
-    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
-    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
-    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    MultiStudyWorkflowRequest, MultichannelConcordanceRequest, MultichannelInput,
+    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalGapRouterRequest,
+    MultimodalIngestionCampaignRequest, MultimodalIngestionManifestRequest,
+    MultimodalKnowledgeProtocolRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
+    MultimodalReadinessRequest, MultimodalRequest, MultimodalResearchObjectRequest,
+    MultimodalWorkbenchRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
+    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
+    PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
+    ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
+    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
+    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
+    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
+    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2660,6 +2661,7 @@ impl Server {
             "glioma_multi_study_context_artifact" => {
                 self.glioma_multi_study_context_artifact(&arguments)
             }
+            "glioma_multi_study_workflow_plan" => self.glioma_multi_study_workflow_plan(&arguments),
             "glioma_federated_decision_context" => {
                 self.glioma_federated_decision_context(&arguments)
             }
@@ -11825,6 +11827,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multi-study context artifact: {error}"))
+    }
+
+    /// Compile a validated multi-study frontier into dependency-closed local research tasks.
+    /// The planner reserves declared resources and routes material, external, instrument, and
+    /// higher-autonomy effects through explicit approval/preflight gates; it never executes them.
+    fn glioma_multi_study_workflow_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultiStudyWorkflowRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multi_study_workflow_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multi-study workflow request: {error}"))?;
+        let plan = plan_glioma_multi_study_workflow(&request)
+            .map_err(|error| format!("glioma multi-study workflow planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "next_routes": [
+                "researcher_approval_gate",
+                "glioma_instrument_preflight",
+                "glioma_decision_operating_cycle"
+            ],
+            "guarantees": [
+                "only the digest-bound qualified multi-study frontier can enter dependency closure",
+                "replication uses distinct independent groups and incomplete quorums are never scheduled as complete",
+                "study-local resource budgets, data locality, autonomy ceilings, dependencies, and deterministic waves are explicit",
+                "material consumption, external/federated effects, instrument execution, and elevated autonomy require approval/preflight routing",
+                "negative, unknown, blocked, and deferred research states remain explicit; no task executes and no clinical decision is produced"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-study workflow plan: {error}"))
     }
 
     /// Aggregate site-local branch plans into a robust continual decision frontier. MCP receives
@@ -55728,6 +55762,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_decision_context",
                 "glioma_decision_context_artifact",
                 "glioma_multi_study_context_artifact",
+                "glioma_multi_study_workflow_plan",
                 "glioma_federated_decision_context",
                 "glioma_decision_context_replay",
                 "glioma_decision_branch_evidence",
@@ -66568,6 +66603,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultiStudyContextRequest1@1 with objective/epoch, study and group quorum, quality/support thresholds, compatibility contract, and DecisionContextArtifact1@1 inputs."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multi_study_workflow_plan",
+        "description": "Compile a digest-bound qualified glioma multi-study frontier into a deterministic, dependency-closed execution plan. Allocates actions only across adequately resourced independent study groups, enforces local-data and autonomy ceilings, reserves compute/material/instrument budgets, and routes material, external/federated, instrument, and elevated-autonomy effects through authorization and preflight gates. Negative/unknown/blocked/deferred states remain explicit; this is planning only and never executes an action or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultiStudyWorkflowRequest1@1 with the MultiStudyDecisionContextArtifact1@1, objective/epoch binding, independent-group replication quorum, limits, portfolio budget, and local per-study policy/resource/autonomy budgets."}
             },
             "required": ["request"]
         }

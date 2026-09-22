@@ -17,6 +17,7 @@ pub mod decision_loop_governor;
 pub mod federated_decision_context;
 pub mod mission_bridge;
 pub mod multi_study_context_artifact;
+pub mod multi_study_workflow;
 pub mod omission_certificate;
 pub mod value_calibration;
 pub mod value_optimizer;
@@ -107,6 +108,11 @@ pub use multi_study_context_artifact::{
     align_glioma_multi_study_context_artifacts, MultiStudyActionDisposition,
     MultiStudyContextDisposition, MultiStudyContextError, MultiStudyContextInput,
     MultiStudyContextRequest, MultiStudyDecisionAction, MultiStudyDecisionContextArtifact,
+};
+pub use multi_study_workflow::{
+    plan_glioma_multi_study_workflow, MultiStudyStudyBudget, MultiStudyTaskDisposition,
+    MultiStudyWorkflowDisposition, MultiStudyWorkflowError, MultiStudyWorkflowPlan,
+    MultiStudyWorkflowRequest, MultiStudyWorkflowTask,
 };
 pub use omission_certificate::{
     certify_decision_omissions, DecisionCoverageState, DecisionOmissionCertificate,
