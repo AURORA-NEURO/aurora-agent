@@ -21,6 +21,7 @@ pub mod mechanism_validation_protocol;
 pub mod multi_fidelity;
 pub mod multi_fidelity_campaign;
 pub mod operating_cycle;
+pub mod posterior_batch;
 pub mod power_reestimation;
 pub mod power_stress_surface;
 pub mod replication_continuation;
@@ -125,6 +126,11 @@ pub use multi_fidelity_campaign::{
     MultiFidelityCampaign, MultiFidelityCampaignDisposition, MultiFidelityCampaignError,
     MultiFidelityCampaignExecutor, MultiFidelityCampaignRequest, MultiFidelityCampaignRound,
     MultiFidelityCampaignStopReason, MultiFidelityExecutionFailure,
+};
+pub use posterior_batch::{
+    plan_glioma_posterior_batch, PosteriorBatchCandidate, PosteriorBatchCandidateDisposition,
+    PosteriorBatchDisposition, PosteriorBatchError, PosteriorBatchPlan, PosteriorBatchRequest,
+    PosteriorBatchScore, PosteriorBatchTarget, PosteriorPredictiveDraw,
 };
 
 pub use mechanism_validation::{

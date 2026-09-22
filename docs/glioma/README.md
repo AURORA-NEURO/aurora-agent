@@ -519,6 +519,7 @@ crates/research/src/glioma/
     p06_experiment_design/adaptive_allocation_campaign.rs P06 autonomous Beta-posterior replicate allocation with aggregate batch validation and posterior replanning
     p06_experiment_design/multi_fidelity.rs P06 cost-aware multi-fidelity surrogate optimization across screening, mechanistic, and validation models
     p06_experiment_design/active_learning.rs P06 uncertainty-aware kernel active learning for next-assay selection
+    p06_experiment_design/posterior_batch.rs P06 posterior-draw-based batch diversification with conditional information discounting
     p06_experiment_design/robust_active_learning.rs
                                              P06 model-ensemble lower-tail active learning under disagreement
     p06_experiment_design/multi_fidelity_campaign.rs
@@ -1491,6 +1492,24 @@ conservative residual uncertainty so contradictory evidence cannot be averaged a
 a diverse next assay batch under budget, risk, cost, replicate, and redundancy limits. The output
 is a next-batch plan only; institution-owned executors remain responsible for any physical or
 computational effect.
+
+The posterior batch selector (`plan_glioma_posterior_batch`) adds an alternate posterior-ensemble
+planning path within P06-F12's active-learning capability. It accepts weighted posterior draws, target predictions, and
+per-assay predictive outcome distributions, then greedily chooses a cost-adjusted batch that reduces
+pairwise posterior disagreement. A Bhattacharyya-overlap product is used as a deterministic
+conditional-independence surrogate so a second assay that predicts the same outcome split receives
+less marginal value than an orthogonal assay. Risk ceilings, replicate limits, cost, and unresolved
+posterior disagreement remain explicit. The institution supplies the fitted model and calibrated
+posterior inputs; this planner neither trains a glioma model nor executes assays.
+
+The design is informed by BATCHIE/PDBAL's posterior-draw, information-oriented batch selection
+([Tosh et al., Nature Communications, 2025](https://doi.org/10.1038/s41467-024-55287-7)), but it is
+not an implementation of PDBAL, does not inherit its theoretical guarantees, and has no empirical
+glioma validation. Its current comparison is only a deterministic synthetic two-endpoint fixture:
+the static top-two baseline selects duplicate endpoint-A assays, while conditional selection pairs
+endpoint A with endpoint B and reduces the fixture's posterior diameter. Real glioma utility requires
+retrospective replay on institutionally approved data and prospective validation against the local
+assay/model calibration before research use.
 
 P07 closes that planning loop with `execute_glioma_active_learning_campaign`. The campaign
 controller repeatedly invokes the P06 surrogate, sends each admitted candidate to a caller-owned
