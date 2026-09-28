@@ -42,8 +42,8 @@
 
     <h1>Install</h1>
 
-    <p class="lede">Five ways in, all local. The server makes no network requests and collects no data
-    on any of them.</p>
+    <p class="lede">Five local-first ways in. Local workflows run offline; there is no telemetry or
+    background network activity. Outbound source HTTP is denied by default.</p>
 
     <h2>Claude Desktop (.mcpb bundle)</h2>
 
@@ -112,8 +112,9 @@ cargo build --release --offline</code></pre>
     <p>The same build produces <code>bioprism</code> (a CLI with <code>--json</code> envelopes and a
     ten-exit-code retryability matrix — every failure code carries exactly one retry decision) and
     <code>bioprism-api</code>, a bounded local HTTP gateway for deployments that need a network
-    boundary. The gateway binds to an address you choose, loopback by default, and calls no external
-    services.</p>
+    boundary. The gateway binds to an address you choose, loopback by default. Explicit source HTTP
+    retrieval needs a repeated <code>--allow-http-origin &lt;host[:port]&gt;</code> startup option and a
+    caller plan that opts in; requests use unencrypted HTTP.</p>
 
     <div class="boundary">Research and developer infrastructure: it does not diagnose an individual,
     recommend treatment, triage care, enroll participants, or claim medical-device functionality.</div>

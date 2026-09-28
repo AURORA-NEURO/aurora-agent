@@ -1,6 +1,6 @@
 # aurora-agent-mcp
 
-Launcher for the **AURORA Agent (bioprism) MCP server** — a Rust, local-only
+Launcher for the **AURORA Agent (bioprism) MCP server** — a Rust, local-first
 [Model Context Protocol](https://modelcontextprotocol.io) server built around
 the FIBER decision-context compiler. Every compile returns a **Context
 Certificate**: a receipt stating exactly what was omitted from the context and
@@ -11,7 +11,7 @@ policies, and capability/operations evidence.
 
 - Source: <https://github.com/AURORA-NEURO/aurora-agent> (Apache-2.0)
 - MCP registry name: `io.github.MurariAmbati/aurora-agent`
-- Privacy: fully local, no network access, no data collection —
+- Privacy: no telemetry or background network activity; outbound source HTTP is denied by default and needs explicit operator and plan opt-in —
   [PRIVACY.md](https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md)
 
 ## Quick start

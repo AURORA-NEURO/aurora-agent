@@ -751,8 +751,12 @@ impl Server {
         {
             return Err("execution source_tool does not match retained source plan".into());
         }
-        let execution = execute_domain_evidence_source(self.root(), &plan)
-            .map_err(|error| format!("domain evidence source execution refused: {error}"))?;
+        let execution = execute_domain_evidence_source_with_http_policy(
+            self.root(),
+            &plan,
+            &self.domain_evidence_source_http_policy,
+        )
+        .map_err(|error| format!("domain evidence source execution refused: {error}"))?;
         let request = arguments.get("request").cloned().unwrap_or_else(|| {
             json!({
                 "connector_kind": plan.get("connector_kind"),

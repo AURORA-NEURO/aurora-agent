@@ -437,6 +437,19 @@ impl MissionJobState {
 
 impl ApiRouter {
     pub fn new(root: PathBuf, config: ApiConfig) -> Result<Self, String> {
+        Self::new_with_domain_evidence_source_http_origins(root, config, Vec::<String>::new())
+    }
+
+    /// Construct a router with an operator-owned allow-list for the explicit HTTP source reader.
+    ///
+    /// Empty origins are the default and refuse all outbound source HTTP. Entries are exact
+    /// `host` or `host:port` origins; each retained plan must separately enable HTTP and allow
+    /// the requested host.
+    pub fn new_with_domain_evidence_source_http_origins(
+        root: PathBuf,
+        config: ApiConfig,
+        allowed_http_origins: Vec<String>,
+    ) -> Result<Self, String> {
         config.validate()?;
         let mission_queue_policy = QueueAdmissionPolicy::new(
             config.mission_queue_max_jobs,
@@ -481,7 +494,8 @@ impl ApiRouter {
             Arc::clone(&workbench_registry),
             Arc::clone(&ci_provider_evidence_registry),
             Arc::clone(&artifact_registry),
-        );
+        )
+        .with_domain_evidence_source_http_origins(allowed_http_origins)?;
         let initialize = Request {
             id: Some(json!(0)),
             method: "initialize".into(),

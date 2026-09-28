@@ -1,17 +1,18 @@
 //! `bioprism-mcp` — stdio MCP server.
 //!
-//! Usage: `bioprism-mcp [--root <dir>]`
+//! Usage: `bioprism-mcp [--root <dir>] [--allow-http-origin <host[:port]>]...`
 //!
 //! The root defaults to the working directory and confines every path the server will read or
 //! write. stdout carries JSON-RPC only; audit records and diagnostics go to stderr.
 
-use bioprism_mcp::{Server, serve};
+use bioprism_mcp::{serve, Server};
 use std::io::{self, BufReader};
 use std::path::PathBuf;
 
 fn main() {
     let mut arguments = std::env::args().skip(1);
     let mut root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut allowed_http_origins = Vec::new();
 
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -22,12 +23,20 @@ fn main() {
                     std::process::exit(2);
                 }
             },
+            "--allow-http-origin" => match arguments.next() {
+                Some(value) => allowed_http_origins.push(value),
+                None => {
+                    eprintln!("--allow-http-origin requires a host or host:port");
+                    std::process::exit(2);
+                }
+            },
             "-h" | "--help" => {
                 println!(
                     "bioprism-mcp — Model Context Protocol server for the FIBER context compiler\n\n\
-                     USAGE\n  bioprism-mcp [--root <dir>]\n\n\
+                     USAGE\n  bioprism-mcp [--root <dir>] [--allow-http-origin <host[:port]>]...\n\n\
                      Speaks JSON-RPC 2.0 over newline-delimited stdio. Every path an agent supplies \n\
                      is resolved inside --root; absolute paths, traversal and symlink escapes are refused.\n\n\
+                     Outbound HTTP source retrieval is denied by default. Repeat --allow-http-origin <host[:port]> to approve exact plain-HTTP origins; each source plan must also opt in. HTTPS and redirects are refused.\n\n\
                      The client must initialize, acknowledge notifications/initialized, and then use\n\
                      tools/list, tools/call, resources/list or resources/read. fiber_compile returns\n\
                      a content-addressed refinement handle.\n\n\
@@ -272,7 +281,12 @@ fn main() {
         std::process::exit(2);
     }
 
-    let mut server = Server::new(root);
+    let mut server = Server::new(root)
+        .with_domain_evidence_source_http_origins(allowed_http_origins)
+        .unwrap_or_else(|error| {
+            eprintln!("invalid HTTP source origin configuration: {error}");
+            std::process::exit(2);
+        });
     let stdin = BufReader::new(io::stdin());
     let mut stdout = io::stdout();
 

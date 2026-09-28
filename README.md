@@ -1067,7 +1067,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,355,697 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,356,207 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 
@@ -1269,7 +1269,7 @@ neither; the registry it found them in is retained there as the audit's known-po
   workflow/autopilot/pipeline views (see [editors/vscode](editors/vscode/)).
 - **MCP registry**: listed as `io.github.MurariAmbati/aurora-agent` on
   [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io/).
-- Privacy: local program, no network, no data collection — [PRIVACY.md](PRIVACY.md).
+- Privacy: local-first, no telemetry or background network activity; outbound source HTTP is denied by default and requires operator and plan opt-in — [PRIVACY.md](PRIVACY.md).
 
 ## Documentation
 
@@ -1389,6 +1389,11 @@ handle, and *not* the evidence. An agent passes that handle to `fiber_refine` on
 is insufficient to act; the server recompiles and verifies the certificate digest before disclosing
 the requested layer. On the reference world L0 is ~204 estimated tokens against ~1,900 for the full
 section.
+
+The MCP server denies outbound source HTTP by default. To enable it, add one or more
+`--allow-http-origin <host[:port]>` options at startup; each retained source plan must also set
+`retrieval_policy.network` to `enabled` and include the requested host in `allowed_hosts`. The
+connector uses plain HTTP only and refuses HTTPS and redirects.
 
 The invariant that makes that safe: **omissions are reported at every layer**, so an agent that
 stops at L0 still knows what it does not have. Layering hides volume, never the fact of an
@@ -2543,10 +2548,12 @@ disclosures were sent, or controls are live. See docs/SECURITY_PROGRAM_AUDIT.md.
 
 ## Privacy Policy
 
-The MCP server and CLI are local programs: no network requests, no external
-services, no telemetry, and no collection, storage, or transmission of
-personal data. File access is confined to the data root you configure. Full
-policy: [PRIVACY.md](PRIVACY.md).
+The MCP server and CLI are local-first: no telemetry or background network
+activity. Explicit source HTTP retrieval is denied by default and requires an
+operator startup allow-list plus a caller plan that opts in; the request sends
+the selected locator path and query to that host over unencrypted HTTP. Local
+file access is confined to the configured data root. Full policy:
+[PRIVACY.md](PRIVACY.md).
 
 ## License
 

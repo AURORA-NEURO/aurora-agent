@@ -5,6 +5,7 @@ available as a library (`bioprism_api::ApiRouter`) and as the `bioprism-api` bin
 
 ```bash
 cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16-visible-bytes> \
+  --allow-http-origin evidence.example.org:80 \
   --mission-state .local/mission-state.json --mission-queue-state .local/mission-queue.json \
   --event-state .local/event-state.json \
   --reconciliation-state .local/reconciliation-state.json \
@@ -414,10 +415,16 @@ declared, a later `source_plan_digest`-bound intake is refused unless its canoni
 matches that expectation.
 `POST /v1/domain-evidence/sources/execute` is the controlled execution seam. It requires a retained
 plan, confines file reads to the configured server root, and permits plain HTTP only when the plan
-has `network: "enabled"` plus an exact `allowed_hosts` list. Reads enforce `max_bytes` and
+has `retrieval_policy.network: "enabled"` plus an `allowed_hosts` entry matching the request host,
+and the API server was started with `--allow-http-origin <host[:port]>` matching that exact origin.
+The operator allow-list is empty by default, so a caller-controlled plan cannot authorize its own
+network access. Reads enforce `max_bytes` and
 `timeout_ms`; redirects, HTTPS, credentials, unsupported connector families, traversal, and
 network-policy refusals remain explicit `refused` or `error` outcomes; the in-process kernel only
 executes `retrieval_mode: "content"`, leaving reference-only and metadata-only plans caller-managed.
+The equivalent MCP server option is `--allow-http-origin <host[:port]>`. Omitting the option denies
+all outbound source HTTP. Origins accept a host (port 80) or a host and exact port; this connector
+does not support TLS, redirects, or IPv6 literals.
 Successful reads expose an
 exact raw-byte digest and a separate canonical JSON response digest, then automatically retain the
 bounded response through `domain_evidence_intake` with both the plan identity and plan artifact

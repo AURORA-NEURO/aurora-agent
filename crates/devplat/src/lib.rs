@@ -453,7 +453,8 @@ pub use domain_evidence_source::{
     MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TIMEOUT_MS,
 };
 pub use domain_evidence_source_execution::{
-    execute_domain_evidence_source, DomainEvidenceSourceExecutionError,
+    execute_domain_evidence_source, execute_domain_evidence_source_with_http_policy,
+    DomainEvidenceSourceExecutionError, DomainEvidenceSourceHttpPolicy,
     DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW,
     MAX_DOMAIN_EVIDENCE_SOURCE_EXECUTION_HEADER_BYTES,
     MAX_DOMAIN_EVIDENCE_SOURCE_EXECUTION_PREVIEW_BYTES,

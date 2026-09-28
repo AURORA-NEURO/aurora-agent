@@ -231,7 +231,7 @@ pub(super) fn validate_mission_tool_arguments(
         digest,
         issues: Vec::new(),
     };
-    validate_mission_schema_value(arguments, schema, "", 0, &mut report);
+    validate_mission_schema_value(arguments, schema, schema, "", 0, &mut report);
     Ok(Some(report))
 }
 
@@ -453,18 +453,25 @@ fn mission_pattern_matches(value: &str, pattern: &str) -> Result<bool, &'static 
     Ok(input.next().is_none())
 }
 
-fn mission_schema_matches(value: &Value, schema: &Value) -> bool {
+fn mission_schema_matches(
+    value: &Value,
+    schema: &Value,
+    schema_root: &Value,
+    path: &str,
+    depth: usize,
+) -> bool {
     let mut report = MissionSchemaReport {
         digest: String::new(),
         issues: Vec::new(),
     };
-    validate_mission_schema_value(value, schema, "", 0, &mut report);
+    validate_mission_schema_value(value, schema, schema_root, path, depth, &mut report);
     report.issues.is_empty()
 }
 
 fn validate_mission_schema_value(
     value: &Value,
     schema: &Value,
+    schema_root: &Value,
     path: &str,
     depth: usize,
     report: &mut MissionSchemaReport,
@@ -489,6 +496,79 @@ fn validate_mission_schema_value(
         }
         return;
     };
+
+    if let Some(reference) = schema_object.get("$ref") {
+        let Some(reference) = reference.as_str() else {
+            push_mission_schema_issue(
+                report,
+                path,
+                "invalid_schema_ref",
+                "authoritative $ref must be a local JSON Pointer string",
+            );
+            return;
+        };
+        let Some(pointer) = reference.strip_prefix('#') else {
+            push_mission_schema_issue(
+                report,
+                path,
+                "unsupported_schema_ref",
+                "external schema references are refused",
+            );
+            return;
+        };
+        if !pointer.is_empty() && !pointer.starts_with('/') {
+            push_mission_schema_issue(
+                report,
+                path,
+                "invalid_schema_ref",
+                "local $ref must use a JSON Pointer fragment",
+            );
+            return;
+        }
+        let Some(target) = schema_root.pointer(pointer) else {
+            push_mission_schema_issue(
+                report,
+                path,
+                "unresolved_schema_ref",
+                format!("local schema reference {reference:?} does not resolve"),
+            );
+            return;
+        };
+        if !target.is_object() && !target.is_boolean() {
+            push_mission_schema_issue(
+                report,
+                path,
+                "invalid_schema_ref_target",
+                format!("local schema reference {reference:?} does not target a schema"),
+            );
+            return;
+        }
+        validate_mission_schema_value(value, target, schema_root, path, depth + 1, report);
+    }
+
+    if let Some(definitions) = schema_object.get("$defs") {
+        let Some(definitions) = definitions.as_object() else {
+            push_mission_schema_issue(
+                report,
+                path,
+                "invalid_schema_definitions",
+                "authoritative $defs must be an object of schemas",
+            );
+            return;
+        };
+        for (name, definition) in definitions {
+            if !definition.is_object() && !definition.is_boolean() {
+                push_mission_schema_issue(
+                    report,
+                    path,
+                    "invalid_schema_definition",
+                    format!(
+                        "authoritative $defs entry {name:?} must be a schema object or boolean"
+                    ),
+                );
+            }
+        }
+    }
 
     if let Some(types) = schema_object.get("type") {
         let matches = types
@@ -566,13 +646,13 @@ fn validate_mission_schema_value(
 
     if let Some(all_of) = schema_object.get("allOf").and_then(Value::as_array) {
         for branch in all_of {
-            validate_mission_schema_value(value, branch, path, depth + 1, report);
+            validate_mission_schema_value(value, branch, schema_root, path, depth + 1, report);
         }
     }
     if let Some(any_of) = schema_object.get("anyOf").and_then(Value::as_array) {
         if !any_of
             .iter()
-            .any(|branch| mission_schema_matches(value, branch))
+            .any(|branch| mission_schema_matches(value, branch, schema_root, path, depth + 1))
         {
             push_mission_schema_issue(
                 report,
@@ -585,7 +665,7 @@ fn validate_mission_schema_value(
     if let Some(one_of) = schema_object.get("oneOf").and_then(Value::as_array) {
         let matches = one_of
             .iter()
-            .filter(|branch| mission_schema_matches(value, branch))
+            .filter(|branch| mission_schema_matches(value, branch, schema_root, path, depth + 1))
             .count();
         if matches != 1 {
             push_mission_schema_issue(
@@ -597,7 +677,7 @@ fn validate_mission_schema_value(
         }
     }
     if let Some(not_schema) = schema_object.get("not") {
-        if mission_schema_matches(value, not_schema) {
+        if mission_schema_matches(value, not_schema, schema_root, path, depth + 1) {
             push_mission_schema_issue(
                 report,
                 path,
@@ -628,6 +708,7 @@ fn validate_mission_schema_value(
                     validate_mission_schema_value(
                         child,
                         child_schema,
+                        schema_root,
                         &child_path,
                         depth + 1,
                         report,
@@ -641,6 +722,7 @@ fn validate_mission_schema_value(
                 validate_mission_schema_value(
                     &Value::String(name.clone()),
                     property_names_schema,
+                    schema_root,
                     &child_path,
                     depth + 1,
                     report,
@@ -663,6 +745,7 @@ fn validate_mission_schema_value(
                     Value::Object(_) => validate_mission_schema_value(
                         child,
                         additional_schema,
+                        schema_root,
                         &child_path,
                         depth + 1,
                         report,
@@ -735,7 +818,14 @@ fn validate_mission_schema_value(
         if let Some(item_schema) = schema_object.get("items") {
             for (index, item) in array.iter().enumerate() {
                 let item_path = mission_schema_path(path, &index.to_string());
-                validate_mission_schema_value(item, item_schema, &item_path, depth + 1, report);
+                validate_mission_schema_value(
+                    item,
+                    item_schema,
+                    schema_root,
+                    &item_path,
+                    depth + 1,
+                    report,
+                );
             }
         }
     }
@@ -1884,9 +1974,9 @@ impl Server {
 
 #[cfg(test)]
 mod schema_tests {
-    use super::{MissionSchemaReport, mission_pattern_matches, validate_mission_schema_value};
+    use super::{mission_pattern_matches, validate_mission_schema_value, MissionSchemaReport};
     use super::{Request, Server};
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
     use std::collections::BTreeSet;
     use std::path::PathBuf;
 
@@ -1895,7 +1985,7 @@ mod schema_tests {
             digest: String::new(),
             issues: Vec::new(),
         };
-        validate_mission_schema_value(value, schema, "", 0, &mut report);
+        validate_mission_schema_value(value, schema, schema, "", 0, &mut report);
         report
     }
 
@@ -1964,6 +2054,18 @@ mod schema_tests {
                         }
                     }
                 }
+                "$defs" => {
+                    if let Some(definitions) = value.as_object() {
+                        for (name, definition) in definitions {
+                            collect_schema_contracts(
+                                definition,
+                                &format!("{path}/$defs/{name}"),
+                                keywords,
+                                patterns,
+                            );
+                        }
+                    }
+                }
                 "items" | "additionalProperties" | "propertyNames" | "not" => {
                     collect_schema_contracts(
                         value,
@@ -1993,13 +2095,11 @@ mod schema_tests {
     fn catalogue_pattern_subset_matches_digest_date_and_tool_names() {
         assert!(mission_pattern_matches(&"a".repeat(64), "^[0-9a-f]{64}$").unwrap());
         assert!(!mission_pattern_matches(&"A".repeat(64), "^[0-9a-f]{64}$").unwrap());
-        assert!(
-            mission_pattern_matches(
-                "2026-09-25T18:42:10Z",
-                "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
-            )
-            .unwrap()
-        );
+        assert!(mission_pattern_matches(
+            "2026-09-25T18:42:10Z",
+            "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        )
+        .unwrap());
         assert!(mission_pattern_matches("2045-01-31", "^\\d{4}-\\d{2}-\\d{2}$").unwrap());
         assert!(mission_pattern_matches("workspace_tool_2", "^[A-Za-z0-9_]+$").unwrap());
         assert!(!mission_pattern_matches("invalid-tool", "^[A-Za-z0-9_]+$").unwrap());
@@ -2012,12 +2112,55 @@ mod schema_tests {
             &json!("left"),
             &json!({"type": "string", "pattern": "^(left|right)$"}),
         );
-        assert!(
-            report
-                .issues
-                .iter()
-                .any(|issue| issue.code == "unsupported_pattern")
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "unsupported_pattern"));
+    }
+
+    #[test]
+    fn local_schema_refs_enforce_targets_and_refuse_unsafe_or_recursive_refs() {
+        let schema = json!({
+            "type": "object",
+            "properties": {"id": {"$ref": "#/$defs/identifier"}},
+            "$defs": {"identifier": {"type": "string", "minLength": 3}}
+        });
+        assert!(validate(&json!({"id": "abc"}), &schema).issues.is_empty());
+        assert!(validate(&json!({"id": "ab"}), &schema)
+            .issues
+            .iter()
+            .any(|issue| issue.code == "min_length"));
+
+        let unresolved = validate(&json!("value"), &json!({"$ref": "#/$defs/missing"}));
+        assert!(unresolved
+            .issues
+            .iter()
+            .any(|issue| issue.code == "unresolved_schema_ref"));
+        let external = validate(
+            &json!("value"),
+            &json!({"$ref": "https://example.org/schema"}),
         );
+        assert!(external
+            .issues
+            .iter()
+            .any(|issue| issue.code == "unsupported_schema_ref"));
+        let scalar_target = validate(
+            &json!("value"),
+            &json!({"$defs": {"not_a_schema": "string"}, "$ref": "#/$defs/not_a_schema"}),
+        );
+        assert!(scalar_target
+            .issues
+            .iter()
+            .any(|issue| issue.code == "invalid_schema_ref_target"));
+
+        let recursive = json!({
+            "$ref": "#/$defs/self",
+            "$defs": {"self": {"$ref": "#/$defs/self"}}
+        });
+        assert!(validate(&json!(null), &recursive)
+            .issues
+            .iter()
+            .any(|issue| issue.code == "schema_depth_exceeded"));
     }
 
     #[test]
@@ -2039,12 +2182,10 @@ mod schema_tests {
                 .count()
                 >= 3
         );
-        assert!(
-            invalid
-                .issues
-                .iter()
-                .any(|issue| issue.path == "/stage-b" && issue.code == "min_length")
-        );
+        assert!(invalid
+            .issues
+            .iter()
+            .any(|issue| issue.path == "/stage-b" && issue.code == "min_length"));
     }
 
     #[test]
@@ -2053,17 +2194,17 @@ mod schema_tests {
             &json!({"unexpected": true}),
             &json!({"type": "object", "additionalProperties": false}),
         );
-        assert!(
-            report
-                .issues
-                .iter()
-                .any(|issue| issue.code == "additional_property")
-        );
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "additional_property"));
     }
 
     #[test]
     fn every_embedded_schema_keyword_and_pattern_is_supported() {
         let supported = [
+            "$defs",
+            "$ref",
             "additionalProperties",
             "allOf",
             "anyOf",
@@ -2131,12 +2272,10 @@ mod schema_tests {
             }),
         );
         assert_eq!(bad_digest["result"]["isError"], true);
-        assert!(
-            bad_digest["result"]["content"][0]["text"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("pattern_mismatch")
-        );
+        assert!(bad_digest["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("pattern_mismatch"));
 
         let bad_key = call_tool(
             &mut server,
@@ -2148,12 +2287,10 @@ mod schema_tests {
             }),
         );
         assert_eq!(bad_key["result"]["isError"], true);
-        assert!(
-            bad_key["result"]["content"][0]["text"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("min_length at /stage_input_paths/")
-        );
+        assert!(bad_key["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("min_length at /stage_input_paths/"));
 
         let bad_value = call_tool(
             &mut server,
@@ -2165,11 +2302,9 @@ mod schema_tests {
             }),
         );
         assert_eq!(bad_value["result"]["isError"], true);
-        assert!(
-            bad_value["result"]["content"][0]["text"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("min_length at /stage_input_paths/stage-a")
-        );
+        assert!(bad_value["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("min_length at /stage_input_paths/stage-a"));
     }
 }

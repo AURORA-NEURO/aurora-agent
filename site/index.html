@@ -10,12 +10,12 @@
 <link rel="stylesheet" href="style.css">
 <meta property="og:type" content="website">
 <meta property="og:title" content="AURORA Agent — a decision-context compiler for the Model Context Protocol">
-<meta property="og:description" content="Context engineering as a compiler pass: the smallest decision-sufficient evidence region, plus a Context Certificate for every omission. 893 MCP tools, fully local, Apache-2.0.">
+<meta property="og:description" content="Context engineering as a compiler pass: the smallest decision-sufficient evidence region, plus a Context Certificate for every omission. 893 MCP tools, local-first, Apache-2.0.">
 <meta property="og:url" content="https://aurora-neuro.github.io/aurora-agent/">
 <meta property="og:site_name" content="AURORA Agent">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="AURORA Agent — a decision-context compiler for the Model Context Protocol">
-<meta name="twitter:description" content="Context engineering as a compiler pass: the smallest decision-sufficient evidence region, plus a Context Certificate for every omission. 893 MCP tools, fully local, Apache-2.0.">
+<meta name="twitter:description" content="Context engineering as a compiler pass: the smallest decision-sufficient evidence region, plus a Context Certificate for every omission. 893 MCP tools, local-first, Apache-2.0.">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -50,7 +50,7 @@
     {
       "@type": "Question",
       "name": "Does AURORA Agent need network access?",
-      "acceptedAnswer": { "@type": "Answer", "text": "No. It is a local program: no network requests, no external services, no telemetry, no data collection. The optional HTTP gateway binds to an address you choose (loopback by default) and calls no external services." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Local workflows run offline and the software has no telemetry or background network activity. Outbound source HTTP is denied by default; an operator must allow an exact origin at startup and a caller's retained plan must also opt in. The HTTP gateway binds to an address you choose (loopback by default)." }
     },
     {
       "@type": "Question",
@@ -129,8 +129,8 @@
       layer still knows what it does not have — layering hides volume, never the fact of an omission.</li>
       <li><strong>Independent verification.</strong> A certificate can be read and verified without linking
       the engine that produced it.</li>
-      <li><strong>Fully local.</strong> No network requests, no external services, no telemetry, no data
-      collection — <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">privacy policy</a>.</li>
+      <li><strong>Local-first.</strong> No telemetry or background network activity. Explicit source HTTP
+      is denied by default and needs operator and plan opt-in — <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">privacy policy</a>.</li>
     </ul>
 
     <h2>Autonomous workflows, with receipts</h2>

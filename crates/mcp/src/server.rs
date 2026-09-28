@@ -148,8 +148,8 @@ use bioprism_devplat::{
     build_dashboard, build_delivery_receipt, build_domain_acquisition_catalogue,
     build_domain_workflow_catalogue, build_domain_workflow_portfolio,
     build_workflow_execution_evidence, classify_domain_report_bridge,
-    execute_domain_evidence_source, handoff_domain_evidence_provider, instantiate_domain_workflow,
-    mission_claim_lineage_with_review, normalize_ci_provider_payload,
+    execute_domain_evidence_source_with_http_policy, handoff_domain_evidence_provider,
+    instantiate_domain_workflow, mission_claim_lineage_with_review, normalize_ci_provider_payload,
     normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
     plan_domain_evidence_source, plan_mission, query_adapter_execution_evidence,
     query_domain_evidence_provider_external_payload_evidence, reconcile_domain_workflow,
@@ -170,16 +170,17 @@ use bioprism_devplat::{
     DomainEvidenceProviderExternalPayloadReceiptRequest,
     DomainEvidenceProviderExternalPayloadReplayRequest, DomainEvidenceProviderHandoffRequest,
     DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
-    DomainWorkflowReconciliationRegistry, EngineeringManifest, EngineeringPlanRequest,
-    EvidenceBundleRegistry, ExecutionProvenanceRequest, MissionEvaluatorCatalogue,
-    MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
-    MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
-    MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
-    SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
-    WorkbenchReportRegistry, WorkbenchRequest, WorkbenchVerificationRequest,
-    WorkflowExecutionEvidenceQuery, WorkflowExecutionEvidenceRegistry,
-    ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION, ADAPTER_DOMAIN_REPORT_WORKFLOW,
-    CAPABILITY_SCHEMA_VERSION, DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
+    DomainEvidenceSourceHttpPolicy, DomainWorkflowReconciliationRegistry, EngineeringManifest,
+    EngineeringPlanRequest, EvidenceBundleRegistry, ExecutionProvenanceRequest,
+    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest,
+    MissionEvaluatorReplayRequest, MissionEvaluatorReviewRequest, MissionReport, MissionRequest,
+    MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
+    OperationalReadinessManifest, ReleasePipelineManifest, SandboxManifest, SandboxRuntimeManifest,
+    SecurityPrivacyManifest, SecurityProgramManifest, WorkbenchReportRegistry, WorkbenchRequest,
+    WorkbenchVerificationRequest, WorkflowExecutionEvidenceQuery,
+    WorkflowExecutionEvidenceRegistry, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
+    ADAPTER_DOMAIN_REPORT_WORKFLOW, CAPABILITY_SCHEMA_VERSION,
+    DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
     DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID, DOMAIN_ACQUISITION_SCHEMA_VERSION,
     DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_DECISION_READINESS_SCHEMA_VERSION,
     DOMAIN_DECISION_READINESS_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
@@ -1166,6 +1167,7 @@ pub struct Server {
     workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
     ci_provider_evidence_registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
     artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    domain_evidence_source_http_policy: DomainEvidenceSourceHttpPolicy,
     brain_control_state: Arc<Mutex<BrainControlState>>,
     glioma_action_executor: Option<Arc<Mutex<Box<dyn GliomaActionExecutor + Send>>>>,
 }
@@ -1267,6 +1269,7 @@ impl Server {
             workbench_registry,
             ci_provider_evidence_registry,
             artifact_registry,
+            domain_evidence_source_http_policy: DomainEvidenceSourceHttpPolicy::default(),
             brain_control_state: Arc::new(Mutex::new(BrainControlState::default())),
             glioma_action_executor: None,
         }
@@ -1274,6 +1277,22 @@ impl Server {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Allow explicit source retrieval from operator-approved plain HTTP origins.
+    ///
+    /// Plans remain caller-controlled and cannot grant themselves network access. Each request
+    /// must also opt into networking and name the requested host in its own plan.
+    pub fn with_domain_evidence_source_http_origins<I, S>(
+        mut self,
+        origins: I,
+    ) -> Result<Self, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.domain_evidence_source_http_policy = DomainEvidenceSourceHttpPolicy::new(origins)?;
+        Ok(self)
     }
 
     pub fn lifecycle(&self) -> Lifecycle {

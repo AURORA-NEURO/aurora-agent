@@ -735,6 +735,121 @@ fn domain_evidence_source_execute_route_reads_file_and_restores_intake() {
 }
 
 #[test]
+fn domain_evidence_source_http_is_denied_without_operator_origin_approval() {
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let root: std::path::PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect();
+    let router = ApiRouter::new(root, ApiConfig::default()).unwrap();
+    let source = router.handle(request(
+        "POST",
+        "/v1/domain-evidence/sources",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "api-source-http-default-deny",
+            "source_tool": "modality_catalog",
+            "connector_kind": "generic_http",
+            "locator_kind": "uri",
+            "locator": format!("http://127.0.0.1:{}/evidence", address.port()),
+            "retrieval_mode": "content",
+            "retrieval_policy": {
+                "network": "enabled",
+                "allowed_hosts": ["127.0.0.1"],
+                "max_bytes": 4096
+            },
+            "does_not_claim": ["source truth"]
+        }),
+    ));
+    assert_eq!(source.status, 200);
+    let source: Value = serde_json::from_slice(&source.body).unwrap();
+    let executed = router.handle(request(
+        "POST",
+        "/v1/domain-evidence/sources/execute",
+        json!({"source_plan_digest": source["plan_digest"].clone()}),
+    ));
+    assert_eq!(executed.status, 200);
+    let executed: Value = serde_json::from_slice(&executed.body).unwrap();
+    assert_eq!(executed["outcome"], "refused");
+    assert!(
+        executed["execution_result"]["response"]["retrieval"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("operator's server-level allow-list")
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "default policy opened a socket"
+    );
+}
+
+#[test]
+fn domain_evidence_source_http_requires_both_plan_and_operator_approval() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    let server_thread = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 4096];
+        let _ = stream.read(&mut request).unwrap();
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}",
+            )
+            .unwrap();
+    });
+
+    let root: std::path::PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect();
+    let router = ApiRouter::new_with_domain_evidence_source_http_origins(
+        root,
+        ApiConfig::default(),
+        vec![format!("127.0.0.1:{}", address.port())],
+    )
+    .unwrap();
+    let source = router.handle(request(
+        "POST",
+        "/v1/domain-evidence/sources",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "api-source-http-operator-allow",
+            "source_tool": "modality_catalog",
+            "connector_kind": "generic_http",
+            "locator_kind": "uri",
+            "locator": format!("http://127.0.0.1:{}/evidence", address.port()),
+            "retrieval_mode": "content",
+            "retrieval_policy": {
+                "network": "enabled",
+                "allowed_hosts": ["127.0.0.1"],
+                "max_bytes": 4096
+            },
+            "does_not_claim": ["source truth"]
+        }),
+    ));
+    assert_eq!(source.status, 200);
+    let source: Value = serde_json::from_slice(&source.body).unwrap();
+    let executed = router.handle(request(
+        "POST",
+        "/v1/domain-evidence/sources/execute",
+        json!({"source_plan_digest": source["plan_digest"].clone()}),
+    ));
+    assert_eq!(executed.status, 200);
+    let executed: Value = serde_json::from_slice(&executed.body).unwrap();
+    assert_eq!(executed["outcome"], "observed");
+    assert_eq!(executed["execution_result"]["http_status"], 200);
+    assert_eq!(
+        executed["execution_result"]["response"]["retrieval"]["body"]["ok"],
+        true
+    );
+    server_thread.join().unwrap();
+}
+
+#[test]
 fn domain_workflow_routes_expose_catalogue_and_scoped_preflight() {
     let reconciliation_path = test_state_path("domain-workflow-auto-reconciliation");
     let config = ApiConfig {
