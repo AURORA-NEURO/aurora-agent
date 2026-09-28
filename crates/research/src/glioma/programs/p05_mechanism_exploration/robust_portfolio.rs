@@ -10,8 +10,8 @@
 
 use super::counterfactual::{CounterfactualDisposition, CounterfactualIntervention};
 use super::ensemble_counterfactual::{
-    CounterfactualEnsembleRequest, CounterfactualModel, EnsembleDirection,
-    simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_counterfactual_ensemble, CounterfactualEnsembleRequest, CounterfactualModel,
+    EnsembleDirection,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_ids::ContentHash;
@@ -602,8 +602,12 @@ pub fn plan_glioma_robust_intervention_portfolio(
     for _depth in 0..request.max_selected {
         let mut expanded = Vec::new();
         for state in &beam {
-            for position in state.next_index..eligible_indices.len() {
-                let score_index = eligible_indices[position];
+            for (position, score_index) in eligible_indices
+                .iter()
+                .copied()
+                .enumerate()
+                .skip(state.next_index)
+            {
                 let score = &scored[score_index];
                 let candidate = candidate_by_id[score.candidate_id.as_str()];
                 if state.groups.contains(&candidate.redundancy_group)
@@ -827,12 +831,10 @@ mod tests {
         let output =
             plan_glioma_robust_intervention_portfolio(&request(), &models, &candidates).unwrap();
         assert_eq!(output.selected_order, vec!["safe"]);
-        assert!(
-            output
-                .negative_evidence
-                .iter()
-                .any(|item| item.contains("risk-ceiling-blocked"))
-        );
+        assert!(output
+            .negative_evidence
+            .iter()
+            .any(|item| item.contains("risk-ceiling-blocked")));
         output.validate().unwrap();
     }
 

@@ -778,9 +778,12 @@ mod tests {
     ) {
         let action = action();
         let preflight = admitted_plan(&action);
-        let plan =
-            compile_glioma_instrument_protocol_binding(&preflight, &[action.clone()], &manifest())
-                .expect("compatible command should bind");
+        let plan = compile_glioma_instrument_protocol_binding(
+            &preflight,
+            std::slice::from_ref(&action),
+            &manifest(),
+        )
+        .expect("compatible command should bind");
         (action, preflight, plan)
     }
 
@@ -813,7 +816,11 @@ mod tests {
         let mut wrong_unit = manifest();
         wrong_unit.commands[0].parameters[0].unit = "second_milli".into();
         assert!(matches!(
-            compile_glioma_instrument_protocol_binding(&preflight, &[action.clone()], &wrong_unit),
+            compile_glioma_instrument_protocol_binding(
+                &preflight,
+                std::slice::from_ref(&action),
+                &wrong_unit,
+            ),
             Err(InstrumentProtocolBindingError::UnsupportedAction { .. })
         ));
         let mut missing_command = manifest();

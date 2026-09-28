@@ -166,7 +166,13 @@ fn saturation_milli(used: u64, capacity: u64) -> Option<u16> {
     if capacity == 0 {
         None
     } else {
-        Some(((used.saturating_mul(1_000) / capacity).min(1_000)) as u16)
+        Some(
+            (used
+                .saturating_mul(1_000)
+                .checked_div(capacity)
+                .unwrap_or(0)
+                .min(1_000)) as u16,
+        )
     }
 }
 
@@ -413,7 +419,8 @@ fn summarize_run(
     } else {
         CampaignRunDisposition::Successful
     };
-    let mut candidates = [(
+    let mut candidates = [
+        (
             CampaignBottleneck::QueueLatency,
             queue_latency_ticks.unwrap_or(0),
         ),
@@ -440,7 +447,8 @@ fn summarize_run(
         (
             CampaignBottleneck::FailureBurden,
             u64::from(failed_task_count) * 1_000,
-        )];
+        ),
+    ];
     candidates.sort_by(|left, right| {
         right
             .1

@@ -505,7 +505,11 @@ pub fn analyze_glioma_pathway_activity(
         } else if edge_weight_total == 0 {
             0
         } else {
-            (edge_weight_agree.saturating_mul(1_000) / edge_weight_total).min(1_000) as u16
+            edge_weight_agree
+                .saturating_mul(1_000)
+                .checked_div(edge_weight_total)
+                .unwrap_or(0)
+                .min(1_000) as u16
         };
         let edge_gate = !request.require_edge_consistency
             || definition.edges.is_empty()

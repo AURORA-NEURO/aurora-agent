@@ -82,7 +82,7 @@ pub struct FederatedBenchmarkWorkflowBudget {
 pub enum FederatedBenchmarkWorkflowEventKind {
     StageSucceeded {
         stage: FederatedWorkflowStage,
-        aggregate: Option<FederatedBenchmarkSite>,
+        aggregate: Option<Box<FederatedBenchmarkSite>>,
     },
     StageFailed {
         stage: FederatedWorkflowStage,
@@ -615,7 +615,7 @@ pub fn execute_glioma_multisite_benchmark_workflow(
                         ignored_event_order.insert(event.event_id);
                         continue;
                     }
-                    aggregate_by_site.insert(site.site_id.clone(), aggregate);
+                    aggregate_by_site.insert(site.site_id.clone(), *aggregate);
                     query_count = query_count.saturating_add(1);
                 } else if aggregate.is_some() {
                     let record = stage_record_mut(site, stage);
@@ -954,7 +954,7 @@ mod tests {
                 site_id,
                 FederatedBenchmarkWorkflowEventKind::StageSucceeded {
                     stage: FederatedWorkflowStage::AggregateQuery,
-                    aggregate: Some(aggregate(site_id, study_id, 620)),
+                    aggregate: Some(Box::new(aggregate(site_id, study_id, 620))),
                 },
             ),
             event(
@@ -1031,7 +1031,7 @@ mod tests {
                 "site-a",
                 FederatedBenchmarkWorkflowEventKind::StageSucceeded {
                     stage: FederatedWorkflowStage::AggregateQuery,
-                    aggregate: Some(aggregate("site-a", "study-a", 650)),
+                    aggregate: Some(Box::new(aggregate("site-a", "study-a", 650))),
                 },
             ),
         ]);
@@ -1155,7 +1155,7 @@ mod tests {
                 "site-a",
                 FederatedBenchmarkWorkflowEventKind::StageSucceeded {
                     stage: FederatedWorkflowStage::AggregateQuery,
-                    aggregate: Some(aggregate("site-b", "study-b", 650)),
+                    aggregate: Some(Box::new(aggregate("site-b", "study-b", 650))),
                 },
             ),
         ];

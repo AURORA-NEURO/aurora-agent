@@ -354,14 +354,11 @@ pub fn plan_federation_capacity(
                 )
             })
             .unwrap_or((None, Vec::new(), 0));
-    let disposition = if recommended.is_none() {
-        CapacityPlanDisposition::Blocked
-    } else if recommended.unwrap().demand_met {
-        CapacityPlanDisposition::Scheduled
-    } else if recommended.unwrap().quorum_satisfied {
-        CapacityPlanDisposition::Constrained
-    } else {
-        CapacityPlanDisposition::Unresolved
+    let disposition = match recommended {
+        None => CapacityPlanDisposition::Blocked,
+        Some(window) if window.demand_met => CapacityPlanDisposition::Scheduled,
+        Some(window) if window.quorum_satisfied => CapacityPlanDisposition::Constrained,
+        Some(_) => CapacityPlanDisposition::Unresolved,
     };
     let mut plan = FederationCapacityPlan {
         feature_id: FEATURE_ID.into(),

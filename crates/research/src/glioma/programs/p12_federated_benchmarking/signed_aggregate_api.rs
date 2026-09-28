@@ -239,10 +239,9 @@ pub fn submit_glioma_signed_aggregate(
     } else if request.policy_scope != request.required_policy_scope {
         reasons.push(AggregateSubmissionReason::PolicyScopeMismatch);
         AggregateSubmissionStatus::Rejected
-    } else if request.signer_id.as_deref().is_none_or(|id| !safe_text(id)) {
-        reasons.push(AggregateSubmissionReason::MissingSignature);
-        AggregateSubmissionStatus::Rejected
-    } else if request.signature_digest.is_none() {
+    } else if request.signer_id.as_deref().is_none_or(|id| !safe_text(id))
+        || request.signature_digest.is_none()
+    {
         reasons.push(AggregateSubmissionReason::MissingSignature);
         AggregateSubmissionStatus::Rejected
     } else if !request.signature_valid {

@@ -302,7 +302,10 @@ fn profile_distance_milli(
     if shared_prior == 0 {
         0
     } else {
-        (weighted_distance / shared_prior).min(u128::from(u64::MAX)) as u64
+        weighted_distance
+            .checked_div(shared_prior)
+            .unwrap_or(0)
+            .min(u128::from(u64::MAX)) as u64
     }
 }
 

@@ -427,7 +427,7 @@ mod tests {
             build_glioma_federation_operations_snapshot(&request(vec![site("site-a")])).unwrap();
         assert_eq!(snapshot.ready_site_order, vec!["site-a"]);
         assert_eq!(snapshot.failover_candidate_order, vec!["site-a"]);
-        assert!(snapshot.local_payloads_exchanged == false);
+        assert!(!snapshot.local_payloads_exchanged);
         assert!(!snapshot.dispatch_permitted);
     }
 

@@ -964,7 +964,10 @@ fn score_candidate(
     let reduction_milli = if prior_variance == 0 {
         0
     } else {
-        (reduction.saturating_mul(u128::from(LIKELIHOOD_MILLI)) / prior_variance)
+        reduction
+            .saturating_mul(u128::from(LIKELIHOOD_MILLI))
+            .checked_div(prior_variance)
+            .unwrap_or(0)
             .min(u128::from(LIKELIHOOD_MILLI)) as u16
     };
     let reduction_per_cost_million = u64::from(reduction_milli).saturating_mul(PROBABILITY_MILLION)
@@ -1552,9 +1555,11 @@ impl LineagePropagationAcquisitionPolicy {
             let expected_reduction_milli = if total_prior_variance_q == 0 {
                 0
             } else {
-                (expected_realized_gain_q.saturating_mul(u128::from(LIKELIHOOD_MILLI))
-                    / total_prior_variance_q)
-                    .min(u128::from(LIKELIHOOD_MILLI)) as u16
+                (expected_realized_gain_q
+                    .saturating_mul(u128::from(LIKELIHOOD_MILLI))
+                    .checked_div(total_prior_variance_q)
+                    .unwrap_or(0))
+                .min(u128::from(LIKELIHOOD_MILLI)) as u16
             };
             priorities.insert(
                 (first.stratum_id.clone(), first.action.action_id.clone()),
@@ -2180,7 +2185,13 @@ mod tests {
             2,
         )
         .unwrap();
-        assert_eq!(policy.plan(&[candidate.clone()]).unwrap().target, target);
+        assert_eq!(
+            policy
+                .plan(std::slice::from_ref(&candidate))
+                .unwrap()
+                .target,
+            target
+        );
 
         let wrong_state_order = LineagePropagationAcquisitionTarget {
             destination_state_order: vec!["mes_like".into(), "npc_like".into()],

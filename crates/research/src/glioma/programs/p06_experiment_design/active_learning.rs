@@ -495,9 +495,7 @@ pub fn plan_glioma_active_learning(
             .get(&candidate.candidate_id)
             .copied()
             .unwrap_or(0);
-        if candidate.risk_milli > request.max_risk_milli {
-            blocked.push(candidate.candidate_id.clone());
-        } else if count >= candidate.max_replicates {
+        if candidate.risk_milli > request.max_risk_milli || count >= candidate.max_replicates {
             blocked.push(candidate.candidate_id.clone());
         } else if candidate.cost_units > request.budget_units {
             blocked.push(candidate.candidate_id.clone());
@@ -591,9 +589,8 @@ pub fn plan_glioma_active_learning(
             groups: BTreeSet::new(),
             spent: 0,
             utility: 0,
-        });
+    });
     let selected = best.selections;
-    let groups = best.groups;
     let remaining_budget = request.budget_units.saturating_sub(best.spent);
     for (index, _) in &eligible {
         let candidate = ordered_candidates[*index];
@@ -603,10 +600,6 @@ pub fn plan_glioma_active_learning(
         if candidate.cost_units > remaining_budget {
             blocked.push(candidate.candidate_id.clone());
             negative.insert(format!("{}:budget-blocked", candidate.candidate_id));
-        } else if groups.contains(&candidate.redundancy_group) {
-            deferred.push(candidate.candidate_id.clone());
-        } else if selected.len() >= request.max_selections {
-            deferred.push(candidate.candidate_id.clone());
         } else {
             deferred.push(candidate.candidate_id.clone());
         }
@@ -1158,11 +1151,10 @@ mod tests {
         let mut request = request();
         request.min_uncertainty_milli = 100;
         let plan = plan_glioma_active_learning(&request, &candidates(), &observations).unwrap();
-        assert!(
-            plan.uncertainty
-                .iter()
-                .any(|item| item.starts_with("matrix:"))
-        );
+        assert!(plan
+            .uncertainty
+            .iter()
+            .any(|item| item.starts_with("matrix:")));
         assert!(plan.unresolved_order.contains(&"matrix".into()));
         assert_eq!(plan.disposition, ActiveLearningDisposition::Partial);
     }
@@ -1170,16 +1162,14 @@ mod tests {
     #[test]
     fn missing_observations_are_explicit_exploration_not_confidence() {
         let plan = plan_glioma_active_learning(&request(), &candidates(), &[]).unwrap();
-        assert!(
-            plan.scores
-                .iter()
-                .all(|score| score.nearest_observation_count == 0)
-        );
-        assert!(
-            plan.scores
-                .iter()
-                .all(|score| score.rationale.contains("no local observations"))
-        );
+        assert!(plan
+            .scores
+            .iter()
+            .all(|score| score.nearest_observation_count == 0));
+        assert!(plan
+            .scores
+            .iter()
+            .all(|score| score.rationale.contains("no local observations")));
     }
 
     #[test]

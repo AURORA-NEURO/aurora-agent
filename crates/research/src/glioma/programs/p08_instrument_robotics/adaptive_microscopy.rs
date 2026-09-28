@@ -788,7 +788,7 @@ fn validate_outcome_model(
             candidate.candidate_id
         )));
     }
-    for state_index in 0..candidate.state_posterior.len() {
+    for (state_index, state_id) in state_ids.iter().enumerate() {
         let likelihood_sum = candidate
             .outcome_model
             .iter()
@@ -797,7 +797,7 @@ fn validate_outcome_model(
         if likelihood_sum != 1_000 {
             return Err(AdaptiveMicroscopyError::InvalidRequest(format!(
                 "candidate {} outcome likelihoods for state {} sum to {likelihood_sum}, not 1000",
-                candidate.candidate_id, state_ids[state_index]
+                candidate.candidate_id, state_id
             )));
         }
     }
@@ -866,11 +866,11 @@ fn scientific_estimate(candidate: &AdaptiveMicroscopyCandidate) -> (u16, u16) {
             .saturating_mul(1_000)
             + 32_768)
             / 65_536;
-    let uncertainty = if maximum_entropy_milli == 0 {
-        0
-    } else {
-        ((prior_entropy_milli.saturating_mul(1_000) / maximum_entropy_milli).min(1_000)) as u16
-    };
+    let uncertainty = (prior_entropy_milli
+        .saturating_mul(1_000)
+        .checked_div(maximum_entropy_milli)
+        .unwrap_or(0)
+        .min(1_000)) as u16;
     (gain as u16, uncertainty)
 }
 
@@ -1088,12 +1088,10 @@ pub fn execute_glioma_adaptive_microscopy_round<E: InstrumentExecutor>(
     }
 
     if eligible.is_empty() {
-        let (disposition, stop_reason, guidance) = if any_frontier_quality_information_candidate
-            && !any_frontier_candidate_fits_budget
+        let (disposition, stop_reason, guidance) = if (any_frontier_quality_information_candidate
+            && !any_frontier_candidate_fits_budget)
+            || (any_quality_information_candidate && !any_candidate_fits_budget)
         {
-            (AdaptiveMicroscopyDisposition::DoseBudgetExhausted, AdaptiveMicroscopyStopReason::DoseBudgetExhausted,
-                "No quality- and information-qualified field fits the remaining dose budget; analyze existing frames or request a separately reviewed budget change.")
-        } else if any_quality_information_candidate && !any_candidate_fits_budget {
             (AdaptiveMicroscopyDisposition::DoseBudgetExhausted, AdaptiveMicroscopyStopReason::DoseBudgetExhausted,
                 "No quality- and information-qualified field fits the remaining dose budget; analyze existing frames or request a separately reviewed budget change.")
         } else if !any_frontier_candidate {

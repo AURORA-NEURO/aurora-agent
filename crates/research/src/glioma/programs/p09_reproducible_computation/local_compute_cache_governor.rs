@@ -391,9 +391,7 @@ pub fn govern_glioma_compute_cache(
     invalid_order.sort();
     let mut reason_order = reasons.into_iter().collect::<Vec<_>>();
     reason_order.sort();
-    let mut negative_evidence = negative_evidence;
     negative_evidence.sort();
-    let mut uncertainty = uncertainty;
     uncertainty.sort();
     let mut decision = ComputeCacheDecision {
         feature_id: FEATURE_ID.into(),

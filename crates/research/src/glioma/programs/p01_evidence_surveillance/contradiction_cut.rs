@@ -675,18 +675,16 @@ mod tests {
         .unwrap();
         assert_eq!(output.disposition, ContradictionCutDisposition::Covered);
         assert!(output.conflicts[0].covered_by_audit);
-        assert!(
-            output
-                .next_action_order
-                .iter()
-                .any(|item| item == "audit:contradict")
-        );
+        assert!(output
+            .next_action_order
+            .iter()
+            .any(|item| item == "audit:contradict"));
         output.validate().unwrap();
     }
 
     #[test]
     fn cut_beam_prefers_exact_resolution_over_partial_independent_touches() {
-        let values = vec![
+        let values = [
             evidence("hub", EvidencePolarity::Support, "claim-a", 2),
             evidence("cheap-a", EvidencePolarity::Support, "claim-a", 1),
             evidence("cheap-b", EvidencePolarity::Support, "claim-b", 1),
@@ -786,12 +784,10 @@ mod tests {
             ContradictionCutDisposition::BudgetBlocked
         );
         assert_eq!(output.unresolved_claim_order, vec!["claim-a"]);
-        assert!(
-            output
-                .uncertainty
-                .iter()
-                .any(|item| item.contains("uncovered"))
-        );
+        assert!(output
+            .uncertainty
+            .iter()
+            .any(|item| item.contains("uncovered")));
     }
 
     #[test]

@@ -7,14 +7,14 @@
 //! synthetic action artifacts are not biological observations.
 
 use super::adaptive_execution::{
-    AdaptiveFrontierExecution, AdaptiveFrontierExecutionDisposition,
-    AdaptiveFrontierExecutionError, AdaptiveFrontierExecutionRequest,
-    execute_glioma_adaptive_frontier,
+    execute_glioma_adaptive_frontier, AdaptiveFrontierExecution,
+    AdaptiveFrontierExecutionDisposition, AdaptiveFrontierExecutionError,
+    AdaptiveFrontierExecutionRequest,
 };
 use super::adaptive_frontier::AdaptiveFrontierRequest;
 use super::synthesis::{
-    InterpretationSynthesis, InterpretationSynthesisDisposition, InterpretationSynthesisError,
-    InterpretationSynthesisRequest, synthesize_glioma_interpretation,
+    synthesize_glioma_interpretation, InterpretationSynthesis, InterpretationSynthesisDisposition,
+    InterpretationSynthesisError, InterpretationSynthesisRequest,
 };
 use crate::glioma::programs::p07_protocol_simulation::{
     DryRunGliomaActionExecutor, GliomaActionExecutor,
@@ -741,36 +741,6 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
-    struct RetryOnceInterpretationExecutor {
-        attempts: u8,
-    }
-
-    impl crate::glioma::programs::p07_protocol_simulation::GliomaActionExecutor
-        for RetryOnceInterpretationExecutor
-    {
-        fn execute_action(
-            &mut self,
-            candidate: &crate::glioma_engine::GliomaActionCandidate,
-            attempt: u8,
-        ) -> Result<
-            crate::glioma::programs::p07_protocol_simulation::ActionExecutionResult,
-            crate::glioma::programs::p07_protocol_simulation::ActionExecutionFailure,
-        > {
-            self.attempts = self.attempts.saturating_add(1);
-            if attempt == 1 {
-                return Err(
-                    crate::glioma::programs::p07_protocol_simulation::ActionExecutionFailure {
-                        reason: "transient interpretation worker loss".into(),
-                        retryable: true,
-                    },
-                );
-            }
-            crate::glioma::programs::p07_protocol_simulation::DryRunGliomaActionExecutor
-                .execute_action(candidate, attempt)
-        }
-    }
-
     #[test]
     fn dry_run_executes_one_round_then_refuses_to_fabricate_reanalysis() {
         let request = request();
@@ -786,12 +756,10 @@ mod tests {
             first.rounds[0].execution.as_ref().unwrap().disposition,
             AdaptiveFrontierExecutionDisposition::Executed
         );
-        assert!(
-            first
-                .negative_evidence
-                .iter()
-                .any(|item| item.contains("synthetic-dry-run"))
-        );
+        assert!(first
+            .negative_evidence
+            .iter()
+            .any(|item| item.contains("synthetic-dry-run")));
     }
 
     #[test]

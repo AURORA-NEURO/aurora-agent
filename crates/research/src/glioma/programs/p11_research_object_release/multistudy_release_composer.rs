@@ -321,11 +321,9 @@ pub fn compose_glioma_multistudy_release(
         if study_order.len() != studies.len() {
             continue;
         }
-        let relation = if relations.contains(&MappingRelation::NonEquivalent)
-        {
+        let relation = if relations.contains(&MappingRelation::NonEquivalent) {
             MappingRelation::NonEquivalent
-        } else if relations.contains(&MappingRelation::Comparable)
-        {
+        } else if relations.contains(&MappingRelation::Comparable) {
             MappingRelation::Comparable
         } else {
             MappingRelation::Exact
@@ -356,9 +354,7 @@ pub fn compose_glioma_multistudy_release(
             limitation_order: study.limitations.clone(),
         })
         .collect::<Vec<_>>();
-    let disposition = if pooled.is_empty() && !non_pooled.is_empty() && unavailable.is_empty() {
-        ComparativeReleaseDisposition::Partial
-    } else if !unavailable.is_empty() {
+    let disposition = if (pooled.is_empty() && !non_pooled.is_empty()) || !unavailable.is_empty() {
         ComparativeReleaseDisposition::Partial
     } else {
         ComparativeReleaseDisposition::Comparable

@@ -1146,7 +1146,7 @@ mod tests {
             selected_replicates: 0,
             rationale: "test score".into(),
         };
-        let scores = vec![
+        let scores = [
             score("left", 1_000),
             score("duplicate", 1_000),
             score("complementary", 950),
@@ -1191,12 +1191,10 @@ mod tests {
             output.disposition,
             InformationDesignDisposition::NoInformativeActions
         );
-        assert!(
-            output
-                .negative_evidence
-                .iter()
-                .any(|item| item.contains("risk-ceiling"))
-        );
+        assert!(output
+            .negative_evidence
+            .iter()
+            .any(|item| item.contains("risk-ceiling")));
     }
 
     #[test]

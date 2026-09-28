@@ -249,7 +249,10 @@ fn weighted_mad(values: &[&ValidValue], center: i64) -> u64 {
     if total_weight == 0 {
         0
     } else {
-        (weighted_deviation / total_weight).min(u128::from(u64::MAX)) as u64
+        weighted_deviation
+            .checked_div(total_weight)
+            .unwrap_or(0)
+            .min(u128::from(u64::MAX)) as u64
     }
 }
 

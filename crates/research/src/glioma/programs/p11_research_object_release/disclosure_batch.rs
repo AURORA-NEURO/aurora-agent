@@ -5,9 +5,9 @@
 //! research identities or dispatches work to an executor.
 
 use super::disclosure_panel::{
-    ReleaseDisclosurePanel, ReleaseDisclosurePanelDisposition, ReleaseDisclosurePanelError,
-    ReleaseDisclosurePanelRequest, ReleaseDisclosureStudyInput,
-    reconcile_glioma_release_disclosure_panel,
+    reconcile_glioma_release_disclosure_panel, ReleaseDisclosurePanel,
+    ReleaseDisclosurePanelDisposition, ReleaseDisclosurePanelError, ReleaseDisclosurePanelRequest,
+    ReleaseDisclosureStudyInput,
 };
 use bioprism_foundation::PRECLINICAL_BOUNDARY;
 use bioprism_ids::ContentHash;
@@ -346,7 +346,7 @@ mod tests {
         ExpectedDisclosureStudy, ReleaseDisclosurePanelRequest,
     };
     use crate::glioma::programs::p11_research_object_release::disclosure_register::compile_glioma_release_disclosure_register;
-    use crate::glioma::release::{ResearchObjectRequest, build_research_object_manifest};
+    use crate::glioma::release::{build_research_object_manifest, ResearchObjectRequest};
     use crate::glioma_engine::LocalArtifactRef;
 
     fn hash(label: &str) -> ContentHash {
@@ -511,17 +511,22 @@ mod tests {
 
         let mut mismatch = request.clone();
         mismatch.expected_panels[0].request_digest = hash("wrong-panel-request");
-        assert!(
-            reconcile_glioma_release_disclosure_batch(&mismatch, &[valid_input.clone()]).is_err()
-        );
+        assert!(reconcile_glioma_release_disclosure_batch(
+            &mismatch,
+            std::slice::from_ref(&valid_input)
+        )
+        .is_err());
 
         let mut duplicate = request.clone();
         duplicate.expected_panels[1].item_id = duplicate.expected_panels[0].item_id.clone();
         assert!(reconcile_glioma_release_disclosure_batch(&duplicate, &[]).is_err());
 
         let mut batch =
-            reconcile_glioma_release_disclosure_batch(&request, &[valid_input.clone()]).unwrap();
+            reconcile_glioma_release_disclosure_batch(&request, std::slice::from_ref(&valid_input))
+                .unwrap();
         batch.items[0].panel_digest = Some(hash("forged-panel"));
-        assert!(batch.validate(&request, &[valid_input]).is_err());
+        assert!(batch
+            .validate(&request, std::slice::from_ref(&valid_input))
+            .is_err());
     }
 }

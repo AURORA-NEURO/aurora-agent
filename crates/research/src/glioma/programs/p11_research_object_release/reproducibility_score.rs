@@ -339,7 +339,8 @@ pub fn score_glioma_reproducibility_completeness(
             .iter()
             .map(|score| u32::from(score.score_milli))
             .sum::<u32>()
-            / total_weight) as u16
+            .checked_div(total_weight)
+            .unwrap_or(0)) as u16
     };
     let mut sensitivity = Vec::new();
     for score in &scores {
@@ -352,8 +353,9 @@ pub fn score_glioma_reproducibility_completeness(
                 .filter(|other| other.dimension != score.dimension)
                 .map(|other| u32::from(other.score_milli))
                 .sum::<u32>()
-                / remaining)
-                .min(1_000)) as u16
+                .checked_div(remaining)
+                .unwrap_or(0))
+            .min(1_000)) as u16
         };
         sensitivity.push(ReproducibilitySensitivity {
             dimension: score.dimension,
@@ -382,9 +384,9 @@ pub fn score_glioma_reproducibility_completeness(
     };
     profile.disposition = if !profile.hard_blocker_order.is_empty() {
         ReproducibilityCompletenessDisposition::Blocked
-    } else if profile.overall_score_milli < request.minimum_score_milli {
-        ReproducibilityCompletenessDisposition::Partial
-    } else if !profile.warning_order.is_empty() {
+    } else if profile.overall_score_milli < request.minimum_score_milli
+        || !profile.warning_order.is_empty()
+    {
         ReproducibilityCompletenessDisposition::Partial
     } else {
         ReproducibilityCompletenessDisposition::Complete

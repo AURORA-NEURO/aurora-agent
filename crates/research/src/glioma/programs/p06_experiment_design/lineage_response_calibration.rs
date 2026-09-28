@@ -533,7 +533,7 @@ fn project_joint_probabilities(
         .map(|probability| f64::from(*probability))
         .collect::<Vec<_>>();
     for _ in 0..256 {
-        for row in 0..rows {
+        for (row, &row_marginal) in row_marginals.iter().enumerate() {
             let start = row * columns;
             let total = table[start..start + columns].iter().sum::<f64>();
             if total <= 0.0 {
@@ -541,7 +541,7 @@ fn project_joint_probabilities(
                     "joint-table projection encountered an empty row".into(),
                 ));
             }
-            let scale = f64::from(row_marginals[row]) / total;
+            let scale = f64::from(row_marginal) / total;
             for value in &mut table[start..start + columns] {
                 *value *= scale;
             }
@@ -1289,48 +1289,6 @@ impl LineageAssayJointResponseCalibrationRun {
     }
 }
 
-#[cfg(test)]
-mod joint_projection_tests {
-    use super::*;
-
-    #[test]
-    fn controlled_rounding_preserves_sparse_exact_marginals() {
-        let table = project_joint_probabilities(&[996, 1, 1, 2], &[1, 999], &[500, 500]).unwrap();
-        assert_eq!(
-            table.iter().map(|value| u32::from(*value)).sum::<u32>(),
-            1_000
-        );
-        assert_eq!(u32::from(table[0]) + u32::from(table[1]), 1);
-        assert_eq!(u32::from(table[2]) + u32::from(table[3]), 999);
-        assert_eq!(u32::from(table[0]) + u32::from(table[2]), 500);
-        assert_eq!(u32::from(table[1]) + u32::from(table[3]), 500);
-    }
-
-    #[test]
-    fn independent_coupling_keeps_rare_outcome_marginals_exact() {
-        let rows = [1, 249, 750];
-        let columns = [1, 499, 500];
-        let table = independent_joint_probabilities(&rows, &columns).unwrap();
-        for (row, expected) in rows.iter().enumerate() {
-            assert_eq!(
-                table[row * columns.len()..(row + 1) * columns.len()]
-                    .iter()
-                    .map(|value| u32::from(*value))
-                    .sum::<u32>(),
-                u32::from(*expected)
-            );
-        }
-        for (column, expected) in columns.iter().enumerate() {
-            assert_eq!(
-                (0..rows.len())
-                    .map(|row| u32::from(table[row * columns.len() + column]))
-                    .sum::<u32>(),
-                u32::from(*expected)
-            );
-        }
-    }
-}
-
 fn prevalence_probabilities(
     training: &[LineageAssayCalibrationObservation],
     outcomes: &[String],
@@ -1595,5 +1553,47 @@ impl LineageAssayResponseCalibrationRun {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod joint_projection_tests {
+    use super::*;
+
+    #[test]
+    fn controlled_rounding_preserves_sparse_exact_marginals() {
+        let table = project_joint_probabilities(&[996, 1, 1, 2], &[1, 999], &[500, 500]).unwrap();
+        assert_eq!(
+            table.iter().map(|value| u32::from(*value)).sum::<u32>(),
+            1_000
+        );
+        assert_eq!(u32::from(table[0]) + u32::from(table[1]), 1);
+        assert_eq!(u32::from(table[2]) + u32::from(table[3]), 999);
+        assert_eq!(u32::from(table[0]) + u32::from(table[2]), 500);
+        assert_eq!(u32::from(table[1]) + u32::from(table[3]), 500);
+    }
+
+    #[test]
+    fn independent_coupling_keeps_rare_outcome_marginals_exact() {
+        let rows = [1, 249, 750];
+        let columns = [1, 499, 500];
+        let table = independent_joint_probabilities(&rows, &columns).unwrap();
+        for (row, expected) in rows.iter().enumerate() {
+            assert_eq!(
+                table[row * columns.len()..(row + 1) * columns.len()]
+                    .iter()
+                    .map(|value| u32::from(*value))
+                    .sum::<u32>(),
+                u32::from(*expected)
+            );
+        }
+        for (column, expected) in columns.iter().enumerate() {
+            assert_eq!(
+                (0..rows.len())
+                    .map(|row| u32::from(table[row * columns.len() + column]))
+                    .sum::<u32>(),
+                u32::from(*expected)
+            );
+        }
     }
 }

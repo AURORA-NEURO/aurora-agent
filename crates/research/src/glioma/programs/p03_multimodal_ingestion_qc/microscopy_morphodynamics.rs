@@ -1015,7 +1015,12 @@ pub fn analyze_glioma_microscopy_morphodynamics(
     let brier = if brier_count == 0 {
         2_000
     } else {
-        ((brier_sum.saturating_mul(1_000) / brier_count / 1_000_000).min(2_000)) as u16
+        ((brier_sum
+            .saturating_mul(1_000)
+            .checked_div(brier_count)
+            .unwrap_or(0)
+            / 1_000_000)
+            .min(2_000)) as u16
     };
     let outcome_model = (0..state_order.len())
         .map(|predicted_index| MicroscopyOutcomeLikelihood {

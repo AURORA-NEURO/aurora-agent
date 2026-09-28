@@ -347,12 +347,14 @@ impl StateStratifiedCampaign {
     }
 }
 
+type StateStratumIndex = BTreeMap<String, usize>;
+
 fn validate_inputs(
     request: &StateStratifiedCampaignRequest,
     strata: &[GliomaResearchStratum],
     candidates: &[StratifiedAssayCandidate],
     initial: &[StratifiedAssayObservation],
-) -> Result<(BTreeMap<String, usize>, BTreeMap<String, usize>), StateStratifiedCampaignError> {
+) -> Result<(StateStratumIndex, StateStratumIndex), StateStratifiedCampaignError> {
     if request.min_assays_per_stratum == 0
         || request.min_assays_per_stratum > request.campaign.max_rounds
         || request.campaign.max_rounds > MAX_ROUNDS

@@ -1123,7 +1123,7 @@ mod tests {
         );
         assert_eq!(run.instrument_task_order, vec!["capture-edge"]);
         assert_eq!(run.completed_prerequisite_order, vec!["prepare-model"]);
-        assert_eq!(run.preflight.as_ref().unwrap().dispatch_permitted, true);
+        assert!(run.preflight.as_ref().unwrap().dispatch_permitted);
         assert_eq!(run.protocol_binding.as_ref().unwrap().manifest_revision, 7);
         assert_eq!(
             run.execution.as_ref().unwrap().completed_order,

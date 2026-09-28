@@ -674,7 +674,7 @@ mod tests {
             output.disposition,
             ContextInvarianceDisposition::ContextSensitive
         );
-        assert_eq!(output.fields[0].context_sensitive, true);
+        assert!(output.fields[0].context_sensitive);
         assert!(!output.counterexample_order.is_empty());
     }
 

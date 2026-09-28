@@ -603,9 +603,8 @@ pub fn analyze_stratified_causal_adjustment(
         && sensitivity_robust;
     let disposition = if eligible_summary.len() < request.min_eligible_strata
         || batch_leave_one_out_order.is_empty()
+        || sensitivity_crosses_practical_null
     {
-        StratifiedCausalDisposition::Unresolved
-    } else if sensitivity_crosses_practical_null {
         StratifiedCausalDisposition::Unresolved
     } else if qualified {
         StratifiedCausalDisposition::Qualified
@@ -756,11 +755,9 @@ mod tests {
             StratifiedCausalActionKind::AddMissingStratumCoverage
         );
         assert!(output.excluded_stratum_order.contains(&"high".to_string()));
-        assert!(
-            output
-                .uncertainty
-                .contains(&"eligible-stratum-floor-not-met".to_string())
-        );
+        assert!(output
+            .uncertainty
+            .contains(&"eligible-stratum-floor-not-met".to_string()));
     }
 
     #[test]

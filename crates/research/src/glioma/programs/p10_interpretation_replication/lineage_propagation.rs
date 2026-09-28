@@ -538,14 +538,15 @@ fn design_rank(gram: &[Vec<i128>]) -> usize {
         }
         matrix.swap(rank, pivot);
         let divisor = matrix[rank][column];
-        for col in column..n {
-            matrix[rank][col] /= divisor;
+        for value in matrix[rank].iter_mut().skip(column) {
+            *value /= divisor;
         }
-        for row in 0..n {
-            if row != rank {
-                let multiplier = matrix[row][column];
-                for col in column..n {
-                    matrix[row][col] -= multiplier * matrix[rank][col];
+        let pivot_tail = matrix[rank][column..].to_vec();
+        for (row_index, row) in matrix.iter_mut().enumerate() {
+            if row_index != rank {
+                let multiplier = row[column];
+                for (value, pivot_value) in row.iter_mut().skip(column).zip(&pivot_tail) {
+                    *value -= multiplier * pivot_value;
                 }
             }
         }
@@ -574,12 +575,12 @@ fn fit_operator(
             continue;
         }
         let weight = i128::from(weight);
-        for from in 0..states {
-            for other in 0..states {
-                gram[from][other] += i128::from(row.x[from]) * i128::from(row.x[other]) * weight;
+        for (from, &x_from) in row.x.iter().enumerate() {
+            for (gram_value, &x_other) in gram[from].iter_mut().zip(&row.x) {
+                *gram_value += i128::from(x_from) * i128::from(x_other) * weight;
             }
-            for to in 0..states {
-                cross[to][from] += i128::from(row.x[from]) * i128::from(row.y[to]) * weight;
+            for (cross_row, &y_to) in cross.iter_mut().zip(&row.y) {
+                cross_row[from] += i128::from(x_from) * i128::from(y_to) * weight;
             }
         }
     }
@@ -863,7 +864,9 @@ fn quantile_interval(mut values: Vec<i64>, confidence_milli: u16) -> PpmInterval
     let last = values.len().saturating_sub(1);
     let tail = u64::from(1_000 - confidence_milli) / 2;
     let lower = (last as u64 * tail / 1_000) as usize;
-    let upper = (last as u64 * (1_000 - tail)).div_ceil(1_000).min(last as u64) as usize;
+    let upper = (last as u64 * (1_000 - tail))
+        .div_ceil(1_000)
+        .min(last as u64) as usize;
     PpmInterval {
         lower: values[lower],
         upper: values[upper],
@@ -1016,7 +1019,7 @@ fn build_operator(
             })
             .collect::<Vec<_>>();
         let mut destinations = Vec::with_capacity(count);
-        for to in 0..count {
+        for (to, to_state) in states.iter().enumerate() {
             let share_samples = samples
                 .iter()
                 .map(|sample| {
@@ -1040,7 +1043,7 @@ fn build_operator(
                 normalize_to_shares(&full_column)[to]
             };
             destinations.push(PropagationDestinationShare {
-                to_state: states[to].clone(),
+                to_state: to_state.clone(),
                 share_ppm: share,
                 bootstrap_interval_ppm: quantile_interval(share_samples, confidence),
             });
@@ -1121,8 +1124,12 @@ fn forecast(
                 1_000_000
             }
         } else {
-            (predicted_total.abs_diff(observed_total) * u128::from(SCALE) / observed_total)
-                .min(u128::from(SCALE)) as u32
+            (predicted_total
+                .abs_diff(observed_total)
+                .saturating_mul(u128::from(SCALE))
+                .checked_div(observed_total)
+                .unwrap_or(0))
+            .min(u128::from(SCALE)) as u32
         };
         unit_composition
             .entry(trajectory.unit.clone())

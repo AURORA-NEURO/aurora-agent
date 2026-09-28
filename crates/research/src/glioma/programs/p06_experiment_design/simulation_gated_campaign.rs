@@ -1553,7 +1553,7 @@ mod tests {
             informative.clone(),
             complementary.clone(),
         ];
-        let calibration_runs = vec![
+        let calibration_runs = [
             calibrated_model(
                 &analysis,
                 &uninformative,
@@ -1702,7 +1702,7 @@ mod tests {
         let mut mismatch_interpreter = SignalInterpreter;
         let mismatch = execute_glioma_simulation_gated_assay_campaign_with_lineage_acquisition(
             &request,
-            &[stratum.clone()],
+            std::slice::from_ref(&stratum),
             &candidates,
             &[StratifiedAssayObservation {
                 stratum_id: "mes_like".into(),
