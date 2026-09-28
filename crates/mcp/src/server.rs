@@ -20,52 +20,51 @@ use crate::federated_quality_control_assurance::{
     CONTRACT_VERSION as FEDERATED_QUALITY_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_QUALITY_CONTROL_FEATURE_ID,
 };
-use crate::rpc::{Request, Response, code};
+use crate::rpc::{code, Request, Response};
 use crate::tool_definitions::find_tool_definition;
 pub use crate::tool_definitions::tool_definitions;
 use bioprism_adapter::{
-    AdapterPlanRequest, AdapterRegistry, Source, SourceProvenance, TabularAdapter, TabularProfile,
-    certify,
+    certify, AdapterPlanRequest, AdapterRegistry, Source, SourceProvenance, TabularAdapter,
+    TabularProfile,
 };
 use bioprism_adaptive::{
     AdaptivePanel, Candidate as AdaptiveCandidate, CapabilityId as AdaptiveCapabilityId,
 };
 use bioprism_atlas::{
-    Atlas, CapabilityId, CoverageReport, FailureRecord, WeightingPolicy,
-    composite as atlas_composite,
+    composite as atlas_composite, Atlas, CapabilityId, CoverageReport, FailureRecord,
+    WeightingPolicy,
 };
-use bioprism_atlashub::{CiReport, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID, ResultUnderReview};
+use bioprism_atlashub::{CiReport, ResultUnderReview, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID};
 use bioprism_atlasx::{
-    ATLASX_MECHANISM_CONTRACT_VERSION, ATLASX_MECHANISM_FEATURE_ID, ATLASX_SCHEMA_VERSION,
-    DEFINED_HERE, DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, NAMED_NEVER_DEFINED,
-    Surface as AtlasxSurface, Visibility as AtlasxVisibility, audit as atlasx_audit,
-    browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
+    audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
+    DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
+    Visibility as AtlasxVisibility, ATLASX_MECHANISM_CONTRACT_VERSION, ATLASX_MECHANISM_FEATURE_ID,
+    ATLASX_SCHEMA_VERSION, DEFINED_HERE, NAMED_NEVER_DEFINED,
 };
 use bioprism_backends::{Budget as InfluenceBudget, QueryRegion, RegionFactor};
 use bioprism_benchcompiler::counterfactual::pair as benchmark_counterfactual_pair;
 use bioprism_benchcompiler::{
-    Assertion as BenchmarkAssertion, BenchInstance as BenchmarkBenchInstance,
-    CandidateAction as BenchmarkCandidateAction, CandidateActionSet as BenchmarkCandidateActionSet,
-    Compilation as BenchmarkCompilation, ConstraintRecord as BenchmarkConstraintRecord,
-    ContaminationRisk as BenchmarkContaminationRisk, ContextItem as BenchmarkContextItem,
-    ExpectedResponse as BenchmarkExpectedResponse, ExposureLedger as BenchmarkExposureLedger,
-    Instance as BenchmarkInstance, InterestSignature as BenchmarkInterestSignature,
-    Intervention as BenchmarkIntervention, LeakProbe as BenchmarkLeakProbe,
-    MinimizeBudget as BenchmarkMinimizeBudget, NoRealismReview as BenchmarkNoRealismReview,
-    PanelRun as BenchmarkPanelRun, ProposedOracle as BenchmarkProposedOracle,
-    SYNTHESIS_ORDER as BENCHMARK_SYNTHESIS_ORDER, analyse as analyse_benchmark,
-    assess_contamination as benchmark_assess_contamination,
+    analyse as analyse_benchmark, assess_contamination as benchmark_assess_contamination,
     assign_holdout as benchmark_assign_holdout, boundaries as benchmark_boundaries,
     calibrate as benchmark_calibrate, compile as benchmark_compile, contrast as benchmark_contrast,
     deduplicate as benchmark_deduplicate, effective_diversity as benchmark_effective_diversity,
     episodes as benchmark_episodes, failure_card as benchmark_failure_card,
-    repetitions as benchmark_repetitions,
+    repetitions as benchmark_repetitions, Assertion as BenchmarkAssertion,
+    BenchInstance as BenchmarkBenchInstance, CandidateAction as BenchmarkCandidateAction,
+    CandidateActionSet as BenchmarkCandidateActionSet, Compilation as BenchmarkCompilation,
+    ConstraintRecord as BenchmarkConstraintRecord, ContaminationRisk as BenchmarkContaminationRisk,
+    ContextItem as BenchmarkContextItem, ExpectedResponse as BenchmarkExpectedResponse,
+    ExposureLedger as BenchmarkExposureLedger, Instance as BenchmarkInstance,
+    InterestSignature as BenchmarkInterestSignature, Intervention as BenchmarkIntervention,
+    LeakProbe as BenchmarkLeakProbe, MinimizeBudget as BenchmarkMinimizeBudget,
+    NoRealismReview as BenchmarkNoRealismReview, PanelRun as BenchmarkPanelRun,
+    ProposedOracle as BenchmarkProposedOracle, SYNTHESIS_ORDER as BENCHMARK_SYNTHESIS_ORDER,
 };
-use bioprism_bioethics::action::{ActionPlan, Authorisation, refer as refer_physical_action};
-use bioprism_bioethics::dualuse::{CapabilityRelease, refer as refer_dual_use};
-use bioprism_bioethics::humansubject::{StudyDescription, screen as screen_human_subject};
+use bioprism_bioethics::action::{refer as refer_physical_action, ActionPlan, Authorisation};
+use bioprism_bioethics::dualuse::{refer as refer_dual_use, CapabilityRelease};
+use bioprism_bioethics::humansubject::{screen as screen_human_subject, StudyDescription};
 use bioprism_bioethics::representation::{
-    ContextAxis, StratumObservation, attribute as attribute_representation, summarise,
+    attribute as attribute_representation, summarise, ContextAxis, StratumObservation,
 };
 use bioprism_bioethics::validation::ValidationDossier;
 use bioprism_bioethics::{
@@ -105,9 +104,9 @@ use bioprism_bioevalx::mesh::{
     EvaluatorVerdict as BioevalEvaluatorVerdict, Mesh as BioevalMesh,
 };
 use bioprism_bioevalx::metamorphic::{
-    Family as BioevalMetamorphicFamily, Relation as BioevalMetamorphicRelation,
-    Suite as BioevalMetamorphicSuite, Trial as BioevalMetamorphicTrial,
-    TrialVerdict as BioevalTrialVerdict, verdict as bioeval_metamorphic_verdict,
+    verdict as bioeval_metamorphic_verdict, Family as BioevalMetamorphicFamily,
+    Relation as BioevalMetamorphicRelation, Suite as BioevalMetamorphicSuite,
+    Trial as BioevalMetamorphicTrial, TrialVerdict as BioevalTrialVerdict,
 };
 use bioprism_bioevalx::plane::{
     Cell as BioevalCell, FoldPolicy as BioevalFoldPolicy, ScorePlane as BioevalScorePlane,
@@ -120,13 +119,12 @@ use bioprism_bioevalx::waiver::{
     Waiver as BioevalReleaseWaiver,
 };
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
-use bioprism_biolang::{QuerySchema, compile as compile_bioql};
+use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
 use bioprism_brain::{
-    AutonomousPlanRequest, BanditState, BanditUpdate, ContextualModelSelectionRequest,
-    ModelSelectionRequest, PromptAssemblyRequest, assemble_prompt, plan_autonomous,
-    select_bandit_arm, select_bandit_arm_contextual, select_model, select_model_contextual,
-    update_bandit,
+    assemble_prompt, plan_autonomous, select_bandit_arm, select_bandit_arm_contextual,
+    select_model, select_model_contextual, update_bandit, AutonomousPlanRequest, BanditState,
+    BanditUpdate, ContextualModelSelectionRequest, ModelSelectionRequest, PromptAssemblyRequest,
 };
 use bioprism_bundle::{
     KeyRegistry, PubliclyAttestedBundle, ResultBundle, TrustPolicy, VerificationKey,
@@ -136,20 +134,52 @@ use bioprism_choreography::{
 };
 use bioprism_conformance::fiber_suite::workspace_fixture_root;
 use bioprism_conformance::{
-    FiberReference, FixtureStore, assess as assess_conformance, fiber_suite, shipped_baseline,
+    assess as assess_conformance, fiber_suite, shipped_baseline, FiberReference, FixtureStore,
 };
-use bioprism_cookbook::{Workspace as CookbookWorkspace, standard_cookbook};
+use bioprism_cookbook::{standard_cookbook, Workspace as CookbookWorkspace};
 use bioprism_dataops::{
-    DataClass, Plane, TenantPattern, declared_objective_names, parity as topology_parity,
-    reference_local, reference_team,
+    declared_objective_names, parity as topology_parity, reference_local, reference_team,
+    DataClass, Plane, TenantPattern,
 };
 use bioprism_devplat::{
+    apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
+    audit_domain_decision_readiness, audit_domain_evidence_provider_external_payload_execution,
+    audit_domain_evidence_provider_external_payload_lineage, audit_execution_provenance,
+    build_dashboard, build_delivery_receipt, build_domain_acquisition_catalogue,
+    build_domain_workflow_catalogue, build_domain_workflow_portfolio,
+    build_workflow_execution_evidence, classify_domain_report_bridge,
+    execute_domain_evidence_source, handoff_domain_evidence_provider, instantiate_domain_workflow,
+    mission_claim_lineage_with_review, normalize_ci_provider_payload,
+    normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
+    plan_domain_evidence_source, plan_mission, query_adapter_execution_evidence,
+    query_domain_evidence_provider_external_payload_evidence, reconcile_domain_workflow,
+    record_adapter_execution_evidence, record_domain_evidence_provider_external_payload,
+    run_workbench, scaffold_domain_workflow, standard_walkthroughs,
+    validate_domain_decision_readiness, validate_workflow_execution_evidence,
+    verify_delivery_receipt, verify_domain_evidence_provider_external_payload_replay,
+    verify_domain_evidence_provider_replay, verify_domain_workflow_portfolio,
+    verify_mission_evidence_bundle, verify_workbench, AdapterExecutionEvidenceQueryRequest,
+    AdapterExecutionEvidenceRequest, ArtifactRegistry, CapabilityCatalogue,
+    CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
+    CiProviderEvidenceRegistry, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
+    DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
+    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
+    DomainEvidenceProviderExternalPayloadLineageAuditRequest,
+    DomainEvidenceProviderExternalPayloadNormalizationRequest,
+    DomainEvidenceProviderExternalPayloadReceiptRequest,
+    DomainEvidenceProviderExternalPayloadReplayRequest, DomainEvidenceProviderHandoffRequest,
+    DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
+    DomainWorkflowReconciliationRegistry, EngineeringManifest, EngineeringPlanRequest,
+    EvidenceBundleRegistry, ExecutionProvenanceRequest, MissionEvaluatorCatalogue,
+    MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
+    MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
+    SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
+    WorkbenchReportRegistry, WorkbenchRequest, WorkbenchVerificationRequest,
+    WorkflowExecutionEvidenceQuery, WorkflowExecutionEvidenceRegistry,
     ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION, ADAPTER_DOMAIN_REPORT_WORKFLOW,
-    AdapterExecutionEvidenceQueryRequest, AdapterExecutionEvidenceRequest, ArtifactRegistry,
-    CAPABILITY_SCHEMA_VERSION, CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery,
-    CapabilityRouteRequest, CiExecutionEvidenceRequest, CiProviderEvidenceRegistry,
-    CiProviderEvidenceRequest, CiProviderNormalizationRequest,
-    DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
+    CAPABILITY_SCHEMA_VERSION, DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
     DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID, DOMAIN_ACQUISITION_SCHEMA_VERSION,
     DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_DECISION_READINESS_SCHEMA_VERSION,
     DOMAIN_DECISION_READINESS_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
@@ -171,70 +201,27 @@ use bioprism_devplat::{
     DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
     DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
-    DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, DeliveryReceiptRequest,
-    DeliveryReceiptVerificationRequest, DevPlatReport, DomainAcquisitionQuery,
-    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
-    DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
-    DomainEvidenceProviderExternalPayloadLineageAuditRequest,
-    DomainEvidenceProviderExternalPayloadNormalizationRequest,
-    DomainEvidenceProviderExternalPayloadReceiptRequest,
-    DomainEvidenceProviderExternalPayloadReplayRequest, DomainEvidenceProviderHandoffRequest,
-    DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
-    DomainWorkflowReconciliationRegistry, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_PLAN_AUDIT_SCHEMA,
-    EngineeringManifest, EngineeringPlanRequest, EvidenceBundleRegistry,
-    ExecutionProvenanceRequest, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
-    MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, MissionEvaluatorCatalogue,
-    MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
-    MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
-    MissionTraceEvent, MissionTraceObserver, OPERATIONAL_READINESS_AUDIT_SCHEMA,
-    OperationalReadinessManifest, PROVIDER_DOMAIN_REPORT_SCHEMA_VERSION,
-    PROVIDER_DOMAIN_REPORT_WORKFLOW, RELEASE_PIPELINE_AUDIT_SCHEMA, ReleasePipelineManifest,
-    SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA,
-    SECURITY_PROGRAM_AUDIT_SCHEMA, SandboxManifest, SandboxRuntimeManifest,
-    SecurityPrivacyManifest, SecurityProgramManifest, WORKBENCH_SCHEMA_VERSION,
+    DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
+    ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
+    MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, OPERATIONAL_READINESS_AUDIT_SCHEMA,
+    PROVIDER_DOMAIN_REPORT_SCHEMA_VERSION, PROVIDER_DOMAIN_REPORT_WORKFLOW,
+    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA,
+    SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA, WORKBENCH_SCHEMA_VERSION,
     WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA_VERSION, WORKFLOW_EXECUTION_EVIDENCE_SCHEMA_VERSION,
-    WORKFLOW_EXECUTION_EVIDENCE_WORKFLOW, WorkbenchReportRegistry, WorkbenchRequest,
-    WorkbenchVerificationRequest, WorkflowExecutionEvidenceQuery,
-    WorkflowExecutionEvidenceRegistry, apply_binding, audit_ci_execution_evidence,
-    audit_ci_provider_evidence, audit_domain_decision_readiness,
-    audit_domain_evidence_provider_external_payload_execution,
-    audit_domain_evidence_provider_external_payload_lineage, audit_execution_provenance,
-    build_dashboard, build_delivery_receipt, build_domain_acquisition_catalogue,
-    build_domain_workflow_catalogue, build_domain_workflow_portfolio,
-    build_workflow_execution_evidence, classify_domain_report_bridge,
-    execute_domain_evidence_source, handoff_domain_evidence_provider, instantiate_domain_workflow,
-    mission_claim_lineage_with_review, normalize_ci_provider_payload,
-    normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
-    plan_domain_evidence_source, plan_mission, query_adapter_execution_evidence,
-    query_domain_evidence_provider_external_payload_evidence, reconcile_domain_workflow,
-    record_adapter_execution_evidence, record_domain_evidence_provider_external_payload,
-    run_workbench, scaffold_domain_workflow, standard_walkthroughs,
-    validate_domain_decision_readiness, validate_workflow_execution_evidence,
-    verify_delivery_receipt, verify_domain_evidence_provider_external_payload_replay,
-    verify_domain_evidence_provider_replay, verify_domain_workflow_portfolio,
-    verify_mission_evidence_bundle, verify_workbench,
+    WORKFLOW_EXECUTION_EVIDENCE_WORKFLOW,
 };
 use bioprism_devx::{
-    CONTEXT_COMPILATION_CONTRACT_FEATURE_ID, CONTEXT_COMPILATION_CONTRACT_VERSION,
     audit as devx_audit, lint_catalogue, workspace_contract,
+    CONTEXT_COMPILATION_CONTRACT_FEATURE_ID, CONTEXT_COMPILATION_CONTRACT_VERSION,
 };
 use bioprism_docgraph::{
-    DocEdgeType, ModuleId, NodeStatus, ScanOptions, TaskRoute, TraversalPolicy, compile_bundle,
-    impact_of, lint, scan_markdown_tree,
+    compile_bundle, impact_of, lint, scan_markdown_tree, DocEdgeType, ModuleId, NodeStatus,
+    ScanOptions, TaskRoute, TraversalPolicy,
 };
 use bioprism_domain::DomainPack;
 use bioprism_epistemic::submodularity::check_with_tolerance as epistemic_submodularity_check;
 use bioprism_epistemic::{
-    ADAPTIVE_EXECUTION_SCHEMA, Acquisition as EpistemicAcquisition,
-    AdaptiveExecutionReceipt as EpistemicAdaptiveExecutionReceipt,
-    AdaptiveNode as EpistemicAdaptiveNode, AdaptivePlan as EpistemicAdaptivePlan,
-    Belief as EpistemicBelief, Constraint as EpistemicConstraint,
-    CostVector as EpistemicCostVector, CostWeights as EpistemicCostWeights,
-    CostedAcquisition as EpistemicCostedAcquisition, DecisionProblem as EpistemicDecisionProblem,
-    DistortionCriterion as EpistemicDistortionCriterion, EvidencePool as EpistemicEvidencePool,
-    ExecutionGrant as EpistemicExecutionGrant, Outcome as EpistemicOutcome,
-    RegretReduction as EpistemicRegretReduction, ScriptedExecutor as EpistemicScriptedExecutor,
-    SetFunction as EpistemicSetFunction, adaptive_policy as epistemic_adaptive_policy,
+    adaptive_policy as epistemic_adaptive_policy,
     adaptive_policy_with_cost_vectors as epistemic_vector_adaptive_policy,
     brute_force_optimum as epistemic_brute_force_optimum,
     complementarity as epistemic_complementarity,
@@ -243,7 +230,16 @@ use bioprism_epistemic::{
     greedy as epistemic_greedy, identification as epistemic_identification,
     joint_value as epistemic_joint_value, lazy_greedy as epistemic_lazy_greedy,
     minimal_sufficient_context as epistemic_minimal_sufficient_context,
-    value_of_information as epistemic_value_of_information,
+    value_of_information as epistemic_value_of_information, Acquisition as EpistemicAcquisition,
+    AdaptiveExecutionReceipt as EpistemicAdaptiveExecutionReceipt,
+    AdaptiveNode as EpistemicAdaptiveNode, AdaptivePlan as EpistemicAdaptivePlan,
+    Belief as EpistemicBelief, Constraint as EpistemicConstraint,
+    CostVector as EpistemicCostVector, CostWeights as EpistemicCostWeights,
+    CostedAcquisition as EpistemicCostedAcquisition, DecisionProblem as EpistemicDecisionProblem,
+    DistortionCriterion as EpistemicDistortionCriterion, EvidencePool as EpistemicEvidencePool,
+    ExecutionGrant as EpistemicExecutionGrant, Outcome as EpistemicOutcome,
+    RegretReduction as EpistemicRegretReduction, ScriptedExecutor as EpistemicScriptedExecutor,
+    SetFunction as EpistemicSetFunction, ADAPTIVE_EXECUTION_SCHEMA,
 };
 use bioprism_epistemic::{
     RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_CONTRACT_VERSION,
@@ -254,30 +250,30 @@ use bioprism_evalengine::{
     CapabilityPosterior, CreditPolicy, Observation, ReleaseGate as EvalReleaseGate,
 };
 use bioprism_fabric::synth::{
-    Candidate as FabricCandidate, Goal as FabricGoal, synthesize as synthesize_fabric,
-    unimplemented_stages,
+    synthesize as synthesize_fabric, unimplemented_stages, Candidate as FabricCandidate,
+    Goal as FabricGoal,
 };
 use bioprism_factory::{ExecutionAuthoritySnapshot, Job as FactoryJob, JobStore, WorkerCapability};
 use bioprism_factory::{PROSPECTIVE_EVIDENCE_CONTRACT_VERSION, PROSPECTIVE_EVIDENCE_FEATURE_ID};
 use bioprism_fiber::{
-    AdaptiveAcquisitionTrace, DecisionOracle, Query, compile, compile_with_oracle,
+    compile, compile_with_oracle, AdaptiveAcquisitionTrace, DecisionOracle, Query,
 };
 use bioprism_fiber::{FEDERATED_RESOURCE_CONTRACT_VERSION, FEDERATED_RESOURCE_FEATURE_ID};
 use bioprism_foundation::contract::{ContractDraft, FalsifiableContract};
 use bioprism_foundation::maturity::ApplicabilityEnvelope;
 use bioprism_foundation::worldclass::{BioWorldDeclaration, CounterfactualClaim, Transition};
 use bioprism_governance::known as known_schemas;
-use bioprism_graph::{ProjectionSource, project_all as project_graph_bundle};
+use bioprism_graph::{project_all as project_graph_bundle, ProjectionSource};
 use bioprism_hub::{
-    BioAtlasCard, Board as HubBoard, ContaminationWitness, Decision as HubDecision,
-    DisclosureLedger, Entry as HubEntry, Epoch as HubEpoch, ModerationLedger, ModerationState,
-    Score as HubScore, SubmissionDraft, SubmissionId, Submitter, VerificationStatus,
-    accept as accept_hub_submission,
+    accept as accept_hub_submission, BioAtlasCard, Board as HubBoard, ContaminationWitness,
+    Decision as HubDecision, DisclosureLedger, Entry as HubEntry, Epoch as HubEpoch,
+    ModerationLedger, ModerationState, Score as HubScore, SubmissionDraft, SubmissionId, Submitter,
+    VerificationStatus,
 };
 use bioprism_hubapi::{
-    Catalog as HubCatalog, Federation as HubFederation, Query as HubQuery, Request as HubRequest,
     resolve_dependencies as hub_resolve_dependencies, resolve_in as hub_resolve_in,
-    search as hub_search_query,
+    search as hub_search_query, Catalog as HubCatalog, Federation as HubFederation,
+    Query as HubQuery, Request as HubRequest,
 };
 use bioprism_ids::{
     IDS_ADVERSARIAL_RECOVERY_CONTRACT_VERSION, IDS_ADVERSARIAL_RECOVERY_FEATURE_ID,
@@ -351,7 +347,7 @@ use bioprism_ids::{
 };
 use bioprism_ids::{IDS_TYPED_DETERMINISM_CONTRACT_VERSION, IDS_TYPED_DETERMINISM_FEATURE_ID};
 use bioprism_influence::{
-    INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID, InfluenceAnalyzer, Perturbation,
+    InfluenceAnalyzer, Perturbation, INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID,
 };
 use bioprism_infra::{
     AccessRecord, Cache, CodeIdentity, ComputationKey, Dataset as QualityDataset,
@@ -361,19 +357,17 @@ use bioprism_infra::{
 };
 use bioprism_interweave::interweave_contract_frontier_federated_control_plane::feature_id as INTERWEAVE_FRONTIER_FEATURE_ID;
 use bioprism_interweave::workflow::{
-    WorkflowId as InterweaveWorkflowId, catalogue as interweave_catalogue, outstanding_deliverables,
+    catalogue as interweave_catalogue, outstanding_deliverables, WorkflowId as InterweaveWorkflowId,
 };
 use bioprism_interweave::workflow_execution::{
-    WORKFLOW_EXECUTION_SCHEMA as INTERWEAVE_WORKFLOW_EXECUTION_SCHEMA,
     WorkflowExecutionBinding as InterweaveWorkflowExecutionBinding,
     WorkflowExecutionReceipt as InterweaveWorkflowExecutionReceipt,
+    WORKFLOW_EXECUTION_SCHEMA as INTERWEAVE_WORKFLOW_EXECUTION_SCHEMA,
 };
 use bioprism_interweave::{
     FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION, FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
 };
 use bioprism_lab::{
-    AcquisitionAction, AcquisitionCost, HypothesisSet as LabHypothesisSet, Observations,
-    RETRIEVAL_SYNTHESIS_OPERATIONS_CONTRACT_VERSION, RETRIEVAL_SYNTHESIS_OPERATIONS_FEATURE_ID,
     evolution::{ChangeProposal, ContaminationRecord, EvolutionCard},
     expand as expand_acquisitions,
     holdout::{Holdout, HoldoutId, HoldoutLedger, Partition},
@@ -382,43 +376,40 @@ use bioprism_lab::{
     rollback::{Checkpoint, Deployment},
     separate as separate_hypotheses,
     space::{ArchitectureSpace, CandidateArchitecture, ConfigurationId},
+    AcquisitionAction, AcquisitionCost, HypothesisSet as LabHypothesisSet, Observations,
+    RETRIEVAL_SYNTHESIS_OPERATIONS_CONTRACT_VERSION, RETRIEVAL_SYNTHESIS_OPERATIONS_FEATURE_ID,
 };
 use bioprism_ledger::{ClassCounts, Event, EventLedger, SubjectLatest, TemporalCut};
-use bioprism_lens::{CohortLeakageLens, CohortSplit, catalogue as lens_catalogue, run as run_lens};
+use bioprism_lens::{catalogue as lens_catalogue, run as run_lens, CohortLeakageLens, CohortSplit};
 use bioprism_megafactory::{
-    DiscrepancyProbe, ExecutionLedger, FenceRegistry, MechanisticModel, WorkRequest, WorkerProfile,
-    place as megafactory_place,
+    place as megafactory_place, DiscrepancyProbe, ExecutionLedger, FenceRegistry, MechanisticModel,
+    WorkRequest, WorkerProfile,
 };
 use bioprism_metrics::{
-    ANALYTICS_SCHEMA_VERSION, AnalyticsInput, CapabilityGrid, CapabilityVector,
-    ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting, METRICS_SCHEMA_VERSION,
-    PartialRanking, RankInstability, analyse_analytics, breakdown as metrics_breakdown,
+    analyse_analytics, breakdown as metrics_breakdown, AnalyticsInput, CapabilityGrid,
+    CapabilityVector, ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting,
+    PartialRanking, RankInstability, ANALYTICS_SCHEMA_VERSION, METRICS_SCHEMA_VERSION,
 };
 use bioprism_modalities::{
-    ClaimKind, EvaluationHorizon, EvidenceTier, LiteratureClaim, ModalMeasurement, Modality,
-    ModalityDescriptor, ModalityTransport, Resolution, TransportKind,
     analysis_unit as modality_analysis_unit, catalog::all as all_modalities,
     cites as modality_cites, independent_unit as modality_independent_unit,
     report as modality_comparability_report, supported_claims as modality_supported_claims,
-    supports_descriptor as modality_supports_descriptor,
+    supports_descriptor as modality_supports_descriptor, ClaimKind, EvaluationHorizon,
+    EvidenceTier, LiteratureClaim, ModalMeasurement, Modality, ModalityDescriptor,
+    ModalityTransport, Resolution, TransportKind,
 };
 use bioprism_mutation::{
-    MUTATION_PUBLICATION_CONTRACT_VERSION, MUTATION_PUBLICATION_FEATURE_ID,
     generate as generate_mutations, measure as measure_diversity, standard_suite,
+    MUTATION_PUBLICATION_CONTRACT_VERSION, MUTATION_PUBLICATION_FEATURE_ID,
 };
 use bioprism_neurosurgery::{
     CaseAssetManifest, CaseAssetManifestQuery, CaseAssetReviewDecision,
     CaseAssetReviewDispositionReport, CaseRequest, DicomCaseImport, DicomEvidenceWorkflowQuery,
     EvidenceAcquisitionQuery, EvidenceAcquisitionSession, EvidenceGraphQuery, EvidenceProgramQuery,
     EvidenceSynthesisQuery, FhirCaseImport, GliomaMolecularMapQuery, LiteratureLinkAuditQuery,
-    MAX_CASE_ASSET_REVIEW_DISPOSITIONS, MAX_EVIDENCE_ACQUISITION_ADVANCE_STEPS,
-    MAX_EVIDENCE_ACQUISITION_REFERENCES, MAX_EVIDENCE_ACQUISITION_STEPS, MAX_EVIDENCE_GRAPH_EDGES,
-    MAX_EVIDENCE_GRAPH_NODES, MAX_REAL_DATA_DIFF_CHANGES, MAX_REAL_DATA_REVIEW_DISPOSITIONS,
-    MAX_REAL_DATA_REVIEW_ITEMS, MAX_RESEARCH_PLAN_REFERENCES, MAX_RESEARCH_PLAN_TASKS,
-    MAX_SESSION_STEPS, NEUROSURGERY_SCHEMA_VERSION, NeurosurgicalAgent,
-    NeurosurgicalIntakePortfolioQuery, NeurosurgicalIntakeQuery, NeurosurgicalMissionResult,
-    NeurosurgicalResearchBriefQuery, NeurosurgicalSession, PublicLiteratureBundle,
-    PublicLiteratureDraftAuditRequest, PublicLiteratureEvidencePacketQuery,
+    NeurosurgicalAgent, NeurosurgicalIntakePortfolioQuery, NeurosurgicalIntakeQuery,
+    NeurosurgicalMissionResult, NeurosurgicalResearchBriefQuery, NeurosurgicalSession,
+    PublicLiteratureBundle, PublicLiteratureDraftAuditRequest, PublicLiteratureEvidencePacketQuery,
     PublicLiteratureIntegrityAuditQuery, PublicLiteratureMatrixQuery,
     PublicLiteraturePortfolioQuery, PublicLiteratureQuery, PublicLiteratureReasoningContextQuery,
     PublicLiteratureRefreshAuditQuery, PublicLiteratureReviewQueueQuery,
@@ -428,52 +419,57 @@ use bioprism_neurosurgery::{
     RealDataQuery, RealDataReasoningContextQuery, RealDataReconciliationQuery,
     RealDataRefreshAuditQuery, RealDataReviewDecision, RealDataReviewDispositionRequest,
     RealDataReviewQueueQuery, RealDataTrialLandscapeQuery, RealGliomaBundle,
+    MAX_CASE_ASSET_REVIEW_DISPOSITIONS, MAX_EVIDENCE_ACQUISITION_ADVANCE_STEPS,
+    MAX_EVIDENCE_ACQUISITION_REFERENCES, MAX_EVIDENCE_ACQUISITION_STEPS, MAX_EVIDENCE_GRAPH_EDGES,
+    MAX_EVIDENCE_GRAPH_NODES, MAX_REAL_DATA_DIFF_CHANGES, MAX_REAL_DATA_REVIEW_DISPOSITIONS,
+    MAX_REAL_DATA_REVIEW_ITEMS, MAX_RESEARCH_PLAN_REFERENCES, MAX_RESEARCH_PLAN_TASKS,
+    MAX_SESSION_STEPS, NEUROSURGERY_SCHEMA_VERSION,
 };
-use bioprism_obligation::{Action as ObligationAction, ObligationGraph, may_perform};
+use bioprism_obligation::{may_perform, Action as ObligationAction, ObligationGraph};
 use bioprism_onco::{
-    AcquisitionTime, AvailabilityTime, BoundaryRequest, ClinicalObservation, Estimand,
-    FEDERATED_PROVENANCE_CONTRACT_VERSION, FEDERATED_PROVENANCE_FEATURE_ID, FollowUp, Histology,
-    ImagingObservation, MarkerPanel, MolecularMarker, ONCO_INSTRUMENT_CONTRACT_VERSION,
-    ONCO_INSTRUMENT_FEATURE_ID, ProgressionEvidence, ResearchBoundary, ResponseCriterion,
-    ResponseRequest, Timepoint, TreatmentContext, TumourWorldline, assess as onco_assess,
-    classify as onco_classify,
+    assess as onco_assess, classify as onco_classify, AcquisitionTime, AvailabilityTime,
+    BoundaryRequest, ClinicalObservation, Estimand, FollowUp, Histology, ImagingObservation,
+    MarkerPanel, MolecularMarker, ProgressionEvidence, ResearchBoundary, ResponseCriterion,
+    ResponseRequest, Timepoint, TreatmentContext, TumourWorldline,
+    FEDERATED_PROVENANCE_CONTRACT_VERSION, FEDERATED_PROVENANCE_FEATURE_ID,
+    ONCO_INSTRUMENT_CONTRACT_VERSION, ONCO_INSTRUMENT_FEATURE_ID,
 };
 use bioprism_oncoworlds::entities::{
+    declare_cluster as onco_declare_cluster, handle_event as onco_handle_event,
+    pool_alterations as onco_pool_alterations, pool_provenance as onco_pool_provenance,
     AlterationMechanism, EventHandling, FollowUpEvent, LesionEndpoint, LesionSet,
-    RarePerformanceReport, TissueProvenance, declare_cluster as onco_declare_cluster,
-    handle_event as onco_handle_event, pool_alterations as onco_pool_alterations,
-    pool_provenance as onco_pool_provenance,
+    RarePerformanceReport, TissueProvenance,
 };
 use bioprism_oncoworlds::models::REQUIRED_ASSUMPTIONS as MODEL_REQUIRED_ASSUMPTIONS;
 use bioprism_oncoworlds::radiogenomics::{MECHANISM_STRATA, REQUIRED_ASSUMPTIONS};
 use bioprism_oncoworlds::{
-    AnalysisUnit, Artifact, CausalDesign, ClassifierVersion, ClonalHistory,
-    Cohort as OncoShiftCohort, DeclaredTransport, DescriptorUse, EntityMapping, EpochBridge,
-    EstablishmentCohort, EvaluationDesign, FidelityEvidence, IdentityEvidence, JoinReport,
-    JoinVerdict, MethylationClass, ModelResult, PooledScore, PopulationDescriptor,
-    RadiogenomicClaim, SampleContext, SiteAssayContext, SpecimenObservation, TumourPopulation,
-    VersionedResult, as_negative_call as onco_as_negative_call,
-    assert_claim as onco_assert_radiogenomic_claim,
+    as_negative_call as onco_as_negative_call, assert_claim as onco_assert_radiogenomic_claim,
     attribute_to_treatment as onco_attribute_to_treatment, classify as onco_classify_methylation,
     comparable_cohorts as onco_comparable_cohorts,
     compatible_histories as onco_compatible_histories, equity_report as onco_equity_report,
     explain_new_alteration as onco_explain_new_alteration, joinable_with_bridge,
     reconcile_versions as onco_reconcile_methylation,
     transport_to_patients as onco_transport_model, use_descriptor as onco_use_descriptor,
+    AnalysisUnit, Artifact, CausalDesign, ClassifierVersion, ClonalHistory,
+    Cohort as OncoShiftCohort, DeclaredTransport, DescriptorUse, EntityMapping, EpochBridge,
+    EstablishmentCohort, EvaluationDesign, FidelityEvidence, IdentityEvidence, JoinReport,
+    JoinVerdict, MethylationClass, ModelResult, PooledScore, PopulationDescriptor,
+    RadiogenomicClaim, SampleContext, SiteAssayContext, SpecimenObservation, TumourPopulation,
+    VersionedResult,
 };
 use bioprism_ops::{
-    CapacityModel, DegradationPlan, Demand, DomainEvent, MetricDefinition,
-    Observations as TelemetryObservations, RedactionPolicy, TraceId, Workload,
-    audit_statement as telemetry_audit_statement,
+    audit_statement as telemetry_audit_statement, CapacityModel, DegradationPlan, Demand,
+    DomainEvent, MetricDefinition, Observations as TelemetryObservations, RedactionPolicy, TraceId,
+    Workload,
 };
 use bioprism_oracle::{EvidenceTier as OracleEvidenceTier, Judgement, MeshPolicy, UtcTimestamp};
 use bioprism_oraclex::missing::{
-    AbsencePattern, Boundary, Field, MissingnessMechanism, complete_case_admissible,
-    egress as oraclex_egress, informativeness,
+    complete_case_admissible, egress as oraclex_egress, informativeness, AbsencePattern, Boundary,
+    Field, MissingnessMechanism,
 };
 use bioprism_oraclex::panel::{ConsensusRule, ReaderPanel};
 use bioprism_packs::health::{
-    HealthPolicy, Observations as PackObservations, assess as assess_pack_health,
+    assess as assess_pack_health, HealthPolicy, Observations as PackObservations,
 };
 use bioprism_packs::ir::PackIr;
 use bioprism_packs::portfolio::{
@@ -488,224 +484,39 @@ use bioprism_project::{
     ScanOptions as ProjectScanOptions,
 };
 use bioprism_registry::{
-    BenchmarkPack, Policy as RegistryPolicy, REPLICATION_WORKBENCH_CONTRACT_VERSION,
-    REPLICATION_WORKBENCH_FEATURE_ID, RegistryIndex, TierPolicy, TrustTier, gate_document,
+    gate_document, BenchmarkPack, Policy as RegistryPolicy, RegistryIndex, TierPolicy, TrustTier,
+    REPLICATION_WORKBENCH_CONTRACT_VERSION, REPLICATION_WORKBENCH_FEATURE_ID,
 };
 use bioprism_repair::{
-    AcceptanceReport, DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions,
-    RepairPlan, Succession, plan_for_issue, predicate_from_json, verify as verify_repair,
-    verify_successor as verify_repair_successor,
+    plan_for_issue, predicate_from_json, verify as verify_repair,
+    verify_successor as verify_repair_successor, AcceptanceReport,
+    DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan, Succession,
 };
 use bioprism_research::{
-    AcquisitionFeedbackRequest, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
-    ActiveLearningCandidate, ActiveLearningObservation, ActiveLearningRequest,
-    AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
-    AdaptiveCloneCampaignRequest, AdaptiveDecisionBranchCampaignRequest,
-    AdaptiveDecisionControllerRequest, AdaptiveDoseSurfaceRequest,
-    AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
-    AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
-    AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
-    AdaptiveMechanismPolicyRequest, AdaptivePanelRequest, AnalysisDataset, AnalysisRequest,
-    AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
-    AutonomousProgramCycleRequest, AutonomousProtocolControllerRequest,
-    BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
-    BeliefRevisionRequest, BenchmarkDirectorRequest, BenchmarkJobRequest,
-    BlockedRandomizationRequest, CalibratedMechanismCampaignRequest, CalibrationRequest,
-    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
-    CarryoverSequenceRequest, CausalContrastRequest, ClaimEvidenceReconciliationRequest,
-    ClaimExperimentClosureRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
-    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
-    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
-    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
-    ClosedLoopFrontierRequest, ClosureInterpretationRequest, CombinationObservation,
-    CombinationSynergyRequest, ComparativeReleaseExplorerRequest, ComparativeReleaseRequest,
-    ComputationCampaignTimelineRequest, ComputationCandidate, ComputationEventStreamRequest,
-    ComputationExecutionMode, ComputationExecutionRequest,
-    ComputationInterpretationEvidenceGateRequest, ComputationInterpretationFrontierRequest,
-    ComputationLineageRequest, ComputationPlacementRequest,
-    ComputationPlacementStressEvaluationRequest, ComputationPortfolioExecutionRequest,
-    ComputationPortfolioRequest, ComputationRecoveryRequest, ComputationReproducibilityRequest,
-    ComputationReproducibilityRun, ComputationRunInspectionRequest, ComputeCacheGovernorRequest,
-    ComputeCapacityRequest, ComputeEnvironmentLockRequest, ConcordanceRequest, ConformanceRequest,
-    ConsensusRequest, ConsortiumPublicationRequest, ContinualBenchmarkMonitorRequest,
-    ContinualPromotionRequest, ContinuousReleaseRequest, ContradictionAdjudicationRequest,
-    ContradictionCutRequest, ContradictionEvidence, ContrastDesignRequest,
-    ContributionIntegrityRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
-    CounterfactualModel, CounterfactualRequest, CrossModelClaimEnvelopeRequest,
-    CrossModelReplicationFrontierRequest, CrossModelReplicationMissionExecutionRequest,
-    CrossModelReplicationMissionRequest, CrossSiteEvidenceExplorerRequest,
-    CrossStudyContextDifferenceRequest, CrossStudyContextInvarianceRequest,
-    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionAdmissionRequest,
-    DecisionBranchCampaignRequest, DecisionBranchEvidenceRequest, DecisionBranchPlannerRequest,
-    DecisionBudgetRequest, DecisionContext, DecisionContextArtifactRequest,
-    DecisionContextCampaignRequest, DecisionContextQueryRequest, DecisionContextReplayRequest,
-    DecisionContextRequest, DecisionContextSnapshotStoreRequest, DecisionContextUpdateRequest,
-    DecisionLoopGovernorRequest, DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
-    DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
-    DependencyClosureRequest, DesignAction, DesignMechanism, DistributedMirrorRequest,
-    DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
-    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
-    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
-    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
-    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
-    DryRunFederatedMechanismTransportExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
-    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor, DryRunGliomaStageWorker,
-    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
-    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
-    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
-    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor, DryRunReplayFidelityExecutor,
-    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
-    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
-    EnvironmentResolutionRequest, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
-    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFrontierJoinRequest,
-    EvidenceFusionRequest, EvidenceKnowledgeBridgeRequest, EvidenceNoveltyRadarRequest,
-    EvidencePriorityRequest, EvidenceProspectiveTriageRequest, EvidenceRecord,
-    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
-    EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
-    EvidenceVerificationRequest, EvidenceWorkbenchRequest, ExperimentArm,
-    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedAcquisitionPolicyRequest,
-    FederatedAggregateAnomalyRequest, FederatedBatchSchedulerRequest,
-    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
-    FederatedBenchmarkDryRunRequest, FederatedBenchmarkExecutionMode,
-    FederatedBenchmarkExecutionRequest, FederatedBenchmarkOperatingCycleRequest,
-    FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedBenchmarkWorkflowRequest,
-    FederatedComputeCostExchangeRequest, FederatedContextAccessRequest,
-    FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
-    FederatedContinualPromotionRequest, FederatedContinualReleaseRequest,
-    FederatedDecisionContextRequest, FederatedEvidenceOperatingCycleRequest,
-    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
-    FederatedInstrumentConsensusRequest, FederatedInstrumentOperationsRequest,
-    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedKnowledgeRequest,
-    FederatedKnowledgeSiteClaim, FederatedMechanismSite,
-    FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
-    FederatedOutcomeTransportRequest, FederatedReleaseRequest, FederatedReleaseSharingRequest,
-    FederatedReplayConformanceRequest, FederatedReplayDiscrepancyScanRequest,
-    FederatedSiteSelectionRequest, FederatedWorkflowTemplateExchangeRequest,
-    FederationCapacityRequest, FederationOperationsRequest, FederationParticipantRequest,
-    FidelityCandidate, FidelityObservation, FleetHealthMonitorRequest, FrontierCampaignRequest,
-    GliomaActionCandidate, GliomaActionExecutor, GliomaAdaptiveWorkflowSchedulerRequest,
-    GliomaAutonomousCampaignRequest, GliomaAutonomousResearchEngineRequest,
-    GliomaAutonomousResearchWorkflowRequest, GliomaCausalClaimAdjudicationRequest,
-    GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
-    GliomaComputationWorkflowRequest, GliomaEngineTraceOutcome, GliomaEvidenceCampaignRequest,
-    GliomaEvidenceGatedResearchRequest, GliomaEvidenceGatedStageExecutionRequest,
-    GliomaEvidenceOperatingCycleRequest, GliomaExperimentFrontierRequest,
-    GliomaIntentMissionRequest, GliomaInterpretationOperatingCycleRequest,
-    GliomaLocalReleaseWorkflowRequest, GliomaMechanismAutopilotRequest,
-    GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
-    GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
-    GliomaMultimodalSensitivityRequest, GliomaProgramSchedulerRequest,
-    GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
-    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
-    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
-    HarmonizationVector, IdentifiabilityFeature, IdentifiabilityMechanism,
-    InformationDesignRequest, InstrumentAssayEvidenceRunObservation, InstrumentCampaignRequest,
-    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
-    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
-    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InstrumentRecoveryRequest,
-    InstrumentResearchFrontierRequest, InstrumentScienceLoopRequest, InstrumentSignalPoint,
-    InstrumentSignalRun, InterpretationSynthesisRequest, InvarianceMechanism,
-    KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest,
-    KnowledgeActionOutcomeAssimilationRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
-    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeClosureRequest,
-    KnowledgeCompositionRequest, KnowledgeConsistencyRequest, KnowledgeDriftRequest,
-    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest,
-    KnowledgeProtocolRequest, KnowledgeRelation, KnowledgeRequest,
-    KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
-    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, LocalReleaseReviewPacketRequest,
-    LocalReleaseSignatureContextRequest, LocalReleaseSignatureVerificationRequest,
-    LocalWorkflowRequest, LongHorizonCalibrationRequest, LongitudinalTransportObservation,
-    LongitudinalTransportRequest, MechanismActionPlannerConfig, MechanismCalibration,
-    MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
-    MechanismClosedLoopRequest, MechanismConsensusRequest, MechanismDiscrimination,
-    MechanismDiscriminationCampaignRequest, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismDynamicsEdge, MechanismDynamicsIntervention,
-    MechanismDynamicsNode, MechanismDynamicsRequest, MechanismEvidenceAssimilationRequest,
-    MechanismFeatureObservation, MechanismFeedbackReplanRequest, MechanismFidelityBridgeRequest,
-    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
-    MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
-    MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
-    MechanismMultiStudyWorkflowRequest, MechanismOperatingCycleRequest,
-    MechanismProspectiveControllerRequest, MechanismRequest, MechanismRobustnessStressRequest,
-    MechanismSignature, MechanismStateFilterRequest, MechanismStateSmootherRequest,
-    MechanismValidationExecutionRequest, MechanismValidationPlanRequest,
-    MechanismValidationProtocolCompileRequest, MechanismWorkflowAssuranceRequest,
-    MechanismWorkflowRequest, MediationObservation, MediationRequest, MetaAnalysisRequest,
-    MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
-    MultiFidelityCampaignRequest, MultiFidelityControlRequest, MultiFidelityOptimizationRequest,
-    MultiSiteOutcomeReconciliationRequest, MultiStudyConcordanceRequest,
-    MultiStudyContextEpochReplayRequest, MultiStudyContextRequest, MultiStudyEffect,
-    MultiStudyExecutionReceiptRequest, MultiStudyKnowledgeRequest, MultiStudyReleaseRequest,
-    MultiStudyWorkflowRequest, MultichannelConcordanceRequest, MultichannelInput,
-    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalGapRouterRequest,
-    MultimodalIngestionCampaignRequest, MultimodalIngestionManifestRequest,
-    MultimodalKnowledgeProtocolRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
-    MultimodalReadinessRequest, MultimodalRequest, MultimodalResearchObjectRequest,
-    MultimodalWorkbenchRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
-    OutcomeReportingAuditRequest, OutcomeSensitivityRequest, OutcomeSensitivityStudy,
-    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
-    PortfolioReviewWorkbenchRequest, PosteriorBatchCandidate, PosteriorBatchRequest,
-    PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
-    ProspectiveBeliefCalibrationRequest, ProspectiveContradictionEvidence,
-    ProspectiveContradictionRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
-    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
-    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
-    QualityTransportRequest, RegisteredOutcomeEvidencePanelRequest, RegisteredOutcomeRecord,
-    RegisteredOutcomeStudy, ReleaseBatchRequest, ReleaseBatchReviewWorkbenchRequest,
-    ReleaseDisclosureBatchInput, ReleaseDisclosureBatchRequest, ReleaseDisclosurePanelRequest,
-    ReleaseDisclosureStudyInput, ReleaseExecutionMode, ReleaseGateRequest, ReleaseTrustPolicy,
-    ReleaseTrustPolicyEvaluationRequest, ReliabilityCalibrationRequest, ReplayCampaign,
-    ReplayCampaignRequest, ReplayHistoryRequest, ReplicationClosureCampaignRequest,
-    ReplicationClosureExecutionRequest, ReplicationClosureFrontierRequest,
-    ReplicationContinuationRequest, ReplicationObservation, ReplicationPlanRequest,
-    ReplicationProtocolCompileRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectManifest, ResearchObjectMigrationRequest, ResearchObjectRequest,
-    ResolverCandidate as ProspectiveResolverCandidate, RobustActiveLearningCampaignRequest,
-    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
-    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
-    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
-    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
-    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest,
-    SignalBatchStabilityRequest, SignalExtractionRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
-    ValidationCampaignRequest, ValidationReplicationCampaignRequest,
-    ValidationReplicationGateRequest, ValidationReplicationTransportRequest,
-    WorkflowAdmissionRequest, WorkflowRecoveryRequest, adjudicate_glioma_assay_evidence,
-    adjudicate_glioma_evidence_novelty, adjudicate_glioma_multimodal_contradictions,
-    admit_glioma_decision_actions, admit_glioma_research_workflow,
-    aggregate_glioma_federated_decision_context, align_glioma_multi_study_context_artifacts,
-    allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
-    analyze_federated_benchmark_power, analyze_federated_continual_knowledge,
-    analyze_federated_evidence_shifts, analyze_federated_knowledge,
-    analyze_federated_mechanism_transport, analyze_glioma_causal_contrast,
-    analyze_glioma_clonal_evolution, analyze_glioma_clone_panel_outcomes,
-    analyze_glioma_combination_synergy, analyze_glioma_computation_reproducibility,
-    analyze_glioma_dose_response, analyze_glioma_federated_instrument_consensus,
-    analyze_glioma_instrument_batch_stability, analyze_glioma_instrument_multichannel_concordance,
-    analyze_glioma_latent_factors, analyze_glioma_longitudinal_transport,
-    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_intervention_value,
-    analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
-    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
-    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
-    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
-    analyze_glioma_multistudy_concordance, analyze_glioma_outcome_missingness_sensitivity,
-    analyze_glioma_pathway_activity, analyze_glioma_prospective_contradiction,
-    analyze_glioma_research_object_dependency_closure, analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
-    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
-    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
-    analyze_glioma_transportability, analyze_instrument_calibration,
+    adjudicate_glioma_assay_evidence, adjudicate_glioma_evidence_novelty,
+    adjudicate_glioma_multimodal_contradictions, admit_glioma_decision_actions,
+    admit_glioma_research_workflow, aggregate_glioma_federated_decision_context,
+    align_glioma_multi_study_context_artifacts, allocate_glioma_assays, analyze_causal_sensitivity,
+    analyze_federated_benchmark, analyze_federated_benchmark_power,
+    analyze_federated_continual_knowledge, analyze_federated_evidence_shifts,
+    analyze_federated_knowledge, analyze_federated_mechanism_transport,
+    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
+    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
+    analyze_glioma_computation_reproducibility, analyze_glioma_dose_response,
+    analyze_glioma_federated_instrument_consensus, analyze_glioma_instrument_batch_stability,
+    analyze_glioma_instrument_multichannel_concordance, analyze_glioma_latent_factors,
+    analyze_glioma_longitudinal_transport, analyze_glioma_mechanism_identifiability,
+    analyze_glioma_mechanism_intervention_value, analyze_glioma_mechanism_invariance,
+    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
+    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
+    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
+    analyze_glioma_multimodal_sensitivity, analyze_glioma_multistudy_concordance,
+    analyze_glioma_outcome_missingness_sensitivity, analyze_glioma_pathway_activity,
+    analyze_glioma_prospective_contradiction, analyze_glioma_research_object_dependency_closure,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -840,17 +651,182 @@ use bioprism_research::{
     synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, verify_glioma_evidence,
     verify_glioma_local_release_signature, verify_glioma_multimodal_quality_recovery,
+    AcquisitionFeedbackRequest, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
+    ActiveLearningCandidate, ActiveLearningObservation, ActiveLearningRequest,
+    AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
+    AdaptiveCloneCampaignRequest, AdaptiveDecisionBranchCampaignRequest,
+    AdaptiveDecisionControllerRequest, AdaptiveDoseSurfaceRequest,
+    AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
+    AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
+    AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
+    AdaptiveMechanismPolicyRequest, AdaptivePanelRequest, AnalysisDataset, AnalysisRequest,
+    AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
+    AutonomousProgramCycleRequest, AutonomousProtocolControllerRequest,
+    BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
+    BeliefRevisionRequest, BlockedRandomizationRequest, CalibratedMechanismCampaignRequest,
+    CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
+    CarryoverSequenceRequest, CausalContrastRequest, ClaimEvidenceReconciliationRequest,
+    ClaimExperimentClosureRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
+    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
+    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
+    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
+    ClosedLoopFrontierRequest, ClosureInterpretationRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
+    ComputationExecutionRequest, ComputationInterpretationEvidenceGateRequest,
+    ComputationInterpretationFrontierRequest, ComputationLineageRequest,
+    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
+    ComputationRecoveryRequest, ComputationReproducibilityRequest, ComputationReproducibilityRun,
+    ConcordanceRequest, ConsensusRequest, ContinualPromotionRequest,
+    ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
+    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
+    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
+    DecisionActionPlanRequest, DecisionAdmissionRequest, DecisionBranchCampaignRequest,
+    DecisionBranchEvidenceRequest, DecisionBranchPlannerRequest, DecisionContext,
+    DecisionContextArtifactRequest, DecisionContextCampaignRequest, DecisionContextReplayRequest,
+    DecisionContextRequest, DecisionLoopGovernorRequest, DecisionMissionBridgeRequest,
+    DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
+    DecisionValueCalibrationRequest, DecisionValueRequest, DependencyClosureRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest,
+    DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
+    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
+    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
+    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
+    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
+    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
+    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
+    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
+    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
+    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
+    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFrontierJoinRequest,
+    EvidenceFusionRequest, EvidenceKnowledgeBridgeRequest, EvidenceNoveltyRadarRequest,
+    EvidencePriorityRequest, EvidenceProspectiveTriageRequest, EvidenceRecord,
+    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
+    EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
+    EvidenceVerificationRequest, EvidenceWorkbenchRequest, ExperimentArm,
+    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedAcquisitionPolicyRequest,
+    FederatedBatchSchedulerRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
+    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
+    FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
+    FederatedContinualPromotionRequest, FederatedContinualReleaseRequest,
+    FederatedDecisionContextRequest, FederatedEvidenceOperatingCycleRequest,
+    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
+    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
+    FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
+    FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
+    FederatedOutcomeTransportRequest, FidelityCandidate, FidelityObservation,
+    FrontierCampaignRequest, GliomaActionCandidate, GliomaActionExecutor,
+    GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
+    GliomaAutonomousResearchEngineRequest, GliomaCausalClaimAdjudicationRequest,
+    GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
+    GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
+    GliomaEvidenceGatedResearchRequest, GliomaEvidenceOperatingCycleRequest,
+    GliomaExperimentFrontierRequest, GliomaIntentMissionRequest,
+    GliomaInterpretationOperatingCycleRequest, GliomaLocalReleaseWorkflowRequest,
+    GliomaMechanismAutopilotRequest, GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest,
+    GliomaMissionRequest, GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
+    GliomaMultimodalSensitivityRequest, GliomaProgramSchedulerRequest,
+    GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
+    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
+    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
+    HarmonizationVector, IdentifiabilityFeature, IdentifiabilityMechanism,
+    InformationDesignRequest, InstrumentAssayEvidenceRunObservation, InstrumentCampaignRequest,
+    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
+    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
+    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InstrumentRecoveryRequest,
+    InstrumentResearchFrontierRequest, InstrumentScienceLoopRequest, InstrumentSignalPoint,
+    InstrumentSignalRun, InterpretationSynthesisRequest, InvarianceMechanism,
+    KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest,
+    KnowledgeActionOutcomeAssimilationRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
+    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeClosureRequest,
+    KnowledgeCompositionRequest, KnowledgeConsistencyRequest, KnowledgeDriftRequest,
+    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest,
+    KnowledgeProtocolRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
+    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, LocalReleaseReviewPacketRequest,
+    LocalReleaseSignatureContextRequest, LocalReleaseSignatureVerificationRequest,
+    LocalWorkflowRequest, LongHorizonCalibrationRequest, LongitudinalTransportObservation,
+    LongitudinalTransportRequest, MechanismActionPlannerConfig, MechanismCalibration,
+    MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
+    MechanismClosedLoopRequest, MechanismConsensusRequest, MechanismDiscrimination,
+    MechanismDiscriminationCampaignRequest, MechanismDiscriminationRequest,
+    MechanismDiscriminatorAction, MechanismDynamicsEdge, MechanismDynamicsIntervention,
+    MechanismDynamicsNode, MechanismDynamicsRequest, MechanismEvidenceAssimilationRequest,
+    MechanismFeatureObservation, MechanismFeedbackReplanRequest, MechanismFidelityBridgeRequest,
+    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
+    MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
+    MechanismMultiStudyWorkflowRequest, MechanismOperatingCycleRequest,
+    MechanismProspectiveControllerRequest, MechanismRequest, MechanismRobustnessStressRequest,
+    MechanismSignature, MechanismStateFilterRequest, MechanismStateSmootherRequest,
+    MechanismValidationExecutionRequest, MechanismValidationPlanRequest,
+    MechanismValidationProtocolCompileRequest, MechanismWorkflowAssuranceRequest,
+    MechanismWorkflowRequest, MediationObservation, MediationRequest, MetaAnalysisRequest,
+    MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
+    MultiFidelityCampaignRequest, MultiFidelityControlRequest, MultiFidelityOptimizationRequest,
+    MultiSiteOutcomeReconciliationRequest, MultiStudyConcordanceRequest,
+    MultiStudyContextEpochReplayRequest, MultiStudyContextRequest, MultiStudyEffect,
+    MultiStudyExecutionReceiptRequest, MultiStudyKnowledgeRequest, MultiStudyReleaseRequest,
+    MultiStudyWorkflowRequest, MultichannelConcordanceRequest, MultichannelInput,
+    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalGapRouterRequest,
+    MultimodalIngestionCampaignRequest, MultimodalIngestionManifestRequest,
+    MultimodalKnowledgeProtocolRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
+    MultimodalReadinessRequest, MultimodalRequest, MultimodalResearchObjectRequest,
+    MultimodalWorkbenchRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
+    OutcomeReportingAuditRequest, OutcomeSensitivityRequest, OutcomeSensitivityStudy,
+    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
+    PortfolioReviewWorkbenchRequest, PosteriorBatchCandidate, PosteriorBatchRequest,
+    PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
+    ProspectiveBeliefCalibrationRequest, ProspectiveContradictionEvidence,
+    ProspectiveContradictionRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
+    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
+    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
+    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
+    QualityTransportRequest, RegisteredOutcomeEvidencePanelRequest, RegisteredOutcomeRecord,
+    RegisteredOutcomeStudy, ReleaseBatchRequest, ReleaseBatchReviewWorkbenchRequest,
+    ReleaseDisclosureBatchInput, ReleaseDisclosureBatchRequest, ReleaseDisclosurePanelRequest,
+    ReleaseDisclosureStudyInput, ReleaseExecutionMode, ReleaseGateRequest, ReleaseTrustPolicy,
+    ReleaseTrustPolicyEvaluationRequest, ReliabilityCalibrationRequest, ReplayCampaign,
+    ReplayCampaignRequest, ReplayHistoryRequest, ReplicationClosureCampaignRequest,
+    ReplicationClosureExecutionRequest, ReplicationClosureFrontierRequest,
+    ReplicationContinuationRequest, ReplicationObservation, ReplicationPlanRequest,
+    ReplicationProtocolCompileRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectManifest, ResearchObjectMigrationRequest, ResearchObjectRequest,
+    ResolverCandidate as ProspectiveResolverCandidate, RobustActiveLearningCampaignRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
+    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
+    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest,
+    SignalBatchStabilityRequest, SignalExtractionRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
+    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
+    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
+    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
+    TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
+    ValidationCampaignRequest, ValidationReplicationCampaignRequest,
+    ValidationReplicationGateRequest, ValidationReplicationTransportRequest,
+    WorkflowAdmissionRequest, WorkflowRecoveryRequest,
 };
 use bioprism_routing::{
-    EvidenceLedger, FEDERATED_EXECUTION_COPILOT_CONTRACT_VERSION,
-    FEDERATED_EXECUTION_COPILOT_FEATURE_ID, Fingerprint, LABORATORY_INFERENCE_CONTRACT_VERSION,
-    LABORATORY_INFERENCE_FEATURE_ID, RoutingPolicy,
-    lab::{LabSettings, Task, run as run_routing_lab},
+    lab::{run as run_routing_lab, LabSettings, Task},
+    EvidenceLedger, Fingerprint, RoutingPolicy, FEDERATED_EXECUTION_COPILOT_CONTRACT_VERSION,
+    FEDERATED_EXECUTION_COPILOT_FEATURE_ID, LABORATORY_INFERENCE_CONTRACT_VERSION,
+    LABORATORY_INFERENCE_FEATURE_ID,
 };
 use bioprism_runtime::{
-    BudgetController, BudgetPlan, EffectPolicy, EffectRequest, Fault, Host, InProcessWorld,
-    RecordingHost, ReplayHost, RuntimeResource, WorldTape, compare_suffixes, observable_state,
-    open_suffix,
+    compare_suffixes, observable_state, open_suffix, BudgetController, BudgetPlan, EffectPolicy,
+    EffectRequest, Fault, Host, InProcessWorld, RecordingHost, ReplayHost, RuntimeResource,
+    WorldTape,
 };
 use bioprism_safety::attest::{
     Attestation, AttestationClaim, AuditEvent, AuditLog, AuditRecord,
@@ -872,68 +848,68 @@ use bioprism_safety::{
     PROSPECTIVE_LABORATORY_INTEGRATION_FEATURE_ID,
 };
 use bioprism_scale::corpus::{Corpus, GeneratedItem};
-use bioprism_scale::split::{Tier as ScaleTier, verify_item_assignment};
+use bioprism_scale::split::{verify_item_assignment, Tier as ScaleTier};
 use bioprism_scale::{FEDERATION_TRUST_CONTRACT_VERSION, FEDERATION_TRUST_FEATURE_ID};
 use bioprism_scope::{DimensionRegistry, ScopeKey, Timestamp as FactoryTimestamp};
 use bioprism_sdk::{
-    PluginManifest, PluginRegistry, RegistryPolicy as SdkRegistryPolicy, conformance_note,
+    conformance_note, PluginManifest, PluginRegistry, RegistryPolicy as SdkRegistryPolicy,
 };
 use bioprism_section::{CertificateProfile, ContextCertificate, Layer, RenderContext};
 use bioprism_services::{
-    AuditSummary, MULTIMODAL_INTERPRETATION_CONTRACT_VERSION, MULTIMODAL_INTERPRETATION_FEATURE_ID,
-    audit as service_audit,
+    audit as service_audit, AuditSummary, MULTIMODAL_INTERPRETATION_CONTRACT_VERSION,
+    MULTIMODAL_INTERPRETATION_FEATURE_ID,
 };
 use bioprism_services::{
     CONTEXT_COMPILATION_COPILOT_CONTRACT_VERSION, CONTEXT_COMPILATION_COPILOT_FEATURE_ID,
 };
 use bioprism_standards::{
-    ComparabilityPolicy as StandardsComparabilityPolicy, Measurement,
-    report as comparability_report,
+    report as comparability_report, ComparabilityPolicy as StandardsComparabilityPolicy,
+    Measurement,
 };
 use bioprism_stewardship::review::ReviewRecord;
 use bioprism_store::LazyWorld;
 use bioprism_stress::{
-    Cohort, Procedure, Stress, StressReport, profile as stress_profile_run, standard_panel,
+    profile as stress_profile_run, standard_panel, Cohort, Procedure, Stress, StressReport,
 };
 use bioprism_sweep::conform::{
-    CapabilityCard as SweepCapabilityCard, Check as SweepCheck, differential as sweep_differential,
-    gate as sweep_gate,
+    differential as sweep_differential, gate as sweep_gate, CapabilityCard as SweepCapabilityCard,
+    Check as SweepCheck,
 };
 use bioprism_tokens::{
-    ContextRequest, PlanCandidate, compare as compare_token_plans, plan as plan_token_context,
+    compare as compare_token_plans, plan as plan_token_context, ContextRequest, PlanCandidate,
 };
 use bioprism_trace::{
-    CellProposal, MAX_SPANS as MAX_OTEL_SPANS, Trace as TraceIr, excluded as excluded_trace,
-    first_divergence, from_jsonl as trace_from_jsonl, from_otlp_json,
+    excluded as excluded_trace, first_divergence, from_jsonl as trace_from_jsonl, from_otlp_json,
     is_actionable as divergence_is_actionable, review_reduction, segment as segment_trace,
-    validate as validate_trace,
+    validate as validate_trace, CellProposal, Trace as TraceIr, MAX_SPANS as MAX_OTEL_SPANS,
 };
 use bioprism_weave::ActKind;
-use bioprism_weavelang::{ExecutionMode, Machine, compile as compile_weave};
-use bioprism_world::{Severity, World, WorldSource, validate};
+use bioprism_weavelang::{compile as compile_weave, ExecutionMode, Machine};
+use bioprism_world::{validate, Severity, World, WorldSource};
 use bioprism_worldfactory::contradiction::{
-    ContradictionProgram, DiscordanceClass, DiscriminatingAction, EvidenceId, Hypothesis,
-    HypothesisSet, MissingEvidence, Reading, ReferenceDiscordance, check_intent, cue_scan,
-    expectedness as contradiction_expectedness, next_actions as contradiction_next_actions,
-    pose as pose_contradiction, validate as validate_contradiction,
+    check_intent, cue_scan, expectedness as contradiction_expectedness,
+    next_actions as contradiction_next_actions, pose as pose_contradiction,
+    validate as validate_contradiction, ContradictionProgram, DiscordanceClass,
+    DiscriminatingAction, EvidenceId, Hypothesis, HypothesisSet, MissingEvidence, Reading,
+    ReferenceDiscordance,
 };
-use bioprism_worldfactory::lineage::{SpecimenRegistry, audit as audit_lineage};
+use bioprism_worldfactory::lineage::{audit as audit_lineage, SpecimenRegistry};
 use bioprism_worldfactory::observed::{
-    SourceRef as ObservedSourceRef, StudyDesign, declare as declare_observed_world,
+    declare as declare_observed_world, SourceRef as ObservedSourceRef, StudyDesign,
 };
 use bioprism_worldfactory::preanalytic::{
-    PreanalyticMutation, Specimen, apply as apply_preanalytic,
-    check_response as check_preanalytic_response, detectability_floor, validate_family,
+    apply as apply_preanalytic, check_response as check_preanalytic_response, detectability_floor,
+    validate_family, PreanalyticMutation, Specimen,
 };
 use bioprism_worldfactory::provenance::{
-    Claim, Provenance as WorldProvenance, support as support_world_claim,
+    support as support_world_claim, Claim, Provenance as WorldProvenance,
 };
 use bioprism_worldgen::{
-    WORLDGEN_MULTIMODAL_EXECUTION_CONTRACT_VERSION, WORLDGEN_MULTIMODAL_EXECUTION_FEATURE_ID,
-    WORLDGEN_MULTIMODAL_INGESTION_CONTRACT_VERSION, WORLDGEN_MULTIMODAL_INGESTION_FEATURE_ID,
-    WorldSpec, generate as generate_world,
+    generate as generate_world, WorldSpec, WORLDGEN_MULTIMODAL_EXECUTION_CONTRACT_VERSION,
+    WORLDGEN_MULTIMODAL_EXECUTION_FEATURE_ID, WORLDGEN_MULTIMODAL_INGESTION_CONTRACT_VERSION,
+    WORLDGEN_MULTIMODAL_INGESTION_FEATURE_ID,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1302,6 +1278,19 @@ impl Server {
 
     pub fn lifecycle(&self) -> Lifecycle {
         self.lifecycle
+    }
+
+    /// Attach a caller-owned institution-local worker for the autonomous glioma engine.
+    ///
+    /// The default server remains synthetic-only. This opt-in seam is shared across cloned
+    /// servers and is invoked only after the research engine has admitted typed actions under its
+    /// request policy and budget.
+    pub fn with_glioma_action_executor<E>(mut self, executor: E) -> Self
+    where
+        E: GliomaActionExecutor + Send + 'static,
+    {
+        self.glioma_action_executor = Some(Arc::new(Mutex::new(Box::new(executor))));
+        self
     }
 
     /// Resolves a client-supplied path inside the root.

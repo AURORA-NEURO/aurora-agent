@@ -465,19 +465,43 @@ impl Server {
             .map_err(|error| {
                 format!("invalid glioma autonomous research engine request: {error}")
             })?;
-        let mut executor = DryRunGliomaActionExecutor;
-        let engine = execute_glioma_autonomous_research_engine(&request, &mut executor)
-            .map_err(|error| format!("glioma autonomous research engine refused: {error}"))?;
+        let institution_local = self.glioma_action_executor.is_some();
+        let engine = if let Some(executor) = &self.glioma_action_executor {
+            let mut executor = executor
+                .lock()
+                .map_err(|_| "configured glioma action executor lock is poisoned".to_string())?;
+            execute_glioma_autonomous_research_engine(&request, &mut **executor)
+        } else {
+            let mut executor = DryRunGliomaActionExecutor;
+            execute_glioma_autonomous_research_engine(&request, &mut executor)
+        }
+        .map_err(|error| format!("glioma autonomous research engine refused: {error}"))?;
+        let execution_started = engine
+            .cycles
+            .iter()
+            .any(|cycle| cycle.director.execution.is_some());
+        let dispatch = if !execution_started {
+            "not_started"
+        } else if institution_local {
+            "institution_local"
+        } else {
+            "dry_run"
+        };
+        let simulation_only = !institution_local || !execution_started;
         serde_json::to_value(json!({
             "engine": engine,
-            "dispatch": "dry_run",
-            "simulation_only": true,
+            "dispatch": dispatch,
+            "simulation_only": simulation_only,
             "guarantees": [
                 "the engine compiles the high-level glioma intent into the closed dependency graph before each cycle",
                 "only returned typed local artifacts become downstream checkpoints; stale or missing artifacts cannot unlock work",
                 "each cycle preserves selected actions, execution outcomes, negative evidence, uncertainty, budget, and policy holds",
                 "bounded retries, instrument and federation permissions, and preclinical data-locality constraints remain active",
-                "the MCP route performs no real assay, instrument effect, clinical decision, or raw-data movement"
+                if institution_local {
+                    "a configured institution worker receives only typed admitted actions; its authority remains caller-owned"
+                } else {
+                    "the default MCP route uses synthetic local artifacts and performs no biological, instrument, or external effect"
+                }
             ]
         }))
         .map_err(|error| format!("cannot encode glioma autonomous research engine run: {error}"))
