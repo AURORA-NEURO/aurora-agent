@@ -155,6 +155,8 @@ registries in [`router/developer_artifact_routes.rs`](../crates/api/src/router/d
 domain workflows and capability routes in [`router/domain_routes.rs`](../crates/api/src/router/domain_routes.rs),
 workflow reconciliation in [`router/reconciliation_routes.rs`](../crates/api/src/router/reconciliation_routes.rs),
 and operator snapshots and gate reviews in [`router/operations.rs`](../crates/api/src/router/operations.rs).
+Mission checkpoint serialization and restart projections live in
+[`router/mission_state.rs`](../crates/api/src/router/mission_state.rs).
 Health, API discovery, and REST/JSON-RPC ingress handlers live in
 [`router/transport_routes.rs`](../crates/api/src/router/transport_routes.rs).
 Webhook subscription and delivery lifecycle handlers live in
