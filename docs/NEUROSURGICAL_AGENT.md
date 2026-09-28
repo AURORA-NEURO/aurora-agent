@@ -280,7 +280,8 @@ values. The exact case-insensitive `genomic_data_type` facet narrows project hit
 availability modality without fetching files. Clinical-trial hits preserve optional registry study type, aggregate
 enrollment target, intervention names, phases, and last-update date; portal-study hits preserve
 optional public sample counts; guideline-reference hits include the source-reported PDQ update
-date separately from snapshot retrieval time; PubMed hits include publication date, a bounded abstract excerpt,
+date separately from snapshot retrieval time, including in the digest-bound reasoning context;
+PubMed hits include publication date, a bounded abstract excerpt,
 and indexing tags when available. Partial PubMed chronology (year-only or month-only source
 dates) remains missing rather than being padded with an invented day. Missing upstream fields
 remain absent rather than guessed. A

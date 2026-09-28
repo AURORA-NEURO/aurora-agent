@@ -680,6 +680,11 @@ fn render_context(
         if let Some(status) = &hit.status {
             block.push_str(&format!("status: {status}\n"));
         }
+        if hit.record_kind == RealDataRecordKind::GuidelineReference {
+            if let Some(updated_date) = &hit.guideline_updated_date {
+                block.push_str(&format!("guideline_updated_date: {updated_date}\n"));
+            }
+        }
         if !hit.related_records.is_empty() {
             let related = hit
                 .related_records

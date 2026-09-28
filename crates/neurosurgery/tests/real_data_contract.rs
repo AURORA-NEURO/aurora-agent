@@ -139,13 +139,35 @@ fn guideline_update_dates_are_optional_for_old_snapshots_and_bound_into_source_h
         ..RealDataQuery::default()
     };
     let result = data.query(&query).expect("PDQ reference can be queried");
-    assert_eq!(result.hits[0].guideline_updated_date.as_deref(), Some("2025-03-28"));
+    assert_eq!(
+        result.hits[0].guideline_updated_date.as_deref(),
+        Some("2025-03-28")
+    );
     result
         .validate_for_inputs(&data)
         .expect("guideline update date is preserved by exact query replay");
     let mut tampered_result = result.clone();
     tampered_result.hits[0].record_kind = RealDataRecordKind::PortalStudy;
     assert!(tampered_result.validate_integrity().is_err());
+
+    let reasoning_context = NeurosurgicalAgent::default()
+        .real_data_reasoning_context(
+            &data,
+            &RealDataReasoningContextQuery {
+                packet: RealDataEvidencePacketQuery {
+                    query: query.clone(),
+                    ..RealDataEvidencePacketQuery::default()
+                },
+                ..RealDataReasoningContextQuery::default()
+            },
+        )
+        .expect("reasoning context composes the dated guideline hit");
+    assert!(reasoning_context
+        .context_text
+        .contains("guideline_updated_date: 2025-03-28"));
+    reasoning_context
+        .validate_integrity()
+        .expect("context digest binds the source update date");
 
     data.references[0].updated_date = Some("2025-02-30".to_string());
     let source_digests = data
@@ -156,7 +178,10 @@ fn guideline_update_dates_are_optional_for_old_snapshots_and_bound_into_source_h
         .find(|source| source.source_id == source_id)
         .expect("PDQ source exists")
         .content_sha256 = source_digests[&source_id].clone();
-    assert!(data.validate().is_err(), "invalid dates must not be hash-blessed");
+    assert!(
+        data.validate().is_err(),
+        "invalid dates must not be hash-blessed"
+    );
 }
 
 #[test]
