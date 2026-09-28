@@ -155,7 +155,9 @@ registries in [`router/developer_artifact_routes.rs`](../crates/api/src/router/d
 domain workflows and capability routes in [`router/domain_routes.rs`](../crates/api/src/router/domain_routes.rs),
 workflow reconciliation in [`router/reconciliation_routes.rs`](../crates/api/src/router/reconciliation_routes.rs),
 and operator snapshots and gate reviews in [`router/operations.rs`](../crates/api/src/router/operations.rs).
-Event pages, streaming, metrics, delivery receipts, and route-review history live in
+Webhook subscription and delivery lifecycle handlers live in
+[`router/webhook_routes.rs`](../crates/api/src/router/webhook_routes.rs); event pages, streaming,
+metrics, delivery receipts, and route-review history live in
 [`router/event_routes.rs`](../crates/api/src/router/event_routes.rs). Bounded local checkpoint adapters
 live in [`router/persistence.rs`](../crates/api/src/router/persistence.rs). These modules share one
 router instance and do not create separate dispatch or persistence authorities.
