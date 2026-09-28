@@ -1,5 +1,6 @@
 //! Shared fixtures and grouped HTTP gateway contract tests.
 
+use super::operations::{operations_domain_coverage, operations_required_gates};
 use super::*;
 use crate::http::HttpRequest;
 use std::collections::{BTreeMap, BTreeSet};

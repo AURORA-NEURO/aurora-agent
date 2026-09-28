@@ -3,6 +3,9 @@
 //! Keeping this lifecycle together makes its dispatch, recovery, and evidence boundaries
 //! reviewable without mixing them into transport and registry routing.
 
+use super::operations::{
+    mission_execution_provenance, mission_execution_requested, validate_operations_gate_acceptance,
+};
 use super::*;
 
 impl ApiRouter {
