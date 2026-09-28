@@ -95,8 +95,9 @@ The Python and TypeScript SDKs now add reviewed NCBI Gene ESummary retrieval for
 glioma-research marker GeneIDs. A selected catalogue subset is returned through one approved,
 bounded request; IDs, symbol, and human taxid must match the plan exactly. Only identity, concise
 description, location, and bounded alias metadata survive projection; raw ESummary fields and
-autonomous observations stay transient/digest-only, respectively. Process-local rate pacing does
-not replace a deployment-wide limiter, and the source supplies metadata rather than disease,
+autonomous observations stay transient/digest-only, respectively. Reviewed PubMed and Gene requests
+share one runtime-local NCBI rate limiter in each SDK. Deployment-wide coordination across worker
+runtimes, processes, or hosts remains necessary. The source supplies metadata rather than disease,
 variant, or evidence-quality interpretation.
 The Python and TypeScript SDKs also expose a reviewed cBioPortal metadata adapter for fixed public
 TCGA `gbm_tcga` and `lgg_tcga` studies. Each study plan permits exactly a study-summary GET and one

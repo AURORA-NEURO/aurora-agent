@@ -14,8 +14,6 @@ from datetime import datetime, timezone
 import json
 import math
 import re
-import threading
-import time
 from types import MappingProxyType
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -25,6 +23,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .authoring import canonical_json, content_digest
 from .autonomous_evidence_adapters import AutonomousEvidenceAdapterRegistration
 from .errors import ArgumentError
+from .ncbi_rate_limit import acquire_ncbi_request_slot
 
 
 REVIEWED_NCBI_GENE_CONFIG_SCHEMA = "bioprism-reviewed-ncbi-gene-config/0.1"
@@ -71,8 +70,6 @@ _LIMITATIONS = (
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9-]{0,15}$")
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _GENE_IDS = {symbol: gene_id for symbol, gene_id in REVIEWED_NCBI_GENE_CATALOGUE.items()}
-_RATE_LOCK = threading.Lock()
-_LAST_DISPATCH = 0.0
 
 
 class ReviewedNcbiGeneRetrievalError(ArgumentError):
@@ -223,15 +220,6 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def _pace_process_requests() -> None:
-    global _LAST_DISPATCH
-    with _RATE_LOCK:
-        remaining = 0.36 - (time.monotonic() - _LAST_DISPATCH)
-        if remaining > 0:
-            time.sleep(remaining)
-        _LAST_DISPATCH = time.monotonic()
-
-
 def _url(gene_ids: Sequence[str], tool: str | None, email: str | None) -> str:
     parameters: dict[str, str] = {"db": "gene", "id": ",".join(gene_ids), "retmode": "json"}
     if tool is not None and email is not None:
@@ -247,7 +235,6 @@ def _builtin_fetch(url: str, timeout_ms: int) -> bytes:
     if not url.startswith(f"{REVIEWED_NCBI_GENE_ENDPOINT}?"):
         _fail("NCBI Gene built-in transport refused an unpinned URL")
     request = Request(url, headers={"Accept": "application/json"}, method="GET")
-    _pace_process_requests()
     try:
         with build_opener(_NoRedirect).open(request, timeout=timeout_ms / 1000) as response:
             if response.geturl() != url or response.status != 200:
@@ -457,10 +444,10 @@ class ReviewedNcbiGeneRetrievalAdapter:
         tool, email, _registration_digest = _registration(self.config.ncbi_tool, self.config.ncbi_email)
         url = _url(gene_ids, tool, email)
         try:
+            acquire_ncbi_request_slot()
             if self._fetch is None:
                 raw = _builtin_fetch(url, self.config.timeout_ms)
             else:
-                _pace_process_requests()
                 raw = self._fetch(url)
         except ReviewedNcbiGeneRetrievalError:
             raise

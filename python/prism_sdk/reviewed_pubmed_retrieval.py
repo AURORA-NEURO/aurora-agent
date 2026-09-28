@@ -21,7 +21,6 @@ from datetime import datetime
 import json
 import math
 import re
-import time
 from types import MethodType
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
@@ -30,6 +29,7 @@ import xml.etree.ElementTree as ET
 
 from .authoring import canonical_json, content_digest
 from .autonomous_evidence_adapters import AutonomousEvidenceAdapterRegistration
+from .ncbi_rate_limit import acquire_ncbi_request_slot
 from . import public_literature_refresh as _public_literature_module
 from .public_literature_refresh import (
     MAX_PER_SPECIALTY_LIMIT,
@@ -1584,6 +1584,7 @@ class _BoundedReviewedFetch:
                 "PubMed summary and fetch PMID sets differ"
             )
         self.request_count += 1
+        acquire_ncbi_request_slot()
         response = self._fetch(url)
         normalized, response_bytes = _bounded_response(
             response,
@@ -1743,24 +1744,14 @@ class ReviewedPubMedRetrievalAdapter:
                 raise ReviewedPubMedRetrievalError(
                     "builtin PubMed retrieval requires its exact transport identity"
                 )
-            last_request = [0.0]
-            monotonic = time.monotonic
-            sleep = time.sleep
             implementation = _reviewed_default_fetch
             timeout_seconds = config.timeout_seconds
             response_byte_limit = config.response_byte_limit
 
-            def captured_fetch(url: str) -> bytes:
-                elapsed = monotonic() - last_request[0]
-                if elapsed < 0.34:
-                    sleep(0.34 - elapsed)
-                body = implementation(
+            def selected_fetch(url: str) -> bytes:
+                return implementation(
                     url, timeout=timeout_seconds, max_bytes=response_byte_limit
                 )
-                last_request[0] = monotonic()
-                return body
-
-            selected_fetch: PubMedFetcher = captured_fetch
             fetch_dependency: Callable[..., Any] | None = implementation
         else:
             if not callable(fetch):

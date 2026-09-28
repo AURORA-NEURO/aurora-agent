@@ -14352,10 +14352,11 @@ Changed or incomplete source records fail closed.
 The projection contains only symbol, description, chromosome, map location, and bounded aliases;
 it discards ESummary fields outside that projection, including NCBI's function summaries, sequence,
 and genomic-coordinate history. Response bytes, tree depth/size, alias count, request timeout, and
-bundle bytes are bounded; duplicate JSON fields and redirects are refused. The built-in transports
-pace requests within their process. A deployment still needs a shared rate policy across processes
-and hosts. The optional paired NCBI `tool` and developer-email identity is digest-bound while the
-raw values remain outside serialized plans, receipts, and source URIs. Its one evidence-runtime
+bundle bytes are bounded; duplicate JSON fields and redirects are refused. Reviewed PubMed and Gene
+requests share one runtime-local SDK rate limiter, including caller-supplied transports. A deployment
+still needs shared rate coordination across worker runtimes, processes, and hosts. The optional
+paired NCBI `tool` and developer-email identity is digest-bound while raw values remain outside
+serialized plans, receipts, and source URIs. Its one evidence-runtime
 registration validates the transient source binding and emits only provenance digests. This is a
 fixed-catalogue metadata source, not an exhaustive gene search, disease-relevance judgment, variant
 assessment, quality authority, or clinical interpretation. See the [NCBI E-utilities guide](https://www.ncbi.nlm.nih.gov/books/NBK25500/),

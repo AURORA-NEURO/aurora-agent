@@ -1,6 +1,7 @@
 /** Reviewed fixed-catalogue NCBI Gene summary retrieval (blueprint modules 11.06 and 40.15, TypeScript SDK). */
 
 import { ArgumentError } from "./errors.js";
+import { acquireNcbiRequestSlot } from "./ncbi-rate-limit.js";
 import type { AutonomousEvidenceAdapterRegistrationInput } from "./autonomous-evidence-adapters.js";
 import type { AutonomousEvidenceObservationInput } from "./autonomous-evidence-runtime.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
@@ -65,8 +66,6 @@ const NativePromiseRace = globalThis.Promise.race.bind(globalThis.Promise) as <T
 const NativeIsFinite = globalThis.Number.isFinite.bind(globalThis.Number);
 const NativeIsSafeInteger = globalThis.Number.isSafeInteger.bind(globalThis.Number);
 const Encoder = new NativeTextEncoder();
-let dispatchQueue: Promise<void> = Promise.resolve();
-let lastDispatch = 0;
 const CONFIG_REGISTRATION = new WeakMap<object, { tool: string | null; email: string | null }>();
 
 export class ReviewedNcbiGeneRetrievalError extends ArgumentError {
@@ -201,17 +200,6 @@ function registration(tool: unknown, email: unknown): { tool: string | null; ema
   if (typeof tool !== "string" || !/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(tool)) fail("ncbiTool must be a bounded application name without spaces");
   if (typeof email !== "string" || !/^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$/.test(email) || email.length > 254) fail("ncbiEmail must be a bounded developer email address");
   return { tool, email, digest: digestJsonSync({ tool, email }) };
-}
-async function paceProcessRequests(): Promise<void> {
-  let release!: () => void;
-  const turn = dispatchQueue;
-  dispatchQueue = new Promise<void>((resolve) => { release = resolve; });
-  await turn;
-  try {
-    const wait = Math.max(0, 360 - (Date.now() - lastDispatch));
-    if (wait > 0) await new Promise<void>((resolve) => NativeSetTimeout(resolve, wait));
-    lastDispatch = Date.now();
-  } finally { release(); }
 }
 function queryUrl(geneIds: readonly string[], tool: string | null, email: string | null): string {
   const parameters = new URLSearchParams({ db: "gene", id: geneIds.join(","), retmode: "json" });
@@ -373,7 +361,7 @@ export class ReviewedNcbiGeneRetrievalAdapter {
     const retrievedAt = options.retrievedAt === undefined ? now() : timestamp("NCBI Gene retrievedAt", options.retrievedAt);
     const url = requestUrl(this.config); let raw: unknown;
     try {
-      await paceProcessRequests();
+      await acquireNcbiRequestSlot();
       raw = this.fetcher ? await this.fetcher(url, new NativeAbortController().signal) : await builtinFetch(url, this.config.timeoutMs);
     } catch (error) { if (error instanceof ReviewedNcbiGeneRetrievalError) throw error; throw new ReviewedNcbiGeneRetrievalError("NCBI Gene request failed"); }
     const parsed = parseResponse(raw); validateResponseCoverage(parsed.payload, this.config.geneSymbols);
