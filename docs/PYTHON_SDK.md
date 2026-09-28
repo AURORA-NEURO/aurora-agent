@@ -608,7 +608,7 @@ keeping credentials caller-managed and retrieval `not_started`; a source plan is
 When `expected_content_digest` is supplied, a later bound intake is accepted only when the
 canonical response digest matches it.
 `DomainEvidenceSourceExecutionRequest` and `DomainEvidenceSourceExecutionReport` execute a
-retained plan through the bounded file/plain-HTTP kernel, preserve observed/partial/refused/error
+retained plan through the bounded file/HTTP/HTTPS kernel, preserve observed/partial/refused/error
 outcomes and raw-byte versus canonical-response digests, and automatically retain the result as
 intake. The sync/async HTTP clients and `Workspace`/`AsyncWorkspace` expose both REST and MCP
 helpers; unsupported connectors and unsafe transport policy remain explicit refusals.

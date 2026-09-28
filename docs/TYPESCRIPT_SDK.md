@@ -327,9 +327,10 @@ path, or opaque reference into retrieved provenance.
 If the plan includes an expected content digest, the server compares it against the canonical
 response digest of a later bound intake before indexing.
 `domainEvidenceSourceExecute` and `domainEvidenceSourceExecuteTool` consume a retained plan through
-the bounded local-file/plain-HTTP connector kernel. The typed result preserves transport outcome,
+the bounded local-file/HTTP/HTTPS connector kernel. The typed result preserves transport outcome,
 raw-content digest, canonical response digest, and the automatically indexed intake; traversal,
-HTTPS, redirects, unsupported connectors, and disallowed hosts remain explicit refusals.
+redirects, unsupported connectors, and disallowed hosts remain explicit refusals. HTTPS validates
+the remote certificate against platform trust roots and checks the hostname.
 `domainEvidenceProviderNormalize` and `domainEvidenceProviderNormalizeTool` cover the caller-
 managed literature, clinical-trial, FHIR, object-store, and provider-API boundary. They require
 an explicit provider-shaped object/array payload, preserve provider/payload/request identities,
@@ -557,7 +558,7 @@ scientific-validity, release-readiness, or external-effect claim.
 and the mission-draft provenance fields; its `carried_forward_not_recomputed` posture preserves the
 observation without treating it as a runtime or readiness claim.
 `domainAcquisitionCatalogue` adds a typed cross-domain route registry. Its digest-bound rows keep
-bounded file/plain-HTTP transport, caller-managed connectors, native adapter matches, and
+bounded file/HTTP/HTTPS transport, caller-managed connectors, native adapter matches, and
 Python-delegated adapter matches separate for every selected declared domain, with explicit
 scope-match evidence and truncation/completeness flags. It is routing evidence only and never
 executes a source or adapter.

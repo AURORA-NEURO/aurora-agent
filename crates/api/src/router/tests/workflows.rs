@@ -805,7 +805,7 @@ fn domain_evidence_source_http_requires_both_plan_and_operator_approval() {
     });
 
     let root: std::path::PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect();
-    let router = ApiRouter::new_with_domain_evidence_source_http_origins(
+    let router = ApiRouter::new_with_domain_evidence_source_origins(
         root,
         ApiConfig::default(),
         vec![format!("127.0.0.1:{}", address.port())],

@@ -14,6 +14,9 @@ bioprism-cookbook = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+native-tls = { workspace = true }
 
 [dev-dependencies]
 bioprism-epistemic = { workspace = true }
+rcgen = "=0.14.10"
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }

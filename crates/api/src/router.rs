@@ -450,18 +450,28 @@ impl MissionJobState {
 
 impl ApiRouter {
     pub fn new(root: PathBuf, config: ApiConfig) -> Result<Self, String> {
-        Self::new_with_domain_evidence_source_http_origins(root, config, Vec::<String>::new())
+        Self::new_with_domain_evidence_source_origins(root, config, Vec::<String>::new())
     }
 
-    /// Construct a router with an operator-owned allow-list for the explicit HTTP source reader.
-    ///
-    /// Empty origins are the default and refuse all outbound source HTTP. Entries are exact
-    /// `host` or `host:port` origins; each retained plan must separately enable HTTP and allow
-    /// the requested host.
+    /// Compatibility alias for [`Self::new_with_domain_evidence_source_origins`].
     pub fn new_with_domain_evidence_source_http_origins(
         root: PathBuf,
         config: ApiConfig,
-        allowed_http_origins: Vec<String>,
+        allowed_source_origins: Vec<String>,
+    ) -> Result<Self, String> {
+        Self::new_with_domain_evidence_source_origins(root, config, allowed_source_origins)
+    }
+
+    /// Construct a router with an operator-owned allow-list for the source reader.
+    ///
+    /// Empty origins are the default and refuse all outbound source network access. Entries may
+    /// be bare HTTP hosts or exact `http://`/`https://` origins; each retained plan must separately
+    /// enable networking and allow the requested host. HTTPS uses platform trust roots and checks
+    /// the server hostname.
+    pub fn new_with_domain_evidence_source_origins(
+        root: PathBuf,
+        config: ApiConfig,
+        allowed_source_origins: Vec<String>,
     ) -> Result<Self, String> {
         config.validate()?;
         let mission_queue_policy = QueueAdmissionPolicy::new(
@@ -508,7 +518,7 @@ impl ApiRouter {
             Arc::clone(&ci_provider_evidence_registry),
             Arc::clone(&artifact_registry),
         )
-        .with_domain_evidence_source_http_origins(allowed_http_origins)?;
+        .with_domain_evidence_source_origins(allowed_source_origins)?;
         let initialize = Request {
             id: Some(json!(0)),
             method: "initialize".into(),

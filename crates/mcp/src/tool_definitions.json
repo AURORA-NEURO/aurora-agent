@@ -6535,7 +6535,7 @@
   },
   {
     "name": "domain_evidence_source_execute",
-    "description": "Execute a retained domain_evidence_source_plan through the bounded connector kernel. Local files are confined to the server root. Plain HTTP requires the plan to set retrieval_policy.network=enabled and allow the requested host, plus an operator startup allow-list entry configured with --allow-http-origin <host[:port]>; the server default denies all outbound HTTP. HTTPS, redirects, unsupported connector families, policy refusals, and transport failures remain explicit outcomes. Successful and partial reads produce raw-byte and canonical-JSON digests and are automatically retained through domain_evidence_intake; no scientific, clinical, provenance, or release claim is inferred.",
+    "description": "Execute a retained domain_evidence_source_plan through the bounded connector kernel. Local files are confined to the server root. HTTP or HTTPS requires the plan to set retrieval_policy.network=enabled and allow the requested host, plus an exact operator startup origin allow-list entry configured with --allow-http-origin <host[:port]> or --allow-https-origin <host[:port]>; the server default denies all outbound source requests. HTTPS validates certificates against platform trust roots and checks the hostname. Redirects, unsupported connector families, policy refusals, and transport failures remain explicit outcomes. Successful and partial reads produce raw-byte and canonical-JSON digests and are automatically retained through domain_evidence_intake; no scientific, clinical, provenance, or release claim is inferred.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -9345,7 +9345,7 @@
   },
   {
     "name": "domain_acquisition_catalogue",
-    "description": "Build a deterministic acquisition and adapter-conformance route for every selected declared domain. Keeps bounded file/HTTP transport, caller-managed connector families, native adapters, Python-delegated adapters, domain-tool-only coverage, and unmapped domains separate; scope-label matches are routing hints only and this tool never fetches, imports, executes, or grants credentials.",
+    "description": "Build a deterministic acquisition and adapter-conformance route for every selected declared domain. Keeps bounded file/HTTP/HTTPS transport, caller-managed connector families, native adapters, Python-delegated adapters, domain-tool-only coverage, and unmapped domains separate; scope-label matches are routing hints only and this tool never fetches, imports, executes, or grants credentials.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
