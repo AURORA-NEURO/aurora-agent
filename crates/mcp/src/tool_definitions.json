@@ -21438,6 +21438,73 @@
     }
   },
   {
+    "name": "glioma_stage_worker_routes_compile",
+    "description": "Compile the preclinical glioma intent into a deterministic, typed route plan for declared stage workers. Uncovered stages remain blocked with reasons; this planning tool opens no connection and executes no worker.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "GliomaStageWorkerRouteRequest1@1 with one bounded research intent, worker capability profiles, and deterministic/readiness requirements."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_autonomous_research_engine_stage_execute",
+    "description": "Rehearse the autonomous preclinical glioma research engine through declared local deterministic stage workers. MCP supplies synthetic schema-correct artifacts only; real workers, assays, instruments, federation, and clinical operations remain caller-owned.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "A bounded GliomaAutonomousResearchEngineRequest1@1."
+        },
+        "workers": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Declared stage-worker capability profiles used to compile the route plan."
+        },
+        "require_deterministic": {
+          "type": "boolean",
+          "description": "Require each selected worker profile to declare deterministic behavior; defaults to true."
+        },
+        "require_all_ready": {
+          "type": "boolean",
+          "description": "Refuse a complete route plan when any stage lacks a ready worker; defaults to true."
+        }
+      },
+      "required": [
+        "request",
+        "workers"
+      ]
+    }
+  },
+  {
+    "name": "glioma_evidence_gated_stage_engine_execute",
+    "description": "Gate autonomous preclinical glioma stage execution on typed triangulated evidence and local worker readiness. Unqualified evidence returns an explicit hold before routing; any rehearsal output is synthetic and never biological evidence.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "GliomaEvidenceGatedStageExecutionRequest1@1 with a bounded engine request, typed triangulation, qualification floor, and stage-worker profiles."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
     "name": "glioma_autonomous_program_cycle",
     "description": "Run the autonomous preclinical glioma engine and compile a researcher-facing program handoff. Every stage is classified as cleared, active, held, approval-required, blocked, or pending; current frontier actions, progress, negative evidence, uncertainty, and the next operator action remain explicit. MCP uses a deterministic local sandbox and never performs real assays, instrument effects, federation, raw-data movement, or clinical decisions.",
     "inputSchema": {

@@ -315,6 +315,15 @@ impl Server {
             "glioma_autonomous_research_engine_trace_evaluate" => {
                 self.glioma_autonomous_research_engine_trace_evaluate(&arguments)
             }
+            "glioma_stage_worker_routes_compile" => {
+                self.glioma_stage_worker_routes_compile(&arguments)
+            }
+            "glioma_autonomous_research_engine_stage_execute" => {
+                self.glioma_autonomous_research_engine_stage_execute(&arguments)
+            }
+            "glioma_evidence_gated_stage_engine_execute" => {
+                self.glioma_evidence_gated_stage_engine_execute(&arguments)
+            }
             "glioma_temporal_multimodal_mechanism_fusion" => {
                 self.glioma_temporal_multimodal_mechanism_fusion(&arguments)
             }

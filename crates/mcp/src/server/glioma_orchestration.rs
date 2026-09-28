@@ -2,6 +2,21 @@
 
 use super::*;
 
+fn dry_run_stage_workers(
+    profiles: &[GliomaStageWorkerProfile],
+) -> BTreeMap<String, Box<dyn GliomaStageExecutor>> {
+    profiles
+        .iter()
+        .filter(|profile| profile.available && profile.local_only && profile.deterministic)
+        .map(|profile| {
+            (
+                profile.worker_id.clone(),
+                Box::new(DryRunGliomaStageWorker) as Box<dyn GliomaStageExecutor>,
+            )
+        })
+        .collect()
+}
+
 impl Server {
     /// Evaluate the autonomous engine's selection policy against held-out utility without
     /// dispatching a provider, instrument, federation, or biological operation.
@@ -120,6 +135,127 @@ impl Server {
                 "trace outcomes are synthetic evaluator inputs, never biological observations",
                 "missing action outcomes fail closed in every policy replay",
                 "no provider, assay, instrument, federation, raw-data transfer, or clinical operation is invoked"
+            ]
+        }))
+    }
+
+    /// Compile typed local worker declarations against the research intent's closed stage graph.
+    pub(super) fn glioma_stage_worker_routes_compile(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaStageWorkerRouteRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_stage_worker_routes_compile requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma stage-worker route request: {error}"))?;
+        let route_plan = compile_glioma_stage_worker_routes(&request)
+            .map_err(|error| format!("glioma stage-worker route compilation refused: {error}"))?;
+        Ok(json!({
+            "route_plan": route_plan,
+            "evaluation_only": true,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "each route is bound to the compiled typed intent and one declared worker contract",
+                "uncovered, unavailable, incompatible, non-local, or non-deterministic stages remain explicitly blocked",
+                "route compilation opens no connection and executes no worker"
+            ]
+        }))
+    }
+
+    /// Rehearse the autonomous stage engine through synthetic workers for declared available,
+    /// local, deterministic profiles. Real workers remain caller-owned and are never invoked by
+    /// this MCP surface.
+    pub(super) fn glioma_autonomous_research_engine_stage_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .cloned()
+            .ok_or_else(|| {
+                "glioma_autonomous_research_engine_stage_execute requires request".to_string()
+            })?;
+        let engine_request: GliomaAutonomousResearchEngineRequest =
+            serde_json::from_value(request_value.clone())
+                .map_err(|error| format!("invalid stage-engine request: {error}"))?;
+        let workers: Vec<GliomaStageWorkerProfile> = serde_json::from_value(
+            arguments
+                .get("workers")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_autonomous_research_engine_stage_execute requires workers".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid stage-worker profiles: {error}"))?;
+        let route_request = GliomaStageWorkerRouteRequest {
+            intent: engine_request.intent.clone(),
+            workers: workers.clone(),
+            require_deterministic: arguments
+                .get("require_deterministic")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            require_all_ready: arguments
+                .get("require_all_ready")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        };
+        let route_plan = compile_glioma_stage_worker_routes(&route_request)
+            .map_err(|error| format!("stage-worker route compilation refused: {error}"))?;
+        let execution = execute_glioma_autonomous_research_engine_with_stage_workers(
+            &engine_request,
+            &route_plan,
+            dry_run_stage_workers(&workers),
+        )
+        .map_err(|error| format!("stage-worker engine rehearsal refused: {error}"))?;
+        Ok(json!({
+            "execution": execution,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "only declared available, local, deterministic workers receive synthetic rehearsal outputs",
+                "synthetic stage artifacts are not biological evidence or institution-worker receipts",
+                "no real worker, provider, assay, instrument, federation, or clinical operation is invoked"
+            ]
+        }))
+    }
+
+    /// Hold or rehearse an autonomous engine only after the caller-supplied evidence and local
+    /// worker gates have been checked by the typed research contract.
+    pub(super) fn glioma_evidence_gated_stage_engine_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedStageExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_evidence_gated_stage_engine_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid evidence-gated stage request: {error}"))?;
+        let execution = execute_glioma_evidence_gated_stage_engine(
+            &request,
+            dry_run_stage_workers(&request.workers),
+        )
+        .map_err(|error| format!("evidence-gated stage engine refused: {error}"))?;
+        let dispatch = if execution.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        Ok(json!({
+            "execution": execution,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "unqualified or unresolved triangulation returns a typed hold before worker routing",
+                "worker rehearsal accepts only available, local, deterministic profiles",
+                "synthetic outputs remain explicit and no external or clinical operation is invoked"
             ]
         }))
     }
