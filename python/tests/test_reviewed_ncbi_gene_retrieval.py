@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -18,6 +21,10 @@ from prism_sdk.reviewed_ncbi_gene_retrieval import (
     ReviewedNcbiGeneRetrievalPlan,
     create_reviewed_ncbi_gene_autonomous_evidence_registration,
     create_reviewed_ncbi_gene_execution_metadata,
+)
+from prism_sdk.reviewed_pubmed_retrieval import (
+    ReviewedPubMedRetrievalAdapter,
+    ReviewedPubMedRetrievalConfig,
 )
 
 
@@ -213,3 +220,62 @@ def test_evidence_registration_validates_review_and_projects_only_digest_provena
     tampered["receipt"]["receipt_digest"] = content_digest({key: value for key, value in tampered["receipt"].items() if key != "receipt_digest"})
     with pytest.raises(ReviewedNcbiGeneRetrievalError, match="reviewed catalogue"):
         registration.project(tampered, {"requirement": {"label": "NCBI Gene catalogue"}})
+
+
+def test_gene_and_pubmed_dispatches_share_one_process_rate_limiter() -> None:
+    dispatch_times: list[float] = []
+    dispatch_lock = threading.Lock()
+
+    def record_dispatch() -> None:
+        with dispatch_lock:
+            dispatch_times.append(time.monotonic())
+
+    def gene_fetch(_url: str) -> object:
+        record_dispatch()
+        return _summary()
+
+    def pubmed_fetch(url: str) -> object:
+        record_dispatch()
+        endpoint = urlsplit(url).path.rsplit("/", 1)[-1]
+        if endpoint == "esearch.fcgi":
+            return {"esearchresult": {"idlist": ["20000"]}}
+        if endpoint == "esummary.fcgi":
+            return {"result": {"20000": {"title": "Reviewed study", "fulljournalname": "Journal", "pubdate": "2025 Jan 02"}}}
+        return (
+            '<?xml version="1.0" ?>'
+            '<PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>20000</PMID>'
+            '<Article><Abstract><AbstractText>Reviewed abstract</AbstractText></Abstract>'
+            '<PublicationTypeList><PublicationType>Journal Article</PublicationType>'
+            '</PublicationTypeList></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>'
+        ).encode()
+
+    gene_config = ReviewedNcbiGeneRetrievalConfig(gene_symbols=_SYMBOLS, **_TRANSPORT)
+    gene_adapter = ReviewedNcbiGeneRetrievalAdapter(gene_config, fetch=gene_fetch)
+    pubmed_config = ReviewedPubMedRetrievalConfig(
+        specialty_lanes=("glioma",),
+        per_specialty_limit=1,
+        transport_id="fixture.shared-ncbi",
+        transport_version="1",
+        transport_config_digest=content_digest({"fixture": "shared-ncbi-rate-limit"}),
+    )
+    pubmed_adapter = ReviewedPubMedRetrievalAdapter(pubmed_config, fetch=pubmed_fetch)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        gene = workers.submit(
+            gene_adapter.execute,
+            gene_adapter.prepare(),
+            approve_source_dispatch=True,
+            retrieved_at=_RETRIEVED_AT,
+        )
+        pubmed = workers.submit(
+            pubmed_adapter.execute,
+            pubmed_adapter.prepare(),
+            approve_source_dispatch=True,
+            retrieved_at=_RETRIEVED_AT,
+        )
+        gene.result()
+        pubmed.result()
+
+    ordered = sorted(dispatch_times)
+    assert len(ordered) == 4
+    assert all(right - left >= 0.30 for left, right in zip(ordered, ordered[1:]))
