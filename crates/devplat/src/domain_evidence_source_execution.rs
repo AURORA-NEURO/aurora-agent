@@ -2,10 +2,10 @@
 //!
 //! The planner deliberately does not fetch anything. This module is the small, auditable
 //! execution kernel that can consume a retained plan without turning a locator into provenance:
-//! local files are confined to a caller-owned root. HTTP and HTTPS require both an operator-owned
-//! exact-origin allow-list and a matching caller-plan host allow-list. HTTPS uses platform trust
-//! roots and hostname verification; redirects remain refused. Every accepted byte stream receives
-//! both a raw-byte digest and a bounded JSON response projection.
+//! local files are confined to a caller-owned root, plain HTTP requires both an operator-owned
+//! exact-origin allow-list and a matching caller-plan host allow-list, redirects and HTTPS are
+//! refused because this offline workspace has no TLS client, and every accepted byte stream
+//! receives both a raw-byte digest and a bounded JSON response projection.
 //! Unsupported connector families become explicit `refused` outcomes instead of pretending that
 //! a future provider adapter ran.
 
@@ -13,7 +13,6 @@ use crate::domain_evidence_source::{
     validate_domain_evidence_source_plan, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
-use native_tls::TlsConnector;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -23,30 +22,26 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error;
 
-trait ReadWrite: Read + Write {}
-impl<T: Read + Write> ReadWrite for T {}
-
 pub const DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION: &str =
     "bioprism-devplat-domain-evidence-source-execution/0.1";
 pub const DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW: &str = "domain_evidence_source_execute";
 pub const MAX_DOMAIN_EVIDENCE_SOURCE_EXECUTION_HEADER_BYTES: usize = 64 * 1024;
 pub const MAX_DOMAIN_EVIDENCE_SOURCE_EXECUTION_PREVIEW_BYTES: usize = 1024 * 1024;
 
-/// Operator-owned exact HTTP or HTTPS origins that the source executor may contact.
+/// Operator-owned exact HTTP origins that the source executor may contact.
 ///
 /// A retained source plan also carries its own host list, but a plan is caller-controlled data and
 /// cannot authorize its own network access. The effective permission is the intersection of this
 /// set and the plan's host list.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DomainEvidenceSourceHttpPolicy {
-    allowed_origins: BTreeSet<(bool, String, u16)>,
+    allowed_origins: BTreeSet<(String, u16)>,
 }
 
 impl DomainEvidenceSourceHttpPolicy {
-    /// Create an operator allow-list from HTTP `host[:port]` entries or scheme-qualified
-    /// `http://host[:port]` and `https://host[:port]` origins. An unqualified host authorizes
-    /// only HTTP on port 80; a scheme-qualified host without a port uses that scheme's default
-    /// port. Paths, credentials, unsupported schemes, and IPv6 literals are refused.
+    /// Create an operator allow-list from `host` or `host:port` entries. A host without a port
+    /// authorizes only plain HTTP's default port 80. Schemes, paths, credentials, and IPv6
+    /// literals are refused; this connector currently supports only plain HTTP.
     pub fn new<I, S>(origins: I) -> Result<Self, String>
     where
         I: IntoIterator<Item = S>,
@@ -57,52 +52,36 @@ impl DomainEvidenceSourceHttpPolicy {
             let origin = origin.as_ref();
             if origin.is_empty() || origin.trim() != origin {
                 return Err(
-                    "source origins must be non-empty and have no surrounding whitespace".into(),
+                    "HTTP origins must be non-empty and have no surrounding whitespace".into(),
                 );
             }
-            allowed_origins.insert(parse_http_origin(origin)?);
+            let (host, port) = match origin.rsplit_once(':') {
+                Some((host, port)) if !host.is_empty() && !port.is_empty() => {
+                    let port = port
+                        .parse::<u16>()
+                        .map_err(|_| format!("HTTP origin {origin:?} has an invalid port"))?;
+                    (host, port)
+                }
+                Some(_) => {
+                    return Err(format!(
+                        "HTTP origin {origin:?} has an invalid host or port"
+                    ));
+                }
+                None => (origin, 80),
+            };
+            let host = canonical_http_host(host)
+                .ok_or_else(|| format!("HTTP origin {origin:?} has an invalid host"))?;
+            if port == 0 {
+                return Err(format!("HTTP origin {origin:?} must use a non-zero port"));
+            }
+            allowed_origins.insert((host, port));
         }
         Ok(Self { allowed_origins })
     }
 
-    fn allows(&self, tls: bool, host: &str, port: u16) -> bool {
-        self.allowed_origins
-            .contains(&(tls, host.to_string(), port))
+    fn allows(&self, host: &str, port: u16) -> bool {
+        self.allowed_origins.contains(&(host.to_string(), port))
     }
-}
-
-fn parse_http_origin(origin: &str) -> Result<(bool, String, u16), String> {
-    let (tls, authority, default_port) = if let Some(authority) = origin.strip_prefix("http://") {
-        (false, authority, 80)
-    } else if let Some(authority) = origin.strip_prefix("https://") {
-        (true, authority, 443)
-    } else if origin.contains("://") {
-        return Err(format!(
-            "source origin {origin:?} uses an unsupported scheme"
-        ));
-    } else {
-        (false, origin, 80)
-    };
-    let (host, port) = match authority.rsplit_once(':') {
-        Some((host, port)) if !host.is_empty() && !port.is_empty() => {
-            let port = port
-                .parse::<u16>()
-                .map_err(|_| format!("source origin {origin:?} has an invalid port"))?;
-            (host, port)
-        }
-        Some(_) => {
-            return Err(format!(
-                "source origin {origin:?} has an invalid host or port"
-            ));
-        }
-        None => (authority, default_port),
-    };
-    let host = canonical_http_host(host)
-        .ok_or_else(|| format!("source origin {origin:?} has an invalid host"))?;
-    if port == 0 {
-        return Err(format!("source origin {origin:?} must use a non-zero port"));
-    }
-    Ok((tls, host, port))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -150,24 +129,14 @@ pub fn execute_domain_evidence_source(
 
 /// Execute a retained plan under the embedding server's operator-owned HTTP policy.
 ///
-/// HTTP or HTTPS is permitted only when the plan enables networking and names a host that the
-/// operator allow-listed at the exact scheme and requested port. HTTPS uses the platform's
-/// trusted roots and validates the server name. The default
+/// HTTP is permitted only when the plan enables networking and names a host that the operator
+/// allow-listed at the exact requested port. The default
 /// [`execute_domain_evidence_source`] entry point installs an empty policy and refuses all
-/// outbound network access.
+/// outbound HTTP.
 pub fn execute_domain_evidence_source_with_http_policy(
     root: &Path,
     plan: &Value,
     http_policy: &DomainEvidenceSourceHttpPolicy,
-) -> Result<Value, DomainEvidenceSourceExecutionError> {
-    execute_domain_evidence_source_with_http_policy_and_tls_connector(root, plan, http_policy, None)
-}
-
-fn execute_domain_evidence_source_with_http_policy_and_tls_connector(
-    root: &Path,
-    plan: &Value,
-    http_policy: &DomainEvidenceSourceHttpPolicy,
-    tls_connector_override: Option<&TlsConnector>,
 ) -> Result<Value, DomainEvidenceSourceExecutionError> {
     validate_domain_evidence_source_plan(plan)
         .map_err(|error| DomainEvidenceSourceExecutionError::InvalidPlan(error.to_string()))?;
@@ -227,14 +196,7 @@ fn execute_domain_evidence_source_with_http_policy_and_tls_connector(
         match (connector_kind, locator_kind) {
             ("file", "path") => fetch_file(root, locator, max_bytes),
             ("generic_http", "uri") => {
-                fetch_http(
-                    locator,
-                    policy,
-                    http_policy,
-                    max_bytes,
-                    timeout_ms,
-                    tls_connector_override,
-                )
+                fetch_http(locator, policy, http_policy, max_bytes, timeout_ms)
             }
             ("file", _) => FetchResult::Refused {
                 reason: "file connector requires locator_kind=path".into(),
@@ -421,7 +383,6 @@ fn fetch_http(
     http_policy: &DomainEvidenceSourceHttpPolicy,
     max_bytes: usize,
     timeout_ms: u64,
-    tls_connector_override: Option<&TlsConnector>,
 ) -> FetchResult {
     if retrieval_policy.get("network").and_then(Value::as_str) != Some("enabled") {
         return FetchResult::Refused {
@@ -432,7 +393,12 @@ fn fetch_http(
         Ok(value) => value,
         Err(reason) => return FetchResult::Refused { reason },
     };
-    let scheme = if tls { "HTTPS" } else { "HTTP" };
+    if tls {
+        return FetchResult::Refused {
+            reason: "https locators are refused because the offline connector has no TLS client"
+                .into(),
+        };
+    }
     let allowed_hosts = retrieval_policy
         .get("allowed_hosts")
         .and_then(Value::as_array)
@@ -445,93 +411,59 @@ fn fetch_http(
         .any(|allowed| canonical_http_host(allowed) == Some(host.clone()))
     {
         return FetchResult::Refused {
-            reason: format!("{scheme} host {host:?} is not in retrieval_policy.allowed_hosts"),
+            reason: format!("HTTP host {host:?} is not in retrieval_policy.allowed_hosts"),
         };
     }
-    if !http_policy.allows(tls, &host, port) {
+    if !http_policy.allows(&host, port) {
         return FetchResult::Refused {
             reason: format!(
-                "{scheme} origin {host:?}:{port} is not approved by the operator's server-level allow-list"
+                "HTTP origin {host:?}:{port} is not approved by the operator's server-level allow-list"
             ),
         };
     }
-    let tls_connector = if tls {
-        match tls_connector_override {
-            Some(connector) => Some(connector.clone()),
-            None => match TlsConnector::new() {
-                Ok(connector) => Some(connector),
-                Err(error) => {
-                    return FetchResult::Error {
-                        reason: format!("HTTPS client could not initialize platform TLS: {error}"),
-                    }
-                }
-            },
-        }
-    } else {
-        None
-    };
     let timeout = Duration::from_millis(timeout_ms);
     let address = match (host.as_str(), port).to_socket_addrs() {
         Ok(mut addresses) => match addresses.next() {
             Some(address) => address,
             None => {
                 return FetchResult::Error {
-                    reason: format!("{scheme} host resolved to no address"),
+                    reason: "HTTP host resolved to no address".into(),
                 }
             }
         },
         Err(error) => {
             return FetchResult::Error {
-                reason: format!("{scheme} host resolution failed: {error}"),
+                reason: format!("HTTP host resolution failed: {error}"),
             }
         }
     };
-    let stream = match TcpStream::connect_timeout(&address, timeout) {
+    let mut stream = match TcpStream::connect_timeout(&address, timeout) {
         Ok(stream) => stream,
         Err(error) => {
             return FetchResult::Error {
-                reason: format!("{scheme} connection failed: {error}"),
+                reason: format!("HTTP connection failed: {error}"),
             }
         }
     };
     if let Err(error) = stream.set_read_timeout(Some(timeout)) {
         return FetchResult::Error {
-            reason: format!("{scheme} read timeout could not be configured: {error}"),
+            reason: format!("HTTP read timeout could not be configured: {error}"),
         };
     }
     if let Err(error) = stream.set_write_timeout(Some(timeout)) {
         return FetchResult::Error {
-            reason: format!("{scheme} write timeout could not be configured: {error}"),
+            reason: format!("HTTP write timeout could not be configured: {error}"),
         };
     }
-    let mut stream: Box<dyn ReadWrite> = match tls_connector {
-        Some(connector) => match connector.connect(&host, stream) {
-            Ok(stream) => Box::new(stream),
-            Err(error) => {
-                return FetchResult::Error {
-                    reason: format!(
-                        "HTTPS TLS handshake or certificate validation failed: {error:?}"
-                    ),
-                }
-            }
-        },
-        None => Box::new(stream),
-    };
-    let default_port = if tls { 443 } else { 80 };
-    let host_header = if port == default_port {
-        host.clone()
-    } else {
-        format!("{host}:{port}")
-    };
     let request = format!(
-        "GET {target} HTTP/1.1\r\nHost: {host_header}\r\nAccept: application/json, text/plain, */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
+        "GET {target} HTTP/1.1\r\nHost: {host}\r\nAccept: application/json, text/plain, */*\r\nConnection: close\r\n\r\n"
     );
     if let Err(error) = stream.write_all(request.as_bytes()) {
         return FetchResult::Error {
             reason: format!("HTTP request write failed: {error}"),
         };
     }
-    let (headers, mut body) = match read_http_headers(&mut *stream) {
+    let (headers, mut body) = match read_http_headers(&mut stream) {
         Ok(value) => value,
         Err(reason) => return FetchResult::Error { reason },
     };
@@ -576,7 +508,7 @@ fn fetch_http(
             reason: "HTTP response contains bytes beyond its declared Content-Length".into(),
         };
     }
-    let body_result = read_http_body(&mut *stream, &mut body, content_length, max_bytes);
+    let body_result = read_http_body(&mut stream, &mut body, content_length, max_bytes);
     let Some(body) = body_result else {
         return FetchResult::Refused {
             reason: format!("HTTP response exceeded the planned {max_bytes}-byte bound"),
@@ -761,7 +693,7 @@ fn is_http_token_byte(byte: u8) -> bool {
     )
 }
 
-fn read_http_headers<S: Read + ?Sized>(stream: &mut S) -> Result<(Vec<String>, Vec<u8>), String> {
+fn read_http_headers(stream: &mut TcpStream) -> Result<(Vec<String>, Vec<u8>), String> {
     let mut bytes = Vec::new();
     let mut chunk = [0_u8; 8192];
     loop {
@@ -790,8 +722,8 @@ fn read_http_headers<S: Read + ?Sized>(stream: &mut S) -> Result<(Vec<String>, V
     }
 }
 
-fn read_http_body<S: Read + ?Sized>(
-    stream: &mut S,
+fn read_http_body(
+    stream: &mut TcpStream,
     body: &mut Vec<u8>,
     content_length: Option<usize>,
     max_bytes: usize,
@@ -1048,8 +980,8 @@ mod tests {
     }
 
     #[test]
-    fn https_requires_exact_operator_scheme_and_origin_approval() {
-        let source = json!({
+    fn https_and_non_enabled_networks_are_refused_before_io() {
+        let mut source = json!({
             "group_id": "biological_domains",
             "domains": ["modalities"],
             "subject_id": "source-execution-http",
@@ -1061,23 +993,13 @@ mod tests {
             "retrieval_policy": {"network": "enabled", "allowed_hosts": ["example.org"], "max_bytes": 4096},
             "does_not_claim": ["source truth"]
         });
-        let source = plan_domain_evidence_source(&source).unwrap();
+        source = plan_domain_evidence_source(&source).unwrap();
         let result = execute_domain_evidence_source(Path::new("."), &source).unwrap();
         assert_eq!(result["outcome"], "refused");
         assert!(result["response"]["retrieval"]["reason"]
             .as_str()
             .unwrap()
-            .contains("operator's server-level allow-list"));
-
-        let http_policy = DomainEvidenceSourceHttpPolicy::new(["example.org"]).unwrap();
-        let result =
-            execute_domain_evidence_source_with_http_policy(Path::new("."), &source, &http_policy)
-                .unwrap();
-        assert_eq!(result["outcome"], "refused");
-        assert!(result["response"]["retrieval"]["reason"]
-            .as_str()
-            .unwrap()
-            .contains("HTTPS origin"));
+            .contains("TLS"));
     }
 
     #[test]
@@ -1144,9 +1066,9 @@ mod tests {
     }
 
     #[test]
-    fn operator_origins_reject_invalid_schemes_paths_and_zero_ports() {
+    fn operator_http_origins_reject_schemes_paths_and_zero_ports() {
         for origin in [
-            "ftp://example.org",
+            "https://example.org",
             "example.org/path",
             "example.org:0",
             "user@example.org",
@@ -1159,12 +1081,6 @@ mod tests {
         }
         assert!(DomainEvidenceSourceHttpPolicy::new(["EXAMPLE.ORG."]).is_ok());
         assert!(DomainEvidenceSourceHttpPolicy::new(["127.0.0.1:8123"]).is_ok());
-        assert!(DomainEvidenceSourceHttpPolicy::new(["https://EXAMPLE.ORG."]).is_ok());
-        assert!(DomainEvidenceSourceHttpPolicy::new(["https://example.org:8443"]).is_ok());
-        let https_only = DomainEvidenceSourceHttpPolicy::new(["https://example.org"]).unwrap();
-        assert!(https_only.allows(true, "example.org", 443));
-        assert!(!https_only.allows(false, "example.org", 80));
-        assert!(!https_only.allows(true, "example.org", 8443));
     }
 
     #[test]
@@ -1255,113 +1171,6 @@ mod tests {
         assert_eq!(result["http_status"], 200);
         assert_eq!(result["content_type"], "application/json");
         assert_eq!(result["response"]["retrieval"]["body_encoding"], "json");
-        assert_eq!(result["raw_content_digest"].as_str().unwrap().len(), 64);
-    }
-
-    #[test]
-    fn allowlisted_https_uses_trusted_tls_and_returns_bounded_content() {
-        use native_tls::{Certificate, TlsConnector};
-        use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
-        use rustls::{ServerConfig, ServerConnection, StreamOwned};
-        use std::net::TcpListener;
-        use std::sync::Arc;
-        use std::thread;
-
-        let rcgen::CertifiedKey { cert, signing_key } =
-            rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-        let trust = Certificate::from_der(cert.der().as_ref()).unwrap();
-        let server_config = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(
-                vec![cert.der().clone()],
-                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(signing_key.serialize_der())),
-            )
-            .unwrap();
-        let server_config = Arc::new(server_config);
-        let mut connector_builder = TlsConnector::builder();
-        connector_builder.add_root_certificate(trust);
-        let connector = connector_builder.build().unwrap();
-
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let address = listener.local_addr().unwrap();
-        let worker = thread::spawn(move || {
-            for _ in 0..3 {
-                let (stream, _) = listener.accept().unwrap();
-                let connection = ServerConnection::new(Arc::clone(&server_config)).unwrap();
-                let mut stream = StreamOwned::new(connection, stream);
-                let mut request = [0_u8; 1024];
-                if let Ok(count) = stream.read(&mut request) {
-                    if count > 0 {
-                        assert!(String::from_utf8_lossy(&request[..count])
-                            .contains("GET /payload HTTP/1.1"));
-                        stream
-                            .write_all(
-                                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 24\r\nConnection: close\r\n\r\n{\"tls\":\"verified\",\"n\":1}",
-                            )
-                            .unwrap();
-                    }
-                }
-            }
-        });
-        let plan = plan_domain_evidence_source(&json!({
-            "group_id": "biological_domains",
-            "domains": ["modalities"],
-            "subject_id": "source-execution-https-success",
-            "source_tool": "modality_catalog",
-            "connector_kind": "generic_http",
-            "locator_kind": "uri",
-            "locator": format!("https://127.0.0.1:{}/payload", address.port()),
-            "retrieval_mode": "content",
-            "retrieval_policy": {
-                "network": "enabled",
-                "allowed_hosts": ["127.0.0.1"],
-                "max_bytes": 4096,
-                "timeout_ms": 2000,
-                "cache": "no_cache"
-            },
-            "does_not_claim": ["source truth"]
-        }))
-        .unwrap();
-        let policy =
-            DomainEvidenceSourceHttpPolicy::new([format!("https://127.0.0.1:{}", address.port())])
-                .unwrap();
-
-        let untrusted =
-            execute_domain_evidence_source_with_http_policy(Path::new("."), &plan, &policy)
-                .unwrap();
-        assert_eq!(untrusted["outcome"], "error");
-        assert!(untrusted["response"]["retrieval"]["reason"]
-            .as_str()
-            .unwrap()
-            .contains("certificate validation failed"));
-
-        let wrong_name_stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))
-            .expect("TLS test server accepts a hostname verification probe");
-        wrong_name_stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
-        wrong_name_stream
-            .set_write_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
-        assert!(connector
-            .connect("wrong.example", wrong_name_stream)
-            .is_err());
-
-        let result = execute_domain_evidence_source_with_http_policy_and_tls_connector(
-            Path::new("."),
-            &plan,
-            &policy,
-            Some(&connector),
-        )
-        .unwrap();
-        worker.join().unwrap();
-        assert_eq!(result["outcome"], "observed");
-        assert_eq!(result["http_status"], 200);
-        assert_eq!(result["response"]["retrieval"]["body_encoding"], "json");
-        assert_eq!(
-            result["response"]["retrieval"]["body"],
-            json!({"tls":"verified","n":1})
-        );
         assert_eq!(result["raw_content_digest"].as_str().unwrap().len(), 64);
     }
 

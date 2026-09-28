@@ -1798,7 +1798,7 @@ coordinate sort order without emitting read names, reference labels, sequences, 
 values. Binary BAM/CRAM remains an explicit dependency-gated route.
 The `domain_acquisition_catalogue` now joins the authoritative 29-group capability catalogue to
 the adapter registry without pretending that either registry alone is execution evidence. Every
-declared domain receives separate transport and interpretation rows, bounded file/HTTP/HTTPS and
+declared domain receives separate transport and interpretation rows, bounded file/plain-HTTP and
 caller-managed connector families remain distinct, and native/Python-delegated adapter matches
 retain their declared scope-label basis. The four evidence transport/intake tools are explicitly
 cross-cutting memberships for every group, making the existing source-plan and intake scope gates

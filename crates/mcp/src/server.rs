@@ -1279,27 +1279,20 @@ impl Server {
         &self.root
     }
 
-    /// Allow explicit source retrieval from operator-approved HTTP or HTTPS origins.
+    /// Allow explicit source retrieval from operator-approved plain HTTP origins.
     ///
     /// Plans remain caller-controlled and cannot grant themselves network access. Each request
-    /// must also opt into networking and name the requested host in its own plan. HTTPS uses
-    /// platform trust roots and verifies the server hostname.
-    pub fn with_domain_evidence_source_origins<I, S>(mut self, origins: I) -> Result<Self, String>
+    /// must also opt into networking and name the requested host in its own plan.
+    pub fn with_domain_evidence_source_http_origins<I, S>(
+        mut self,
+        origins: I,
+    ) -> Result<Self, String>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
         self.domain_evidence_source_http_policy = DomainEvidenceSourceHttpPolicy::new(origins)?;
         Ok(self)
-    }
-
-    /// Compatibility alias for [`Self::with_domain_evidence_source_origins`].
-    pub fn with_domain_evidence_source_http_origins<I, S>(self, origins: I) -> Result<Self, String>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        self.with_domain_evidence_source_origins(origins)
     }
 
     pub fn lifecycle(&self) -> Lifecycle {

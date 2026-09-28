@@ -61,7 +61,7 @@ mod tests {
             bioprism_ids::ContentHash::of_value(&Value::Array(definitions))
                 .expect("catalogue canonicalizes")
                 .to_string(),
-            "a4ba1a3f76b28594b641d3acc0aa88afd893bfd366dcece405e66d5b03e11f6c"
+            "5534db27c882c04e3afaea0ef16d7e5f30f9b3717afe38ed21ec354864787715"
         );
     }
 

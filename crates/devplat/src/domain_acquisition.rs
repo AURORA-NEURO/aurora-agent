@@ -4,7 +4,7 @@
 //! adapter registry says which physical formats can be interpreted. Those are different facts.
 //! This module joins them without collapsing them into an inflated "supported" boolean:
 //!
-//! * transport describes whether a domain has the bounded file/HTTP/HTTPS source-plan and intake
+//! * transport describes whether a domain has the bounded file/HTTP source-plan and intake
 //!   seam, or only a caller-managed/declared intake surface;
 //! * interpretation describes native and Python-delegated adapter routes whose *declared scope
 //!   labels* overlap the domain label;
@@ -451,7 +451,7 @@ fn build_route(
         bounded_connector_kinds,
         caller_managed_connector_kinds,
         limitations: vec![
-            "generic_http uses verified platform TLS for HTTPS; redirects remain refused".into(),
+            "generic_http is plain-HTTP only in the in-process kernel; HTTPS and redirects remain refused".into(),
             "literature, clinical-trial, FHIR, object-store, and provider connectors remain caller-managed".into(),
         ],
     };

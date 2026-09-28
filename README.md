@@ -1067,7 +1067,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,356,517 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,356,298 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 
@@ -1390,10 +1390,10 @@ is insufficient to act; the server recompiles and verifies the certificate diges
 the requested layer. On the reference world L0 is ~204 estimated tokens against ~1,900 for the full
 section.
 
-The MCP server denies outbound source retrieval by default. To enable it, add one or more
-`--allow-http-origin <host[:port]>` or `--allow-https-origin <host[:port]>` options at startup;
-each retained source plan must also set `retrieval_policy.network` to `enabled` and include the
-requested host in `allowed_hosts`. HTTPS uses verified platform TLS. Redirects are refused.
+The MCP server denies outbound source HTTP by default. To enable it, add one or more
+`--allow-http-origin <host[:port]>` options at startup; each retained source plan must also set
+`retrieval_policy.network` to `enabled` and include the requested host in `allowed_hosts`. The
+connector uses plain HTTP only and refuses HTTPS and redirects.
 
 The invariant that makes that safe: **omissions are reported at every layer**, so an agent that
 stops at L0 still knows what it does not have. Layering hides volume, never the fact of an

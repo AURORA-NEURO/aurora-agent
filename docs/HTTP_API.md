@@ -56,7 +56,7 @@ behind an operator-managed TLS endpoint; bearer credentials travel in plaintext 
 | `GET /v1/domain-evidence/harmonization/coverage?subject_id=&domain=&report_class=&bridge_mode=&traceability_state=&after=&max_items=&include_report_digests=` | Query bounded retained harmonization summaries without returning full artifact bodies |
 | `POST /v1/domain-evidence/intake` | Normalize and index one supplied raw request/response envelope from any declared capability-group tool |
 | `POST /v1/domain-evidence/sources` | Build and index a non-fetching, digest-addressed external evidence source plan |
-| `POST /v1/domain-evidence/sources/execute` | Execute a retained source plan through bounded file/HTTP/HTTPS connectors and retain the response intake |
+| `POST /v1/domain-evidence/sources/execute` | Execute a retained source plan through bounded file/plain-HTTP connectors and retain the response intake |
 | `GET /v1/domain-evidence/coverage?group_id=&domain=&max_groups=&include_intake_digests=` | Count retained raw-intake envelopes plus advisory digest-verified artifact-family evidence by authoritative group |
 | `GET /v1/domain-decision-readiness?subject_id=&decision_state=&policy_satisfied=&after=&limit=&include_audits=` | Query retained structural decision-readiness audits by exact state/policy posture |
 | `POST /v1/control-plane-readiness` | Join explicitly supplied domain, route, operations, release, and workflow evidence into one retained structural posture |
@@ -424,20 +424,17 @@ retrieval will be authentic, complete, or scientifically valid. If an expected c
 declared, a later `source_plan_digest`-bound intake is refused unless its canonical response digest
 matches that expectation.
 `POST /v1/domain-evidence/sources/execute` is the controlled execution seam. It requires a retained
-plan, confines file reads to the configured server root, and permits HTTP or HTTPS only when the
-plan has `retrieval_policy.network: "enabled"` plus an `allowed_hosts` entry matching the request
-host, and the API server was started with `--allow-http-origin <host[:port]>` or
-`--allow-https-origin <host[:port]>` matching that exact scheme, host, and port. HTTPS validates
-the server certificate against platform trust roots and checks the hostname.
+plan, confines file reads to the configured server root, and permits plain HTTP only when the plan
+has `retrieval_policy.network: "enabled"` plus an `allowed_hosts` entry matching the request host,
+and the API server was started with `--allow-http-origin <host[:port]>` matching that exact origin.
 The operator allow-list is empty by default, so a caller-controlled plan cannot authorize its own
 network access. Reads enforce `max_bytes` and
-`timeout_ms`; redirects, credentials, unsupported connector families, traversal, and
+`timeout_ms`; redirects, HTTPS, credentials, unsupported connector families, traversal, and
 network-policy refusals remain explicit `refused` or `error` outcomes; the in-process kernel only
 executes `retrieval_mode: "content"`, leaving reference-only and metadata-only plans caller-managed.
-The equivalent MCP server options are `--allow-http-origin <host[:port]>` and
-`--allow-https-origin <host[:port]>`. Omitting both options denies all outbound source requests.
-Origins accept a host (port 80 for HTTP or 443 for HTTPS) or a host and exact port; redirects and
-IPv6 literals are refused.
+The equivalent MCP server option is `--allow-http-origin <host[:port]>`. Omitting the option denies
+all outbound source HTTP. Origins accept a host (port 80) or a host and exact port; this connector
+does not support TLS, redirects, or IPv6 literals.
 Successful reads expose an
 exact raw-byte digest and a separate canonical JSON response digest, then automatically retain the
 bounded response through `domain_evidence_intake` with both the plan identity and plan artifact
@@ -456,7 +453,7 @@ from being selected from a truncated catalogue slice; it remains a routing/confo
 not ontology resolution or scientific authorization.
 `POST /v1/tools/domain_acquisition_catalogue` exposes the cross-domain route registry. Its
 digest-bound report returns one row for every selected declared domain, with transport and
-interpretation kept separate: bounded file/HTTP/HTTPS transport, caller-managed connector
+interpretation kept separate: bounded file/plain-HTTP transport, caller-managed connector
 families, native adapter matches, Python-delegated adapter matches, domain-tool-only rows, and
 unmapped rows are distinct. Adapter matches are based only on declared scope-label overlap and
 carry the adapter registry digest; they do not resolve ontologies, execute adapters, verify

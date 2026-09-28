@@ -1,6 +1,6 @@
 //! `bioprism-api` — bounded HTTP/REST and event gateway.
 //!
-//! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--allow-http-origin <host[:port]>]... [--allow-https-origin <host[:port]>]... [--mission-state <file>] [--mission-queue-state <file>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>] [--ci-provider-evidence-state <file>]`
+//! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--allow-http-origin <host[:port]>]... [--mission-state <file>] [--mission-queue-state <file>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>] [--ci-provider-evidence-state <file>]`
 
 use bioprism_api::{serve, validate_bind_auth, ApiConfig, ApiRouter};
 use std::net::TcpListener;
@@ -12,7 +12,7 @@ fn main() {
     let mut bind = "127.0.0.1:8787".to_string();
     let mut root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut token = None;
-    let mut allowed_source_origins = Vec::new();
+    let mut allowed_http_origins = Vec::new();
     let mut mission_state_path = None;
     let mut mission_queue_state_path = None;
     let mut mission_queue_max_jobs = ApiConfig::default().mission_queue_max_jobs;
@@ -39,12 +39,8 @@ fn main() {
             "--root" => root = PathBuf::from(value("--root", &mut arguments)),
             "--token" => token = Some(value("--token", &mut arguments)),
             "--allow-http-origin" => {
-                allowed_source_origins.push(value("--allow-http-origin", &mut arguments))
+                allowed_http_origins.push(value("--allow-http-origin", &mut arguments))
             }
-            "--allow-https-origin" => allowed_source_origins.push(format!(
-                "https://{}",
-                value("--allow-https-origin", &mut arguments)
-            )),
             "--mission-state" => {
                 mission_state_path = Some(PathBuf::from(value("--mission-state", &mut arguments)))
             }
@@ -123,7 +119,7 @@ fn main() {
             "-h" | "--help" => {
                 println!(
                     "bioprism-api — bounded HTTP/REST and event gateway\n\n\
-                     USAGE\n  bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--allow-http-origin <host[:port]>]... [--allow-https-origin <host[:port]>]... [--mission-state <file>] [--mission-queue-state <file>] [--mission-queue-max-jobs <n>] [--mission-queue-max-active-leases <n>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>] [--ci-provider-evidence-state <file>]\n\n\
+                     USAGE\n  bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--allow-http-origin <host[:port]>]... [--mission-state <file>] [--mission-queue-state <file>] [--mission-queue-max-jobs <n>] [--mission-queue-max-active-leases <n>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>] [--ci-provider-evidence-state <file>]\n\n\
                      GET /healthz, /readyz, and /openapi.json are public. Numeric loopback binds may omit authentication; every other bind requires --token or AURORA_API_TOKEN.\n\
                      REST tools: POST /v1/tools/<name> with a JSON object body.\n\
                      JSON-RPC: POST /v1/rpc. Events: GET /v1/events or /v1/events/stream.\n\
@@ -136,7 +132,7 @@ fn main() {
                      Workbench reports: --workbench-state enables bounded restart-safe retention of structurally valid developer_workbench reports.\n\
                      CI provider evidence: --ci-provider-evidence-state enables bounded restart-safe retention of re-audited provider/run/artifact/log/attestation reports; it does not authenticate providers or verify remote bytes.\n\
                      Webhooks: register, poll signed deliveries, retry, and acknowledge.\n\
-                     Domain source retrieval makes no outbound requests by default. Repeat --allow-http-origin <host[:port]> or --allow-https-origin <host[:port]> to approve exact origins; a retained source plan must also opt in and allow the requested host. HTTPS uses verified platform TLS, and redirects are refused. The gateway does not terminate inbound TLS or speak gRPC."
+                     Domain source retrieval makes no outbound HTTP requests by default. Repeat --allow-http-origin <host[:port]> to approve exact plain-HTTP origins; a retained source plan must also opt in and allow the requested host. HTTPS and redirects are refused. The gateway does not terminate inbound TLS or speak gRPC."
                 );
                 return;
             }
@@ -185,10 +181,10 @@ fn main() {
         ci_provider_evidence_state_path,
         ..ApiConfig::default()
     };
-    let router = match ApiRouter::new_with_domain_evidence_source_origins(
+    let router = match ApiRouter::new_with_domain_evidence_source_http_origins(
         root,
         config,
-        allowed_source_origins,
+        allowed_http_origins,
     ) {
         Ok(router) => Arc::new(router),
         Err(error) => {
