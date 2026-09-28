@@ -236,6 +236,32 @@ def test_action_outputs_only_status_and_digest_unless_full_result_is_requested(t
     assert private_task not in output_text  # the opt-in file is separate from GitHub outputs
 
 
+@pytest.mark.parametrize(
+    ("routing_mode", "status"),
+    (("explicit_domain", None), ("unexpected", "completed"), ([], "completed")),
+)
+def test_action_rejects_malformed_success_projection_before_writing_outputs(
+    tmp_path: Path, routing_mode: object, status: str | None
+) -> None:
+    environment = _environment(tmp_path)
+    environment["INPUT_RESULT_FILE"] = "result.json"
+    payload = {
+        "schema": CLI_SCHEMA,
+        "command": "run",
+        "routing_mode": routing_mode,
+        "result": {"status": status},
+    }
+
+    def malformed_cli(_argv, *, environ, writer, error_writer) -> int:
+        writer.write(json.dumps(payload))
+        return 0
+
+    with pytest.raises(AutonomousAgentActionError, match="status|routing mode"):
+        run_action(environment, command=malformed_cli)
+    assert not Path(environment["GITHUB_OUTPUT"]).exists()
+    assert not (tmp_path / "result.json").exists()
+
+
 def test_action_runs_local_provider_and_caller_owned_mcp_end_to_end(tmp_path: Path, monkeypatch) -> None:
     fixture = ROOT / "python" / "tests" / "autonomous_brain_mcp_server.py"
     command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'

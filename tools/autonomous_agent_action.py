@@ -295,13 +295,15 @@ def run_action(
     if not isinstance(result, Mapping):
         raise AutonomousAgentActionError("autonomous CLI result projection is malformed")
     raw_status = result.get("status")
-    status = raw_status if isinstance(raw_status, str) and _STATUS.fullmatch(raw_status) else "unknown"
+    if not isinstance(raw_status, str) or not _STATUS.fullmatch(raw_status):
+        raise AutonomousAgentActionError("autonomous CLI result status is missing or malformed")
+    status = raw_status
     digest = hashlib.sha256(payload_bytes).hexdigest()
+    routing_mode = payload.get("routing_mode")
+    if not isinstance(routing_mode, str) or routing_mode not in {"automatic", "explicit_domain"}:
+        raise AutonomousAgentActionError("autonomous CLI routing mode is unsupported")
     if result_path is not None:
         _write_result_file(result_path, payload_text)
-    routing_mode = payload.get("routing_mode")
-    if routing_mode not in {"automatic", "explicit_domain"}:
-        routing_mode = "unknown"
     outputs = {
         "status": status,
         "routing_mode": routing_mode,

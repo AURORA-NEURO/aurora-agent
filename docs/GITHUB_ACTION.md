@@ -48,11 +48,11 @@ and SHA-256 digest to `GITHUB_OUTPUT` and the workflow log. It does not upload o
 file by default. Set `result-file` only when the workflow owner wants the full JSON response in a
 path inside `GITHUB_WORKSPACE`; that file can contain the task and model response and follows the
 caller's workspace retention policy. The digest is over the exact CLI JSON bytes and does not
-certify task correctness or scientific validity. A nonzero CLI process result fails the action;
-domain outcomes such as `paused`, `blocked`, or `approval_required` are exposed as `status` so a
-workflow can define its own gate. Successful provider-only and tool-loop calls have distinct
-statuses (`completed_provider_call` and `completed_provider_tool_loop`); gate on the result modes
-enabled in that workflow.
+certify task correctness or scientific validity. A nonzero CLI result or malformed result
+projection fails the action; domain outcomes such as `paused`, `blocked`, or `approval_required` are
+exposed as `status` so a workflow can define its own gate. Successful provider-only and tool-loop
+calls have distinct statuses (`completed_provider_call` and `completed_provider_tool_loop`); gate
+on the result modes enabled in that workflow.
 
 The action requires Python 3.11 or newer and uses the dependency-free source SDK shipped beside
 the action. Its Python setup step is pinned to `actions/setup-python` v7.0.0 and requires a GitHub
