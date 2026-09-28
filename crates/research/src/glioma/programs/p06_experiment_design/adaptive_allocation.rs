@@ -10,13 +10,14 @@
 use crate::glioma_engine::{GliomaModelSystem, LocalArtifactRef};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F10";
 pub const OUTPUT_SCHEMA: &str = "GliomaAdaptiveAllocation1@1";
 pub const MAX_ARMS: usize = 256;
 pub const MAX_OBSERVATIONS_PER_ARM: u32 = 1_000_000;
+const ADAPTIVE_ALLOCATION_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdaptiveAllocationRequest {
@@ -494,37 +495,139 @@ pub fn allocate_glioma_assays(
             .cmp(&left.utility_milli)
             .then_with(|| left.arm_id.cmp(&right.arm_id))
     });
-    let mut remaining_budget = request.budget_units;
-    let mut selected_order = Vec::new();
-    for posterior in posteriors
-        .iter_mut()
+    // A greedy arm-by-arm fill can spend the entire budget on one expensive arm. Keep a bounded
+    // knapsack beam over both arm inclusion and replicate count so total expected information is
+    // optimized under the declared arm and budget limits. Ties are replay-stable, and the
+    // resulting allocation remains a planning artifact until a caller-owned executor runs it.
+    #[derive(Clone)]
+    struct AllocationState {
+        selections: Vec<(String, u32)>,
+        selected_ids: BTreeSet<String>,
+        spent: u64,
+        utility: u128,
+    }
+    fn state_better(left: &AllocationState, right: &AllocationState) -> bool {
+        left.utility > right.utility
+            || (left.utility == right.utility
+                && (left.selections.len() > right.selections.len()
+                    || (left.selections.len() == right.selections.len()
+                        && (left.spent < right.spent
+                            || (left.spent == right.spent && left.selections < right.selections)))))
+    }
+    let eligible = posteriors
+        .iter()
         .filter(|posterior| !posterior.is_control && posterior.recommended_replicates > 0)
-        .take(request.max_selected_arms)
-    {
-        let arm = arms
-            .iter()
-            .find(|arm| arm.arm_id == posterior.arm_id)
-            .expect("validated arm exists");
-        let affordable = if arm.cost_units == 0 {
+        .map(|posterior| {
+            let arm = arms
+                .iter()
+                .find(|arm| arm.arm_id == posterior.arm_id)
+                .expect("validated arm exists");
+            (
+                posterior.arm_id.clone(),
+                posterior.utility_milli,
+                posterior.recommended_replicates,
+                arm.cost_units,
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut beam = vec![AllocationState {
+        selections: Vec::new(),
+        selected_ids: BTreeSet::new(),
+        spent: 0,
+        utility: 0,
+    }];
+    for (arm_id, utility, recommended, cost) in &eligible {
+        let mut expanded = beam.clone();
+        let max_affordable = if *cost == 0 {
             0
         } else {
-            (remaining_budget / u64::from(arm.cost_units))
-                .min(u64::from(posterior.recommended_replicates)) as u32
+            (request.budget_units / u64::from(*cost)).min(u64::from(*recommended)) as u32
         };
-        if affordable > 0 {
-            posterior.allocated_replicates = affordable;
-            remaining_budget = remaining_budget
-                .saturating_sub(u64::from(affordable).saturating_mul(u64::from(arm.cost_units)));
-            selected_order.push(posterior.arm_id.clone());
-            if affordable < posterior.recommended_replicates {
-                posterior.rationale =
-                    "hard budget capped the otherwise recommended next batch".into();
+        for state in &beam {
+            if state.selected_ids.len() >= request.max_selected_arms || max_affordable == 0 {
+                continue;
             }
-        } else {
-            posterior.action = AdaptiveAllocationActionKind::BudgetBlocked;
-            posterior.rationale = "hard budget cannot fund even one recommended replicate".into();
+            for replicates in 1..=max_affordable {
+                let spent = state
+                    .spent
+                    .saturating_add(u64::from(replicates).saturating_mul(u64::from(*cost)));
+                if spent > request.budget_units {
+                    break;
+                }
+                let mut selections = state.selections.clone();
+                selections.push((arm_id.clone(), replicates));
+                let mut selected_ids = state.selected_ids.clone();
+                selected_ids.insert(arm_id.clone());
+                expanded.push(AllocationState {
+                    selections,
+                    selected_ids,
+                    spent,
+                    utility: state.utility.saturating_add(
+                        u128::from(*utility).saturating_mul(u128::from(replicates)),
+                    ),
+                });
+            }
         }
+        expanded.sort_by(|left, right| {
+            right
+                .utility
+                .cmp(&left.utility)
+                .then_with(|| left.spent.cmp(&right.spent))
+                .then_with(|| left.selections.cmp(&right.selections))
+        });
+        let mut seen = BTreeSet::new();
+        expanded.retain(|state| seen.insert(state.selections.clone()));
+        expanded.truncate(ADAPTIVE_ALLOCATION_BEAM_WIDTH);
+        beam = expanded;
     }
+    let best = beam
+        .iter()
+        .max_by(|left, right| {
+            if state_better(left, right) {
+                std::cmp::Ordering::Greater
+            } else if state_better(right, left) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .cloned()
+        .unwrap_or_else(|| AllocationState {
+            selections: Vec::new(),
+            selected_ids: BTreeSet::new(),
+            spent: 0,
+            utility: 0,
+        });
+    let remaining_budget = request.budget_units.saturating_sub(best.spent);
+    let selected_arm_count = best.selected_ids.len();
+    let allocation_by_arm = best.selections.into_iter().collect::<BTreeMap<_, _>>();
+    let selected_order = posteriors
+        .iter_mut()
+        .filter_map(|posterior| {
+            let allocated = allocation_by_arm
+                .get(&posterior.arm_id)
+                .copied()
+                .unwrap_or(0);
+            if allocated == 0 {
+                if !posterior.is_control && posterior.recommended_replicates > 0 {
+                    posterior.action = AdaptiveAllocationActionKind::BudgetBlocked;
+                    posterior.rationale = if selected_arm_count >= request.max_selected_arms {
+                        "portfolio arm limit deferred this otherwise recommended batch".into()
+                    } else {
+                        "hard budget cannot fund even one recommended replicate".into()
+                    };
+                }
+                None
+            } else {
+                posterior.allocated_replicates = allocated;
+                if allocated < posterior.recommended_replicates {
+                    posterior.rationale =
+                        "hard budget capped the otherwise recommended next batch".into();
+                }
+                Some(posterior.arm_id.clone())
+            }
+        })
+        .collect::<Vec<_>>();
     let posterior_order = ids.iter().cloned().collect::<Vec<_>>();
     let mut negative_evidence = BTreeSet::new();
     if !negative.is_empty() {
@@ -697,5 +800,35 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.budget_remaining_units, 0);
         assert_eq!(first.posteriors[0].allocated_replicates, 1);
+    }
+
+    #[test]
+    fn allocation_beam_prefers_two_cheap_arms_over_one_expensive_arm() {
+        let mut request = request();
+        request.min_replicates_per_arm = 1_000;
+        request.max_new_replicates = 2;
+        request.max_selected_arms = 2;
+        request.budget_units = 4;
+        let mut expensive = arm("expensive", 90, 10, 100);
+        expensive.cost_units = 4;
+        let cheap_a = arm("cheap-a", 70, 30, 100);
+        let cheap_b = arm("cheap-b", 70, 30, 100);
+        let output = allocate_glioma_assays(
+            &request,
+            &[arm("control", 50, 50, 100), expensive, cheap_a, cheap_b],
+        )
+        .unwrap();
+        assert_eq!(output.selected_order, vec!["cheap-a", "cheap-b"]);
+        assert_eq!(output.budget_remaining_units, 0);
+        assert_eq!(
+            output
+                .posteriors
+                .iter()
+                .find(|posterior| posterior.arm_id == "expensive")
+                .unwrap()
+                .action,
+            AdaptiveAllocationActionKind::BudgetBlocked
+        );
+        output.validate().unwrap();
     }
 }

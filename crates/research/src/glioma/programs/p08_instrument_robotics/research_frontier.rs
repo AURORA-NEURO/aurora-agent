@@ -1,4 +1,4 @@
-//! Instrument-result to autonomous-research-frontier compilation.
+//! Status-aware instrument-result to autonomous-research-frontier compilation.
 //!
 //! P08's science loop deliberately stops at assay adjudication.  This module turns that typed
 //! result into the next executable glioma work: qualified assays become local computation,
@@ -24,8 +24,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P08-F25";
-pub const OUTPUT_SCHEMA: &str = "GliomaInstrumentResearchFrontier1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaInstrumentResearchFrontier1@2";
 pub const MAX_ACTIONS: usize = 256;
+const FRONTIER_BEAM_WIDTH: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstrumentResearchFrontierRequest {
@@ -96,6 +97,169 @@ pub enum InstrumentResearchFrontierError {
     InvalidOutput(String),
     #[error("instrument research frontier digest failed: {0}")]
     Digest(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum FrontierEvidenceState {
+    Qualified,
+    Negative,
+    Unresolved,
+}
+
+fn evidence_state(stage: GliomaStageKind) -> Option<FrontierEvidenceState> {
+    match stage {
+        GliomaStageKind::ComputationalExecution => Some(FrontierEvidenceState::Qualified),
+        GliomaStageKind::ExperimentDesign => Some(FrontierEvidenceState::Negative),
+        GliomaStageKind::ReplicationRobustness => Some(FrontierEvidenceState::Unresolved),
+        _ => None,
+    }
+}
+
+fn frontier_score(candidate: &GliomaActionCandidate, state: FrontierEvidenceState) -> u128 {
+    let status_weight = match state {
+        // A qualified assay is useful immediately, but a negative or unresolved assay has
+        // extra value because it prevents the autonomous engine from repeatedly pursuing an
+        // unsupported branch.
+        FrontierEvidenceState::Qualified => 1_000_u128,
+        FrontierEvidenceState::Negative => 1_080,
+        FrontierEvidenceState::Unresolved => 1_120,
+    };
+    u128::from(candidate.information_gain_milli)
+        .saturating_mul(u128::from(candidate.reproducibility_safety_milli.max(1)))
+        .saturating_mul(status_weight)
+        .saturating_div(u128::from(candidate.cost_units.max(1)))
+}
+
+#[derive(Debug, Clone)]
+struct FrontierPortfolioState {
+    selected_indices: Vec<usize>,
+    selected_ids: Vec<String>,
+    selected_states: BTreeSet<FrontierEvidenceState>,
+    selected_runs: BTreeSet<String>,
+    utility: u128,
+}
+
+fn frontier_state_better(
+    left: &FrontierPortfolioState,
+    right: &FrontierPortfolioState,
+    available_states: usize,
+    max_actions: usize,
+) -> bool {
+    let left_state_complete =
+        max_actions >= available_states && left.selected_states.len() == available_states;
+    let right_state_complete =
+        max_actions >= available_states && right.selected_states.len() == available_states;
+    left_state_complete && !right_state_complete
+        || (left_state_complete == right_state_complete
+            && (left.utility > right.utility
+                || (left.utility == right.utility
+                    && (left.selected_runs.len() > right.selected_runs.len()
+                        || (left.selected_runs.len() == right.selected_runs.len()
+                            && left.selected_ids < right.selected_ids)))))
+}
+
+/// Select a bounded frontier while retaining evidence-state coverage and source-run diversity.
+/// A raw top-k truncation can erase every negative or unresolved result from a large instrument
+/// campaign. The bounded portfolio beam evaluates those trade-offs jointly, keeping negative
+/// evidence and independent assay runs as first-class research work.
+fn select_frontier_candidates(
+    mut candidates: Vec<(GliomaActionCandidate, FrontierEvidenceState, String)>,
+    max_actions: usize,
+) -> Vec<GliomaActionCandidate> {
+    candidates.sort_by(|left, right| {
+        frontier_score(&right.0, right.1)
+            .cmp(&frontier_score(&left.0, left.1))
+            .then_with(|| left.0.action_id.cmp(&right.0.action_id))
+    });
+    let available_state_count = candidates
+        .iter()
+        .map(|(_, state, _)| *state)
+        .collect::<BTreeSet<_>>()
+        .len();
+    let initial = FrontierPortfolioState {
+        selected_indices: Vec::new(),
+        selected_ids: Vec::new(),
+        selected_states: BTreeSet::new(),
+        selected_runs: BTreeSet::new(),
+        utility: 0,
+    };
+    let mut beam = vec![initial.clone()];
+    let mut best = initial;
+    for _ in 0..max_actions {
+        let mut expanded = Vec::new();
+        for state in &beam {
+            for (index, (candidate, evidence_state, run_id)) in candidates.iter().enumerate() {
+                if state
+                    .selected_ids
+                    .binary_search(&candidate.action_id)
+                    .is_ok()
+                    || state
+                        .selected_ids
+                        .last()
+                        .is_some_and(|last| candidate.action_id <= *last)
+                {
+                    continue;
+                }
+                let base = frontier_score(candidate, *evidence_state);
+                let state_bonus = if state.selected_states.contains(evidence_state) {
+                    0
+                } else {
+                    base / 20 + 1
+                };
+                let run_bonus = if state.selected_runs.contains(run_id) {
+                    0
+                } else {
+                    base / 10 + 1
+                };
+                let mut selected_indices = state.selected_indices.clone();
+                selected_indices.push(index);
+                let mut selected_ids = state.selected_ids.clone();
+                selected_ids.push(candidate.action_id.clone());
+                selected_ids.sort();
+                let mut selected_states = state.selected_states.clone();
+                selected_states.insert(*evidence_state);
+                let mut selected_runs = state.selected_runs.clone();
+                selected_runs.insert(run_id.clone());
+                expanded.push(FrontierPortfolioState {
+                    selected_indices,
+                    selected_ids,
+                    selected_states,
+                    selected_runs,
+                    utility: state
+                        .utility
+                        .saturating_add(base)
+                        .saturating_add(state_bonus)
+                        .saturating_add(run_bonus),
+                });
+            }
+        }
+        if expanded.is_empty() {
+            break;
+        }
+        expanded.sort_by(|left, right| {
+            if frontier_state_better(left, right, available_state_count, max_actions) {
+                std::cmp::Ordering::Less
+            } else if frontier_state_better(right, left, available_state_count, max_actions) {
+                std::cmp::Ordering::Greater
+            } else {
+                left.selected_ids.cmp(&right.selected_ids)
+            }
+        });
+        expanded.truncate(FRONTIER_BEAM_WIDTH);
+        for candidate in &expanded {
+            if frontier_state_better(candidate, &best, available_state_count, max_actions) {
+                best = candidate.clone();
+            }
+        }
+        beam = expanded;
+    }
+    let mut output = best
+        .selected_indices
+        .into_iter()
+        .map(|index| candidates[index].0.clone())
+        .collect::<Vec<_>>();
+    output.sort_by(|left, right| left.action_id.cmp(&right.action_id));
+    output
 }
 
 fn canonical<T: Ord>(values: &[T]) -> bool {
@@ -341,6 +505,8 @@ pub fn compile_glioma_instrument_research_frontier(
 ) -> Result<InstrumentResearchFrontier, InstrumentResearchFrontierError> {
     validate_request(request)?;
     let mut candidates = BTreeMap::<String, GliomaActionCandidate>::new();
+    let mut candidate_states = BTreeMap::<String, FrontierEvidenceState>::new();
+    let mut candidate_source_runs = BTreeMap::<String, String>::new();
     let mut qualified_source = BTreeSet::new();
     let mut negative_source = BTreeSet::new();
     let mut unresolved_source = BTreeSet::new();
@@ -368,25 +534,29 @@ pub fn compile_glioma_instrument_research_frontier(
             request.modality,
             request.default_cost_units,
         ) {
-            candidates
-                .entry(candidate.action_id.clone())
-                .or_insert(candidate);
+            let candidate_id = candidate.action_id.clone();
+            if let Some(state) = evidence_state(candidate.stage_kind) {
+                candidate_states
+                    .entry(candidate_id.clone())
+                    .or_insert(state);
+                candidate_source_runs
+                    .entry(candidate_id.clone())
+                    .or_insert_with(|| run_id.clone());
+                candidates.entry(candidate_id).or_insert(candidate);
+            }
         }
     }
-    let mut ranked = candidates.into_values().collect::<Vec<_>>();
-    ranked.sort_by(|left, right| {
-        let left_score = u64::from(left.information_gain_milli)
-            .saturating_mul(u64::from(left.reproducibility_safety_milli.max(1)))
-            .saturating_div(u64::from(left.cost_units));
-        let right_score = u64::from(right.information_gain_milli)
-            .saturating_mul(u64::from(right.reproducibility_safety_milli.max(1)))
-            .saturating_div(u64::from(right.cost_units));
-        right_score
-            .cmp(&left_score)
-            .then_with(|| left.action_id.cmp(&right.action_id))
-    });
-    ranked.truncate(request.max_actions);
-    ranked.sort_by(|left, right| left.action_id.cmp(&right.action_id));
+    let ranked = select_frontier_candidates(
+        candidates
+            .into_values()
+            .filter_map(|candidate| {
+                let state = candidate_states.get(&candidate.action_id).copied()?;
+                let source_run = candidate_source_runs.get(&candidate.action_id)?.clone();
+                Some((candidate, state, source_run))
+            })
+            .collect(),
+        request.max_actions,
+    );
     if ranked.is_empty() && !request.allow_empty_frontier {
         return Err(InstrumentResearchFrontierError::InvalidInput(
             "instrument science loop produced no qualified, negative, or unresolved action to route".into(),
@@ -496,6 +666,7 @@ mod tests {
     use crate::glioma::programs::p08_instrument_robotics::assay_adjudication::{
         AssayEvidenceDisposition, AssayEvidenceRecord,
     };
+    use std::collections::BTreeSet;
 
     fn record(action_id: &str, eligible: bool, effect_milli: u64) -> AssayEvidenceRecord {
         AssayEvidenceRecord {
@@ -514,6 +685,117 @@ mod tests {
                 vec!["gate".into()]
             },
         }
+    }
+
+    fn candidate(
+        action_id: &str,
+        stage_kind: GliomaStageKind,
+        information_gain_milli: u16,
+        reproducibility_safety_milli: u16,
+    ) -> GliomaActionCandidate {
+        GliomaActionCandidate {
+            action_id: action_id.into(),
+            stage_kind,
+            modality: GliomaModality::Imaging,
+            model_system: GliomaModelSystem::Organoid,
+            depends_on: Vec::new(),
+            cost_units: 1,
+            information_gain_milli,
+            frontier_novelty_milli: 700,
+            workflow_leverage_milli: 700,
+            cross_stage_unlock_milli: 700,
+            reproducibility_safety_milli,
+            federation_value_milli: 700,
+            feasibility_milli: 900,
+            autonomy_tier: AutonomyTier::A1,
+            effects: BTreeSet::from([
+                Effect::ReadLocalData,
+                Effect::ExecuteLocalComputation,
+                Effect::WriteLocalArtifact,
+            ]),
+        }
+    }
+
+    #[test]
+    fn frontier_budget_retains_negative_and_unresolved_states() {
+        let selected = select_frontier_candidates(
+            vec![
+                (
+                    candidate(
+                        "qualified-high",
+                        GliomaStageKind::ComputationalExecution,
+                        950,
+                        980,
+                    ),
+                    FrontierEvidenceState::Qualified,
+                    "run-qualified".into(),
+                ),
+                (
+                    candidate(
+                        "qualified-second",
+                        GliomaStageKind::ComputationalExecution,
+                        920,
+                        970,
+                    ),
+                    FrontierEvidenceState::Qualified,
+                    "run-qualified-2".into(),
+                ),
+                (
+                    candidate("negative", GliomaStageKind::ExperimentDesign, 500, 400),
+                    FrontierEvidenceState::Negative,
+                    "run-negative".into(),
+                ),
+                (
+                    candidate(
+                        "unresolved",
+                        GliomaStageKind::ReplicationRobustness,
+                        450,
+                        350,
+                    ),
+                    FrontierEvidenceState::Unresolved,
+                    "run-unresolved".into(),
+                ),
+            ],
+            3,
+        );
+        let ids = selected
+            .iter()
+            .map(|candidate| candidate.action_id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(selected.len(), 3);
+        assert!(ids.contains("negative"));
+        assert!(ids.contains("unresolved"));
+        assert!(ids.contains("qualified-high"));
+    }
+
+    #[test]
+    fn single_slot_frontier_still_uses_utility_before_state_seeding() {
+        let selected = select_frontier_candidates(
+            vec![
+                (
+                    candidate(
+                        "qualified-low",
+                        GliomaStageKind::ComputationalExecution,
+                        100,
+                        100,
+                    ),
+                    FrontierEvidenceState::Qualified,
+                    "run-qualified".into(),
+                ),
+                (
+                    candidate("negative-high", GliomaStageKind::ExperimentDesign, 900, 900),
+                    FrontierEvidenceState::Negative,
+                    "run-negative".into(),
+                ),
+            ],
+            1,
+        );
+        assert_eq!(
+            selected
+                .first()
+                .map(|candidate| candidate.action_id.as_str()),
+            Some("negative-high")
+        );
     }
 
     #[test]

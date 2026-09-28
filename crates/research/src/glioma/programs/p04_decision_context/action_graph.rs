@@ -494,7 +494,9 @@ mod tests {
         KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma::programs::p04_decision_context::compile_decision_context;
-    use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
+    use crate::glioma_engine::{
+        GliomaModality, GliomaModelSystem, GliomaSelectionConfig, LocalArtifactRef,
+    };
     use bioprism_foundation::PRECLINICAL_BOUNDARY;
     use bioprism_ids::ContentHash;
     use std::collections::BTreeSet;
@@ -647,5 +649,150 @@ mod tests {
     #[test]
     fn preclinical_boundary_fixture_is_constant() {
         assert!(PRECLINICAL_BOUNDARY.contains("preclinical"));
+    }
+
+    #[test]
+    fn decision_graph_runs_a_dependency_closed_multi_step_local_mission() {
+        use crate::glioma::programs::p04_decision_context::mission_bridge::{
+            execute_glioma_decision_mission, DecisionMissionBridgeDisposition,
+            DecisionMissionBridgeRequest,
+        };
+        use crate::glioma::programs::p07_protocol_simulation::{
+            ActionExecutionDisposition, ActionExecutionFailure, ActionExecutionResult,
+            GliomaActionExecutionContext, GliomaActionExecutor, GliomaActionWorkflowScope,
+            GliomaMissionExecutionContext, GliomaMissionGates,
+        };
+        use bioprism_foundation::AutonomyTier;
+
+        let (context, composition) = context_and_composition();
+        let graph = compile_decision_action_graph(
+            &DecisionActionGraphRequest {
+                objective: "compose invasion mechanism".into(),
+                max_nodes: 8,
+                max_waves: 8,
+                budget_units: 100,
+                require_qualified_composition: true,
+            },
+            &context,
+            &composition,
+        )
+        .unwrap();
+        let modalities = graph
+            .nodes
+            .iter()
+            .map(|node| node.action.modality)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let model_systems = graph
+            .nodes
+            .iter()
+            .map(|node| node.action.model_system)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let source = artifact("study:organoid-invasion");
+
+        #[derive(Default)]
+        struct ContextRecorder {
+            contexts: Vec<GliomaActionExecutionContext>,
+        }
+        impl GliomaActionExecutor for ContextRecorder {
+            fn execute_action(
+                &mut self,
+                candidate: &GliomaActionCandidate,
+                attempt: u8,
+            ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+                self.execute_action_with_context(
+                    candidate,
+                    &GliomaActionExecutionContext::default(),
+                    attempt,
+                )
+            }
+
+            fn execute_action_with_context(
+                &mut self,
+                candidate: &GliomaActionCandidate,
+                context: &GliomaActionExecutionContext,
+                attempt: u8,
+            ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+                self.contexts.push(context.clone());
+                Ok(ActionExecutionResult {
+                    action_id: candidate.action_id.clone(),
+                    disposition: ActionExecutionDisposition::Completed,
+                    attempt_count: attempt,
+                    artifact: Some(LocalArtifactRef {
+                        artifact_id: format!("result:{}", candidate.action_id),
+                        content_hash: ContentHash::of_bytes(candidate.action_id.as_bytes()),
+                        content_type: "application/vnd.aurora.glioma.result+json".into(),
+                        local_only: true,
+                        contains_human_data: false,
+                        contains_direct_identifiers: false,
+                    }),
+                    note: "local integration-test result".into(),
+                    uncertainty: Vec::new(),
+                    negative_evidence: Vec::new(),
+                })
+            }
+        }
+
+        let request = DecisionMissionBridgeRequest {
+            mission_id: "glioma-invasion-workflow".into(),
+            objective: context.objective.clone(),
+            context,
+            graph,
+            execution_context: GliomaMissionExecutionContext {
+                source_artifacts: vec![source.clone()],
+                completed_artifacts: Vec::new(),
+                workflow_scope: Some(GliomaActionWorkflowScope {
+                    research_id: "glioma-invasion".into(),
+                    study_id: "organoid-replication".into(),
+                    objective: "compose invasion mechanism".into(),
+                    modalities,
+                    model_systems,
+                    requested_autonomy: AutonomyTier::A1,
+                }),
+            },
+            completed_action_order: Vec::new(),
+            selection: GliomaSelectionConfig {
+                budget_units: 100,
+                max_actions: 1,
+                ..GliomaSelectionConfig::default()
+            },
+            gates: GliomaMissionGates {
+                required_stages: BTreeSet::new(),
+                min_completed_actions: 2,
+                min_information_gain_milli: 0,
+                max_uncertainty_milli: 10_000,
+                min_model_systems: 1,
+                min_modalities: 1,
+            },
+            max_rounds: 4,
+            max_retries: 0,
+            require_artifacts: true,
+            stop_on_negative: false,
+            allow_partial_graph: false,
+        };
+        let mut executor = ContextRecorder::default();
+        let run = execute_glioma_decision_mission(&request, &mut executor).unwrap();
+
+        assert_eq!(run.disposition, DecisionMissionBridgeDisposition::Executed);
+        assert!(run.omitted_action_order.is_empty());
+        let mission = run.mission.as_ref().unwrap();
+        assert_eq!(
+            mission.disposition,
+            crate::glioma::programs::p07_protocol_simulation::GliomaMissionDisposition::Qualified
+        );
+        assert_eq!(mission.rounds.len(), 2);
+        assert_eq!(executor.contexts.len(), 2);
+        assert_eq!(executor.contexts[0].source_artifacts, vec![source.clone()]);
+        assert_eq!(executor.contexts[1].source_artifacts, vec![source]);
+        assert_eq!(executor.contexts[0].dependency_artifacts.len(), 0);
+        assert_eq!(executor.contexts[1].dependency_artifacts.len(), 1);
+        assert_eq!(
+            executor.contexts[1].dependency_artifacts[0].action_id,
+            mission.rounds[0].execution.action_order[0]
+        );
+        run.validate().unwrap();
     }
 }

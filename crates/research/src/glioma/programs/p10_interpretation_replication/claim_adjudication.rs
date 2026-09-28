@@ -31,7 +31,7 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F07";
-pub const OUTPUT_SCHEMA: &str = "GliomaCausalClaimAdjudication1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaCausalClaimAdjudication1@3";
 pub const MAX_ACTIONS: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +111,7 @@ pub struct GliomaCausalClaimAdjudication {
     pub meta_analysis: ReplicationMetaAnalysis,
     pub gates: Vec<ClaimGate>,
     pub action_order: Vec<String>,
+    pub deferred_action_order: Vec<String>,
     pub actions: Vec<ClaimNextAction>,
     pub claim_effect_milli: i64,
     pub claim_uncertainty_milli: u64,
@@ -150,6 +151,7 @@ fn digest_input(output: &GliomaCausalClaimAdjudication) -> serde_json::Value {
         "meta_analysis": output.meta_analysis,
         "gates": output.gates,
         "action_order": output.action_order,
+        "deferred_action_order": output.deferred_action_order,
         "actions": output.actions,
         "claim_effect_milli": output.claim_effect_milli,
         "claim_uncertainty_milli": output.claim_uncertainty_milli,
@@ -174,6 +176,7 @@ impl GliomaCausalClaimAdjudication {
                     || gate.threshold_milli > 1_000_000_000
             })
             || !canonical(&self.action_order)
+            || !canonical(&self.deferred_action_order)
             || self.actions.len() != self.action_order.len()
             || self.actions.iter().any(|action| {
                 action.action_id.trim().is_empty()
@@ -216,11 +219,18 @@ impl GliomaCausalClaimAdjudication {
             .iter()
             .map(|action| action.action_id.clone())
             .collect::<BTreeSet<_>>();
+        let selected_ids = self.action_order.iter().cloned().collect::<BTreeSet<_>>();
+        let deferred_ids = self
+            .deferred_action_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         if action_ids.len() != self.actions.len()
-            || action_ids != self.action_order.iter().cloned().collect::<BTreeSet<_>>()
+            || action_ids != selected_ids
+            || !selected_ids.is_disjoint(&deferred_ids)
         {
             return Err(GliomaCausalClaimAdjudicationError::InvalidOutput(
-                "claim action order does not reconcile with actions".into(),
+                "claim selected/deferred action partitions do not reconcile with actions".into(),
             ));
         }
         let expected = ContentHash::of_value(&digest_input(self))
@@ -302,23 +312,30 @@ fn confidence(
     meta: &ReplicationMetaAnalysis,
     min_robust_strength: u64,
 ) -> u16 {
-    let effect_score: u16 = if contrast.difference_in_differences_milli.unsigned_abs() >= 1
-        && contrast.interval_low_milli <= contrast.difference_in_differences_milli
-        && contrast.interval_high_milli >= contrast.difference_in_differences_milli
-    {
-        1_000
-    } else {
-        0
+    // Confidence is a gate-aware synthesis score, not a fourth estimator. A large numeric
+    // effect or signal-to-noise ratio cannot restore confidence after its parent analysis has
+    // explicitly failed or remained unresolved. This prevents a missing/negative causal gate
+    // from being averaged away by three positive downstream summaries.
+    let effect_score: u16 = match contrast.disposition {
+        CausalContrastDisposition::Qualified => 1_000,
+        CausalContrastDisposition::Negative => 0,
+        CausalContrastDisposition::Unresolved => 250,
     };
-    let robustness_score = if min_robust_strength == 0 {
-        1_000
-    } else {
-        (sensitivity
-            .max_robust_strength_milli
-            .saturating_mul(1_000)
-            .checked_div(min_robust_strength)
-            .unwrap_or(0)
-            .min(1_000)) as u16
+    let robustness_score = match sensitivity.disposition {
+        SensitivityDisposition::Qualified => {
+            if min_robust_strength == 0 {
+                1_000
+            } else {
+                (sensitivity
+                    .max_robust_strength_milli
+                    .saturating_mul(1_000)
+                    .checked_div(min_robust_strength)
+                    .unwrap_or(0)
+                    .min(1_000)) as u16
+            }
+        }
+        SensitivityDisposition::Negative => 0,
+        SensitivityDisposition::Partial | SensitivityDisposition::Unresolved => 250,
     };
     let replication_score: u16 = match replication.disposition {
         ReplicationDisposition::Replicated => 1_000,
@@ -326,7 +343,12 @@ fn confidence(
         ReplicationDisposition::NotReplicated => 0,
         ReplicationDisposition::Unresolved => 250,
     };
-    let meta_score = meta.random_signal_to_noise_milli.min(1_000) as u16;
+    let meta_score: u16 = match meta.disposition {
+        MetaAnalysisDisposition::Qualified => meta.random_signal_to_noise_milli.min(1_000) as u16,
+        MetaAnalysisDisposition::Heterogeneous => 250,
+        MetaAnalysisDisposition::Negative => 0,
+        MetaAnalysisDisposition::Unresolved => 250,
+    };
     ((u32::from(effect_score)
         + u32::from(robustness_score)
         + u32::from(replication_score)
@@ -542,11 +564,27 @@ pub fn execute_glioma_causal_claim_adjudication(
             .cmp(&left.priority_milli)
             .then_with(|| left.action_id.cmp(&right.action_id))
     });
-    actions.truncate(request.max_actions);
-    let action_order = actions
+    let generated_action_order = actions
         .iter()
         .map(|action| action.action_id.clone())
         .collect::<Vec<_>>();
+    let selected_actions = actions
+        .iter()
+        .take(request.max_actions)
+        .cloned()
+        .collect::<Vec<_>>();
+    let selected_ids = selected_actions
+        .iter()
+        .map(|action| action.action_id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut action_order = selected_ids.iter().cloned().collect::<Vec<_>>();
+    action_order.sort();
+    let mut deferred_action_order = generated_action_order
+        .into_iter()
+        .filter(|action_id| !selected_ids.contains(action_id))
+        .collect::<Vec<_>>();
+    deferred_action_order.sort();
+    actions = selected_actions;
     let mut negative_evidence = BTreeSet::new();
     negative_evidence.extend(
         contrast
@@ -617,6 +655,7 @@ pub fn execute_glioma_causal_claim_adjudication(
         meta_analysis,
         gates,
         action_order,
+        deferred_action_order,
         actions,
         negative_evidence: negative_evidence.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
@@ -791,6 +830,26 @@ mod tests {
     }
 
     #[test]
+    fn confidence_cannot_average_away_a_negative_causal_gate() {
+        let mut request = request();
+        request.contrast_request.effect_threshold_milli = 1_000;
+        let output = execute_glioma_causal_claim_adjudication(&request).unwrap();
+
+        assert_eq!(
+            output.contrast.disposition,
+            CausalContrastDisposition::Negative
+        );
+        assert_eq!(output.disposition, CausalClaimDisposition::Negative);
+        assert!(output.confidence_milli < 900);
+        assert!(output
+            .gates
+            .iter()
+            .any(|gate| gate.gate_id == "causal_effect"
+                && gate.disposition == ClaimGateDisposition::Negative));
+        output.validate().unwrap();
+    }
+
+    #[test]
     fn adjudication_preserves_unresolved_temporal_evidence_as_a_next_action() {
         let mut request = request();
         request
@@ -804,5 +863,29 @@ mod tests {
                 .iter()
                 .any(|action| action.kind == ClaimActionKind::CollectTimepoints)
         );
+    }
+
+    #[test]
+    fn adjudication_exposes_deferred_followups_instead_of_dropping_them() {
+        let mut request = request();
+        request.sensitivity_request.max_confounder_strength_milli = 100;
+        request.sensitivity_request.max_leave_one_out_shift_milli = 0;
+        request.replication_request.min_sites = 3;
+        request.meta_request.min_studies = 3;
+        request.max_actions = 1;
+
+        let output = execute_glioma_causal_claim_adjudication(&request).unwrap();
+        assert_eq!(output.actions.len(), 1);
+        assert!(!output.deferred_action_order.is_empty());
+        assert!(output
+            .action_order
+            .iter()
+            .all(|action_id| !output.deferred_action_order.contains(action_id)));
+        assert!(output.action_order.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(output
+            .deferred_action_order
+            .windows(2)
+            .all(|pair| pair[0] < pair[1]));
+        output.validate().unwrap();
     }
 }

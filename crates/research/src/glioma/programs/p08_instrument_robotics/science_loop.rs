@@ -208,6 +208,18 @@ fn prefixed(run_id: &str, action_id: &str) -> String {
     format!("{run_id}:{action_id}")
 }
 
+fn canonicalize_assessment_pairs<T>(
+    assessment_run_order: Vec<String>,
+    assessments: Vec<T>,
+) -> (Vec<String>, Vec<T>) {
+    let mut assessment_pairs = assessment_run_order
+        .into_iter()
+        .zip(assessments)
+        .collect::<Vec<_>>();
+    assessment_pairs.sort_by(|left, right| left.0.cmp(&right.0));
+    assessment_pairs.into_iter().unzip()
+}
+
 impl InstrumentScienceLoop {
     /// Verify the sealed output against the caller-retained source request and observations.
     /// This binds source data; it does not replay or authenticate instrument effects.
@@ -819,13 +831,15 @@ mod tests {
     }
 
     fn blocked_request() -> InstrumentScienceLoopRequest {
+        let empty_action_manifest_digest = ContentHash::of_value(&serde_json::json!([])).unwrap();
         let plan_without_digest = serde_json::json!({
             "feature_id": "GAF-GLIOMA-P08-F10",
-            "output_schema": "GliomaInstrumentPreflight1@1",
+            "output_schema": "GliomaInstrumentPreflight1@2",
             "objective": "blocked science loop",
             "instrument_id": "imager-1",
             "model_system": "organoid",
             "authorization_id": "approval-1",
+            "action_manifest_digest": empty_action_manifest_digest.clone(),
             "action_order": ["acquire"],
             "admitted_order": [],
             "blocked_order": ["acquire"],
@@ -843,11 +857,12 @@ mod tests {
         let digest = ContentHash::of_value(&plan_without_digest).unwrap();
         let plan = serde_json::json!({
             "feature_id": "GAF-GLIOMA-P08-F10",
-            "output_schema": "GliomaInstrumentPreflight1@1",
+            "output_schema": "GliomaInstrumentPreflight1@2",
             "objective": "blocked science loop",
             "instrument_id": "imager-1",
             "model_system": "organoid",
             "authorization_id": "approval-1",
+            "action_manifest_digest": empty_action_manifest_digest,
             "action_order": ["acquire"],
             "admitted_order": [],
             "blocked_order": ["acquire"],
@@ -885,6 +900,16 @@ mod tests {
             "stop_on_first_qualified_run":true
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn canonical_run_order_preserves_assessment_binding() {
+        let (run_order, assessments) = canonicalize_assessment_pairs(
+            vec!["run-z".into(), "run-a".into()],
+            vec!["assessment-z", "assessment-a"],
+        );
+        assert_eq!(run_order, vec!["run-a", "run-z"]);
+        assert_eq!(assessments, vec!["assessment-a", "assessment-z"]);
     }
 
     #[test]

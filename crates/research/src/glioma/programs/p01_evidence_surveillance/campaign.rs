@@ -1,10 +1,11 @@
-//! Autonomous evidence-refresh campaigns for preclinical glioma research.
+//! Beam-selected autonomous evidence-refresh campaigns for preclinical glioma research.
 //!
 //! Snapshot surveillance identifies changed, stale, contradictory, missing, or negative
 //! evidence. This controller turns that queue into a bounded local workflow: it dispatches typed
 //! refresh actions, replaces only the evidence record returned by the local provider, and reruns
-//! surveillance after every round. It does not fetch the internet or promote synthetic dry-run
-//! records into biological conclusions.
+//! surveillance after every round. Each round scores the complete refresh batch jointly for
+//! priority and modality/model coverage. It does not fetch the internet or promote synthetic
+//! dry-run records into biological conclusions.
 
 use super::surveillance::{
     EvidenceSurveillance, EvidenceSurveillanceAction, EvidenceSurveillanceActionKind,
@@ -18,10 +19,11 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P01-F20";
-pub const OUTPUT_SCHEMA: &str = "GliomaEvidenceRefreshCampaign1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaEvidenceRefreshCampaign1@3";
 pub const MAX_ROUNDS: u16 = 32;
 pub const MAX_ACTIONS_PER_ROUND: usize = 16;
 pub const MAX_RETRIES: u8 = 6;
+const REFRESH_BATCH_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceRefreshCampaignRequest {
@@ -168,6 +170,7 @@ pub struct EvidenceRefreshCampaign {
     pub budget_spent_units: u64,
     pub remaining_budget_units: u64,
     pub final_surveillance: EvidenceSurveillance,
+    pub deferred_action_order: Vec<String>,
     pub negative_evidence: Vec<String>,
     pub uncertainty: Vec<String>,
     pub simulation_only: bool,
@@ -208,6 +211,7 @@ fn digest_input(campaign: &EvidenceRefreshCampaign) -> serde_json::Value {
         "budget_spent_units": campaign.budget_spent_units,
         "remaining_budget_units": campaign.remaining_budget_units,
         "final_surveillance": campaign.final_surveillance,
+        "deferred_action_order": campaign.deferred_action_order,
         "negative_evidence": campaign.negative_evidence,
         "uncertainty": campaign.uncertainty,
         "simulation_only": campaign.simulation_only,
@@ -302,6 +306,75 @@ fn validate_returned_record(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RefreshBatchState {
+    selected: Vec<usize>,
+}
+
+fn refresh_batch_score(state: &RefreshBatchState, eligible: &[&EvidenceSurveillanceAction]) -> u64 {
+    let mut score = 0_u64;
+    let mut covered_modalities = BTreeSet::new();
+    let mut covered_models = BTreeSet::new();
+    for index in &state.selected {
+        let action = eligible[*index];
+        score = score.saturating_add(u64::from(action.priority_milli).saturating_mul(1_000_000));
+        for modality in &action.required_modalities {
+            if covered_modalities.insert(*modality) {
+                score = score.saturating_add(100_000_000);
+            }
+        }
+        for model in &action.required_model_systems {
+            if covered_models.insert(*model) {
+                score = score.saturating_add(100_000_000);
+            }
+        }
+    }
+    score
+}
+
+fn select_refresh_actions<'a>(
+    eligible: &[&'a EvidenceSurveillanceAction],
+    max_batch: usize,
+) -> Vec<&'a EvidenceSurveillanceAction> {
+    if max_batch == 0 || eligible.is_empty() {
+        return Vec::new();
+    }
+    let mut states = vec![RefreshBatchState {
+        selected: Vec::new(),
+    }];
+    for index in 0..eligible.len() {
+        let mut next = states.clone();
+        for state in &states {
+            if state.selected.len() < max_batch {
+                let mut selected = state.selected.clone();
+                selected.push(index);
+                next.push(RefreshBatchState { selected });
+            }
+        }
+        next.sort_by(|left, right| {
+            refresh_batch_score(right, eligible)
+                .cmp(&refresh_batch_score(left, eligible))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        next.dedup_by(|left, right| left.selected == right.selected);
+        next.truncate(REFRESH_BATCH_BEAM_WIDTH);
+        states = next;
+    }
+    let chosen = states
+        .into_iter()
+        .max_by(|left, right| {
+            refresh_batch_score(left, eligible)
+                .cmp(&refresh_batch_score(right, eligible))
+                .then_with(|| right.selected.cmp(&left.selected))
+        })
+        .expect("refresh beam always retains an empty state");
+    chosen
+        .selected
+        .into_iter()
+        .map(|index| eligible[index])
+        .collect()
+}
+
 impl EvidenceRefreshCampaign {
     pub fn validate(&self) -> Result<(), EvidenceRefreshCampaignError> {
         if self.feature_id != FEATURE_ID
@@ -310,6 +383,7 @@ impl EvidenceRefreshCampaign {
             || self.rounds.len() > MAX_ROUNDS as usize
             || !canonical(&self.refreshed_order)
             || !canonical(&self.failed_order)
+            || !canonical(&self.deferred_action_order)
             || !canonical(&self.negative_evidence)
             || !canonical(&self.uncertainty)
             || self
@@ -328,6 +402,18 @@ impl EvidenceRefreshCampaign {
         self.final_surveillance
             .validate()
             .map_err(|error| EvidenceRefreshCampaignError::InvalidOutput(error.to_string()))?;
+        if self.deferred_action_order != self.final_surveillance.deferred_action_order
+            || self.deferred_action_order.iter().any(|id| {
+                self.final_surveillance
+                    .action_order
+                    .iter()
+                    .any(|selected| selected == id)
+            })
+        {
+            return Err(EvidenceRefreshCampaignError::InvalidOutput(
+                "campaign deferred frontier does not reconcile with final surveillance".into(),
+            ));
+        }
         let mut rounds = BTreeSet::new();
         let mut spent = 0_u64;
         let mut retries = 0_u32;
@@ -373,7 +459,7 @@ pub fn execute_glioma_evidence_refresh_campaign<E: EvidenceRefreshCampaignExecut
     executor: &mut E,
 ) -> Result<EvidenceRefreshCampaign, EvidenceRefreshCampaignError> {
     validate_request(request)?;
-    let mut previous_records = request.previous_records.clone();
+    let previous_records = request.previous_records.clone();
     let mut current_records = request.current_records.clone();
     let mut rounds = Vec::new();
     let mut refreshed = BTreeSet::new();
@@ -388,11 +474,20 @@ pub fn execute_glioma_evidence_refresh_campaign<E: EvidenceRefreshCampaignExecut
         let surveillance =
             surveil_glioma_evidence(&request.surveillance, &previous_records, &current_records)
                 .map_err(|error| EvidenceRefreshCampaignError::Planning(error.to_string()))?;
+        // The caller's surveillance cap controls the public snapshot, not the planner's
+        // visibility.  Recompile a complete local frontier so a refreshed/failed top action
+        // cannot strand lower-priority evidence work behind the cap.  The execution cap below
+        // still bounds every round.
+        let mut frontier_request = request.surveillance.clone();
+        frontier_request.max_actions = MAX_RECORDS;
+        let planning_surveillance =
+            surveil_glioma_evidence(&frontier_request, &previous_records, &current_records)
+                .map_err(|error| EvidenceRefreshCampaignError::Planning(error.to_string()))?;
         negative_evidence.extend(surveillance.negative_evidence.iter().cloned());
         uncertainty.extend(surveillance.uncertainty.iter().cloned());
         if request.stop_on_qualified
             && surveillance.disposition == EvidenceSurveillanceDisposition::Qualified
-            && surveillance.actions.is_empty()
+            && planning_surveillance.actions.is_empty()
         {
             stop_reason = EvidenceRefreshCampaignStopReason::Qualified;
             break;
@@ -402,23 +497,20 @@ pub fn execute_glioma_evidence_refresh_campaign<E: EvidenceRefreshCampaignExecut
             stop_reason = EvidenceRefreshCampaignStopReason::BudgetExhausted;
             break;
         }
-        let mut eligible = surveillance
+        let eligible = planning_surveillance
             .actions
             .iter()
             .filter(|action| {
                 !refreshed.contains(&action.action_id) && !failed.contains(&action.action_id)
             })
             .collect::<Vec<_>>();
-        eligible.truncate(request.surveillance.max_actions.min(MAX_ACTIONS_PER_ROUND));
         if eligible.is_empty() {
             stop_reason = EvidenceRefreshCampaignStopReason::NoActions;
             break;
         }
         let max_batch = (remaining / u64::from(request.cost_per_action_units)) as usize;
-        let selected = eligible
-            .into_iter()
-            .take(max_batch.clamp(1, MAX_ACTIONS_PER_ROUND))
-            .collect::<Vec<_>>();
+        let round_cap = request.surveillance.max_actions.min(MAX_ACTIONS_PER_ROUND);
+        let selected = select_refresh_actions(&eligible, max_batch.clamp(1, round_cap));
         let before_budget = remaining;
         let mut refreshed_round = Vec::new();
         let mut failed_round = Vec::new();
@@ -486,7 +578,9 @@ pub fn execute_glioma_evidence_refresh_campaign<E: EvidenceRefreshCampaignExecut
             budget_after_units: after_budget,
             retry_count: retry_round,
         });
-        previous_records = current_records.clone();
+        // Keep the last acknowledged baseline stable while a bounded campaign drains its
+        // frontier.  Advancing it to the partially refreshed snapshot would erase still-
+        // unexecuted stale/contradictory transitions before their deferred actions are promoted.
         if !failed_round.is_empty() {
             stop_reason = EvidenceRefreshCampaignStopReason::ExecutorFailed;
             break;
@@ -498,6 +592,7 @@ pub fn execute_glioma_evidence_refresh_campaign<E: EvidenceRefreshCampaignExecut
         if request.stop_on_qualified
             && updated_surveillance.disposition == EvidenceSurveillanceDisposition::Qualified
             && updated_surveillance.actions.is_empty()
+            && updated_surveillance.deferred_action_order.is_empty()
         {
             stop_reason = EvidenceRefreshCampaignStopReason::Qualified;
             break;
@@ -516,6 +611,7 @@ pub fn execute_glioma_evidence_refresh_campaign<E: EvidenceRefreshCampaignExecut
     if request.stop_on_qualified
         && final_surveillance.disposition == EvidenceSurveillanceDisposition::Qualified
         && final_surveillance.actions.is_empty()
+        && final_surveillance.deferred_action_order.is_empty()
     {
         stop_reason = EvidenceRefreshCampaignStopReason::Qualified;
     }
@@ -547,6 +643,7 @@ pub fn execute_glioma_evidence_refresh_campaign<E: EvidenceRefreshCampaignExecut
         retry_count,
         budget_spent_units: budget_spent,
         remaining_budget_units: request.budget_units.saturating_sub(budget_spent),
+        deferred_action_order: final_surveillance.deferred_action_order.clone(),
         final_surveillance,
         negative_evidence: negative_evidence.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
@@ -615,6 +712,54 @@ mod tests {
         }
     }
 
+    fn action(
+        id: &str,
+        priority: u16,
+        modality: GliomaModality,
+        model_system: GliomaModelSystem,
+    ) -> EvidenceSurveillanceAction {
+        EvidenceSurveillanceAction {
+            action_id: id.into(),
+            evidence_id: format!("evidence-{id}"),
+            kind: EvidenceSurveillanceActionKind::RefreshStale,
+            priority_milli: priority,
+            required_modalities: vec![modality],
+            required_model_systems: vec![model_system],
+            rationale: "test action".into(),
+        }
+    }
+
+    #[test]
+    fn refresh_batch_prefers_new_modality_and_model_over_redundant_priority() {
+        let first = action(
+            "high",
+            1_000,
+            GliomaModality::Genomics,
+            GliomaModelSystem::Organoid,
+        );
+        let redundant = action(
+            "redundant",
+            999,
+            GliomaModality::Genomics,
+            GliomaModelSystem::Organoid,
+        );
+        let complementary = action(
+            "complementary",
+            950,
+            GliomaModality::Imaging,
+            GliomaModelSystem::MouseModel,
+        );
+        let actions = vec![&first, &redundant, &complementary];
+        let selected = select_refresh_actions(&actions, 2);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|action| action.action_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["high", "complementary"]
+        );
+    }
+
     #[test]
     fn campaign_refreshes_stale_evidence_and_replans_deterministically() {
         let request = request();
@@ -651,6 +796,38 @@ mod tests {
             output.disposition,
             EvidenceRefreshCampaignDisposition::Qualified
         );
+    }
+
+    #[test]
+    fn campaign_promotes_deferred_frontier_after_the_top_action_is_refreshed() {
+        let mut request = request();
+        request.surveillance.max_actions = 1;
+        request.previous_records = vec![
+            record("e1", EvidenceState::Supported, 1),
+            record("e2", EvidenceState::Supported, 1),
+        ];
+        request.current_records = vec![
+            record("e1", EvidenceState::Stale, 1),
+            record("e2", EvidenceState::Stale, 1),
+        ];
+        request.budget_units = 2;
+        let mut executor = DryRunEvidenceRefreshCampaignExecutor;
+        let output = execute_glioma_evidence_refresh_campaign(&request, &mut executor).unwrap();
+
+        assert_eq!(
+            output.refreshed_order,
+            vec![
+                "surveillance:e1:RefreshStale",
+                "surveillance:e2:RefreshStale"
+            ]
+        );
+        assert_eq!(output.rounds.len(), 2);
+        assert!(output.deferred_action_order.is_empty());
+        assert_eq!(
+            output.final_surveillance.deferred_action_order,
+            output.deferred_action_order
+        );
+        output.validate().unwrap();
     }
 
     #[test]

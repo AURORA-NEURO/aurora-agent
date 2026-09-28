@@ -11,8 +11,10 @@ use super::action_execution::{
     ActionPortfolioExecution, ActionPortfolioExecutionError, ActionPortfolioExecutionRequest,
     GliomaActionExecutor, MAX_RETRIES, execute_glioma_action_portfolio,
 };
-use super::scientific_frontier::ScientificFrontierPlan;
-use crate::glioma_engine::{GliomaActionCandidate, GliomaSelectionConfig};
+use super::scientific_frontier::{
+    admitted_candidates_with_frontier_priority, ScientificFrontierPlan,
+};
+use crate::glioma_engine::{GliomaActionCandidate, GliomaSelectionConfig, LocalArtifactRef};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -21,12 +23,28 @@ use thiserror::Error;
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P07-F08";
 pub const OUTPUT_SCHEMA: &str = "GliomaScientificFrontierExecution1@1";
 
+fn has_simulation_only_output(results: &[super::action_execution::ActionExecutionResult]) -> bool {
+    results.iter().any(|result| {
+        result
+            .negative_evidence
+            .iter()
+            .any(|evidence| evidence == "synthetic-dry-run-not-biological-evidence")
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScientificFrontierExecutionRequest {
     pub objective: String,
     pub plan_digest: ContentHash,
     pub candidates: Vec<GliomaActionCandidate>,
     pub completed_action_order: Vec<String>,
+    /// Local source references remain in the institution's artifact store; only handles reach
+    /// the executor.
+    pub source_artifacts: Vec<LocalArtifactRef>,
+    /// Artifact handles for completed prerequisites when resuming a research campaign.
+    pub completed_artifacts: Vec<GliomaActionArtifactInput>,
+    /// Bound research/study scope, modality/model coverage, and requested autonomy ceiling.
+    pub workflow_scope: Option<GliomaActionWorkflowScope>,
     pub selection: GliomaSelectionConfig,
     pub max_retries: u8,
     pub require_artifacts: bool,
@@ -231,13 +249,7 @@ pub fn execute_glioma_scientific_frontier<E: GliomaActionExecutor>(
             "candidate pool does not match the plan candidate order".into(),
         ));
     }
-    let admitted = plan.admitted_order.iter().cloned().collect::<BTreeSet<_>>();
-    let candidates = request
-        .candidates
-        .iter()
-        .filter(|candidate| admitted.contains(&candidate.action_id))
-        .cloned()
-        .collect::<Vec<_>>();
+    let candidates = admitted_candidates_with_frontier_priority(&request.candidates, &plan.gates);
     let mut selected_order = plan
         .selection
         .as_ref()
@@ -250,6 +262,22 @@ pub fn execute_glioma_scientific_frontier<E: GliomaActionExecutor>(
             "frontier next-action order does not reconcile with its selector".into(),
         ));
     }
+    let selected_candidates = plan
+        .selection
+        .as_ref()
+        .map(|selection| {
+            let by_id = request
+                .candidates
+                .iter()
+                .map(|candidate| (candidate.action_id.as_str(), candidate))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            selection
+                .selected_order
+                .iter()
+                .filter_map(|action_id| by_id.get(action_id.as_str()).copied())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let mut execution = None;
     let mut executed_order = Vec::new();
     let (disposition, next_step, simulation_only) = if candidates.is_empty()
@@ -265,7 +293,42 @@ pub fn execute_glioma_scientific_frontier<E: GliomaActionExecutor>(
             true,
         )
     } else {
-        let result = execute_glioma_action_portfolio(
+        if request.workflow_scope.as_ref().is_some_and(|scope| {
+            scope.research_id.trim().is_empty()
+                || scope.study_id.trim().is_empty()
+                || scope.objective != plan.objective
+                || selected_candidates.iter().any(|candidate| {
+                    !scope.modalities.contains(&candidate.modality)
+                        || !scope.model_systems.contains(&candidate.model_system)
+                        || candidate.autonomy_tier > scope.requested_autonomy
+                })
+        }) {
+            return Err(ScientificFrontierExecutionError::InvalidRequest(
+                "execution scope must bind the plan objective and cover each selected modality, model, and autonomy tier".into(),
+            ));
+        }
+        if request.require_artifacts {
+            let completed_artifact_actions = request
+                .completed_artifacts
+                .iter()
+                .map(|input| input.action_id.as_str())
+                .collect::<BTreeSet<_>>();
+            if selected_candidates.iter().any(|candidate| {
+                candidate.depends_on.iter().any(|dependency| {
+                    request
+                        .completed_action_order
+                        .binary_search(dependency)
+                        .is_ok()
+                        && !completed_artifact_actions.contains(dependency.as_str())
+                })
+            }) {
+                return Err(ScientificFrontierExecutionError::InvalidRequest(
+                    "resumed selected actions require local artifacts for completed prerequisites"
+                        .into(),
+                ));
+            }
+        }
+        let result = execute_glioma_action_portfolio_with_selection_and_context(
             &ActionPortfolioExecutionRequest {
                 candidates,
                 completed_actions: request.completed_action_order.iter().cloned().collect(),
@@ -273,6 +336,14 @@ pub fn execute_glioma_scientific_frontier<E: GliomaActionExecutor>(
                 max_retries: request.max_retries,
                 require_artifacts: request.require_artifacts,
             },
+            plan.selection.as_ref().ok_or_else(|| {
+                ScientificFrontierExecutionError::InvalidPlan(
+                    "nonempty next-action order has no selector output".into(),
+                )
+            })?,
+            &request.source_artifacts,
+            &request.completed_artifacts,
+            request.workflow_scope.as_ref(),
             executor,
         )
         .map_err(|error: ActionPortfolioExecutionError| {
@@ -301,12 +372,10 @@ pub fn execute_glioma_scientific_frontier<E: GliomaActionExecutor>(
             .iter()
             .map(|result| result.action_id.clone())
             .collect();
-        let simulation = result.results.iter().all(|result| {
-            result
-                .negative_evidence
-                .iter()
-                .any(|evidence| evidence == "synthetic-dry-run-not-biological-evidence")
-        });
+        // A single synthetic result makes the batch unsafe to treat as an evidence update. The
+        // adaptive mission stops and retains the whole batch for reconciliation rather than
+        // promoting the real-looking subset while silently dropping simulated work.
+        let simulation = has_simulation_only_output(&result.results);
         let disposition = match result.disposition {
             super::action_execution::ActionPortfolioExecutionDisposition::Completed => {
                 ScientificFrontierExecutionDisposition::Completed
@@ -365,6 +434,38 @@ mod tests {
         GliomaModality, GliomaModelSystem, GliomaStageKind, select_glioma_actions,
     };
     use bioprism_foundation::{AutonomyTier, Effect};
+
+    #[derive(Default)]
+    struct ContextRecordingExecutor {
+        inner: super::super::action_execution::DryRunGliomaActionExecutor,
+        contexts: Vec<super::super::action_execution::GliomaActionExecutionContext>,
+    }
+
+    impl GliomaActionExecutor for ContextRecordingExecutor {
+        fn execute_action(
+            &mut self,
+            candidate: &GliomaActionCandidate,
+            attempt: u8,
+        ) -> Result<
+            super::super::action_execution::ActionExecutionResult,
+            super::super::action_execution::ActionExecutionFailure,
+        > {
+            self.inner.execute_action(candidate, attempt)
+        }
+
+        fn execute_action_with_context(
+            &mut self,
+            candidate: &GliomaActionCandidate,
+            context: &super::super::action_execution::GliomaActionExecutionContext,
+            attempt: u8,
+        ) -> Result<
+            super::super::action_execution::ActionExecutionResult,
+            super::super::action_execution::ActionExecutionFailure,
+        > {
+            self.contexts.push(context.clone());
+            self.inner.execute_action(candidate, attempt)
+        }
+    }
     use serde_json::json;
 
     fn candidate(id: &str) -> GliomaActionCandidate {
@@ -418,6 +519,8 @@ mod tests {
             gates: vec![super::super::scientific_frontier::FrontierCandidateGate {
                 action_id: action.action_id.clone(),
                 stage_kind: action.stage_kind,
+                linked_claim_order: Vec::new(),
+                claim_priority_milli: 0,
                 status: super::super::scientific_frontier::FrontierCandidateStatus::Admitted,
                 reason: "test admission".into(),
             }],
@@ -452,6 +555,9 @@ mod tests {
             plan_digest: plan.digest.clone(),
             candidates: vec![action],
             completed_action_order: Vec::new(),
+            source_artifacts: Vec::new(),
+            completed_artifacts: Vec::new(),
+            workflow_scope: None,
             selection: selection_config,
             max_retries: 1,
             require_artifacts: true,
@@ -475,6 +581,29 @@ mod tests {
     }
 
     #[test]
+    fn one_simulated_result_marks_a_mixed_batch_non_scientific() {
+        let completed = |action_id: &str, simulation_only: bool| {
+            super::super::action_execution::ActionExecutionResult {
+                action_id: action_id.into(),
+                disposition: super::super::action_execution::ActionExecutionDisposition::Completed,
+                attempt_count: 1,
+                artifact: None,
+                note: "completed".into(),
+                uncertainty: Vec::new(),
+                negative_evidence: if simulation_only {
+                    vec!["synthetic-dry-run-not-biological-evidence".into()]
+                } else {
+                    Vec::new()
+                },
+            }
+        };
+        let mixed = vec![completed("measured", false), completed("simulated", true)];
+
+        assert!(has_simulation_only_output(&mixed));
+        assert!(!has_simulation_only_output(&[completed("measured", false)]));
+    }
+
+    #[test]
     fn candidate_pool_drift_is_rejected_before_executor_call() {
         let (plan, mut request) = plan();
         request.candidates[0].action_id = "tampered".into();
@@ -483,5 +612,38 @@ mod tests {
             execute_glioma_scientific_frontier(&request, &plan, &mut executor),
             Err(ScientificFrontierExecutionError::InvalidRequest(_))
         ));
+    }
+
+    #[test]
+    fn execution_keeps_sources_local_and_binds_the_declared_research_scope() {
+        let (plan, mut request) = plan();
+        let source = LocalArtifactRef {
+            artifact_id: "source-local".into(),
+            content_hash: ContentHash::of_bytes(b"source-local"),
+            content_type: "application/json".into(),
+            local_only: true,
+            contains_human_data: false,
+            contains_direct_identifiers: false,
+        };
+        request.source_artifacts = vec![source.clone()];
+        request.workflow_scope = Some(GliomaActionWorkflowScope {
+            research_id: "research-1".into(),
+            study_id: "study-1".into(),
+            objective: plan.objective.clone(),
+            modalities: vec![GliomaModality::Genomics],
+            model_systems: vec![GliomaModelSystem::Organoid],
+            requested_autonomy: AutonomyTier::A1,
+        });
+
+        let mut executor = ContextRecordingExecutor::default();
+        let output = execute_glioma_scientific_frontier(&request, &plan, &mut executor).unwrap();
+
+        assert_eq!(output.executed_order, vec!["frontier-action"]);
+        assert_eq!(executor.contexts.len(), 1);
+        assert_eq!(executor.contexts[0].source_artifacts, vec![source]);
+        assert_eq!(
+            executor.contexts[0].scope.as_ref().unwrap().objective,
+            plan.objective
+        );
     }
 }

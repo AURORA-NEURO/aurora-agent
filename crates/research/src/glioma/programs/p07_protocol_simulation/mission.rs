@@ -7,6 +7,12 @@
 //! stages and model/modality pairs, and uses negative or contradictory results to redirect the
 //! next round.  The controller never invents observations and never treats a dry-run artifact as
 //! biological evidence; a local institution supplies the executor for real work.
+//!
+//! A mission execution context keeps institution-local source handles, the declared glioma study
+//! scope, and prerequisite artifacts available through every adaptive round. The dispatcher gives
+//! each action only its declared direct dependencies; a later round cannot run on a missing output
+//! when artifacts are required. The declared model/modality/autonomy scope is checked before the
+//! first effectful executor call.
 
 use super::action_execution::{
     ActionPortfolioExecution, ActionPortfolioExecutionDisposition, ActionPortfolioExecutionError,
@@ -14,8 +20,9 @@ use super::action_execution::{
     execute_glioma_action_portfolio,
 };
 use crate::glioma_engine::{
-    GliomaActionCandidate, GliomaActionSelection, GliomaModality, GliomaModelSystem,
-    GliomaSelectionConfig, GliomaStageKind,
+    adapt_glioma_candidates_from_outcomes, glioma_action_outcome_key, GliomaActionCandidate,
+    GliomaActionOutcomeSummary, GliomaActionSelection, GliomaModality, GliomaModelSystem,
+    GliomaSelectionConfig, GliomaStageKind, LocalArtifactRef,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -68,6 +75,22 @@ pub struct GliomaMissionRequest {
     pub max_retries: u8,
     pub require_artifacts: bool,
     pub stop_on_negative: bool,
+}
+
+/// Institution-local inputs available throughout every round of an autonomous research mission.
+///
+/// Only content-addressed artifact references cross the controller boundary; the artifact bytes
+/// remain in the institution-local store. Outputs from completed actions are added here as the
+/// mission progresses so a later assay or analysis receives the actual prerequisite artifacts.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GliomaMissionExecutionContext {
+    #[serde(default)]
+    pub source_artifacts: Vec<LocalArtifactRef>,
+    /// Artifact references for actions completed before this mission (for example, a resumed run).
+    #[serde(default)]
+    pub completed_artifacts: Vec<GliomaActionArtifactInput>,
+    #[serde(default)]
+    pub workflow_scope: Option<GliomaActionWorkflowScope>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,6 +247,7 @@ impl GliomaAutonomousResearchMission {
                 || round.planner_note.trim().is_empty()
                 || round.selection.selected_order != round.execution.action_order
                 || round.budget_after_units > round.budget_before_units
+                || round.cost_units != round.execution.budget_spent_units
                 || round.cost_units
                     != round
                         .budget_before_units
@@ -308,16 +332,134 @@ fn validate_request(request: &GliomaMissionRequest) -> Result<(), GliomaMissionE
     Ok(())
 }
 
+fn validate_execution_context(
+    request: &GliomaMissionRequest,
+    context: &GliomaMissionExecutionContext,
+) -> Result<(), GliomaMissionError> {
+    let completed = request
+        .completed_action_order
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut action_ids = BTreeSet::new();
+    let mut artifact_ids = BTreeSet::new();
+    if context.source_artifacts.iter().any(|artifact| {
+        artifact.validate().is_err() || !artifact_ids.insert(artifact.artifact_id.clone())
+    }) || context.completed_artifacts.iter().any(|input| {
+        input.action_id.trim().is_empty()
+            || !completed.contains(&input.action_id)
+            || !action_ids.insert(input.action_id.clone())
+            || input.artifact.validate().is_err()
+            || !artifact_ids.insert(input.artifact.artifact_id.clone())
+    }) {
+        return Err(GliomaMissionError::InvalidRequest(
+            "mission source and completed-action artifacts must be local, content-addressed, de-identified, and uniquely bound".into(),
+        ));
+    }
+    if context.workflow_scope.as_ref().is_some_and(|scope| {
+        scope.research_id.trim().is_empty()
+            || scope.study_id.trim().is_empty()
+            || scope.objective != request.objective
+            || scope.modalities.is_empty()
+            || scope.model_systems.is_empty()
+            || !canonical(&scope.modalities)
+            || !canonical(&scope.model_systems)
+            || request.candidates.iter().any(|candidate| {
+                scope.modalities.binary_search(&candidate.modality).is_err()
+                    || scope
+                        .model_systems
+                        .binary_search(&candidate.model_system)
+                        .is_err()
+                    || candidate.autonomy_tier > scope.requested_autonomy
+            })
+    }) {
+        return Err(GliomaMissionError::InvalidRequest(
+            "workflow scope must match the mission objective, cover every candidate modality/model, and authorize no higher autonomy tier than requested".into(),
+        ));
+    }
+    if request.require_artifacts {
+        let artifact_actions = context
+            .completed_artifacts
+            .iter()
+            .map(|input| input.action_id.as_str())
+            .collect::<BTreeSet<_>>();
+        let candidate_ids = request
+            .candidates
+            .iter()
+            .map(|candidate| candidate.action_id.as_str())
+            .collect::<BTreeSet<_>>();
+        if completed
+            .iter()
+            .filter(|action_id| candidate_ids.contains(action_id.as_str()))
+            .any(|action_id| {
+                request
+                    .candidates
+                    .iter()
+                    .any(|candidate| candidate.depends_on.binary_search(action_id).is_ok())
+                    && !artifact_actions.contains(action_id.as_str())
+            })
+        {
+            return Err(GliomaMissionError::InvalidRequest(
+                "a resumed prerequisite needed by a downstream action is missing its artifact reference".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn bounded_score(value: u16, delta: i32) -> u16 {
     (i32::from(value) + delta).clamp(0, 1_000) as u16
 }
 
+/// Count the active transitive dependents of an action.  A mission should prefer an assay or
+/// analysis that unlocks a meaningful downstream branch, not merely the action with the largest
+/// local score.  The graph is caller-supplied and already bounded by `MAX_CANDIDATES`, so a
+/// deterministic fixed-point walk is preferable to an opaque learned priority here.
+fn transitive_dependent_count(action_id: &str, candidates: &[GliomaActionCandidate]) -> usize {
+    let mut frontier = vec![action_id.to_string()];
+    let mut seen = BTreeSet::new();
+    while let Some(parent) = frontier.pop() {
+        for candidate in candidates {
+            if candidate
+                .depends_on
+                .iter()
+                .any(|dependency| dependency == &parent)
+                && seen.insert(candidate.action_id.clone())
+            {
+                frontier.push(candidate.action_id.clone());
+            }
+        }
+    }
+    seen.len()
+}
+
+#[cfg(test)]
 fn adjust_candidates(
     candidates: &[GliomaActionCandidate],
     completed: &BTreeSet<String>,
     negative: &BTreeSet<String>,
+    uncertain: &BTreeSet<String>,
     uncertainty_milli: u32,
 ) -> Vec<GliomaActionCandidate> {
+    adjust_candidates_with_outcomes(
+        candidates,
+        completed,
+        negative,
+        uncertain,
+        uncertainty_milli,
+        &BTreeMap::new(),
+    )
+}
+
+fn adjust_candidates_with_outcomes(
+    candidates: &[GliomaActionCandidate],
+    completed: &BTreeSet<String>,
+    negative: &BTreeSet<String>,
+    uncertain: &BTreeSet<String>,
+    uncertainty_milli: u32,
+    outcomes: &BTreeMap<String, GliomaActionOutcomeSummary>,
+) -> Vec<GliomaActionCandidate> {
+    let outcome_adapted = adapt_glioma_candidates_from_outcomes(candidates, outcomes);
     let completed_pairs = candidates
         .iter()
         .filter(|candidate| completed.contains(&candidate.action_id))
@@ -328,7 +470,7 @@ fn adjust_candidates(
         .filter(|candidate| completed.contains(&candidate.action_id))
         .map(|candidate| candidate.stage_kind)
         .collect::<BTreeSet<_>>();
-    candidates
+    outcome_adapted
         .iter()
         .map(|candidate| {
             let mut adjusted = candidate.clone();
@@ -339,13 +481,29 @@ fn adjust_candidates(
                 .depends_on
                 .iter()
                 .any(|dependency| negative.contains(dependency));
-            let uncertainty_pressure = (uncertainty_milli / 100).min(180) as i32;
+            let resolves_uncertainty = candidate
+                .depends_on
+                .iter()
+                .any(|dependency| uncertain.contains(dependency));
+            let transitive_unlock = transitive_dependent_count(&candidate.action_id, candidates);
+            // Cap graph leverage so a very deep workflow cannot drown out a genuinely novel
+            // cross-model observation.  The selector still divides by cost downstream.
+            let unlock_delta = (transitive_unlock.min(4) as i32) * 45;
+            let uncertainty_pressure = if resolves_uncertainty {
+                (uncertainty_milli / 100).min(140) as i32 + 120
+            } else {
+                0
+            };
             let stage_delta = if uncovered_stage { 140 } else { -30 };
             let diversity_delta = if novel_pair { 120 } else { -80 };
             let contradiction_delta = if resolves_negative_dependency { 160 } else { 0 };
             adjusted.information_gain_milli = bounded_score(
                 adjusted.information_gain_milli,
-                stage_delta + diversity_delta + contradiction_delta + uncertainty_pressure,
+                stage_delta
+                    + diversity_delta
+                    + contradiction_delta
+                    + uncertainty_pressure
+                    + unlock_delta,
             );
             adjusted.frontier_novelty_milli = bounded_score(
                 adjusted.frontier_novelty_milli,
@@ -354,11 +512,19 @@ fn adjust_candidates(
             adjusted.cross_stage_unlock_milli = bounded_score(
                 adjusted.cross_stage_unlock_milli,
                 if uncovered_stage { 120 } else { 0 }
-                    + if resolves_negative_dependency { 80 } else { 0 },
+                    + if resolves_negative_dependency { 80 } else { 0 }
+                    + if resolves_uncertainty { 120 } else { 0 }
+                    + unlock_delta,
             );
             adjusted.reproducibility_safety_milli = bounded_score(
                 adjusted.reproducibility_safety_milli,
-                if uncertainty_milli > 0 { 70 } else { 0 },
+                if resolves_uncertainty {
+                    140
+                } else if uncertainty_milli > 0 {
+                    25
+                } else {
+                    0
+                },
             );
             adjusted
         })
@@ -440,7 +606,22 @@ pub fn execute_glioma_autonomous_research_mission<E: GliomaActionExecutor>(
     request: &GliomaMissionRequest,
     executor: &mut E,
 ) -> Result<GliomaAutonomousResearchMission, GliomaMissionError> {
+    execute_glioma_autonomous_research_mission_with_context(
+        request,
+        &GliomaMissionExecutionContext::default(),
+        executor,
+    )
+}
+
+/// Execute a mission while carrying local source references, workflow scope, and prerequisite
+/// artifact handles through every adaptive round. No payload bytes leave the caller's local store.
+pub fn execute_glioma_autonomous_research_mission_with_context<E: GliomaActionExecutor>(
+    request: &GliomaMissionRequest,
+    execution_context: &GliomaMissionExecutionContext,
+    executor: &mut E,
+) -> Result<GliomaAutonomousResearchMission, GliomaMissionError> {
     validate_request(request)?;
+    validate_execution_context(request, execution_context)?;
     let mut completed = request
         .completed_action_order
         .iter()
@@ -452,11 +633,18 @@ pub fn execute_glioma_autonomous_research_mission<E: GliomaActionExecutor>(
     let mut rounds = Vec::new();
     let mut negative_evidence = BTreeSet::new();
     let mut uncertainty = BTreeSet::new();
+    let mut uncertain_actions = BTreeSet::new();
+    let mut outcome_summaries = BTreeMap::<String, GliomaActionOutcomeSummary>::new();
     let mut information_gain_milli = 0_u32;
     let mut uncertainty_milli = 0_u32;
     let mut budget_spent_units = 0_u32;
     let mut retry_count = 0_u32;
     let mut stop_reason = GliomaMissionStopReason::MaxRounds;
+    let mut artifacts_by_action = execution_context
+        .completed_artifacts
+        .iter()
+        .map(|input| (input.action_id.clone(), input.artifact.clone()))
+        .collect::<BTreeMap<_, _>>();
 
     for round_number in 1..=request.max_rounds {
         if gates_satisfied(
@@ -501,7 +689,14 @@ pub fn execute_glioma_autonomous_research_mission<E: GliomaActionExecutor>(
             };
             break;
         }
-        let adjusted = adjust_candidates(&active, &completed, &negative, uncertainty_milli);
+        let adjusted = adjust_candidates_with_outcomes(
+            &active,
+            &completed,
+            &negative,
+            &uncertain_actions,
+            uncertainty_milli,
+            &outcome_summaries,
+        );
         let mut selection_config = request.selection.clone();
         selection_config.budget_units = remaining_budget;
         let selection =
@@ -522,16 +717,14 @@ pub fn execute_glioma_autonomous_research_mission<E: GliomaActionExecutor>(
             };
             break;
         }
-        let cost_by_id = adjusted
+        let completed_artifacts = artifacts_by_action
             .iter()
-            .map(|candidate| (candidate.action_id.clone(), candidate.cost_units))
-            .collect::<BTreeMap<_, _>>();
-        let round_cost = selection
-            .selected_order
-            .iter()
-            .map(|id| cost_by_id.get(id).copied().unwrap_or(0))
-            .sum::<u32>();
-        let execution = execute_glioma_action_portfolio(
+            .map(|(action_id, artifact)| GliomaActionArtifactInput {
+                action_id: action_id.clone(),
+                artifact: artifact.clone(),
+            })
+            .collect::<Vec<_>>();
+        let execution = execute_glioma_action_portfolio_with_context(
             &ActionPortfolioExecutionRequest {
                 candidates: adjusted.clone(),
                 completed_actions: completed.clone(),
@@ -539,6 +732,9 @@ pub fn execute_glioma_autonomous_research_mission<E: GliomaActionExecutor>(
                 max_retries: request.max_retries,
                 require_artifacts: request.require_artifacts,
             },
+            &execution_context.source_artifacts,
+            &completed_artifacts,
+            execution_context.workflow_scope.as_ref(),
             executor,
         )
         .map_err(|error: ActionPortfolioExecutionError| {
@@ -549,6 +745,11 @@ pub fn execute_glioma_autonomous_research_mission<E: GliomaActionExecutor>(
                 "mission selector changed between planning and execution".into(),
             ));
         }
+        // The portfolio executor charges each worker invocation, including retry attempts, and
+        // does not charge actions skipped behind a failure. Reconcile the mission envelope from
+        // that measured spend instead of the nominal selected-action sum; otherwise a transient
+        // worker failure could make a resumed mission overspend while reporting false headroom.
+        let round_cost = execution.budget_spent_units;
         let before_budget = request
             .selection
             .budget_units
@@ -565,13 +766,69 @@ pub fn execute_glioma_autonomous_research_mission<E: GliomaActionExecutor>(
             negative.insert(action_id.clone());
             retired.insert(action_id.clone());
         }
+        for result in &execution.results {
+            if matches!(
+                result.disposition,
+                super::action_execution::ActionExecutionDisposition::Completed
+                    | super::action_execution::ActionExecutionDisposition::Negative
+            ) {
+                if let Some(artifact) = &result.artifact {
+                    artifacts_by_action.insert(result.action_id.clone(), artifact.clone());
+                }
+            }
+        }
         for action_id in &execution.failed_order {
             failed.insert(action_id.clone());
             retired.insert(action_id.clone());
         }
         for result in &execution.results {
+            let summary = outcome_summaries
+                .entry(result.action_id.clone())
+                .or_default();
+            match result.disposition {
+                super::action_execution::ActionExecutionDisposition::Completed => {
+                    summary.completed = summary.completed.saturating_add(1)
+                }
+                super::action_execution::ActionExecutionDisposition::Negative => {
+                    summary.negative = summary.negative.saturating_add(1)
+                }
+                super::action_execution::ActionExecutionDisposition::Partial => {
+                    summary.partial = summary.partial.saturating_add(1)
+                }
+                super::action_execution::ActionExecutionDisposition::Failed => {
+                    summary.failed = summary.failed.saturating_add(1)
+                }
+                super::action_execution::ActionExecutionDisposition::Skipped => {}
+            }
+            if let Some(candidate) = request
+                .candidates
+                .iter()
+                .find(|candidate| candidate.action_id == result.action_id)
+            {
+                let cohort = outcome_summaries
+                    .entry(glioma_action_outcome_key(candidate))
+                    .or_default();
+                match result.disposition {
+                    super::action_execution::ActionExecutionDisposition::Completed => {
+                        cohort.completed = cohort.completed.saturating_add(1)
+                    }
+                    super::action_execution::ActionExecutionDisposition::Negative => {
+                        cohort.negative = cohort.negative.saturating_add(1)
+                    }
+                    super::action_execution::ActionExecutionDisposition::Partial => {
+                        cohort.partial = cohort.partial.saturating_add(1)
+                    }
+                    super::action_execution::ActionExecutionDisposition::Failed => {
+                        cohort.failed = cohort.failed.saturating_add(1)
+                    }
+                    super::action_execution::ActionExecutionDisposition::Skipped => {}
+                }
+            }
             negative_evidence.extend(result.negative_evidence.iter().cloned());
             uncertainty.extend(result.uncertainty.iter().cloned());
+            if !result.uncertainty.is_empty() {
+                uncertain_actions.insert(result.action_id.clone());
+            }
         }
         let newly_completed = completed.difference(&prior_completed).count();
         information_gain_milli = information_gain_milli.saturating_add(
@@ -579,7 +836,6 @@ pub fn execute_glioma_autonomous_research_mission<E: GliomaActionExecutor>(
                 .completed_order
                 .iter()
                 .chain(execution.negative_order.iter())
-                .filter_map(|id| cost_by_id.get(id).map(|_| id))
                 .map(|id| {
                     adjusted
                         .iter()
@@ -793,6 +1049,70 @@ mod tests {
     }
 
     #[test]
+    fn mission_charges_retry_attempts_to_budget() {
+        struct RetryOnce {
+            calls: u8,
+        }
+
+        impl GliomaActionExecutor for RetryOnce {
+            fn execute_action(
+                &mut self,
+                candidate: &GliomaActionCandidate,
+                attempt: u8,
+            ) -> Result<
+                super::super::action_execution::ActionExecutionResult,
+                super::super::action_execution::ActionExecutionFailure,
+            > {
+                self.calls = self.calls.saturating_add(1);
+                if self.calls == 1 {
+                    return Err(super::super::action_execution::ActionExecutionFailure {
+                        reason: "transient local worker outage".into(),
+                        retryable: true,
+                    });
+                }
+                let content_hash = ContentHash::of_value(&serde_json::json!({
+                    "action": candidate.action_id,
+                    "attempt": attempt,
+                }))
+                .expect("retry artifact should hash");
+                Ok(super::super::action_execution::ActionExecutionResult {
+                    action_id: candidate.action_id.clone(),
+                    disposition:
+                        super::super::action_execution::ActionExecutionDisposition::Completed,
+                    attempt_count: attempt,
+                    artifact: Some(LocalArtifactRef {
+                        artifact_id: format!("retry-result:{}", candidate.action_id),
+                        content_hash,
+                        content_type: "application/vnd.aurora.glioma.action-result+json".into(),
+                        local_only: true,
+                        contains_human_data: false,
+                        contains_direct_identifiers: false,
+                    }),
+                    note: "typed local retry result".into(),
+                    uncertainty: Vec::new(),
+                    negative_evidence: Vec::new(),
+                })
+            }
+        }
+
+        let request = request(vec![candidate(
+            "mechanism-organoid",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Transcriptomics,
+            GliomaModelSystem::Organoid,
+            900,
+        )]);
+        let mut executor = RetryOnce { calls: 0 };
+        let mission = execute_glioma_autonomous_research_mission(&request, &mut executor).unwrap();
+        assert_eq!(mission.rounds[0].cost_units, 4);
+        assert_eq!(mission.rounds[0].execution.budget_spent_units, 4);
+        assert_eq!(mission.budget_spent_units, 4);
+        assert_eq!(mission.remaining_budget_units, 4);
+        assert_eq!(mission.retry_count, 1);
+        mission.validate().unwrap();
+    }
+
+    #[test]
     fn mission_preserves_negative_results_and_redirects_to_new_model() {
         let first = candidate(
             "mechanism-organoid",
@@ -862,6 +1182,94 @@ mod tests {
     }
 
     #[test]
+    fn frontier_scoring_rewards_transitive_downstream_unlocks() {
+        let root = candidate(
+            "root-mechanism",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Transcriptomics,
+            GliomaModelSystem::Organoid,
+            500,
+        );
+        let mut middle = candidate(
+            "middle-analysis",
+            GliomaStageKind::ComputationalExecution,
+            GliomaModality::Imaging,
+            GliomaModelSystem::Organoid,
+            500,
+        );
+        middle.depends_on = vec![root.action_id.clone()];
+        let mut leaf = candidate(
+            "leaf-replication",
+            GliomaStageKind::ReplicationRobustness,
+            GliomaModality::Replication,
+            GliomaModelSystem::MouseModel,
+            500,
+        );
+        leaf.depends_on = vec![middle.action_id.clone()];
+        let adjusted = adjust_candidates(
+            &[root.clone(), middle, leaf],
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            0,
+        );
+        let root_adjusted = adjusted
+            .iter()
+            .find(|candidate| candidate.action_id == root.action_id)
+            .expect("root candidate");
+        assert!(root_adjusted.information_gain_milli > root.information_gain_milli);
+        assert!(root_adjusted.cross_stage_unlock_milli > root.cross_stage_unlock_milli);
+    }
+
+    #[test]
+    fn frontier_scoring_targets_follow_up_to_uncertain_action() {
+        let uncertain_action = candidate(
+            "uncertain-assay",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Transcriptomics,
+            GliomaModelSystem::Organoid,
+            700,
+        );
+        let mut follow_up = candidate(
+            "uncertainty-resolution",
+            GliomaStageKind::StatisticalInterpretation,
+            GliomaModality::Imaging,
+            GliomaModelSystem::MouseModel,
+            450,
+        );
+        follow_up.depends_on = vec![uncertain_action.action_id.clone()];
+        let unrelated = candidate(
+            "unrelated-assay",
+            GliomaStageKind::ExperimentDesign,
+            GliomaModality::Spatial,
+            GliomaModelSystem::Organoid,
+            450,
+        );
+        let adjusted = adjust_candidates(
+            &[uncertain_action, follow_up.clone(), unrelated.clone()],
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &BTreeSet::from(["uncertain-assay".into()]),
+            300,
+        );
+        let follow_up_adjusted = adjusted
+            .iter()
+            .find(|candidate| candidate.action_id == follow_up.action_id)
+            .expect("follow-up candidate");
+        let unrelated_adjusted = adjusted
+            .iter()
+            .find(|candidate| candidate.action_id == unrelated.action_id)
+            .expect("unrelated candidate");
+        assert!(
+            follow_up_adjusted.reproducibility_safety_milli
+                > unrelated_adjusted.reproducibility_safety_milli
+        );
+        assert!(
+            follow_up_adjusted.information_gain_milli > unrelated_adjusted.information_gain_milli
+        );
+    }
+
+    #[test]
     fn mission_does_not_execute_when_policy_blocks_all_actions() {
         let mut blocked = candidate(
             "instrument-preflight",
@@ -882,5 +1290,212 @@ mod tests {
             GliomaMissionStopReason::NoRunnableActions
         );
         mission.validate().unwrap();
+    }
+
+    #[test]
+    fn mission_carries_inputs_and_prerequisite_outputs_across_adaptive_rounds() {
+        let upstream = candidate(
+            "mechanism-organoid",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Transcriptomics,
+            GliomaModelSystem::Organoid,
+            700,
+        );
+        let mut downstream = candidate(
+            "validate-mouse-imaging",
+            GliomaStageKind::ComputationalExecution,
+            GliomaModality::Imaging,
+            GliomaModelSystem::MouseModel,
+            700,
+        );
+        downstream.depends_on = vec![upstream.action_id.clone()];
+        let mut mission_request = request(vec![upstream, downstream]);
+        mission_request.gates.required_stages = BTreeSet::from([
+            GliomaStageKind::MechanismExploration,
+            GliomaStageKind::ComputationalExecution,
+        ]);
+        mission_request.gates.min_completed_actions = 2;
+        mission_request.gates.min_model_systems = 2;
+        mission_request.gates.min_modalities = 2;
+
+        let source = LocalArtifactRef {
+            artifact_id: "study:glioma-organoid-input".into(),
+            content_hash: ContentHash::of_bytes(b"local preclinical source"),
+            content_type: "application/vnd.aurora.glioma.study+json".into(),
+            local_only: true,
+            contains_human_data: false,
+            contains_direct_identifiers: false,
+        };
+        let scope = GliomaActionWorkflowScope {
+            research_id: "glioma-invasion-study".into(),
+            study_id: "study-organoid-mouse".into(),
+            objective: mission_request.objective.clone(),
+            modalities: BTreeSet::from([GliomaModality::Imaging, GliomaModality::Transcriptomics])
+                .into_iter()
+                .collect(),
+            model_systems: BTreeSet::from([
+                GliomaModelSystem::MouseModel,
+                GliomaModelSystem::Organoid,
+            ])
+            .into_iter()
+            .collect(),
+            requested_autonomy: AutonomyTier::A1,
+        };
+
+        #[derive(Default)]
+        struct ContextRecorder {
+            contexts: Vec<super::super::action_execution::GliomaActionExecutionContext>,
+        }
+        impl GliomaActionExecutor for ContextRecorder {
+            fn execute_action(
+                &mut self,
+                candidate: &GliomaActionCandidate,
+                attempt: u8,
+            ) -> Result<
+                super::super::action_execution::ActionExecutionResult,
+                super::super::action_execution::ActionExecutionFailure,
+            > {
+                self.execute_action_with_context(
+                    candidate,
+                    &super::super::action_execution::GliomaActionExecutionContext::default(),
+                    attempt,
+                )
+            }
+
+            fn execute_action_with_context(
+                &mut self,
+                candidate: &GliomaActionCandidate,
+                context: &super::super::action_execution::GliomaActionExecutionContext,
+                attempt: u8,
+            ) -> Result<
+                super::super::action_execution::ActionExecutionResult,
+                super::super::action_execution::ActionExecutionFailure,
+            > {
+                self.contexts.push(context.clone());
+                let content_hash = ContentHash::of_value(&serde_json::json!({
+                    "action": candidate.action_id,
+                    "attempt": attempt,
+                }))
+                .expect("synthetic artifact should hash");
+                Ok(super::super::action_execution::ActionExecutionResult {
+                    action_id: candidate.action_id.clone(),
+                    disposition:
+                        super::super::action_execution::ActionExecutionDisposition::Completed,
+                    attempt_count: attempt,
+                    artifact: Some(LocalArtifactRef {
+                        artifact_id: format!("result:{}", candidate.action_id),
+                        content_hash,
+                        content_type: "application/vnd.aurora.glioma.action-result+json".into(),
+                        local_only: true,
+                        contains_human_data: false,
+                        contains_direct_identifiers: false,
+                    }),
+                    note: "synthetic local workflow result".into(),
+                    uncertainty: Vec::new(),
+                    negative_evidence: Vec::new(),
+                })
+            }
+        }
+
+        let context = GliomaMissionExecutionContext {
+            source_artifacts: vec![source.clone()],
+            completed_artifacts: Vec::new(),
+            workflow_scope: Some(scope.clone()),
+        };
+        let mut executor = ContextRecorder::default();
+        let mission = execute_glioma_autonomous_research_mission_with_context(
+            &mission_request,
+            &context,
+            &mut executor,
+        )
+        .unwrap();
+
+        assert_eq!(mission.disposition, GliomaMissionDisposition::Qualified);
+        assert_eq!(mission.rounds.len(), 2);
+        assert_eq!(executor.contexts.len(), 2);
+        assert_eq!(executor.contexts[0].source_artifacts, vec![source.clone()]);
+        assert_eq!(executor.contexts[0].scope, Some(scope.clone()));
+        assert!(executor.contexts[0].dependency_artifacts.is_empty());
+        assert_eq!(executor.contexts[1].source_artifacts, vec![source]);
+        assert_eq!(executor.contexts[1].scope, Some(scope));
+        assert_eq!(
+            executor.contexts[1].dependency_action_order,
+            vec!["mechanism-organoid"]
+        );
+        assert_eq!(executor.contexts[1].dependency_artifacts.len(), 1);
+        assert_eq!(
+            executor.contexts[1].dependency_artifacts[0].action_id,
+            "mechanism-organoid"
+        );
+        assert_eq!(
+            executor.contexts[1].dependency_artifacts[0]
+                .artifact
+                .artifact_id,
+            "result:mechanism-organoid"
+        );
+        mission.validate().unwrap();
+    }
+
+    #[test]
+    fn resumed_mission_requires_artifacts_for_completed_prerequisites() {
+        let upstream = candidate(
+            "mechanism-organoid",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Transcriptomics,
+            GliomaModelSystem::Organoid,
+            700,
+        );
+        let mut downstream = candidate(
+            "validate-mouse-imaging",
+            GliomaStageKind::ComputationalExecution,
+            GliomaModality::Imaging,
+            GliomaModelSystem::MouseModel,
+            700,
+        );
+        downstream.depends_on = vec![upstream.action_id.clone()];
+        let mut mission_request = request(vec![upstream, downstream]);
+        mission_request.completed_action_order = vec!["mechanism-organoid".into()];
+        mission_request.selection.max_actions = 1;
+        let mut executor = DryRunGliomaActionExecutor;
+        let error = execute_glioma_autonomous_research_mission_with_context(
+            &mission_request,
+            &GliomaMissionExecutionContext::default(),
+            &mut executor,
+        )
+        .unwrap_err();
+        assert!(matches!(error, GliomaMissionError::InvalidRequest(_)));
+        assert!(error.to_string().contains("missing its artifact reference"));
+    }
+
+    #[test]
+    fn workflow_scope_blocks_out_of_scope_autonomy_before_dispatch() {
+        let mission_request = request(vec![candidate(
+            "mechanism-organoid",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Transcriptomics,
+            GliomaModelSystem::Organoid,
+            700,
+        )]);
+        let context = GliomaMissionExecutionContext {
+            source_artifacts: Vec::new(),
+            completed_artifacts: Vec::new(),
+            workflow_scope: Some(GliomaActionWorkflowScope {
+                research_id: "glioma-study".into(),
+                study_id: "organoid-model".into(),
+                objective: mission_request.objective.clone(),
+                modalities: vec![GliomaModality::Transcriptomics],
+                model_systems: vec![GliomaModelSystem::Organoid],
+                requested_autonomy: AutonomyTier::A0,
+            }),
+        };
+        let mut executor = DryRunGliomaActionExecutor;
+        let error = execute_glioma_autonomous_research_mission_with_context(
+            &mission_request,
+            &context,
+            &mut executor,
+        )
+        .unwrap_err();
+        assert!(matches!(error, GliomaMissionError::InvalidRequest(_)));
+        assert!(error.to_string().contains("authorize no higher autonomy"));
     }
 }

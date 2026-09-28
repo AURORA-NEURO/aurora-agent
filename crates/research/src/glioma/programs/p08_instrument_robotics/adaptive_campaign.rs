@@ -1,11 +1,12 @@
-//! Information-aware instrument campaign selection for preclinical glioma research.
+//! Beam-selected information-aware instrument campaign selection for preclinical glioma research.
 //!
 //! A fleet scheduler answers *where* a run can execute and the campaign controller answers
 //! *whether* a queue may continue. This feature answers the scientific question in between:
 //! given several already-preflighted assay plans, which dependency-closed subset buys the most
 //! reproducible information per unit of instrument time and risk? The selector is deterministic,
-//! accounts for endpoint diversity, and then hands only the selected plans to the existing guarded
-//! campaign executor. It never turns an instrument completion into biological evidence.
+//! uses a bounded beam over complete dependency-closed portfolios, accounts for endpoint and
+//! instrument diversity, and then hands only the selected plans to the existing guarded campaign
+//! executor. It never turns an instrument completion into biological evidence.
 
 use super::campaign::{
     InstrumentCampaign, InstrumentCampaignDisposition, InstrumentCampaignError,
@@ -18,10 +19,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P08-F15";
-pub const OUTPUT_SCHEMA: &str = "GliomaAdaptiveInstrumentCampaign1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaAdaptiveInstrumentCampaign1@4";
 pub const MAX_CANDIDATES: usize = 256;
 pub const MAX_SELECTED: usize = 256;
 pub const MAX_ENDPOINTS: usize = 256;
+const INSTRUMENT_PORTFOLIO_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdaptiveInstrumentCandidate {
@@ -76,6 +78,10 @@ pub struct AdaptiveInstrumentCampaign {
     pub objective: String,
     pub candidate_order: Vec<String>,
     pub selected_order: Vec<String>,
+    /// Candidates retained for a subsequent campaign round. This is the explicit complement of
+    /// `selected_order`, not a lossy rejection reason: deferred candidates may be reconsidered when
+    /// budgets, endpoint floors, or preflight availability change.
+    pub deferred_order: Vec<String>,
     pub endpoint_order: Vec<String>,
     pub candidates: Vec<AdaptiveInstrumentCandidate>,
     pub decisions: Vec<AdaptiveInstrumentDecision>,
@@ -131,6 +137,161 @@ fn score(candidate: &AdaptiveInstrumentCandidate, endpoint_is_new: bool) -> u64 
         .min(u64::MAX as u128) as u64
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InstrumentPortfolioState {
+    selected: BTreeSet<String>,
+    selected_order: Vec<String>,
+    planned_information_milli: u64,
+    planned_cost_ticks: u64,
+    planned_risk_milli: u64,
+    endpoints: BTreeSet<String>,
+    instruments: BTreeSet<String>,
+}
+
+impl InstrumentPortfolioState {
+    fn empty() -> Self {
+        Self {
+            selected: BTreeSet::new(),
+            selected_order: Vec::new(),
+            planned_information_milli: 0,
+            planned_cost_ticks: 0,
+            planned_risk_milli: 0,
+            endpoints: BTreeSet::new(),
+            instruments: BTreeSet::new(),
+        }
+    }
+
+    fn admit(&mut self, id: &str, candidate: &AdaptiveInstrumentCandidate) {
+        if self.selected.insert(id.to_string()) {
+            self.planned_information_milli = self
+                .planned_information_milli
+                .saturating_add(candidate.expected_information_milli);
+            self.planned_cost_ticks = self
+                .planned_cost_ticks
+                .saturating_add(candidate.estimated_cost_ticks);
+            self.planned_risk_milli = self.planned_risk_milli.saturating_add(candidate.risk_milli);
+            self.endpoints.insert(candidate.endpoint.clone());
+            self.instruments
+                .insert(candidate.execution.plan.instrument_id.clone());
+            self.selected_order.push(id.to_string());
+        }
+    }
+}
+
+/// Score a complete portfolio rather than only a root candidate. Dependencies consume instrument
+/// time and risk, but they also produce information and endpoints. Endpoint diversity is weighted
+/// most heavily; instrument diversity breaks near-ties so one physical device cannot monopolize a
+/// campaign when an orthogonal, equally safe gateway is available.
+fn instrument_portfolio_score(
+    state: &InstrumentPortfolioState,
+    candidates: &BTreeMap<String, AdaptiveInstrumentCandidate>,
+) -> u64 {
+    if state.selected.is_empty() {
+        return 0;
+    }
+    let total_utility = state.selected.iter().fold(0_u128, |total, id| {
+        total.saturating_add(utility(&candidates[id]))
+    });
+    let diversity_factor = (1_u128.saturating_add(state.endpoints.len() as u128))
+        .saturating_mul(10)
+        .saturating_add(1_u128.saturating_add(state.instruments.len() as u128));
+    let risk_factor = 1_000_000_u128.saturating_add(state.planned_risk_milli as u128);
+    total_utility
+        .saturating_mul(1_000_000)
+        .saturating_mul(diversity_factor)
+        .checked_div(
+            (state.planned_cost_ticks as u128)
+                .saturating_mul(risk_factor)
+                .max(1),
+        )
+        .unwrap_or(0)
+        .min(u64::MAX as u128) as u64
+}
+
+fn sort_and_prune_instrument_beam(
+    beam: &mut Vec<InstrumentPortfolioState>,
+    candidates: &BTreeMap<String, AdaptiveInstrumentCandidate>,
+    request: &AdaptiveInstrumentCampaignRequest,
+) {
+    beam.sort_by(|left, right| {
+        let gate_rank = |state: &InstrumentPortfolioState| {
+            let information_met =
+                state.planned_information_milli >= request.minimum_information_milli;
+            let endpoints_met = state.endpoints.len() >= request.minimum_endpoint_count;
+            (information_met as u8) * 2 + (endpoints_met as u8)
+        };
+        gate_rank(right)
+            .cmp(&gate_rank(left))
+            .then_with(|| {
+                instrument_portfolio_score(right, candidates)
+                    .cmp(&instrument_portfolio_score(left, candidates))
+            })
+            .then_with(|| left.planned_cost_ticks.cmp(&right.planned_cost_ticks))
+            .then_with(|| left.planned_risk_milli.cmp(&right.planned_risk_milli))
+            .then_with(|| left.selected_order.cmp(&right.selected_order))
+    });
+    beam.dedup_by(|left, right| left.selected == right.selected);
+    beam.truncate(INSTRUMENT_PORTFOLIO_BEAM_WIDTH);
+}
+
+fn select_instrument_portfolio(
+    request: &AdaptiveInstrumentCampaignRequest,
+    candidates: &BTreeMap<String, AdaptiveInstrumentCandidate>,
+) -> Result<InstrumentPortfolioState, AdaptiveInstrumentCampaignError> {
+    let mut beam = vec![InstrumentPortfolioState::empty()];
+    for root_id in candidates.keys() {
+        let mut next = beam.clone();
+        for state in &beam {
+            if state.selected.contains(root_id) {
+                continue;
+            }
+            let mut closure = Vec::new();
+            dependency_closure(
+                root_id,
+                candidates,
+                &state.selected,
+                &mut BTreeSet::new(),
+                &mut closure,
+            )?;
+            if state.selected.len().saturating_add(closure.len()) > request.max_selected {
+                continue;
+            }
+            let closure_cost = closure.iter().fold(0_u64, |total, id| {
+                total.saturating_add(candidates[id].estimated_cost_ticks)
+            });
+            let closure_risk = closure.iter().fold(0_u64, |total, id| {
+                total.saturating_add(candidates[id].risk_milli)
+            });
+            if state.planned_cost_ticks.saturating_add(closure_cost) > request.cost_budget_ticks
+                || state.planned_risk_milli.saturating_add(closure_risk) > request.risk_budget_milli
+            {
+                continue;
+            }
+            let mut admitted = state.clone();
+            for id in closure {
+                admitted.admit(&id, &candidates[&id]);
+            }
+            next.push(admitted);
+        }
+        sort_and_prune_instrument_beam(&mut next, candidates, request);
+        beam = next;
+    }
+    sort_and_prune_instrument_beam(&mut beam, candidates, request);
+    let fallback = beam
+        .iter()
+        .find(|state| !state.selected.is_empty())
+        .cloned();
+    Ok(beam
+        .into_iter()
+        .filter(|state| !state.selected.is_empty())
+        .find(|state| {
+            state.planned_information_milli >= request.minimum_information_milli
+                && state.endpoints.len() >= request.minimum_endpoint_count
+        })
+        .or(fallback)
+        .unwrap_or_else(InstrumentPortfolioState::empty))
+}
+
 fn digest_input(output: &AdaptiveInstrumentCampaign) -> serde_json::Value {
     serde_json::json!({
         "feature_id": output.feature_id,
@@ -138,6 +299,7 @@ fn digest_input(output: &AdaptiveInstrumentCampaign) -> serde_json::Value {
         "objective": output.objective,
         "candidate_order": output.candidate_order,
         "selected_order": output.selected_order,
+        "deferred_order": output.deferred_order,
         "endpoint_order": output.endpoint_order,
         "candidates": output.candidates,
         "decisions": output.decisions,
@@ -276,6 +438,7 @@ impl AdaptiveInstrumentCampaign {
                 .selected_order
                 .windows(2)
                 .any(|pair| pair[0] == pair[1])
+            || !canonical(&self.deferred_order)
             || !canonical(&self.endpoint_order)
             || !canonical(&self.negative_evidence)
             || !canonical(&self.uncertainty)
@@ -304,6 +467,15 @@ impl AdaptiveInstrumentCampaign {
                 "selected candidates are duplicated".into(),
             ));
         }
+        let deferred = self.deferred_order.iter().cloned().collect::<BTreeSet<_>>();
+        if deferred.len() != self.deferred_order.len()
+            || selected.intersection(&deferred).next().is_some()
+            || selected.union(&deferred).cloned().collect::<BTreeSet<_>>() != candidate_ids
+        {
+            return Err(AdaptiveInstrumentCampaignError::InvalidOutput(
+                "selected and deferred candidates must form a disjoint complete partition".into(),
+            ));
+        }
         let mut decisions = BTreeSet::new();
         for decision in &self.decisions {
             if !candidate_ids.contains(&decision.candidate_id)
@@ -326,6 +498,27 @@ impl AdaptiveInstrumentCampaign {
             .iter()
             .map(|candidate| (candidate.candidate_id.as_str(), candidate))
             .collect::<BTreeMap<_, _>>();
+        let selected_positions = self
+            .selected_order
+            .iter()
+            .enumerate()
+            .map(|(position, id)| (id.as_str(), position))
+            .collect::<BTreeMap<_, _>>();
+        for id in &self.selected_order {
+            let candidate = by_id[id.as_str()];
+            for dependency in &candidate.depends_on {
+                let Some(dependency_position) = selected_positions.get(dependency.as_str()) else {
+                    return Err(AdaptiveInstrumentCampaignError::InvalidOutput(format!(
+                        "selected candidate {id} is missing dependency {dependency}"
+                    )));
+                };
+                if *dependency_position >= selected_positions[&id.as_str()] {
+                    return Err(AdaptiveInstrumentCampaignError::InvalidOutput(format!(
+                        "selected dependency {dependency} must precede {id}"
+                    )));
+                }
+            }
+        }
         let mut information = 0_u64;
         let mut cost = 0_u64;
         let mut risk = 0_u64;
@@ -391,71 +584,40 @@ pub fn execute_glioma_adaptive_instrument_campaign<E: InstrumentExecutor>(
 ) -> Result<AdaptiveInstrumentCampaign, AdaptiveInstrumentCampaignError> {
     let candidates = validate_request(request)?;
     let candidate_order = candidates.keys().cloned().collect::<Vec<_>>();
-    let mut selected = BTreeSet::new();
-    let mut selected_order = Vec::new();
-    let mut planned_information = 0_u64;
-    let mut planned_cost = 0_u64;
-    let mut planned_risk = 0_u64;
-    let mut endpoints = BTreeSet::new();
+    let portfolio = select_instrument_portfolio(request, &candidates)?;
+    let selected = portfolio.selected;
+    let selected_order = portfolio.selected_order;
+    let deferred_order = candidate_order
+        .iter()
+        .filter(|candidate_id| !selected.contains(*candidate_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let planned_information = portfolio.planned_information_milli;
+    let planned_cost = portfolio.planned_cost_ticks;
+    let planned_risk = portfolio.planned_risk_milli;
+    let endpoints = portfolio.endpoints;
     let mut scored = BTreeMap::new();
     for candidate in candidates.values() {
         scored.insert(candidate.candidate_id.clone(), score(candidate, true));
     }
-
-    while selected.len() < request.max_selected {
-        let mut best: Option<(u64, String, Vec<String>)> = None;
-        for candidate in candidates.values() {
-            if selected.contains(&candidate.candidate_id) {
-                continue;
-            }
-            let mut closure = Vec::new();
-            dependency_closure(
-                &candidate.candidate_id,
-                &candidates,
-                &selected,
-                &mut BTreeSet::new(),
-                &mut closure,
-            )?;
-            if selected.len().saturating_add(closure.len()) > request.max_selected {
-                continue;
-            }
-            let mut closure_cost = 0_u64;
-            let mut closure_risk = 0_u64;
-            for id in &closure {
-                let item = &candidates[id];
-                closure_cost = closure_cost.saturating_add(item.estimated_cost_ticks);
-                closure_risk = closure_risk.saturating_add(item.risk_milli);
-            }
-            if planned_cost.saturating_add(closure_cost) > request.cost_budget_ticks
-                || planned_risk.saturating_add(closure_risk) > request.risk_budget_milli
-            {
-                continue;
-            }
-            let endpoint_is_new = !endpoints.contains(&candidate.endpoint);
-            let candidate_score = score(candidate, endpoint_is_new);
-            let better = best.as_ref().is_none_or(|(best_score, best_id, _)| {
-                candidate_score > *best_score
-                    || (candidate_score == *best_score && candidate.candidate_id < *best_id)
-            });
-            if better {
-                best = Some((candidate_score, candidate.candidate_id.clone(), closure));
-            }
-        }
-        let Some((chosen_score, root_id, closure)) = best else {
-            break;
-        };
-        for id in closure {
-            if selected.insert(id.clone()) {
-                let candidate = &candidates[&id];
-                planned_information =
-                    planned_information.saturating_add(candidate.expected_information_milli);
-                planned_cost = planned_cost.saturating_add(candidate.estimated_cost_ticks);
-                planned_risk = planned_risk.saturating_add(candidate.risk_milli);
-                endpoints.insert(candidate.endpoint.clone());
-                selected_order.push(id);
-            }
-        }
-        scored.insert(root_id, chosen_score);
+    let portfolio_score = instrument_portfolio_score(
+        &InstrumentPortfolioState {
+            selected: selected.clone(),
+            selected_order: selected_order.clone(),
+            planned_information_milli: planned_information,
+            planned_cost_ticks: planned_cost,
+            planned_risk_milli: planned_risk,
+            endpoints: endpoints.clone(),
+            instruments: candidates
+                .iter()
+                .filter(|(id, _)| selected.contains(*id))
+                .map(|(_, candidate)| candidate.execution.plan.instrument_id.clone())
+                .collect(),
+        },
+        &candidates,
+    );
+    if let Some(first_selected) = selected_order.first() {
+        scored.insert(first_selected.clone(), portfolio_score);
     }
 
     let mut uncertainty = Vec::new();
@@ -526,6 +688,7 @@ pub fn execute_glioma_adaptive_instrument_campaign<E: InstrumentExecutor>(
         objective: request.objective.clone(),
         candidate_order,
         selected_order,
+        deferred_order,
         endpoint_order: endpoints.into_iter().collect(),
         candidates: request.candidates.clone(),
         decisions,
@@ -569,8 +732,9 @@ pub fn dry_run_adaptive_instrument_executor(
 mod tests {
     use super::*;
     use crate::glioma::programs::p08_instrument_robotics::preflight::{
-        InstrumentActionDecision, InstrumentActionDisposition, InstrumentAuthorization,
-        InstrumentInterlockSnapshot, InstrumentPreflightDisposition, InstrumentPreflightPlan,
+        action_manifest_digest, InstrumentAction, InstrumentActionDecision,
+        InstrumentActionDisposition, InstrumentAuthorization, InstrumentInterlockSnapshot,
+        InstrumentOperation, InstrumentPreflightDisposition, InstrumentPreflightPlan,
     };
     use crate::glioma_engine::GliomaModelSystem;
 
@@ -579,13 +743,27 @@ mod tests {
     }
 
     fn candidate(id: &str, endpoint: &str, dependency: Vec<String>) -> AdaptiveInstrumentCandidate {
+        let action = InstrumentAction {
+            action_id: "acquire".into(),
+            instrument_id: format!("imager-{id}"),
+            operation: InstrumentOperation::AcquireImage,
+            model_system: GliomaModelSystem::Organoid,
+            requested_start_tick: 1,
+            duration_ticks: 1,
+            risk_milli: 10,
+            parameters: Vec::new(),
+            requires_operator: false,
+            output_schema: "application/json".into(),
+        };
+        let action_manifest_digest = action_manifest_digest(std::slice::from_ref(&action)).unwrap();
         let mut plan = InstrumentPreflightPlan {
             feature_id: "GAF-GLIOMA-P08-F10".into(),
-            output_schema: "GliomaInstrumentPreflight1@1".into(),
+            output_schema: "GliomaInstrumentPreflight1@2".into(),
             objective: format!("assay {id}"),
             instrument_id: format!("imager-{id}"),
             model_system: GliomaModelSystem::Organoid,
             authorization_id: format!("approval-{id}"),
+            action_manifest_digest,
             action_order: vec!["acquire".into()],
             admitted_order: vec!["acquire".into()],
             blocked_order: Vec::new(),
@@ -614,6 +792,7 @@ mod tests {
             "instrument_id": plan.instrument_id,
             "model_system": plan.model_system,
             "authorization_id": plan.authorization_id,
+            "action_manifest_digest": plan.action_manifest_digest,
             "action_order": plan.action_order,
             "admitted_order": plan.admitted_order,
             "blocked_order": plan.blocked_order,
@@ -632,18 +811,7 @@ mod tests {
         let execution = InstrumentExecutionRequest {
             objective: format!("assay {id}"),
             plan,
-            actions: vec![crate::glioma::programs::p08_instrument_robotics::preflight::InstrumentAction {
-                action_id: "acquire".into(),
-                instrument_id: format!("imager-{id}"),
-                model_system: GliomaModelSystem::Organoid,
-                    operation: crate::glioma::programs::p08_instrument_robotics::preflight::InstrumentOperation::AcquireImage,
-                requested_start_tick: 1,
-                duration_ticks: 1,
-                risk_milli: 10,
-                parameters: Vec::new(),
-                    requires_operator: false,
-                    output_schema: "application/json".into(),
-            }],
+            actions: vec![action],
             authorization: InstrumentAuthorization {
                 authorization_id: format!("approval-{id}"),
                 operator_id: "operator".into(),
@@ -724,6 +892,59 @@ mod tests {
     }
 
     #[test]
+    fn prefers_a_new_instrument_when_endpoint_and_information_are_near_tied() {
+        let mut repeat = candidate("b", "viability", Vec::new());
+        repeat.expected_information_milli = 699;
+        repeat.execution.plan.instrument_id = "imager-a".into();
+        repeat.execution.authorization.instrument_scope = "imager-a".into();
+        repeat.execution.actions[0].instrument_id = "imager-a".into();
+        repeat.execution.plan.action_manifest_digest =
+            action_manifest_digest(&repeat.execution.actions).unwrap();
+
+        let mut orthogonal = candidate("c", "viability", Vec::new());
+        orthogonal.expected_information_milli = 698;
+        let request = AdaptiveInstrumentCampaignRequest {
+            objective: "fleet-diverse glioma imaging campaign".into(),
+            candidates: vec![candidate("a", "viability", Vec::new()), repeat, orthogonal],
+            cost_budget_ticks: 4,
+            risk_budget_milli: 100,
+            minimum_information_milli: 1,
+            minimum_endpoint_count: 1,
+            max_selected: 2,
+            stop_on_negative: false,
+        };
+        let mut executor = dry_run_adaptive_instrument_executor(&request).unwrap();
+        let output = execute_glioma_adaptive_instrument_campaign(&request, &mut executor).unwrap();
+        assert_eq!(output.selected_order, vec!["a", "c"]);
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn beam_can_reject_a_high_value_root_when_its_dependency_blocks_complementarity() {
+        let mut prerequisite = candidate("a", "viability", Vec::new());
+        prerequisite.expected_information_milli = 50;
+        let mut dominant = candidate("b", "viability", vec!["a".into()]);
+        dominant.expected_information_milli = 1_000;
+        let mut complementary = candidate("c", "invasion", Vec::new());
+        complementary.expected_information_milli = 700;
+        let request = AdaptiveInstrumentCampaignRequest {
+            objective: "dependency-aware glioma instrument campaign".into(),
+            candidates: vec![prerequisite, dominant, complementary],
+            cost_budget_ticks: 4,
+            risk_budget_milli: 100,
+            minimum_information_milli: 1,
+            minimum_endpoint_count: 2,
+            max_selected: 2,
+            stop_on_negative: false,
+        };
+        let mut executor = dry_run_adaptive_instrument_executor(&request).unwrap();
+        let output = execute_glioma_adaptive_instrument_campaign(&request, &mut executor).unwrap();
+        assert_eq!(output.selected_order, vec!["a", "c"]);
+        assert_eq!(output.endpoint_order, vec!["invasion", "viability"]);
+        output.validate().unwrap();
+    }
+
+    #[test]
     fn holds_when_information_or_endpoint_gate_cannot_be_met() {
         let request = AdaptiveInstrumentCampaignRequest {
             objective: "underpowered glioma assay campaign".into(),
@@ -744,5 +965,39 @@ mod tests {
             .disposition,
             AdaptiveInstrumentCampaignDisposition::NoFeasiblePlan
         ));
+    }
+
+    #[test]
+    fn prefers_a_lower_score_portfolio_that_satisfies_all_scientific_gates() {
+        let mut high_score_single_endpoint = candidate("a", "viability", Vec::new());
+        high_score_single_endpoint.expected_information_milli = 10_000;
+        high_score_single_endpoint.estimated_cost_ticks = 3;
+        let mut lower_score_endpoint_b = candidate("b", "invasion", Vec::new());
+        lower_score_endpoint_b.expected_information_milli = 100;
+        let mut lower_score_endpoint_c = candidate("c", "state", Vec::new());
+        lower_score_endpoint_c.expected_information_milli = 100;
+        let request = AdaptiveInstrumentCampaignRequest {
+            objective: "gate-aware glioma instrument campaign".into(),
+            candidates: vec![
+                high_score_single_endpoint,
+                lower_score_endpoint_b,
+                lower_score_endpoint_c,
+            ],
+            cost_budget_ticks: 4,
+            risk_budget_milli: 100,
+            minimum_information_milli: 150,
+            minimum_endpoint_count: 2,
+            max_selected: 2,
+            stop_on_negative: false,
+        };
+        let mut executor = dry_run_adaptive_instrument_executor(&request).unwrap();
+        let output = execute_glioma_adaptive_instrument_campaign(&request, &mut executor).unwrap();
+        assert_eq!(
+            output.disposition,
+            AdaptiveInstrumentCampaignDisposition::Executed
+        );
+        assert_eq!(output.selected_order, vec!["b", "c"]);
+        assert_eq!(output.deferred_order, vec!["a"]);
+        output.validate().unwrap();
     }
 }

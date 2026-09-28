@@ -8,6 +8,18 @@ An MCP server and CLI built on the FIBER decision-context compiler: a typed deci
 compiled into the smallest decision-sufficient evidence region, delivered with a Context
 Certificate stating exactly what was omitted.
 
+The preclinical glioma engine now compiles a complete bounded research workflow, adapts its next
+stage from typed outcomes, and admits only capability-matched institution-local workers before
+dispatch. Worker routing is deterministic and fail-closed; the engine never turns an unimplemented
+stage into a generic action and never makes clinical decisions.
+The route can also drive the autonomous engine end to end through the typed stage/action adapter;
+MCP exposes this as a simulation-only rehearsal, while production hosts supply their own local
+workers.
+Evidence is an execution gate, not a passive report: P01 cross-family triangulation must qualify
+before the P07 stage router can admit a worker. The evidence-gated stage engine returns an explicit
+evidence hold or capability hold with next actions, and only then runs bounded evidence,
+multimodal, mechanism, experiment, computation, replication, release, and federation stages.
+
 [![CI](https://github.com/AURORA-NEURO/aurora-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/AURORA-NEURO/aurora-agent/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/AURORA-NEURO/aurora-agent)](https://github.com/AURORA-NEURO/aurora-agent/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)

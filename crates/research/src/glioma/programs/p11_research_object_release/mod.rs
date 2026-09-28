@@ -16,6 +16,10 @@ pub mod operating_cycle;
 pub mod portfolio_review_workbench;
 pub mod release_batch;
 pub mod release_gate;
+pub mod release_preview_workbench;
+pub mod release_queue_console;
+pub mod release_queue_scheduler;
+pub mod release_signature_verifier;
 pub mod replay;
 pub mod replay_history;
 pub mod review_workbench;
@@ -125,6 +129,24 @@ pub use multimodal_bundle::{
     MultimodalResearchObjectRequest, compile_glioma_multimodal_research_object,
 };
 
+pub use leakage_audit::{
+    audit_glioma_release_dependency_leakage, DependencyExportScope, LeakageAuditDisposition,
+    LeakageAuditError, LeakageKind, LeakageSeverity, ReleaseDependencyLeakageAudit,
+    ReleaseDependencyLeakageRequest, ReleaseDependencyNode, ReleaseLeakFinding,
+};
+pub use metadata_normalizer::{
+    normalize_glioma_release_metadata, ControlledVocabulary, MetadataConflict, MetadataField,
+    MetadataMappingRule, MetadataNormalizationError, MetadataSource, MetadataTransform,
+    MetadataUnresolved, NormalizationDisposition, NormalizedFieldStatus, NormalizedMetadataField,
+    ReleaseMetadataNormalization, ReleaseMetadataNormalizationRequest, ReversibleMetadataChange,
+    TargetMetadataField, VocabularyTerm,
+};
+pub use multistudy_release_composer::{
+    compose_glioma_multistudy_release, ComparativeAssayMapping, ComparativeFieldBinding,
+    ComparativeReleaseDisposition, ComparativeReleaseError, ComparativeReleaseRequest,
+    ComparativeResearchObject, ComparativeStudyField, ComparativeStudyObject, MappingRelation,
+    StudyReleaseProvenance,
+};
 pub use operating_cycle::{
     GliomaReleaseOperatingCycle, GliomaReleaseOperatingCycleDisposition,
     GliomaReleaseOperatingCycleError, GliomaReleaseOperatingCycleRequest, ReleaseExecutionMode,

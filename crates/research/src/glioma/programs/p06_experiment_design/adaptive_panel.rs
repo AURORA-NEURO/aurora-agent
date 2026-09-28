@@ -1,10 +1,10 @@
 //! Mechanism-aware adaptive assay-panel design for preclinical glioma research.
 //!
 //! Existing information design ranks one candidate at a time. This product compiles a bounded
-//! multi-assay panel: it greedily chooses complementary assays using expected Gini-information
-//! reduction, discounts correlated independence groups, and applies explicit feasibility, risk,
-//! cost, and budget gates. Candidate outcome distributions are planning declarations; no outcome
-//! is invented, observed, or dispatched by this module.
+//! multi-assay panel: it searches a deterministic portfolio beam over sequential belief states,
+//! discounts correlated independence groups, and applies explicit feasibility, risk, cost, and
+//! budget gates. Candidate outcome distributions are planning declarations; no outcome is
+//! invented, observed, or dispatched by this module.
 
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_ids::ContentHash;
@@ -13,11 +13,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F25";
-pub const OUTPUT_SCHEMA: &str = "GliomaAdaptivePanelDesign1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaAdaptivePanelDesign1@2";
 pub const MAX_MECHANISMS: usize = 128;
 pub const MAX_ACTIONS: usize = 4_096;
 pub const MAX_OUTCOMES: usize = 128;
 pub const SCORE_SCALE: u64 = 1_000;
+const PORTFOLIO_BEAM_WIDTH: usize = 64;
+const MAX_SEARCH_DEPTH: usize = 8;
+const MAX_BELIEF_BRANCHES: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PanelMechanism {
@@ -317,6 +320,263 @@ fn expected_information(
     (prior_gini, expected_posterior.min(SCORE_SCALE))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BeliefBranch {
+    weight_milli: u64,
+    posterior: Vec<u16>,
+}
+
+#[derive(Debug, Clone)]
+struct PanelPortfolioState {
+    action_ids: Vec<String>,
+    spent: u64,
+    expected_gini: u64,
+    utility: u64,
+    group_counts: BTreeMap<String, u32>,
+    selection_scores: BTreeMap<String, (u64, u64, u64)>,
+    branches: Vec<BeliefBranch>,
+}
+
+fn expected_branch_gini(branches: &[BeliefBranch]) -> u64 {
+    branches
+        .iter()
+        .map(|branch| branch.weight_milli.saturating_mul(gini(&branch.posterior)))
+        .sum::<u64>()
+        .checked_div(SCORE_SCALE)
+        .unwrap_or(0)
+        .min(SCORE_SCALE)
+}
+
+fn apply_action_to_beliefs(
+    branches: &[BeliefBranch],
+    mechanisms: &[PanelMechanism],
+    action: &PanelAction,
+) -> Vec<BeliefBranch> {
+    let mut expanded = Vec::new();
+    for branch in branches {
+        for outcome in &action.outcomes {
+            let predictive = mechanisms
+                .iter()
+                .enumerate()
+                .map(|(index, mechanism)| {
+                    u64::from(branch.posterior[index]).saturating_mul(u64::from(
+                        outcome
+                            .probability_milli_by_mechanism
+                            .get(&mechanism.mechanism_id)
+                            .copied()
+                            .unwrap_or(0),
+                    )) / SCORE_SCALE
+                })
+                .sum::<u64>();
+            if predictive == 0 {
+                continue;
+            }
+            let weight_milli = branch
+                .weight_milli
+                .saturating_mul(predictive)
+                .checked_div(SCORE_SCALE)
+                .unwrap_or(0);
+            if weight_milli == 0 {
+                continue;
+            }
+            let posterior = mechanisms
+                .iter()
+                .enumerate()
+                .map(|(index, mechanism)| {
+                    u64::from(branch.posterior[index])
+                        .saturating_mul(u64::from(
+                            outcome
+                                .probability_milli_by_mechanism
+                                .get(&mechanism.mechanism_id)
+                                .copied()
+                                .unwrap_or(0),
+                        ))
+                        .checked_div(predictive)
+                        .unwrap_or(0)
+                        .min(SCORE_SCALE) as u16
+                })
+                .collect::<Vec<_>>();
+            expanded.push(BeliefBranch {
+                weight_milli,
+                posterior,
+            });
+        }
+    }
+    if expanded.is_empty() {
+        return branches.to_vec();
+    }
+    expanded.sort_by(|left, right| {
+        right
+            .weight_milli
+            .cmp(&left.weight_milli)
+            .then_with(|| left.posterior.cmp(&right.posterior))
+    });
+    expanded.truncate(MAX_BELIEF_BRANCHES);
+    let total_weight = expanded
+        .iter()
+        .map(|branch| branch.weight_milli)
+        .sum::<u64>();
+    if total_weight == 0 {
+        return branches.to_vec();
+    }
+    let mut assigned = 0_u64;
+    let expanded_len = expanded.len();
+    for (index, branch) in expanded.iter_mut().enumerate() {
+        branch.weight_milli = if index + 1 == expanded_len {
+            SCORE_SCALE.saturating_sub(assigned)
+        } else {
+            branch
+                .weight_milli
+                .saturating_mul(SCORE_SCALE)
+                .checked_div(total_weight)
+                .unwrap_or(0)
+        };
+        assigned = assigned.saturating_add(branch.weight_milli);
+    }
+    expanded.retain(|branch| branch.weight_milli > 0);
+    expanded
+}
+
+fn panel_state_better(left: &PanelPortfolioState, right: &PanelPortfolioState) -> bool {
+    left.utility > right.utility
+        || (left.utility == right.utility && left.expected_gini < right.expected_gini)
+        || (left.utility == right.utility
+            && left.expected_gini == right.expected_gini
+            && left.spent < right.spent)
+        || (left.utility == right.utility
+            && left.expected_gini == right.expected_gini
+            && left.spent == right.spent
+            && left.action_ids < right.action_ids)
+}
+
+fn panel_action_utility(
+    request: &AdaptivePanelRequest,
+    action: &PanelAction,
+    information_gain: u64,
+    repeat_count: u32,
+) -> (u64, u64) {
+    let diversity_bonus = if repeat_count == 0 {
+        u64::from(request.diversity_weight_milli)
+    } else {
+        u64::from(request.diversity_weight_milli) / u64::from(repeat_count + 1)
+    };
+    let risk_penalty = u64::from(action.risk_milli)
+        .saturating_mul(u64::from(request.risk_penalty_milli))
+        / SCORE_SCALE;
+    let cost_penalty = u64::from(action.cost_units)
+        .saturating_mul(u64::from(request.cost_penalty_milli))
+        / SCORE_SCALE;
+    let utility = information_gain
+        .saturating_add(diversity_bonus)
+        .saturating_add(u64::from(action.feasibility_milli) / 10)
+        .saturating_sub(risk_penalty)
+        .saturating_sub(cost_penalty)
+        .min(SCORE_SCALE);
+    (diversity_bonus, utility)
+}
+
+fn select_panel_portfolio(
+    request: &AdaptivePanelRequest,
+    mechanisms: &[PanelMechanism],
+    prior: &[u16],
+    actions: &[PanelAction],
+) -> (PanelPortfolioState, bool) {
+    let initial_branches = vec![BeliefBranch {
+        weight_milli: SCORE_SCALE,
+        posterior: prior.to_vec(),
+    }];
+    let initial = PanelPortfolioState {
+        action_ids: Vec::new(),
+        spent: 0,
+        expected_gini: gini(prior),
+        utility: 0,
+        group_counts: BTreeMap::new(),
+        selection_scores: BTreeMap::new(),
+        branches: initial_branches,
+    };
+    let search_depth = request.max_selected_actions.min(MAX_SEARCH_DEPTH);
+    let mut beam = vec![initial.clone()];
+    let mut best = initial;
+    for _ in 0..search_depth {
+        let mut expanded = Vec::new();
+        for state in &beam {
+            for action in actions {
+                if state.action_ids.binary_search(&action.action_id).is_ok()
+                    || state
+                        .action_ids
+                        .last()
+                        .is_some_and(|last| action.action_id <= *last)
+                    || state.spent.saturating_add(u64::from(action.cost_units))
+                        > request.budget_units
+                    || action.feasibility_milli < request.min_feasibility_milli
+                    || action.risk_milli > request.risk_ceiling_milli
+                {
+                    continue;
+                }
+                let next_branches = apply_action_to_beliefs(&state.branches, mechanisms, action);
+                let before_gini = expected_branch_gini(&state.branches);
+                let after_gini = expected_branch_gini(&next_branches);
+                let information_gain = before_gini.saturating_sub(after_gini);
+                if information_gain < request.min_information_gain_milli {
+                    continue;
+                }
+                let repeat_count = state
+                    .group_counts
+                    .get(&action.independence_group)
+                    .copied()
+                    .unwrap_or(0);
+                let (diversity_bonus, action_utility) =
+                    panel_action_utility(request, action, information_gain, repeat_count);
+                let mut action_ids = state.action_ids.clone();
+                action_ids.push(action.action_id.clone());
+                action_ids.sort();
+                let mut group_counts = state.group_counts.clone();
+                *group_counts
+                    .entry(action.independence_group.clone())
+                    .or_default() += 1;
+                let mut selection_scores = state.selection_scores.clone();
+                selection_scores.insert(
+                    action.action_id.clone(),
+                    (information_gain, diversity_bonus, action_utility),
+                );
+                expanded.push(PanelPortfolioState {
+                    action_ids,
+                    spent: state.spent.saturating_add(u64::from(action.cost_units)),
+                    expected_gini: after_gini,
+                    utility: state
+                        .utility
+                        .saturating_add(action_utility)
+                        .min(SCORE_SCALE),
+                    group_counts,
+                    selection_scores,
+                    branches: next_branches,
+                });
+            }
+        }
+        if expanded.is_empty() {
+            break;
+        }
+        expanded.sort_by(|left, right| {
+            if panel_state_better(left, right) {
+                std::cmp::Ordering::Less
+            } else if panel_state_better(right, left) {
+                std::cmp::Ordering::Greater
+            } else {
+                left.action_ids.cmp(&right.action_ids)
+            }
+        });
+        expanded.truncate(PORTFOLIO_BEAM_WIDTH);
+        if let Some(candidate) = expanded
+            .iter()
+            .find(|candidate| panel_state_better(candidate, &best))
+        {
+            best = candidate.clone();
+        }
+        beam = expanded;
+    }
+    (best, request.max_selected_actions > MAX_SEARCH_DEPTH)
+}
+
 fn validate_output(output: &AdaptivePanelDesign) -> Result<(), AdaptivePanelError> {
     if output.feature_id != FEATURE_ID
         || output.output_schema != OUTPUT_SCHEMA
@@ -387,7 +647,7 @@ impl AdaptivePanelDesign {
     }
 }
 
-/// Compile a multi-assay panel using greedy information gain with diversity and safety gates.
+/// Compile a multi-assay panel using sequential-belief portfolio search with diversity and safety gates.
 pub fn plan_glioma_adaptive_panel(
     request: &AdaptivePanelRequest,
 ) -> Result<AdaptivePanelDesign, AdaptivePanelError> {
@@ -403,102 +663,51 @@ pub fn plan_glioma_adaptive_panel(
         .map(|mechanism| mechanism.prior_milli)
         .collect::<Vec<_>>();
     let prior_gini = gini(&prior);
-    let mut remaining_budget = request.budget_units;
-    let mut selected = BTreeSet::new();
-    let mut selected_groups = BTreeSet::new();
     let mut candidate_actions = request.actions.clone();
     candidate_actions.sort_by(|left, right| left.action_id.cmp(&right.action_id));
+    let (best_portfolio, search_depth_bounded) =
+        select_panel_portfolio(request, &mechanisms, &prior, &candidate_actions);
+    let remaining_budget = request.budget_units.saturating_sub(best_portfolio.spent);
+    let selected = best_portfolio
+        .action_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let selected_groups = best_portfolio
+        .group_counts
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let mut selections = Vec::new();
     let mut uncertainty = BTreeSet::new();
     let mut negative_evidence = BTreeSet::new();
-    while selected.len() < request.max_selected_actions {
-        let mut best = None::<(u64, String, u64, u64)>;
-        for action in &candidate_actions {
-            if selected.contains(&action.action_id) {
-                continue;
-            }
-            if action.feasibility_milli < request.min_feasibility_milli {
-                continue;
-            }
-            if action.risk_milli > request.risk_ceiling_milli {
-                continue;
-            }
-            if u64::from(action.cost_units) > remaining_budget {
-                continue;
-            }
-            let (prior_gini_for_action, posterior_gini) =
-                expected_information(&prior, &mechanisms, action);
-            let information_gain = prior_gini_for_action.saturating_sub(posterior_gini);
-            let repeat_count = candidate_actions
-                .iter()
-                .filter(|candidate| {
-                    selected.contains(&candidate.action_id)
-                        && candidate.independence_group == action.independence_group
-                })
-                .count() as u64;
-            let diversity_bonus = if repeat_count == 0 {
-                u64::from(request.diversity_weight_milli)
-            } else {
-                u64::from(request.diversity_weight_milli) / (repeat_count + 1)
-            };
-            let risk_penalty = u64::from(action.risk_milli)
-                .saturating_mul(u64::from(request.risk_penalty_milli))
-                / 1_000;
-            let cost_penalty = u64::from(action.cost_units)
-                .saturating_mul(u64::from(request.cost_penalty_milli))
-                / 1_000;
-            let utility = information_gain
-                .saturating_add(diversity_bonus)
-                .saturating_add(u64::from(action.feasibility_milli) / 10)
-                .saturating_sub(risk_penalty)
-                .saturating_sub(cost_penalty)
-                .min(SCORE_SCALE);
-            if information_gain < request.min_information_gain_milli {
-                continue;
-            }
-            let candidate = (
-                utility,
-                action.action_id.clone(),
-                information_gain,
-                diversity_bonus,
-            );
-            if best.as_ref().is_none_or(|current| {
-                candidate.0 > current.0 || (candidate.0 == current.0 && candidate.1 < current.1)
-            }) {
-                best = Some(candidate);
-            }
+    if search_depth_bounded {
+        uncertainty.insert("portfolio-search-depth-bounded".into());
+    }
+    for action in &candidate_actions {
+        if selected.contains(&action.action_id) {
+            let (information_gain, diversity_bonus, utility) = best_portfolio
+                .selection_scores
+                .get(&action.action_id)
+                .copied()
+                .unwrap_or((0, 0, 0));
+            selections.push(AdaptivePanelSelection {
+                action_id: action.action_id.clone(),
+                feature_id: action.feature_id.clone(),
+                independence_group: action.independence_group.clone(),
+                expected_information_gain_milli: information_gain,
+                diversity_bonus_milli: diversity_bonus,
+                utility_milli: utility,
+                cost_units: action.cost_units,
+                allocated_replicates: 1,
+                feasibility_milli: action.feasibility_milli,
+                risk_milli: action.risk_milli,
+                action: AdaptivePanelActionKind::Selected,
+                rationale: format!(
+                    "selected by sequential belief portfolio beam for conditional information gain {information_gain}, diversity bonus {diversity_bonus}, and utility {utility}"
+                ),
+            });
         }
-        let Some((utility, action_id, information_gain, diversity_bonus)) = best else {
-            break;
-        };
-        let action = candidate_actions
-            .iter()
-            .find(|candidate| candidate.action_id == action_id)
-            .expect("selected action exists");
-        let replicate_cap = (remaining_budget / u64::from(action.cost_units))
-            .min(u64::from(action.max_replicates))
-            .max(1) as u16;
-        let allocated_replicates = 1_u16.min(replicate_cap);
-        let projected_cost = u64::from(action.cost_units) * u64::from(allocated_replicates);
-        remaining_budget = remaining_budget.saturating_sub(projected_cost);
-        selected.insert(action.action_id.clone());
-        selected_groups.insert(action.independence_group.clone());
-        selections.push(AdaptivePanelSelection {
-            action_id: action.action_id.clone(),
-            feature_id: action.feature_id.clone(),
-            independence_group: action.independence_group.clone(),
-            expected_information_gain_milli: information_gain,
-            diversity_bonus_milli: diversity_bonus,
-            utility_milli: utility,
-            cost_units: action.cost_units,
-            allocated_replicates,
-            feasibility_milli: action.feasibility_milli,
-            risk_milli: action.risk_milli,
-            action: AdaptivePanelActionKind::Selected,
-            rationale: format!(
-                "selected for expected information gain {information_gain}, diversity bonus {diversity_bonus}, and utility {utility}"
-            ),
-        });
     }
     let action_order = candidate_actions
         .iter()
@@ -550,13 +759,8 @@ pub fn plan_glioma_adaptive_panel(
         });
     }
     selections.sort_by(|left, right| left.action_id.cmp(&right.action_id));
-    let total_information_gain = selections
-        .iter()
-        .filter(|selection| selection.action == AdaptivePanelActionKind::Selected)
-        .map(|selection| selection.expected_information_gain_milli)
-        .sum::<u64>()
-        .min(SCORE_SCALE);
-    let planned_final_gini = prior_gini.saturating_sub(total_information_gain);
+    let total_information_gain = prior_gini.saturating_sub(best_portfolio.expected_gini);
+    let planned_final_gini = best_portfolio.expected_gini;
     if selected.is_empty() {
         uncertainty.insert("no-action-selected".into());
     }
@@ -729,5 +933,72 @@ mod tests {
             AdaptivePanelDisposition::NoInformativeActions
         );
         assert!(!result.negative_evidence.is_empty());
+    }
+
+    #[test]
+    fn sequential_portfolio_beam_prefers_complementary_low_cost_assays() {
+        let tri_action = |id: &str, group: &str, focus: usize, cost_units: u32| {
+            let mut focused = BTreeMap::from([
+                ("m1".into(), 0_u16),
+                ("m2".into(), 0_u16),
+                ("m3".into(), 0_u16),
+            ]);
+            focused.insert(format!("m{}", focus), 1_000);
+            let mut remainder = BTreeMap::from([
+                ("m1".into(), 1_000_u16),
+                ("m2".into(), 1_000_u16),
+                ("m3".into(), 1_000_u16),
+            ]);
+            remainder.insert(format!("m{}", focus), 0);
+            PanelAction {
+                action_id: id.into(),
+                feature_id: format!("feature-{id}"),
+                label: format!("{id} assay"),
+                independence_group: group.into(),
+                outcomes: vec![
+                    PanelOutcome {
+                        outcome_id: "focused".into(),
+                        probability_milli_by_mechanism: focused,
+                    },
+                    PanelOutcome {
+                        outcome_id: "remainder".into(),
+                        probability_milli_by_mechanism: remainder,
+                    },
+                ],
+                feasibility_milli: 900,
+                risk_milli: 100,
+                cost_units,
+                max_replicates: 1,
+            }
+        };
+        let mut request = request(Vec::new());
+        request.mechanisms = vec![
+            PanelMechanism {
+                mechanism_id: "m1".into(),
+                prior_milli: 333,
+            },
+            PanelMechanism {
+                mechanism_id: "m2".into(),
+                prior_milli: 333,
+            },
+            PanelMechanism {
+                mechanism_id: "m3".into(),
+                prior_milli: 334,
+            },
+        ];
+        request.actions = vec![
+            tri_action("cheap-m1", "m1", 1, 1),
+            tri_action("cheap-m2", "m2", 2, 1),
+            tri_action("expensive-m1", "expensive", 1, 2),
+        ];
+        let result = plan_glioma_adaptive_panel(&request).unwrap();
+        assert_eq!(result.selected_order, vec!["cheap-m1", "cheap-m2"]);
+        assert_eq!(result.budget_remaining_units, 0);
+        assert!(result.planned_final_gini_milli < result.prior_gini_milli);
+        assert!(result
+            .selections
+            .iter()
+            .any(|selection| selection.action_id == "expensive-m1"
+                && selection.action == AdaptivePanelActionKind::Deferred));
     }
 }

@@ -44,6 +44,13 @@ pub struct MechanismDiscriminationCampaignExecutionFailure {
 /// Institution-local assay, imaging, omics, or computational adapters implement this seam.
 /// Only a validated, de-identified feature observation may return to the controller.
 pub trait MechanismDiscriminationCampaignExecutor {
+    /// Whether this adapter returns synthetic rehearsal observations. Production adapters must
+    /// override the safe default and should dispatch wet-lab actions only through the institution's
+    /// own P08 preflight, approval, interlock, and local-data controls.
+    fn simulation_only(&self) -> bool {
+        true
+    }
+
     fn execute_action(
         &mut self,
         action: &MechanismDiscriminatorAction,
@@ -367,6 +374,7 @@ pub fn execute_glioma_mechanism_discrimination_campaign<
     executor: &mut E,
 ) -> Result<MechanismDiscriminationCampaign, MechanismDiscriminationCampaignError> {
     validate_request(request)?;
+    let simulation_only = executor.simulation_only();
     let mut observations = request.observations.clone();
     let action_map = request
         .actions
@@ -530,6 +538,10 @@ pub fn execute_glioma_mechanism_discrimination_campaign<
         }
         _ => MechanismDiscriminationCampaignDisposition::Partial,
     };
+    if simulation_only {
+        negative.insert("simulation-only-campaign-observations-are-not-biological-evidence".into());
+        uncertainty.insert("campaign-actions-were-rehearsed-by-a-simulation-adapter".into());
+    }
     let mut output = MechanismDiscriminationCampaign {
         feature_id: FEATURE_ID.into(),
         output_schema: OUTPUT_SCHEMA.into(),
@@ -545,7 +557,7 @@ pub fn execute_glioma_mechanism_discrimination_campaign<
         final_discrimination,
         negative_evidence: negative.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
-        simulation_only: true,
+        simulation_only,
         disposition,
         stop_reason,
         digest: ContentHash::of_bytes(b"unsealed-glioma-mechanism-discrimination-campaign"),

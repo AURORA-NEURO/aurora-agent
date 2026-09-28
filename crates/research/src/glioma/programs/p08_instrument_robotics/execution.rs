@@ -7,7 +7,7 @@
 //! never treats a successful instrument operation as scientific evidence.
 
 use super::preflight::{
-    InstrumentAction, InstrumentAuthorization, InstrumentInterlockSnapshot,
+    action_manifest_digest, InstrumentAction, InstrumentAuthorization, InstrumentInterlockSnapshot,
     InstrumentPreflightDisposition, InstrumentPreflightPlan,
 };
 use crate::glioma_engine::LocalArtifactRef;
@@ -463,6 +463,13 @@ pub fn execute_glioma_instrument_plan<E: InstrumentExecutor>(
         return Err(InstrumentExecutionError::InvalidRequest(
             "action identities, instrument, model system, and admitted plan order must reconcile"
                 .into(),
+        ));
+    }
+    let manifest_digest = action_manifest_digest(&request.actions)
+        .map_err(|error| InstrumentExecutionError::InvalidRequest(error.to_string()))?;
+    if manifest_digest != request.plan.action_manifest_digest {
+        return Err(InstrumentExecutionError::PreflightBlocked(
+            "action manifest changed after preflight; re-admission is required".into(),
         ));
     }
     let action_map = request
@@ -954,6 +961,23 @@ mod tests {
         assert!(matches!(
             error,
             InstrumentExecutionError::PreflightBlocked(_)
+        ));
+        assert!(!executor.emergency_stop_called);
+    }
+
+    #[test]
+    fn action_mutation_after_preflight_is_refused_before_gateway_dispatch() {
+        let mut request = request();
+        request.actions[0].requested_start_tick = 9;
+        let mut executor = DryRunInstrumentExecutor {
+            interlocks: request.live_interlocks.clone(),
+            emergency_stop_called: false,
+        };
+        let error = execute_glioma_instrument_plan(&request, &mut executor).unwrap_err();
+        assert!(matches!(
+            error,
+            InstrumentExecutionError::PreflightBlocked(message)
+                if message.contains("action manifest changed")
         ));
         assert!(!executor.emergency_stop_called);
     }

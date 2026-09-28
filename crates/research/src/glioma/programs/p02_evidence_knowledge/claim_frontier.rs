@@ -1,4 +1,4 @@
-//! Scientific claim-frontier prioritization for the autonomous glioma workflow.
+//! Beam-selected scientific claim-frontier prioritization for the autonomous glioma workflow.
 //!
 //! Typed knowledge tells the engine what the evidence currently supports.  This module decides
 //! which claim should drive the next work cycle by combining coverage debt, contradiction,
@@ -13,9 +13,12 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P02-F09";
-pub const OUTPUT_SCHEMA: &str = "GliomaKnowledgeFrontier1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaKnowledgeFrontier1@2";
 pub const MAX_CLAIMS: usize = 4_096;
 const SCORE_SCALE: u64 = 1_000;
+const PRIORITY_SELECTION_SCALE: u64 = 1_000_000;
+const ACTION_KIND_NOVELTY_BONUS: u64 = 250_000_000;
+const FRONTIER_BEAM_WIDTH: usize = 128;
 
 /// Weights are explicit and must sum to 1,000 milli-weight units.  This makes a frontier policy
 /// reviewable and allows a lab to emphasize replication, coverage, or supported mechanisms.
@@ -301,6 +304,89 @@ fn rationale(claim: &super::knowledge_graph::KnowledgeClaim, action: FrontierAct
     }
 }
 
+fn action_kind_key(action: FrontierActionKind) -> &'static str {
+    match action {
+        FrontierActionKind::CloseCoverage => "close_coverage",
+        FrontierActionKind::ResolveContradiction => "resolve_contradiction",
+        FrontierActionKind::ResolveUncertainty => "resolve_uncertainty",
+        FrontierActionKind::RevalidateNegative => "revalidate_negative",
+        FrontierActionKind::ValidateSupported => "validate_supported",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FrontierBatchState {
+    selected: Vec<usize>,
+}
+
+fn frontier_batch_score(state: &FrontierBatchState, eligible: &[&KnowledgeFrontierScore]) -> u64 {
+    let mut score = 0_u64;
+    let mut covered_kinds = BTreeSet::new();
+    for index in &state.selected {
+        let claim = eligible[*index];
+        score = score.saturating_add(
+            u64::from(claim.priority_milli).saturating_mul(PRIORITY_SELECTION_SCALE),
+        );
+        if covered_kinds.insert(action_kind_key(claim.action_kind)) {
+            score = score.saturating_add(ACTION_KIND_NOVELTY_BONUS);
+        }
+    }
+    score
+}
+
+/// Select a bounded frontier batch while preserving priority and rewarding a new action family.
+/// The bounded beam scores the complete batch, so a pair of near-tied claims that covers distinct
+/// evidence debts can displace a redundant pair. Explicit tie-breaks keep replay and
+/// cross-language projections deterministic.
+fn select_frontier_claims(
+    ranking: &[KnowledgeFrontierScore],
+    request: &KnowledgeFrontierRequest,
+) -> Vec<String> {
+    let eligible = ranking
+        .iter()
+        .filter(|score| score.priority_milli >= request.min_priority_milli)
+        .collect::<Vec<_>>();
+    if request.max_selected_claims == 0 || eligible.is_empty() {
+        return Vec::new();
+    }
+    let mut states = vec![FrontierBatchState {
+        selected: Vec::new(),
+    }];
+    for index in 0..eligible.len() {
+        let mut next = states.clone();
+        for state in &states {
+            if state.selected.len() < request.max_selected_claims {
+                let mut selected = state.selected.clone();
+                selected.push(index);
+                next.push(FrontierBatchState { selected });
+            }
+        }
+        next.sort_by(|left, right| {
+            frontier_batch_score(right, &eligible)
+                .cmp(&frontier_batch_score(left, &eligible))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        next.dedup_by(|left, right| left.selected == right.selected);
+        next.truncate(FRONTIER_BEAM_WIDTH);
+        states = next;
+    }
+    let chosen = states
+        .into_iter()
+        .max_by(|left, right| {
+            frontier_batch_score(left, &eligible)
+                .cmp(&frontier_batch_score(right, &eligible))
+                .then_with(|| right.selected.cmp(&left.selected))
+        })
+        .expect("frontier beam always retains an empty state");
+    let mut selected = chosen
+        .selected
+        .into_iter()
+        .map(|index| eligible[index].claim_id.clone())
+        .collect::<Vec<_>>();
+    selected.sort();
+    selected
+}
+
 /// Rank claims for the next autonomous research cycle.
 pub fn prioritize_knowledge_frontier(
     request: &KnowledgeFrontierRequest,
@@ -369,13 +455,7 @@ pub fn prioritize_knowledge_frontier(
             .then_with(|| left.claim_id.cmp(&right.claim_id))
     });
     let claim_order = knowledge.claim_order.clone();
-    let mut selected_order = ranking
-        .iter()
-        .filter(|score| score.priority_milli >= request.min_priority_milli)
-        .take(request.max_selected_claims)
-        .map(|score| score.claim_id.clone())
-        .collect::<Vec<_>>();
-    selected_order.sort();
+    let selected_order = select_frontier_claims(&ranking, request);
     let selected_set = selected_order.iter().collect::<BTreeSet<_>>();
     let deferred_order = ranking
         .iter()
@@ -488,6 +568,64 @@ mod tests {
         }
     }
 
+    fn coverage_diverse_knowledge() -> TypedKnowledge {
+        compile_typed_knowledge(
+            &KnowledgeRequest {
+                objective: "prioritize glioma invasion frontier".into(),
+                required_modalities: BTreeSet::from([GliomaModality::Imaging]),
+                required_model_systems: BTreeSet::new(),
+                min_support_milli: 700,
+                min_sources_per_claim: 1,
+                max_claims: 8,
+            },
+            &[
+                EvidenceRecord {
+                    evidence_id: "high-genomic".into(),
+                    source_artifact: artifact("high-genomic"),
+                    source_kind: EvidenceSourceKind::Dataset,
+                    claim: "EGFR signaling increases invasion".into(),
+                    scope: "preclinical glioma".into(),
+                    modality: GliomaModality::Genomics,
+                    model_system: Some(GliomaModelSystem::Organoid),
+                    state: EvidenceState::Supported,
+                    relevance_milli: 1_000,
+                    quality_milli: 1_000,
+                    reproducibility_milli: 1_000,
+                    release_epoch: 1,
+                },
+                EvidenceRecord {
+                    evidence_id: "high-transcriptomic".into(),
+                    source_artifact: artifact("high-transcriptomic"),
+                    source_kind: EvidenceSourceKind::Dataset,
+                    claim: "TGF beta signaling increases invasion".into(),
+                    scope: "preclinical glioma".into(),
+                    modality: GliomaModality::Transcriptomics,
+                    model_system: Some(GliomaModelSystem::Organoid),
+                    state: EvidenceState::Supported,
+                    relevance_milli: 1_000,
+                    quality_milli: 1_000,
+                    reproducibility_milli: 1_000,
+                    release_epoch: 1,
+                },
+                EvidenceRecord {
+                    evidence_id: "moderate-imaging".into(),
+                    source_artifact: artifact("moderate-imaging"),
+                    source_kind: EvidenceSourceKind::Dataset,
+                    claim: "Cell motility is visible in live imaging".into(),
+                    scope: "preclinical glioma".into(),
+                    modality: GliomaModality::Imaging,
+                    model_system: Some(GliomaModelSystem::Organoid),
+                    state: EvidenceState::Supported,
+                    relevance_milli: 800,
+                    quality_milli: 800,
+                    reproducibility_milli: 800,
+                    release_epoch: 1,
+                },
+            ],
+        )
+        .unwrap()
+    }
+
     #[test]
     fn frontier_exposes_action_mode_and_ranked_claims() {
         let output = prioritize_knowledge_frontier(&request(), &knowledge()).unwrap();
@@ -508,6 +646,73 @@ mod tests {
         let second = prioritize_knowledge_frontier(&request(), &knowledge()).unwrap();
         assert_eq!(first.ranking, second.ranking);
         assert_eq!(first.selected_order, second.selected_order);
+    }
+
+    #[test]
+    fn frontier_batch_prefers_new_action_kind_over_redundant_priority() {
+        let output =
+            prioritize_knowledge_frontier(&request(), &coverage_diverse_knowledge()).unwrap();
+        let selected_kinds = output
+            .selected_order
+            .iter()
+            .map(|claim_id| {
+                action_kind_key(
+                    output
+                        .ranking
+                        .iter()
+                        .find(|score| &score.claim_id == claim_id)
+                        .unwrap()
+                        .action_kind,
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(selected_kinds.len(), 2);
+        assert!(selected_kinds.contains("close_coverage"));
+        assert!(selected_kinds.contains("validate_supported"));
+    }
+
+    #[test]
+    fn frontier_beam_jointly_scores_complementary_claims() {
+        let ranking = vec![
+            KnowledgeFrontierScore {
+                claim_id: "repeat-a".into(),
+                action_kind: FrontierActionKind::ValidateSupported,
+                priority_milli: 950,
+                coverage_debt_milli: 0,
+                contradiction_milli: 0,
+                uncertainty_milli: 0,
+                support_milli: 950,
+                workflow_leverage_milli: 0,
+                rationale: "repeat-a".into(),
+            },
+            KnowledgeFrontierScore {
+                claim_id: "repeat-b".into(),
+                action_kind: FrontierActionKind::ValidateSupported,
+                priority_milli: 949,
+                coverage_debt_milli: 0,
+                contradiction_milli: 0,
+                uncertainty_milli: 0,
+                support_milli: 949,
+                workflow_leverage_milli: 0,
+                rationale: "repeat-b".into(),
+            },
+            KnowledgeFrontierScore {
+                claim_id: "coverage".into(),
+                action_kind: FrontierActionKind::CloseCoverage,
+                priority_milli: 800,
+                coverage_debt_milli: 800,
+                contradiction_milli: 0,
+                uncertainty_milli: 0,
+                support_milli: 800,
+                workflow_leverage_milli: 0,
+                rationale: "coverage".into(),
+            },
+        ];
+        let selected = select_frontier_claims(&ranking, &request());
+        assert_eq!(
+            selected,
+            vec!["coverage".to_string(), "repeat-a".to_string()]
+        );
     }
 
     #[test]

@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F02";
-pub const OUTPUT_SCHEMA: &str = "GliomaDoseResponseAnalysis1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaDoseResponseAnalysis1@2";
 pub const MAX_OBSERVATIONS: usize = 16_384;
 pub const MAX_DOSE_LEVELS: usize = 256;
 
@@ -52,6 +52,7 @@ pub struct DoseResponsePoint {
     pub dose_milli: u32,
     pub observation_order: Vec<String>,
     pub observation_count: usize,
+    pub batch_count: usize,
     pub observed_mean_milli: i64,
     pub fitted_mean_milli: i64,
     pub residual_mad_milli: u64,
@@ -101,6 +102,14 @@ pub enum DoseResponseError {
 fn median(values: &mut [u64]) -> u64 {
     values.sort_unstable();
     values[values.len() / 2]
+}
+
+fn mean(values: &[i64]) -> i64 {
+    if values.is_empty() {
+        return 0;
+    }
+    (values.iter().map(|value| i128::from(*value)).sum::<i128>() / values.len() as i128)
+        .clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
 }
 
 fn isotonic_fit(means: &[(i64, u64)], direction: DoseDirection) -> Vec<i64> {
@@ -178,6 +187,10 @@ impl DoseResponseAnalysis {
             || self.dose_order.len() != self.curve.len()
             || self.dose_order.windows(2).any(|pair| pair[0] >= pair[1])
             || self.curve.iter().any(|point| point.observation_count == 0)
+            || self
+                .curve
+                .iter()
+                .any(|point| point.batch_count == 0 || point.batch_count > point.observation_count)
             || self.eligible_dose_count > self.dose_order.len()
             || self
                 .negative_evidence
@@ -254,20 +267,30 @@ pub fn analyze_glioma_dose_response(
     if dose_order.len() < request.min_dose_levels {
         negative.insert("minimum-dose-level-floor-not-met".into());
     }
-    let means = dose_order
+    // Technical batches are the independent measurement process for this curve. Equal-weight
+    // their per-batch means so a single over-sampled run cannot move the inferred dose response;
+    // the PAV weight is the number of independent batches, not the raw observation count.
+    let batch_balanced = dose_order
         .iter()
         .map(|dose| {
-            let values = &grouped[dose];
-            let mean = values
-                .iter()
-                .map(|observation| observation.outcome_milli as i128)
-                .sum::<i128>()
-                / values.len() as i128;
-            (mean as i64, values.len() as u64)
+            let mut by_batch = BTreeMap::<String, Vec<i64>>::new();
+            for observation in &grouped[dose] {
+                by_batch
+                    .entry(observation.batch_id.clone())
+                    .or_default()
+                    .push(observation.outcome_milli);
+            }
+            let batch_means = by_batch
+                .values()
+                .map(|values| mean(values))
+                .collect::<Vec<_>>();
+            let dose_mean = mean(&batch_means);
+            (dose_mean, by_batch.len() as u64)
         })
         .collect::<Vec<_>>();
+    let means = batch_balanced.clone();
     let fitted = isotonic_fit(&means, request.direction);
-    let observed_direction_violations = means
+    let observed_direction_violations = batch_balanced
         .windows(2)
         .filter(|pair| match request.direction {
             DoseDirection::Increasing => pair[1].0 < pair[0].0,
@@ -300,6 +323,7 @@ pub fn analyze_glioma_dose_response(
             dose_milli: *dose,
             observation_order,
             observation_count: observations_at_dose.len(),
+            batch_count: means[index].1 as usize,
             observed_mean_milli: means[index].0,
             fitted_mean_milli: fitted[index],
             residual_mad_milli: residual_mad,
@@ -481,5 +505,65 @@ mod tests {
         assert_eq!(output.terminal_dose_milli, 20);
         assert_eq!(output.terminal_effect_milli, -200);
         assert_eq!(output.half_maximal_dose_milli, Some(10));
+    }
+
+    #[test]
+    fn dose_curve_equalizes_over_sampled_technical_batches() {
+        let observations = vec![
+            DoseResponseObservation {
+                observation_id: "d0".into(),
+                unit_id: "u0".into(),
+                model_system: GliomaModelSystem::Organoid,
+                batch_id: "control-batch".into(),
+                dose_milli: 0,
+                outcome_milli: 0,
+            },
+            DoseResponseObservation {
+                observation_id: "d10-heavy-1".into(),
+                unit_id: "u1".into(),
+                model_system: GliomaModelSystem::Organoid,
+                batch_id: "heavy-batch".into(),
+                dose_milli: 10,
+                outcome_milli: 100,
+            },
+            DoseResponseObservation {
+                observation_id: "d10-heavy-2".into(),
+                unit_id: "u2".into(),
+                model_system: GliomaModelSystem::Organoid,
+                batch_id: "heavy-batch".into(),
+                dose_milli: 10,
+                outcome_milli: 100,
+            },
+            DoseResponseObservation {
+                observation_id: "d10-heavy-3".into(),
+                unit_id: "u3".into(),
+                model_system: GliomaModelSystem::Organoid,
+                batch_id: "heavy-batch".into(),
+                dose_milli: 10,
+                outcome_milli: 100,
+            },
+            DoseResponseObservation {
+                observation_id: "d10-minor".into(),
+                unit_id: "u4".into(),
+                model_system: GliomaModelSystem::Organoid,
+                batch_id: "minor-batch".into(),
+                dose_milli: 10,
+                outcome_milli: 0,
+            },
+            DoseResponseObservation {
+                observation_id: "d20".into(),
+                unit_id: "u5".into(),
+                model_system: GliomaModelSystem::Organoid,
+                batch_id: "terminal-batch".into(),
+                dose_milli: 20,
+                outcome_milli: 200,
+            },
+        ];
+        let output = analyze_glioma_dose_response(&request(), &observations).unwrap();
+        let middle = &output.curve[1];
+        assert_eq!(middle.batch_count, 2);
+        assert_eq!(middle.observed_mean_milli, 50);
+        assert_eq!(middle.fitted_mean_milli, 50);
+        output.validate().unwrap();
     }
 }

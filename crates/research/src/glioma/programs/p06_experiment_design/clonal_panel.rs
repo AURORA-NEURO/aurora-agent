@@ -13,11 +13,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F30";
-pub const OUTPUT_SCHEMA: &str = "GliomaClonePerturbationPanel1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaClonePerturbationPanel1@2";
 pub const MAX_CANDIDATES: usize = 4_096;
 pub const MAX_SELECTED: usize = 256;
 pub const MAX_BRANCHES: usize = 8_192;
 pub const MAX_BUDGET_MILLI: u64 = 1_000_000_000;
+const PANEL_BEAM_WIDTH: usize = 96;
+const MAX_PANEL_SEARCH_DEPTH: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -138,8 +140,6 @@ struct BranchUnit {
     target_markers: BTreeSet<String>,
     unresolved_markers: BTreeSet<String>,
 }
-
-type CandidateSelection = (u64, u32, String, Vec<String>, Vec<String>);
 
 fn digest_input(output: &ClonePerturbationPanel) -> serde_json::Value {
     serde_json::json!({
@@ -308,6 +308,152 @@ fn matching_branches(
     (covered_order, uncertain_order, gain)
 }
 
+#[derive(Debug, Clone)]
+struct ClonePanelState {
+    selected_ids: Vec<String>,
+    covered_branches: BTreeSet<String>,
+    uncertain_branches: BTreeSet<String>,
+    total_cost: u64,
+    total_gain: u64,
+    utility: u64,
+    selections: BTreeMap<String, (u32, u64, Vec<String>, Vec<String>)>,
+}
+
+fn weighted_covered_milli(state: &ClonePanelState, branches: &[BranchUnit]) -> u64 {
+    let total_weight = branches
+        .iter()
+        .map(|branch| u64::from(branch.weight_milli))
+        .sum::<u64>()
+        .max(1);
+    let covered_weight = branches
+        .iter()
+        .filter(|branch| state.covered_branches.contains(&branch.branch_id))
+        .map(|branch| u64::from(branch.weight_milli))
+        .sum::<u64>();
+    (covered_weight * 1_000) / total_weight
+}
+
+fn clone_panel_state_complete(
+    state: &ClonePanelState,
+    request: &ClonePerturbationPanelRequest,
+    branches: &[BranchUnit],
+) -> bool {
+    weighted_covered_milli(state, branches) >= u64::from(request.min_coverage_milli)
+        && (!request.require_branch_coverage || state.covered_branches.len() == branches.len())
+}
+
+fn clone_panel_state_better(
+    left: &ClonePanelState,
+    right: &ClonePanelState,
+    request: &ClonePerturbationPanelRequest,
+    branches: &[BranchUnit],
+) -> bool {
+    let left_complete = clone_panel_state_complete(left, request, branches);
+    let right_complete = clone_panel_state_complete(right, request, branches);
+    if left_complete != right_complete {
+        return left_complete;
+    }
+    let left_coverage = weighted_covered_milli(left, branches);
+    let right_coverage = weighted_covered_milli(right, branches);
+    left_coverage > right_coverage
+        || (left_coverage == right_coverage
+            && (left.total_gain > right.total_gain
+                || (left.total_gain == right.total_gain
+                    && (left.utility > right.utility
+                        || (left.utility == right.utility
+                            && (left.total_cost < right.total_cost
+                                || (left.total_cost == right.total_cost
+                                    && left.selected_ids < right.selected_ids)))))))
+}
+
+fn select_clone_panel_portfolio(
+    request: &ClonePerturbationPanelRequest,
+    branches: &[BranchUnit],
+    candidates: &[ClonePerturbationCandidate],
+) -> (ClonePanelState, bool) {
+    let initial = ClonePanelState {
+        selected_ids: Vec::new(),
+        covered_branches: BTreeSet::new(),
+        uncertain_branches: BTreeSet::new(),
+        total_cost: 0,
+        total_gain: 0,
+        utility: 0,
+        selections: BTreeMap::new(),
+    };
+    let mut beam = vec![initial.clone()];
+    let mut best = initial;
+    let search_depth = request.max_selected.min(MAX_PANEL_SEARCH_DEPTH);
+    for _ in 0..search_depth {
+        let mut expanded = Vec::new();
+        for state in &beam {
+            for candidate in candidates {
+                if state
+                    .selected_ids
+                    .last()
+                    .is_some_and(|last| candidate.candidate_id <= *last)
+                    || state.selected_ids.contains(&candidate.candidate_id)
+                    || state.total_cost.saturating_add(candidate.cost_milli) > request.budget_milli
+                {
+                    continue;
+                }
+                let (covered, uncertain, gain) = matching_branches(
+                    candidate,
+                    branches,
+                    &state.covered_branches,
+                    request.allow_uncertain_targets,
+                );
+                if gain == 0 {
+                    continue;
+                }
+                let score = (u64::from(gain) * 1_000_000) / candidate.cost_milli.max(1);
+                let mut selected_ids = state.selected_ids.clone();
+                selected_ids.push(candidate.candidate_id.clone());
+                let mut covered_branches = state.covered_branches.clone();
+                covered_branches.extend(covered.iter().cloned());
+                let mut uncertain_branches = state.uncertain_branches.clone();
+                uncertain_branches.extend(uncertain.iter().cloned());
+                let mut selections = state.selections.clone();
+                selections.insert(
+                    candidate.candidate_id.clone(),
+                    (gain, score, covered, uncertain),
+                );
+                expanded.push(ClonePanelState {
+                    selected_ids,
+                    covered_branches,
+                    uncertain_branches,
+                    total_cost: state.total_cost.saturating_add(candidate.cost_milli),
+                    total_gain: state.total_gain.saturating_add(u64::from(gain)),
+                    utility: state.utility.saturating_add(score),
+                    selections,
+                });
+            }
+        }
+        if expanded.is_empty() {
+            break;
+        }
+        expanded.sort_by(|left, right| {
+            if clone_panel_state_better(left, right, request, branches) {
+                std::cmp::Ordering::Less
+            } else if clone_panel_state_better(right, left, request, branches) {
+                std::cmp::Ordering::Greater
+            } else {
+                left.selected_ids.cmp(&right.selected_ids)
+            }
+        });
+        expanded.truncate(PANEL_BEAM_WIDTH);
+        for candidate in &expanded {
+            if clone_panel_state_better(candidate, &best, request, branches) {
+                best = candidate.clone();
+            }
+        }
+        beam = expanded;
+        if clone_panel_state_complete(&best, request, branches) {
+            break;
+        }
+    }
+    (best, request.max_selected > MAX_PANEL_SEARCH_DEPTH)
+}
+
 fn branch_coverage(
     branches: &[BranchUnit],
     selected: &[ClonePerturbationCandidate],
@@ -405,8 +551,9 @@ impl ClonePerturbationPanel {
 }
 
 /// Select a bounded, clone-aware preclinical perturbation/readout panel from a validated
-/// clonal-evolution graph. The greedy set-cover objective is deterministic and exposes all
-/// omitted branches; it is a design recommendation for an approved local experiment executor.
+/// clonal-evolution graph. A sequential portfolio beam evaluates joint branch coverage under
+/// cost, effect, uncertainty, and cardinality gates; it is a design recommendation for an
+/// approved local experiment executor.
 pub fn plan_glioma_clone_perturbation_panel(
     request: &ClonePerturbationPanelRequest,
     graph: &ClonalEvolutionGraph,
@@ -442,71 +589,37 @@ pub fn plan_glioma_clone_perturbation_panel(
         .iter()
         .map(|candidate| candidate.candidate_id.clone())
         .collect::<Vec<_>>();
-    let mut selected_ids = BTreeSet::new();
-    let mut covered_branches = BTreeSet::new();
-    let mut total_cost = 0u64;
+    let (best_portfolio, search_depth_bounded) =
+        select_clone_panel_portfolio(request, &branches, &ordered_candidates);
+    let selected_ids = best_portfolio
+        .selected_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let covered_branches = best_portfolio.covered_branches.clone();
+    let total_cost = best_portfolio.total_cost;
     let mut decisions_by_id = BTreeMap::<String, ClonePerturbationDecision>::new();
-    loop {
-        if selected_ids.len() >= request.max_selected {
-            break;
-        }
-        let mut best: Option<CandidateSelection> = None;
-        for candidate in &ordered_candidates {
-            if selected_ids.contains(&candidate.candidate_id)
-                || total_cost.saturating_add(candidate.cost_milli) > request.budget_milli
-            {
-                continue;
-            }
-            let (covered, uncertain, gain) = matching_branches(
-                candidate,
-                &branches,
-                &covered_branches,
-                request.allow_uncertain_targets,
-            );
-            if gain == 0 {
-                continue;
-            }
-            let score = (u64::from(gain) * 1_000_000) / candidate.cost_milli.max(1);
-            let key = (
-                score,
-                gain,
+    for candidate in &ordered_candidates {
+        if let Some((gain, score, covered, uncertain)) =
+            best_portfolio.selections.get(&candidate.candidate_id)
+        {
+            decisions_by_id.insert(
                 candidate.candidate_id.clone(),
-                covered,
-                uncertain,
+                ClonePerturbationDecision {
+                    candidate_id: candidate.candidate_id.clone(),
+                    kind: candidate.kind,
+                    selected: true,
+                    covered_branch_order: covered.clone(),
+                    uncertain_branch_order: uncertain.clone(),
+                    marginal_gain_milli: *gain,
+                    score_milli: *score,
+                    cost_milli: candidate.cost_milli,
+                    rationale:
+                        "selected by sequential branch-coverage portfolio beam under declared cost"
+                            .into(),
+                },
             );
-            if best.as_ref().is_none_or(|current| {
-                key.0 > current.0
-                    || (key.0 == current.0 && key.1 > current.1)
-                    || (key.0 == current.0 && key.1 == current.1 && key.2 < current.2)
-            }) {
-                best = Some(key);
-            }
         }
-        let Some((score, gain, candidate_id, covered, uncertain)) = best else {
-            break;
-        };
-        let candidate = ordered_candidates
-            .iter()
-            .find(|candidate| candidate.candidate_id == candidate_id)
-            .expect("candidate selected from ordered set");
-        selected_ids.insert(candidate_id.clone());
-        total_cost = total_cost.saturating_add(candidate.cost_milli);
-        covered_branches.extend(covered.iter().cloned());
-        decisions_by_id.insert(
-            candidate_id.clone(),
-            ClonePerturbationDecision {
-                candidate_id,
-                kind: candidate.kind,
-                selected: true,
-                covered_branch_order: covered,
-                uncertain_branch_order: uncertain,
-                marginal_gain_milli: gain,
-                score_milli: score,
-                cost_milli: candidate.cost_milli,
-                rationale: "selected by deterministic marginal branch coverage per declared cost"
-                    .into(),
-            },
-        );
     }
     let selected_candidates = ordered_candidates
         .iter()
@@ -589,6 +702,9 @@ pub fn plan_glioma_clone_perturbation_panel(
         for marker in &row.unresolved_marker_order {
             uncertainty.insert(format!("unmeasured-target:{}:{marker}", row.branch_id));
         }
+    }
+    if search_depth_bounded {
+        uncertainty.insert("portfolio-search-depth-bounded".into());
     }
     for branch_id in &uncovered_branch_order {
         uncertainty.insert(format!("uncovered-branch:{branch_id}"));
@@ -705,6 +821,47 @@ mod tests {
         .unwrap()
     }
 
+    fn weighted_graph() -> ClonalEvolutionGraph {
+        let profile =
+            |id: &str, clone_id: &str, abundance_milli: u32, markers: &[&str]| CloneProfile {
+                profile_id: id.into(),
+                study_id: "panel-study".into(),
+                sample_lineage: "lineage-a".into(),
+                clone_id: clone_id.into(),
+                timepoint: if clone_id == "clone-a" { 0 } else { 1 },
+                model_system: GliomaModelSystem::Organoid,
+                abundance_milli,
+                artifact: artifact(id),
+                markers: markers
+                    .iter()
+                    .map(|marker_id| CloneMarker {
+                        marker_id: (*marker_id).into(),
+                        state: CloneMarkerState::Present,
+                        confidence_milli: 900,
+                    })
+                    .collect(),
+            };
+        analyze_glioma_clonal_evolution(
+            &ClonalEvolutionRequest {
+                study_id: "panel-study".into(),
+                model_system: GliomaModelSystem::Organoid,
+                min_shared_markers: 1,
+                min_parent_score_milli: 500,
+                max_time_gap: 5,
+                min_abundance_milli: 1,
+                allow_parallel_branches: true,
+                max_parent_candidates: 3,
+            },
+            &[
+                profile("root", "clone-a", 1_000, &["shared"]),
+                profile("branch-ecdn", "clone-b", 450, &["shared", "ecDNA"]),
+                profile("branch-pten", "clone-c", 450, &["shared", "pten"]),
+                profile("branch-nf1", "clone-d", 100, &["shared", "nf1"]),
+            ],
+        )
+        .unwrap()
+    }
+
     fn request() -> ClonePerturbationPanelRequest {
         ClonePerturbationPanelRequest {
             study_id: "panel-study".into(),
@@ -725,6 +882,18 @@ mod tests {
             cost_milli,
             expected_effect_milli: 900,
             purpose: "branch-selective perturbation readout".into(),
+            artifact: artifact(id),
+        }
+    }
+
+    fn multi_candidate(id: &str, markers: &[&str], cost_milli: u64) -> ClonePerturbationCandidate {
+        ClonePerturbationCandidate {
+            candidate_id: id.into(),
+            kind: ClonePerturbationKind::Inhibit,
+            target_marker_order: markers.iter().map(|marker| (*marker).into()).collect(),
+            cost_milli,
+            expected_effect_milli: 1_000,
+            purpose: "joint branch-discriminating perturbation readout".into(),
             artifact: artifact(id),
         }
     }
@@ -800,5 +969,25 @@ mod tests {
             plan_glioma_clone_perturbation_panel(&request(), &graph(), &[item]),
             Err(ClonePerturbationPanelError::InvalidCandidate(_))
         ));
+    }
+
+    #[test]
+    fn portfolio_beam_prefers_complementary_branch_coverage_over_ratio_greedy_choice() {
+        let mut request = request();
+        request.budget_milli = 5;
+        request.max_selected = 2;
+        let output = plan_glioma_clone_perturbation_panel(
+            &request,
+            &weighted_graph(),
+            &[
+                multi_candidate("a-broad", &["ecDNA", "pten"], 4),
+                multi_candidate("b-ecdn", &["ecDNA"], 2),
+                multi_candidate("c-pten-nf1", &["nf1", "pten"], 3),
+            ],
+        )
+        .unwrap();
+        assert_eq!(output.selected_order, vec!["b-ecdn", "c-pten-nf1"]);
+        assert!(output.uncovered_branch_order.is_empty());
+        assert_eq!(output.total_cost_milli, 5);
     }
 }

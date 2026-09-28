@@ -301,7 +301,7 @@ mod tests {
     use bioprism_foundation::{AutonomyTier, PRECLINICAL_BOUNDARY};
     use bioprism_ids::ContentHash;
     use bioprism_onco::OutputUse;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn evidence_request() -> EvidenceTriangulationRequest {
         EvidenceTriangulationRequest {
@@ -383,6 +383,7 @@ mod tests {
             selection_weights: GliomaSelectionWeights::default(),
             max_retries: 1,
             require_artifacts: true,
+            outcome_summaries: BTreeMap::new(),
         }
     }
 

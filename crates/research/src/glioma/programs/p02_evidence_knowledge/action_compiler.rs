@@ -603,7 +603,7 @@ mod tests {
         };
         let frontier_input = serde_json::json!({
             "feature_id": "GAF-GLIOMA-P02-F09",
-            "output_schema": "GliomaKnowledgeFrontier1@1",
+            "output_schema": "GliomaKnowledgeFrontier1@2",
             "objective": "compile invasion evidence",
             "knowledge_digest": knowledge.digest,
             "claim_order": ["claim-1"],
@@ -617,7 +617,7 @@ mod tests {
         let frontier_digest = ContentHash::of_value(&frontier_input).unwrap();
         let frontier = KnowledgeFrontier {
             feature_id: "GAF-GLIOMA-P02-F09".into(),
-            output_schema: "GliomaKnowledgeFrontier1@1".into(),
+            output_schema: "GliomaKnowledgeFrontier1@2".into(),
             objective: "compile invasion evidence".into(),
             knowledge_digest: knowledge.digest.clone(),
             claim_order: vec!["claim-1".into()],

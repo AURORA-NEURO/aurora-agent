@@ -19,11 +19,11 @@ use bioprism_foundation::{AutonomyTier, Effect};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F20";
-pub const OUTPUT_SCHEMA: &str = "GliomaAdaptiveResearchFrontier1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaAdaptiveResearchFrontier1@2";
 pub const MAX_CANDIDATES: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -42,6 +42,11 @@ pub enum AdaptiveTarget {
 pub struct AdaptiveFrontierRequest {
     pub synthesis: InterpretationSynthesis,
     pub completed_actions: BTreeSet<String>,
+    /// Value-only outcomes from prior rounds. Payloads remain in the local artifact store; these
+    /// summaries let the frontier discount repeatedly unsuccessful branches without erasing
+    /// bounded exploration value.
+    #[serde(default)]
+    pub outcome_summaries: BTreeMap<String, GliomaActionOutcomeSummary>,
     pub budget_units: u32,
     pub max_actions: u16,
     pub approval_granted: bool,
@@ -75,6 +80,7 @@ pub struct AdaptiveResearchFrontier {
     pub hypothesis: String,
     pub model_system: GliomaModelSystem,
     pub synthesis_digest: ContentHash,
+    pub outcome_summaries: BTreeMap<String, GliomaActionOutcomeSummary>,
     pub candidate_order: Vec<String>,
     pub candidates: Vec<AdaptiveFrontierCandidate>,
     pub selection: GliomaActionSelection,
@@ -253,6 +259,7 @@ fn digest_input(output: &AdaptiveResearchFrontier) -> serde_json::Value {
         "hypothesis": output.hypothesis,
         "model_system": output.model_system,
         "synthesis_digest": output.synthesis_digest,
+        "outcome_summaries": output.outcome_summaries,
         "candidate_order": output.candidate_order,
         "candidates": output.candidates,
         "selection": output.selection,
@@ -282,6 +289,10 @@ impl AdaptiveResearchFrontier {
             || self.hypothesis.trim().is_empty()
             || self.candidates.is_empty()
             || self.candidates.len() > MAX_CANDIDATES
+            || self
+                .outcome_summaries
+                .iter()
+                .any(|(id, summary)| id.trim().is_empty() || summary.total() == 0)
             || self.candidate_order != ids.iter().cloned().collect::<Vec<_>>()
             || !canonical(&self.candidate_order)
             || self.selection.candidate_order != self.candidate_order
@@ -315,6 +326,16 @@ fn validate_request(request: &AdaptiveFrontierRequest) -> Result<(), AdaptiveFro
     if request.budget_units == 0 || request.max_actions == 0 {
         return Err(AdaptiveFrontierError::InvalidRequest(
             "adaptive frontier requires a positive budget and max_actions".into(),
+        ));
+    }
+    if request.outcome_summaries.len() > 256
+        || request
+            .outcome_summaries
+            .iter()
+            .any(|(id, summary)| id.trim().is_empty() || summary.total() == 0)
+    {
+        return Err(AdaptiveFrontierError::InvalidRequest(
+            "outcome summaries require non-empty keys and at least one observed outcome".into(),
         ));
     }
     if request
@@ -447,6 +468,21 @@ pub fn plan_glioma_adaptive_research_frontier(
         .iter()
         .map(|candidate| candidate.action.clone())
         .collect::<Vec<_>>();
+    let adapted_actions =
+        adapt_glioma_candidates_from_outcomes(&actions, &request.outcome_summaries);
+    let adapted_by_id = adapted_actions
+        .into_iter()
+        .map(|action| (action.action_id.clone(), action))
+        .collect::<BTreeMap<_, _>>();
+    for candidate in &mut candidates {
+        if let Some(action) = adapted_by_id.get(&candidate.action.action_id) {
+            candidate.action = action.clone();
+        }
+    }
+    let actions = candidates
+        .iter()
+        .map(|candidate| candidate.action.clone())
+        .collect::<Vec<_>>();
     let selection_config = crate::glioma_engine::GliomaSelectionConfig {
         budget_units: request.budget_units,
         max_actions: request.max_actions,
@@ -528,6 +564,7 @@ pub fn plan_glioma_adaptive_research_frontier(
         hypothesis: request.synthesis.hypothesis.clone(),
         model_system: request.synthesis.model_system,
         synthesis_digest: request.synthesis.digest.clone(),
+        outcome_summaries: request.outcome_summaries.clone(),
         candidate_order: candidates
             .iter()
             .map(|candidate| candidate.action.action_id.clone())
@@ -562,7 +599,7 @@ mod tests {
         InterpretationEvidence, InterpretationEvidenceDirection, InterpretationSynthesisRequest,
         synthesize_glioma_interpretation,
     };
-    use crate::glioma_engine::LocalArtifactRef;
+    use crate::glioma_engine::{GliomaActionOutcomeSummary, LocalArtifactRef};
 
     fn synthesis(disposition: InterpretationSynthesisDisposition) -> InterpretationSynthesis {
         let hash = ContentHash::of_bytes(b"adaptive-frontier-test");
@@ -638,6 +675,7 @@ mod tests {
         AdaptiveFrontierRequest {
             synthesis: output,
             completed_actions: BTreeSet::new(),
+            outcome_summaries: BTreeMap::new(),
             budget_units: 80,
             max_actions: 3,
             approval_granted: true,
@@ -696,6 +734,37 @@ mod tests {
                 .blocked_order
                 .contains(&action_id(AdaptiveTarget::ReplicationStrengthening).into())
         );
+    }
+
+    #[test]
+    fn observed_failures_discount_a_branch_but_preserve_frontier_exploration() {
+        let baseline_request = request(synthesis(InterpretationSynthesisDisposition::Qualified));
+        let baseline = plan_glioma_adaptive_research_frontier(&baseline_request).unwrap();
+        let mut adapted_request = baseline_request.clone();
+        adapted_request.outcome_summaries.insert(
+            action_id(AdaptiveTarget::ReplicationStrengthening).into(),
+            GliomaActionOutcomeSummary {
+                failed: 3,
+                ..GliomaActionOutcomeSummary::default()
+            },
+        );
+        let adapted = plan_glioma_adaptive_research_frontier(&adapted_request).unwrap();
+        let baseline_replication = baseline
+            .candidates
+            .iter()
+            .find(|candidate| candidate.target == AdaptiveTarget::ReplicationStrengthening)
+            .expect("baseline replication candidate");
+        let adapted_replication = adapted
+            .candidates
+            .iter()
+            .find(|candidate| candidate.target == AdaptiveTarget::ReplicationStrengthening)
+            .expect("adapted replication candidate");
+        assert!(
+            adapted_replication.action.information_gain_milli
+                < baseline_replication.action.information_gain_milli
+        );
+        assert_eq!(adapted.outcome_summaries.len(), 1);
+        assert!(adapted.validate().is_ok());
     }
 
     #[test]

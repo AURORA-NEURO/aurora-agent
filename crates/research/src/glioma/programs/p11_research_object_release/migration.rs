@@ -162,6 +162,31 @@ impl ResearchObjectMigrationPlan {
                 .chain(self.metadata_rewrite_order.iter())
                 .chain(self.recompute_order.iter())
                 .any(|id| !ids.contains(id))
+            || self.preserve_order
+                != self
+                    .decisions
+                    .iter()
+                    .filter(|decision| decision.action == ResearchObjectMigrationAction::Preserve)
+                    .map(|decision| decision.artifact_id.clone())
+                    .collect::<Vec<_>>()
+            || self.metadata_rewrite_order
+                != self
+                    .decisions
+                    .iter()
+                    .filter(|decision| {
+                        decision.action == ResearchObjectMigrationAction::RewriteMetadata
+                    })
+                    .map(|decision| decision.artifact_id.clone())
+                    .collect::<Vec<_>>()
+            || self.recompute_order
+                != self
+                    .decisions
+                    .iter()
+                    .filter(|decision| {
+                        decision.action == ResearchObjectMigrationAction::RecomputeArtifact
+                    })
+                    .map(|decision| decision.artifact_id.clone())
+                    .collect::<Vec<_>>()
         {
             return Err(ResearchObjectMigrationError::InvalidOutput(
                 "migration artifact partitions contain unknown artifacts".into(),
@@ -324,7 +349,14 @@ pub fn plan_glioma_research_object_migration(
             blocked.insert(format!("{}:recompute-disallowed", entry.artifact_id));
         }
         if loss > request.max_semantic_loss_milli {
+            preserve.remove(&entry.artifact_id);
+            rewrite.remove(&entry.artifact_id);
+            recompute.remove(&entry.artifact_id);
+            action = ResearchObjectMigrationAction::Block;
             blocked.insert(format!("{}:semantic-loss:{}", entry.artifact_id, loss));
+            if entry.required {
+                omissions.insert(format!("required-artifact-blocked:{}", entry.artifact_id));
+            }
         }
         if entry.required && matches!(action, ResearchObjectMigrationAction::Block) {
             omissions.insert(format!("required-artifact-blocked:{}", entry.artifact_id));

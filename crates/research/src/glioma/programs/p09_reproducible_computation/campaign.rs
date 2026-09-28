@@ -1,4 +1,4 @@
-//! Bounded autonomous computation campaigns for preclinical glioma research.
+//! Bounded autonomous computation campaigns with recoverable partial rounds for preclinical glioma research.
 //!
 //! A single portfolio execution is useful, but a real multimodal study usually needs several
 //! compute rounds: harmonise a batch, inspect its output, add a model fit, then run validation or
@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P09-F13";
-pub const OUTPUT_SCHEMA: &str = "GliomaComputationCampaign1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaComputationCampaign1@2";
 pub const MAX_ROUNDS: u16 = 64;
 pub const MAX_CANDIDATES: usize = 4_096;
 
@@ -50,6 +50,10 @@ pub struct GliomaComputationCampaignRequest {
     pub require_local_artifacts: bool,
     pub cache: Vec<ComputationCacheEntry>,
     pub replay_identity: ContentHash,
+    /// Value-only task outcomes to seed a resumed or externally checkpointed campaign.
+    /// Artifact payloads remain institution-local.
+    #[serde(default)]
+    pub outcome_summaries: BTreeMap<String, ComputationOutcomeSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +65,35 @@ pub struct GliomaComputationPlannerContext {
     pub budget_remaining_units: u64,
     pub duration_remaining_ticks: u64,
     pub previous_execution: Option<ComputationPortfolioExecution>,
+    pub outcome_summaries: BTreeMap<String, ComputationOutcomeSummary>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComputationOutcomeSummary {
+    pub completed: u32,
+    pub cached: u32,
+    pub negative: u32,
+    pub partial: u32,
+    pub failed: u32,
+    pub skipped: u32,
+    pub retry_count: u32,
+}
+
+impl ComputationOutcomeSummary {
+    pub fn total(self) -> u32 {
+        self.completed
+            .saturating_add(self.cached)
+            .saturating_add(self.negative)
+            .saturating_add(self.partial)
+            .saturating_add(self.failed)
+            .saturating_add(self.skipped)
+    }
+
+    pub fn success_posterior_milli(self) -> u16 {
+        let numerator = self.completed.saturating_add(self.cached).saturating_add(1) as u64 * 1_000;
+        let denominator = u64::from(self.total()).saturating_add(2);
+        (numerator / denominator).min(1_000) as u16
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +177,7 @@ pub struct GliomaComputationCampaign {
     pub duration_used_ticks: u64,
     pub uncertainty: Vec<String>,
     pub negative_evidence: Vec<String>,
+    pub outcome_summaries: BTreeMap<String, ComputationOutcomeSummary>,
     pub disposition: GliomaComputationCampaignDisposition,
     pub stop_reason: GliomaComputationCampaignStopReason,
     pub digest: ContentHash,
@@ -186,6 +220,7 @@ fn digest_input(output: &GliomaComputationCampaign) -> serde_json::Value {
         "duration_used_ticks": output.duration_used_ticks,
         "uncertainty": output.uncertainty,
         "negative_evidence": output.negative_evidence,
+        "outcome_summaries": output.outcome_summaries,
         "disposition": output.disposition,
         "stop_reason": output.stop_reason,
     })
@@ -213,6 +248,10 @@ impl GliomaComputationCampaign {
             || !canonical(&self.skipped_order)
             || !canonical(&self.uncertainty)
             || !canonical(&self.negative_evidence)
+            || self
+                .outcome_summaries
+                .iter()
+                .any(|(key, summary)| key.trim().is_empty() || summary.total() == 0)
             || self.budget_used_units
                 > self
                     .rounds
@@ -291,6 +330,7 @@ fn validate_request(
         || request.max_tasks == 0
         || request.max_modalities == 0
         || request.min_modalities > request.max_modalities
+        || request.outcome_summaries.len() > MAX_CANDIDATES
         || request.replay_identity.as_str().len() != 64
         || request
             .initial_candidates
@@ -299,6 +339,15 @@ fn validate_request(
     {
         return Err(GliomaComputationCampaignError::InvalidRequest(
             "objective, typed seed candidates, bounded rounds/retries/resources, modality limits, and replay identity are required".into(),
+        ));
+    }
+    if request
+        .outcome_summaries
+        .keys()
+        .any(|key| key.trim().is_empty())
+    {
+        return Err(GliomaComputationCampaignError::InvalidRequest(
+            "outcome summary keys must be non-empty".into(),
         ));
     }
     Ok(())
@@ -388,6 +437,7 @@ pub fn execute_glioma_computation_campaign<
     let mut budget_remaining = request.budget_units;
     let mut duration_remaining = request.duration_ticks;
     let mut previous_execution = None;
+    let mut outcome_summaries = request.outcome_summaries.clone();
     let mut cache = request
         .cache
         .iter()
@@ -429,6 +479,7 @@ pub fn execute_glioma_computation_campaign<
             budget_remaining_units: budget_remaining,
             duration_remaining_ticks: duration_remaining,
             previous_execution: previous_execution.clone(),
+            outcome_summaries: outcome_summaries.clone(),
         };
         let candidates = planner_round(planner, &context, request.max_retries);
         let candidates = candidates?;
@@ -441,7 +492,11 @@ pub fn execute_glioma_computation_campaign<
             .cloned()
             .collect::<Vec<_>>();
         if active_candidates.is_empty() {
-            stop_reason = GliomaComputationCampaignStopReason::Completed;
+            stop_reason = if partial_order.is_empty() && skipped_order.is_empty() {
+                GliomaComputationCampaignStopReason::Completed
+            } else {
+                GliomaComputationCampaignStopReason::DependencyBlocked
+            };
             break;
         }
         let mut closure_ids = active_candidates
@@ -533,6 +588,30 @@ pub fn execute_glioma_computation_campaign<
                 {
                     continue;
                 }
+                let summary = outcome_summaries.entry(result.task_id.clone()).or_default();
+                match result.disposition {
+                    ComputationTaskDisposition::Completed => {
+                        summary.completed = summary.completed.saturating_add(1)
+                    }
+                    ComputationTaskDisposition::Cached => {
+                        summary.cached = summary.cached.saturating_add(1)
+                    }
+                    ComputationTaskDisposition::Negative => {
+                        summary.negative = summary.negative.saturating_add(1)
+                    }
+                    ComputationTaskDisposition::Partial => {
+                        summary.partial = summary.partial.saturating_add(1)
+                    }
+                    ComputationTaskDisposition::Failed => {
+                        summary.failed = summary.failed.saturating_add(1)
+                    }
+                    ComputationTaskDisposition::Skipped => {
+                        summary.skipped = summary.skipped.saturating_add(1)
+                    }
+                }
+                summary.retry_count = summary
+                    .retry_count
+                    .saturating_add(u32::from(result.attempt_count.saturating_sub(1)));
                 if request.allow_cache
                     && matches!(
                         result.disposition,
@@ -617,9 +696,12 @@ pub fn execute_glioma_computation_campaign<
             break;
         }
         let execution_blocked = execution.execution.as_ref().is_none_or(|run| {
-            run.disposition != super::execution::ComputationExecutionDisposition::Completed
+            matches!(
+                run.disposition,
+                super::execution::ComputationExecutionDisposition::Blocked
+            )
         });
-        if !partial_order.is_empty() || !skipped_order.is_empty() || execution_blocked {
+        if execution_blocked {
             stop_reason = GliomaComputationCampaignStopReason::DependencyBlocked;
             break;
         }
@@ -685,6 +767,7 @@ pub fn execute_glioma_computation_campaign<
         duration_used_ticks,
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative_evidence.into_iter().collect(),
+        outcome_summaries,
         disposition,
         stop_reason,
         digest: ContentHash::of_bytes(b"unsealed-glioma-computation-campaign"),
@@ -752,6 +835,7 @@ mod tests {
             require_local_artifacts: true,
             cache: Vec::new(),
             replay_identity: ContentHash::of_bytes(b"campaign-replay"),
+            outcome_summaries: BTreeMap::new(),
         }
     }
 
@@ -764,6 +848,13 @@ mod tests {
             context: &GliomaComputationPlannerContext,
         ) -> Result<Vec<ComputationCandidate>, GliomaComputationPlannerFailure> {
             if context.round == 2 {
+                assert_eq!(
+                    context
+                        .outcome_summaries
+                        .get("normalize")
+                        .map(|summary| summary.completed),
+                    Some(1)
+                );
                 Ok(vec![candidate(
                     "validate",
                     ComputationOperation::Validate,
@@ -772,6 +863,58 @@ mod tests {
             } else {
                 Ok(Vec::new())
             }
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct RecoveryAfterPartialPlanner;
+
+    impl GliomaComputationPlanner for RecoveryAfterPartialPlanner {
+        fn propose_candidates(
+            &mut self,
+            context: &GliomaComputationPlannerContext,
+        ) -> Result<Vec<ComputationCandidate>, GliomaComputationPlannerFailure> {
+            if context.round == 2 {
+                assert_eq!(
+                    context
+                        .outcome_summaries
+                        .get("partial")
+                        .map(|summary| summary.partial),
+                    Some(1)
+                );
+                return Ok(vec![candidate(
+                    "recovery",
+                    ComputationOperation::Validate,
+                    Vec::new(),
+                )]);
+            }
+            Ok(Vec::new())
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct PartialThenCompleteExecutor {
+        partial_emitted: bool,
+        dry_run: DryRunGliomaComputationExecutor,
+    }
+
+    impl GliomaComputationExecutor for PartialThenCompleteExecutor {
+        fn execute_task(
+            &mut self,
+            task: &super::super::execution::ComputationTask,
+            upstream: &[super::super::execution::ComputationTaskResult],
+            attempt: u8,
+        ) -> Result<
+            super::super::execution::ComputationTaskResult,
+            super::super::execution::ComputationExecutionFailure,
+        > {
+            let mut result = self.dry_run.execute_task(task, upstream, attempt)?;
+            if task.task_id == "partial" && !self.partial_emitted {
+                self.partial_emitted = true;
+                result.disposition = ComputationTaskDisposition::Partial;
+                result.note = "synthetic partial result routed to a recovery planner".into();
+            }
+            Ok(result)
         }
     }
 
@@ -801,6 +944,34 @@ mod tests {
         assert_eq!(
             output.disposition,
             GliomaComputationCampaignDisposition::Completed
+        );
+        assert_eq!(output.outcome_summaries["normalize"].completed, 1);
+        assert_eq!(output.outcome_summaries["validate"].completed, 1);
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn partial_round_is_recoverable_by_the_next_planner_round() {
+        let mut planner = RecoveryAfterPartialPlanner;
+        let mut executor = PartialThenCompleteExecutor::default();
+        let output = execute_glioma_computation_campaign(
+            &request(vec![candidate(
+                "partial",
+                ComputationOperation::Normalize,
+                Vec::new(),
+            )]),
+            &mut planner,
+            &mut executor,
+        )
+        .unwrap();
+        assert_eq!(output.rounds.len(), 2);
+        assert_eq!(output.partial_order, vec!["partial".to_string()]);
+        assert_eq!(output.completed_order, vec!["recovery".to_string()]);
+        assert_eq!(output.outcome_summaries["partial"].partial, 1);
+        assert_eq!(output.outcome_summaries["recovery"].completed, 1);
+        assert_eq!(
+            output.disposition,
+            GliomaComputationCampaignDisposition::Partial
         );
         output.validate().unwrap();
     }

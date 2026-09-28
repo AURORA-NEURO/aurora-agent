@@ -1,12 +1,13 @@
-//! Autonomous replication and interpretation campaigns for preclinical glioma research.
+//! Beam-selected autonomous replication and interpretation campaigns for preclinical glioma research.
 //!
 //! The individual P10 analyses answer different questions: does an effect replicate, is the
 //! pooled estimate stable, and does it transport to a declared model system?  This controller
 //! composes those analyses into an executable research loop.  It ranks the next bounded action
 //! from the observed evidence, calls a local executor, incorporates only returned typed studies,
 //! and repeats until a qualification, negative result, resource stop, or unresolved gate is
-//! reached.  It never turns a pooled effect into a clinical decision and never invents a study
-//! result when an executor returns no observation.
+//! reached. Each round uses a bounded budget-aware portfolio over action kind, model system, and
+//! target diversity. It never turns a pooled effect into a clinical decision and never invents a
+//! study result when an executor returns no observation.
 
 use super::meta_analysis::{
     MetaAnalysisDisposition, MetaAnalysisError, MetaAnalysisRequest, ReplicationMetaAnalysis,
@@ -32,6 +33,7 @@ pub const MAX_ROUNDS: u16 = 64;
 pub const MAX_STUDIES: usize = 4_096;
 pub const MAX_ACTIONS_PER_ROUND: usize = 32;
 pub const MAX_SIGNATURE_DIMENSIONS: usize = 256;
+const REPLICATION_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GliomaReplicationCampaignRequest {
@@ -480,6 +482,26 @@ fn candidate_actions(
             "run an orthogonal preclinical replication or moderator assay before pooling discordant studies",
         ));
     }
+    if meta_analysis
+        .uncertainty
+        .iter()
+        .any(|item| item == "future-site-predictive-interval-does-not-clear-effect-threshold")
+    {
+        let interval_width = meta_analysis
+            .predictive_interval_high_milli
+            .saturating_sub(meta_analysis.predictive_interval_low_milli)
+            .unsigned_abs();
+        actions.push(action(
+            GliomaReplicationActionKind::ReplicateStudy,
+            "predictive-transport",
+            request.model_system,
+            request.target_signature.clone(),
+            interval_width.saturating_mul(900),
+            10,
+            875_000_u64.saturating_add(interval_width.min(125_000)),
+            "collect an independent site replication because the future-site predictive interval does not clear the declared effect threshold",
+        ));
+    }
     if meta_analysis.max_leave_one_out_shift_milli > request.max_leave_one_out_shift_milli {
         let target = meta_analysis
             .contributions
@@ -549,6 +571,114 @@ fn candidate_actions(
     });
     actions.dedup_by(|left, right| left.action_id == right.action_id);
     actions
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReplicationBatchState {
+    selected: Vec<usize>,
+    spent_units: u32,
+    action_kinds: BTreeSet<GliomaReplicationActionKind>,
+    model_systems: BTreeSet<GliomaModelSystem>,
+    targets: BTreeSet<String>,
+}
+
+fn replication_batch_score(
+    state: &ReplicationBatchState,
+    candidates: &[GliomaReplicationAction],
+) -> u64 {
+    let mut score = 0_u64;
+    for index in &state.selected {
+        let action = &candidates[*index];
+        score = score
+            .saturating_add(action.priority_score_milli)
+            .saturating_add(action.expected_information_milli / 10);
+    }
+    score
+        .saturating_add((state.action_kinds.len() as u64).saturating_mul(100_000))
+        .saturating_add((state.model_systems.len() as u64).saturating_mul(50_000))
+        .saturating_add((state.targets.len() as u64).saturating_mul(10_000))
+        .saturating_sub(u64::from(state.spent_units).saturating_mul(10))
+}
+
+/// Select a complete replication portfolio under the remaining round budget. Ranking alone can
+/// spend a round on several copies of the same action family; this bounded beam preserves the
+/// strongest action while rewarding orthogonal replication, model transport, and negative-result
+/// closure. Selection remains deterministic and never exceeds the declared cost or cardinality
+/// limits.
+fn select_replication_actions(
+    candidates: &[GliomaReplicationAction],
+    used_actions: &BTreeSet<String>,
+    budget_units: u32,
+    max_actions: usize,
+) -> Vec<GliomaReplicationAction> {
+    let eligible = candidates
+        .iter()
+        .filter(|candidate| {
+            !used_actions.contains(&candidate.action_id)
+                && candidate.estimated_cost_units <= budget_units
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if max_actions == 0 || eligible.is_empty() {
+        return Vec::new();
+    }
+    let mut states = vec![ReplicationBatchState {
+        selected: Vec::new(),
+        spent_units: 0,
+        action_kinds: BTreeSet::new(),
+        model_systems: BTreeSet::new(),
+        targets: BTreeSet::new(),
+    }];
+    for index in 0..eligible.len() {
+        let action = &eligible[index];
+        let mut next = states.clone();
+        for state in &states {
+            let spent = state
+                .spent_units
+                .saturating_add(action.estimated_cost_units);
+            if state.selected.len() >= max_actions || spent > budget_units {
+                continue;
+            }
+            let mut selected = state.selected.clone();
+            selected.push(index);
+            let mut action_kinds = state.action_kinds.clone();
+            action_kinds.insert(action.kind);
+            let mut model_systems = state.model_systems.clone();
+            model_systems.insert(action.model_system);
+            let mut targets = state.targets.clone();
+            targets.insert(action.target_id.clone());
+            next.push(ReplicationBatchState {
+                selected,
+                spent_units: spent,
+                action_kinds,
+                model_systems,
+                targets,
+            });
+        }
+        next.sort_by(|left, right| {
+            replication_batch_score(right, &eligible)
+                .cmp(&replication_batch_score(left, &eligible))
+                .then_with(|| left.spent_units.cmp(&right.spent_units))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        next.dedup_by(|left, right| left.selected == right.selected);
+        next.truncate(REPLICATION_BEAM_WIDTH);
+        states = next;
+    }
+    let chosen = states
+        .into_iter()
+        .max_by(|left, right| {
+            replication_batch_score(left, &eligible)
+                .cmp(&replication_batch_score(right, &eligible))
+                .then_with(|| right.spent_units.cmp(&left.spent_units))
+                .then_with(|| right.selected.cmp(&left.selected))
+        })
+        .expect("replication beam always retains an empty state");
+    chosen
+        .selected
+        .into_iter()
+        .map(|index| eligible[index].clone())
+        .collect()
 }
 
 fn qualified(
@@ -702,6 +832,20 @@ pub fn execute_glioma_replication_campaign<E: GliomaReplicationCampaignExecutor>
     request: &GliomaReplicationCampaignRequest,
     executor: &mut E,
 ) -> Result<GliomaReplicationCampaign, GliomaReplicationCampaignError> {
+    execute_glioma_replication_campaign_with_action_kinds(request, executor, None)
+}
+
+/// Execute a replication campaign while constraining the selector to an upstream closure
+/// frontier's admitted action families.  The public campaign entry point remains unconstrained;
+/// this narrower seam is used by higher-level autonomous planners so a route-level approval cannot
+/// drift into a different scientific operation during internal candidate selection.
+pub(super) fn execute_glioma_replication_campaign_with_action_kinds<
+    E: GliomaReplicationCampaignExecutor,
+>(
+    request: &GliomaReplicationCampaignRequest,
+    executor: &mut E,
+    allowed_kinds: Option<&BTreeSet<GliomaReplicationActionKind>>,
+) -> Result<GliomaReplicationCampaign, GliomaReplicationCampaignError> {
     validate_request(request)?;
     let mut studies = request.initial_studies.clone();
     let mut transport_studies = request.initial_transport_studies.clone();
@@ -752,15 +896,21 @@ pub fn execute_glioma_replication_campaign<E: GliomaReplicationCampaignExecutor>
             &meta_analysis,
             transportability.as_ref(),
         );
-        let selected = candidates
-            .iter()
-            .filter(|candidate| {
-                !used_actions.contains(&candidate.action_id)
-                    && candidate.estimated_cost_units <= budget_remaining
+        let selectable_candidates = allowed_kinds
+            .map(|allowed| {
+                candidates
+                    .iter()
+                    .filter(|candidate| allowed.contains(&candidate.kind))
+                    .cloned()
+                    .collect::<Vec<_>>()
             })
-            .take(request.max_actions_per_round)
-            .cloned()
-            .collect::<Vec<_>>();
+            .unwrap_or_else(|| candidates.clone());
+        let selected = select_replication_actions(
+            &selectable_candidates,
+            &used_actions,
+            budget_remaining,
+            request.max_actions_per_round,
+        );
         if selected.is_empty() {
             stop_reason = if budget_remaining == 0 {
                 GliomaReplicationCampaignStopReason::BudgetExhausted
@@ -785,16 +935,33 @@ pub fn execute_glioma_replication_campaign<E: GliomaReplicationCampaignExecutor>
             break;
         }
         let budget_before = budget_remaining;
-        let mut observations = Vec::new();
+        let mut observations: Vec<GliomaReplicationCampaignObservation> = Vec::new();
         let mut made_progress = false;
+        let mut budget_exhausted_during_round = false;
         for selected_action in &selected {
             used_actions.insert(selected_action.action_id.clone());
             let mut result = None;
             for attempt in 1..=request.max_retries.saturating_add(1) {
+                // A retry is a real worker invocation, not free control-plane work.  Charge it
+                // before dispatch so failures, crashes, and retry suppression all leave an
+                // honest budget ledger.  The selector only budgets the first attempt of each
+                // action; this guard is therefore also required when an earlier action consumed
+                // extra retry capacity in the same portfolio.
+                if budget_remaining < selected_action.estimated_cost_units {
+                    failed_action_order.push(selected_action.action_id.clone());
+                    uncertainty.insert(format!(
+                        "budget-exhausted-before-attempt:{}",
+                        selected_action.action_id
+                    ));
+                    stop_reason = GliomaReplicationCampaignStopReason::BudgetExhausted;
+                    budget_exhausted_during_round = true;
+                    break;
+                }
+                budget_remaining =
+                    budget_remaining.saturating_sub(selected_action.estimated_cost_units);
                 match executor.execute_action(selected_action, round) {
                     Ok(observation) => {
                         result = Some(observation);
-                        retry_count = retry_count.saturating_add(u32::from(attempt - 1));
                         break;
                     }
                     Err(failure) if failure.retryable && attempt <= request.max_retries => {
@@ -803,6 +970,34 @@ pub fn execute_glioma_replication_campaign<E: GliomaReplicationCampaignExecutor>
                     Err(failure) => {
                         failed_action_order.push(selected_action.action_id.clone());
                         stop_reason = GliomaReplicationCampaignStopReason::ExecutorFailed;
+                        rounds.push(GliomaReplicationCampaignRound {
+                            round,
+                            assessment,
+                            meta_analysis,
+                            transportability,
+                            candidate_actions: candidates,
+                            selected_action_order: selected
+                                .iter()
+                                .map(|action| action.action_id.clone())
+                                .collect(),
+                            observation_order: observations
+                                .iter()
+                                .map(|observation| observation.action_id.clone())
+                                .collect(),
+                            observation_artifact_digest_order: observations
+                                .iter()
+                                .flat_map(|observation| observation.artifact_order.iter().cloned())
+                                .collect(),
+                            simulation_only_order: observations
+                                .iter()
+                                .filter(|observation| observation.simulation_only)
+                                .map(|observation| observation.action_id.clone())
+                                .collect(),
+                            budget_before_units: budget_before,
+                            budget_after_units: budget_remaining,
+                        });
+                        let (final_assessment, final_meta_analysis, final_transportability) =
+                            analyze_current(request, &studies, &transport_studies)?;
                         return build_campaign(
                             request,
                             rounds,
@@ -815,13 +1010,16 @@ pub fn execute_glioma_replication_campaign<E: GliomaReplicationCampaignExecutor>
                             uncertainty,
                             negative_evidence,
                             stop_reason,
-                            assessment,
-                            meta_analysis,
-                            transportability,
+                            final_assessment,
+                            final_meta_analysis,
+                            final_transportability,
                             Some(format!("{}: {}", selected_action.action_id, failure.reason)),
                         );
                     }
                 }
+            }
+            if budget_exhausted_during_round {
+                break;
             }
             let observation = result.ok_or_else(|| {
                 GliomaReplicationCampaignError::Executor(
@@ -848,8 +1046,6 @@ pub fn execute_glioma_replication_campaign<E: GliomaReplicationCampaignExecutor>
                 }
             }
             observations.push(observation);
-            budget_remaining =
-                budget_remaining.saturating_sub(selected_action.estimated_cost_units);
             completed_action_order.push(selected_action.action_id.clone());
             made_progress |= observation_progress
                 || selected_action.kind == GliomaReplicationActionKind::PublishNegativeResult;
@@ -880,6 +1076,9 @@ pub fn execute_glioma_replication_campaign<E: GliomaReplicationCampaignExecutor>
             budget_before_units: budget_before,
             budget_after_units: budget_remaining,
         });
+        if budget_exhausted_during_round {
+            break;
+        }
         if !made_progress {
             stop_reason = GliomaReplicationCampaignStopReason::NoProgress;
             break;
@@ -1076,6 +1275,8 @@ mod tests {
     #[derive(Debug, Default)]
     struct ReturningExecutor {
         sequence: u64,
+        retryable_failures_remaining: u32,
+        terminal_failure: bool,
     }
 
     impl GliomaReplicationCampaignExecutor for ReturningExecutor {
@@ -1086,6 +1287,19 @@ mod tests {
         ) -> Result<GliomaReplicationCampaignObservation, GliomaReplicationExecutionFailure>
         {
             self.sequence = self.sequence.saturating_add(1);
+            if self.retryable_failures_remaining > 0 {
+                self.retryable_failures_remaining -= 1;
+                return Err(GliomaReplicationExecutionFailure {
+                    reason: "transient replication gateway failure".into(),
+                    retryable: true,
+                });
+            }
+            if self.terminal_failure {
+                return Err(GliomaReplicationExecutionFailure {
+                    reason: "replication gateway rejected the action".into(),
+                    retryable: false,
+                });
+            }
             let study_id = format!("returned-study-{}", self.sequence);
             let artifact_hash = hash(&study_id);
             Ok(GliomaReplicationCampaignObservation {
@@ -1114,6 +1328,78 @@ mod tests {
     }
 
     #[test]
+    fn replication_beam_prefers_target_model_closure_over_repeated_same_arm() {
+        let candidates = vec![
+            GliomaReplicationAction {
+                action_id: "replicate-high".into(),
+                kind: GliomaReplicationActionKind::ReplicateStudy,
+                target_id: "same-arm".into(),
+                model_system: GliomaModelSystem::Organoid,
+                population_signature: vec![1],
+                expected_information_milli: 1_000,
+                estimated_cost_units: 1,
+                priority_score_milli: 1_000,
+                rationale: "high-value replicate".into(),
+            },
+            GliomaReplicationAction {
+                action_id: "replicate-redundant".into(),
+                kind: GliomaReplicationActionKind::ReplicateStudy,
+                target_id: "same-arm".into(),
+                model_system: GliomaModelSystem::Organoid,
+                population_signature: vec![1],
+                expected_information_milli: 990,
+                estimated_cost_units: 1,
+                priority_score_milli: 990,
+                rationale: "redundant same-arm replicate".into(),
+            },
+            GliomaReplicationAction {
+                action_id: "target-model".into(),
+                kind: GliomaReplicationActionKind::AcquireTargetModel,
+                target_id: "mouse-transport".into(),
+                model_system: GliomaModelSystem::MouseModel,
+                population_signature: vec![2],
+                expected_information_milli: 900,
+                estimated_cost_units: 1,
+                priority_score_milli: 900,
+                rationale: "close target-model transport gap".into(),
+            },
+        ];
+        let selected = select_replication_actions(&candidates, &BTreeSet::new(), 2, 2);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|action| action.action_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["replicate-high", "target-model"]
+        );
+    }
+
+    #[test]
+    fn action_kind_admission_prevents_selector_drift() {
+        let mut request = request(vec![study("s1", "site-1", 250)]);
+        request.max_rounds = 1;
+        request.budget_units = 8;
+        let mut executor = ReturningExecutor::default();
+        let allowed = BTreeSet::from([GliomaReplicationActionKind::ResolveHeterogeneity]);
+
+        let output = execute_glioma_replication_campaign_with_action_kinds(
+            &request,
+            &mut executor,
+            Some(&allowed),
+        )
+        .unwrap();
+
+        assert_eq!(executor.sequence, 0);
+        assert_eq!(output.rounds.len(), 1);
+        assert!(output.rounds[0].selected_action_order.is_empty());
+        assert_eq!(
+            output.stop_reason,
+            GliomaReplicationCampaignStopReason::NoProgress
+        );
+        output.validate().unwrap();
+    }
+
+    #[test]
     fn campaign_ranks_missing_replication_without_inventing_results() {
         let mut executor = DryRunGliomaReplicationCampaignExecutor::default();
         let output = execute_glioma_replication_campaign(
@@ -1134,6 +1420,36 @@ mod tests {
                 .any(|value| value.contains("minimum"))
         );
         output.validate().unwrap();
+    }
+
+    #[test]
+    fn campaign_dispatches_predictive_transport_replication_for_a_nonportable_pool() {
+        let mut studies = vec![
+            study("s1", "site-1", 500),
+            study("s2", "site-2", 500),
+            study("s3", "site-3", 500),
+        ];
+        for study in &mut studies {
+            study.uncertainty_milli = 400;
+        }
+        let mut request = request(studies.clone());
+        request.effect_threshold_milli = 100;
+        let (assessment, meta_analysis, transportability) =
+            analyze_current(&request, &studies, &[]).unwrap();
+        assert!(meta_analysis
+            .uncertainty
+            .iter()
+            .any(|item| item.contains("future-site-predictive-interval")));
+        let actions = candidate_actions(
+            &request,
+            &assessment,
+            &meta_analysis,
+            transportability.as_ref(),
+        );
+        assert!(actions.iter().any(|action| {
+            action.kind == GliomaReplicationActionKind::ReplicateStudy
+                && action.target_id == "predictive-transport"
+        }));
     }
 
     #[test]
@@ -1175,5 +1491,97 @@ mod tests {
         assert_eq!(output.studies.len(), 2);
         assert_eq!(output.rounds.len(), 1);
         assert_eq!(output.final_meta_analysis.included_order.len(), 2);
+    }
+
+    #[test]
+    fn retry_attempts_are_charged_and_counted_once() {
+        let mut request = request(vec![study("s1", "site-1", 250)]);
+        request.min_sites = 2;
+        request.min_studies = 2;
+        request.max_rounds = 1;
+        request.budget_units = 16;
+        let mut executor = ReturningExecutor {
+            retryable_failures_remaining: 1,
+            ..ReturningExecutor::default()
+        };
+
+        let output = execute_glioma_replication_campaign(&request, &mut executor).unwrap();
+
+        assert_eq!(executor.sequence, 2, "one failed attempt plus one retry");
+        assert_eq!(output.retry_count, 1);
+        assert_eq!(output.budget_used_units, 16);
+        assert_eq!(output.remaining_budget_units, 0);
+        assert_eq!(output.rounds[0].budget_before_units, 16);
+        assert_eq!(output.rounds[0].budget_after_units, 0);
+        assert_eq!(
+            output.disposition,
+            GliomaReplicationCampaignDisposition::Qualified
+        );
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn retry_is_suppressed_when_the_remaining_budget_cannot_fund_it() {
+        let mut request = request(vec![study("s1", "site-1", 250)]);
+        request.min_sites = 2;
+        request.min_studies = 2;
+        request.max_rounds = 1;
+        request.budget_units = 8;
+        let mut executor = ReturningExecutor {
+            retryable_failures_remaining: 1,
+            ..ReturningExecutor::default()
+        };
+
+        let output = execute_glioma_replication_campaign(&request, &mut executor).unwrap();
+
+        assert_eq!(
+            executor.sequence, 1,
+            "the unaffordable retry must not dispatch"
+        );
+        assert_eq!(output.retry_count, 1);
+        assert_eq!(output.budget_used_units, 8);
+        assert_eq!(output.remaining_budget_units, 0);
+        assert_eq!(
+            output.stop_reason,
+            GliomaReplicationCampaignStopReason::BudgetExhausted
+        );
+        assert!(output
+            .uncertainty
+            .iter()
+            .any(|value| value == "budget-exhausted-before-attempt:replicate_study:batch-1"));
+        assert_eq!(
+            output.failed_action_order,
+            vec!["replicate_study:batch-1".to_string()]
+        );
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn terminal_executor_failure_preserves_the_attempted_round_and_spend() {
+        let mut request = request(vec![study("s1", "site-1", 250)]);
+        request.max_rounds = 1;
+        request.budget_units = 8;
+        let mut executor = ReturningExecutor {
+            terminal_failure: true,
+            ..ReturningExecutor::default()
+        };
+
+        let output = execute_glioma_replication_campaign(&request, &mut executor).unwrap();
+
+        assert_eq!(executor.sequence, 1);
+        assert_eq!(output.rounds.len(), 1);
+        assert_eq!(output.rounds[0].budget_before_units, 8);
+        assert_eq!(output.rounds[0].budget_after_units, 0);
+        assert_eq!(output.budget_used_units, 8);
+        assert_eq!(output.remaining_budget_units, 0);
+        assert_eq!(
+            output.stop_reason,
+            GliomaReplicationCampaignStopReason::ExecutorFailed
+        );
+        assert_eq!(
+            output.disposition,
+            GliomaReplicationCampaignDisposition::Failed
+        );
+        output.validate().unwrap();
     }
 }

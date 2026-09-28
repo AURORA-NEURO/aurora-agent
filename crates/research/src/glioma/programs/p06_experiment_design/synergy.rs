@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F03";
-pub const OUTPUT_SCHEMA: &str = "GliomaCombinationSynergy1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaCombinationSynergy1@2";
 pub const MAX_OBSERVATIONS: usize = 32_768;
 pub const MAX_DOSE_PAIRS: usize = 4_096;
 
@@ -58,6 +58,7 @@ pub struct CombinationCell {
     pub dose_pair: DosePair,
     pub observation_order: Vec<String>,
     pub observation_count: usize,
+    pub batch_count: usize,
     pub observed_response_milli: u16,
     pub single_a_response_milli: Option<u16>,
     pub single_b_response_milli: Option<u16>,
@@ -110,6 +111,21 @@ fn mean(values: &[u16]) -> u16 {
     } else {
         (values.iter().map(|value| *value as u64).sum::<u64>() / values.len() as u64) as u16
     }
+}
+
+fn batch_balanced_mean(values: &[&CombinationObservation]) -> (u16, usize) {
+    let mut by_batch = BTreeMap::<String, Vec<u16>>::new();
+    for observation in values {
+        by_batch
+            .entry(observation.batch_id.clone())
+            .or_default()
+            .push(observation.response_milli);
+    }
+    let batch_means = by_batch
+        .values()
+        .map(|responses| mean(responses))
+        .collect::<Vec<_>>();
+    (mean(&batch_means), by_batch.len())
 }
 
 fn residual_mad(values: &[u16], center: u16) -> u64 {
@@ -172,6 +188,8 @@ impl CombinationSynergyAnalysis {
                         .observation_order
                         .windows(2)
                         .any(|pair| pair[0] >= pair[1])
+                    || cell.batch_count == 0
+                    || cell.batch_count > cell.observation_count
                     || cell.observed_response_milli > 1_000
                     || cell
                         .single_a_response_milli
@@ -246,12 +264,7 @@ pub fn analyze_glioma_combination_synergy(
         dose_a_milli: 0,
         dose_b_milli: 0,
     };
-    let control_values = groups.get(&control_pair).map(|values| {
-        values
-            .iter()
-            .map(|observation| observation.response_milli)
-            .collect::<Vec<_>>()
-    });
+    let control_values = groups.get(&control_pair).cloned();
     let mut uncertainty = BTreeSet::new();
     let mut negative_evidence = BTreeSet::new();
     if control_values
@@ -269,7 +282,7 @@ pub fn analyze_glioma_combination_synergy(
             .iter()
             .map(|observation| observation.response_milli)
             .collect::<Vec<_>>();
-        let observed_response_milli = mean(&response_values);
+        let (observed_response_milli, batch_count) = batch_balanced_mean(values);
         let residual_mad_milli = residual_mad(&response_values, observed_response_milli);
         let mut cell_uncertainty = BTreeSet::new();
         if values.len() < request.min_replicates_per_cell {
@@ -287,24 +300,10 @@ pub fn analyze_glioma_combination_synergy(
             dose_b_milli: pair.dose_b_milli,
         };
         let single_a_response_milli = groups.get(&single_a_pair).and_then(|values| {
-            (values.len() >= request.min_replicates_per_cell).then(|| {
-                mean(
-                    &values
-                        .iter()
-                        .map(|observation| observation.response_milli)
-                        .collect::<Vec<_>>(),
-                )
-            })
+            (values.len() >= request.min_replicates_per_cell).then(|| batch_balanced_mean(values).0)
         });
         let single_b_response_milli = groups.get(&single_b_pair).and_then(|values| {
-            (values.len() >= request.min_replicates_per_cell).then(|| {
-                mean(
-                    &values
-                        .iter()
-                        .map(|observation| observation.response_milli)
-                        .collect::<Vec<_>>(),
-                )
-            })
+            (values.len() >= request.min_replicates_per_cell).then(|| batch_balanced_mean(values).0)
         });
         if single_a_response_milli.is_none() {
             cell_uncertainty.insert("single-agent-a-control-missing".into());
@@ -347,6 +346,7 @@ pub fn analyze_glioma_combination_synergy(
                 .into_iter()
                 .collect(),
             observation_count: values.len(),
+            batch_count,
             observed_response_milli,
             single_a_response_milli,
             single_b_response_milli,
@@ -474,5 +474,44 @@ mod tests {
                 .iter()
                 .any(|item| item.contains("single-agent-b"))
         );
+    }
+
+    #[test]
+    fn synergy_equalizes_over_sampled_technical_batches() {
+        let mut observations = vec![observation("v", 0, 0, 0)];
+        for (index, response) in [400_u16, 400, 400].into_iter().enumerate() {
+            let mut item = observation(&format!("a-heavy-{index}"), 10, 0, response);
+            item.batch_id = "a-heavy-batch".into();
+            observations.push(item);
+        }
+        let mut a_minor = observation("a-minor", 10, 0, 0);
+        a_minor.batch_id = "a-minor-batch".into();
+        observations.push(a_minor);
+        for (index, response) in [400_u16, 400, 400].into_iter().enumerate() {
+            let mut item = observation(&format!("b-heavy-{index}"), 0, 10, response);
+            item.batch_id = "b-heavy-batch".into();
+            observations.push(item);
+        }
+        let mut b_minor = observation("b-minor", 0, 10, 0);
+        b_minor.batch_id = "b-minor-batch".into();
+        observations.push(b_minor);
+        for (index, response) in [900_u16, 900, 900].into_iter().enumerate() {
+            let mut item = observation(&format!("ab-heavy-{index}"), 10, 10, response);
+            item.batch_id = "ab-heavy-batch".into();
+            observations.push(item);
+        }
+        let mut ab_minor = observation("ab-minor", 10, 10, 0);
+        ab_minor.batch_id = "ab-minor-batch".into();
+        observations.push(ab_minor);
+
+        let output = analyze_glioma_combination_synergy(&request(), &observations).unwrap();
+        let cell = &output.cells[0];
+        assert_eq!(cell.batch_count, 2);
+        assert_eq!(cell.observed_response_milli, 450);
+        assert_eq!(cell.single_a_response_milli, Some(200));
+        assert_eq!(cell.single_b_response_milli, Some(200));
+        assert_eq!(cell.bliss_expected_milli, Some(360));
+        assert_eq!(cell.synergy_milli, Some(90));
+        output.validate().unwrap();
     }
 }

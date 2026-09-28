@@ -18,8 +18,12 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P04-F01";
-pub const OUTPUT_SCHEMA: &str = "GliomaDecisionContext1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaDecisionContext1@2";
 pub const MAX_ACTIONS: usize = 256;
+const PRIORITY_SELECTION_SCALE: u64 = 1_000_000;
+const ACTION_KIND_NOVELTY_BONUS: u64 = 150_000_000;
+const MODALITY_NOVELTY_BONUS: u64 = 75_000_000;
+const MODEL_NOVELTY_BONUS: u64 = 75_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecisionContextRequest {
@@ -265,6 +269,62 @@ fn action_for_claim(
     }
 }
 
+fn action_kind_key(kind: DecisionActionKind) -> &'static str {
+    match kind {
+        DecisionActionKind::CloseCoverage => "close_coverage",
+        DecisionActionKind::ResolveContradiction => "resolve_contradiction",
+        DecisionActionKind::FalsifyNegative => "falsify_negative",
+        DecisionActionKind::ResolveEvidence => "resolve_evidence",
+        DecisionActionKind::ValidateMechanism => "validate_mechanism",
+    }
+}
+
+/// Select context actions with a bounded portfolio bonus so a capped context contains distinct
+/// scientific work families and modalities when priorities are near-tied.  The ranking remains
+/// deterministic and a sufficiently stronger priority still wins over exploration bonuses.
+fn select_context_actions(actions: &[DecisionAction], max_actions: usize) -> Vec<DecisionAction> {
+    let mut remaining = actions.iter().collect::<Vec<_>>();
+    let mut selected = Vec::with_capacity(max_actions.min(remaining.len()));
+    let mut covered_kinds = BTreeSet::new();
+    let mut covered_modalities = BTreeSet::new();
+    let mut covered_models = BTreeSet::new();
+
+    while selected.len() < max_actions && !remaining.is_empty() {
+        let best_index = remaining
+            .iter()
+            .enumerate()
+            .max_by(|(_, left), (_, right)| {
+                let score = |action: &DecisionAction| {
+                    let kind_bonus = (!covered_kinds.contains(action_kind_key(action.kind))) as u64
+                        * ACTION_KIND_NOVELTY_BONUS;
+                    let modality_bonus = (!covered_modalities.contains(&action.target_modality))
+                        as u64
+                        * MODALITY_NOVELTY_BONUS;
+                    let model_bonus = (!covered_models.contains(&action.target_model_system))
+                        as u64
+                        * MODEL_NOVELTY_BONUS;
+                    u64::from(action.priority_milli)
+                        .saturating_mul(PRIORITY_SELECTION_SCALE)
+                        .saturating_add(kind_bonus)
+                        .saturating_add(modality_bonus)
+                        .saturating_add(model_bonus)
+                };
+                score(left)
+                    .cmp(&score(right))
+                    .then_with(|| left.priority_milli.cmp(&right.priority_milli))
+                    .then_with(|| right.action_id.cmp(&left.action_id))
+            })
+            .map(|(index, _)| index)
+            .expect("remaining decision actions are non-empty");
+        let action = remaining.swap_remove(best_index);
+        covered_kinds.insert(action_kind_key(action.kind));
+        covered_modalities.insert(action.target_modality);
+        covered_models.insert(action.target_model_system);
+        selected.push(action.clone());
+    }
+    selected
+}
+
 pub fn compile_decision_context(
     request: &DecisionContextRequest,
     knowledge: &TypedKnowledge,
@@ -298,14 +358,14 @@ pub fn compile_decision_context(
             .cmp(&left.priority_milli)
             .then_with(|| left.action_id.cmp(&right.action_id))
     });
-    let selected = all_actions
+    let selected = select_context_actions(&all_actions, request.max_actions);
+    let selected_set = selected
         .iter()
-        .take(request.max_actions)
-        .cloned()
-        .collect::<Vec<_>>();
+        .map(|action| action.action_id.as_str())
+        .collect::<BTreeSet<_>>();
     let deferred_action_order = all_actions
         .iter()
-        .skip(request.max_actions)
+        .filter(|action| !selected_set.contains(action.action_id.as_str()))
         .map(|action| action.action_id.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -402,6 +462,76 @@ mod tests {
         .unwrap()
     }
 
+    fn portfolio_knowledge() -> TypedKnowledge {
+        let artifact = |id: &str| LocalArtifactRef {
+            artifact_id: id.into(),
+            content_hash: hash(id),
+            content_type: "application/vnd.aurora.glioma-evidence+json".into(),
+            local_only: true,
+            contains_human_data: false,
+            contains_direct_identifiers: false,
+        };
+        let record = |id: &str,
+                      claim: &str,
+                      modality: GliomaModality,
+                      state: EvidenceState,
+                      quality: u16| EvidenceRecord {
+            evidence_id: id.into(),
+            source_artifact: artifact(id),
+            source_kind: EvidenceSourceKind::Dataset,
+            claim: claim.into(),
+            scope: "preclinical glioma".into(),
+            modality,
+            model_system: Some(GliomaModelSystem::Organoid),
+            state,
+            relevance_milli: quality,
+            quality_milli: quality,
+            reproducibility_milli: quality,
+            release_epoch: 1,
+        };
+        compile_typed_knowledge(
+            &KnowledgeRequest {
+                objective: "rank invasion mechanisms".into(),
+                required_modalities: BTreeSet::from([GliomaModality::Imaging]),
+                required_model_systems: BTreeSet::from([GliomaModelSystem::Organoid]),
+                min_support_milli: 700,
+                min_sources_per_claim: 1,
+                max_claims: 8,
+            },
+            &[
+                record(
+                    "close-a",
+                    "EGFR signaling increases invasion",
+                    GliomaModality::Genomics,
+                    EvidenceState::Supported,
+                    1_000,
+                ),
+                record(
+                    "close-b",
+                    "TGF beta signaling increases invasion",
+                    GliomaModality::Transcriptomics,
+                    EvidenceState::Supported,
+                    1_000,
+                ),
+                record(
+                    "contradiction-support",
+                    "Matrix remodeling changes invasion",
+                    GliomaModality::Imaging,
+                    EvidenceState::Supported,
+                    1_000,
+                ),
+                record(
+                    "contradiction-negative",
+                    "Matrix remodeling changes invasion",
+                    GliomaModality::Imaging,
+                    EvidenceState::Contradicted,
+                    900,
+                ),
+            ],
+        )
+        .unwrap()
+    }
+
     #[test]
     fn compiles_typed_action_candidate_for_supported_claim() {
         let output = compile_decision_context(
@@ -446,5 +576,28 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("objective"));
+    }
+
+    #[test]
+    fn capped_context_keeps_contradiction_work_beside_repeated_coverage() {
+        let output = compile_decision_context(
+            &DecisionContextRequest {
+                objective: "rank invasion mechanisms".into(),
+                max_actions: 2,
+                default_cost_units: 5,
+            },
+            &portfolio_knowledge(),
+        )
+        .unwrap();
+        let kinds = output
+            .actions
+            .iter()
+            .map(|action| action_kind_key(action.kind))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(kinds.len(), 2);
+        assert!(kinds.contains("close_coverage"));
+        assert!(kinds.contains("resolve_contradiction"));
+        assert_eq!(output.deferred_action_order.len(), 1);
+        output.validate().unwrap();
     }
 }

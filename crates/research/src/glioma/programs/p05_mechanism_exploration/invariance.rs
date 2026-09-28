@@ -3,7 +3,7 @@
 //! A signature that separates mechanisms in one model system can disappear, reverse direction,
 //! or become unmeasurable in another. This feature evaluates signed mechanism predictions across
 //! declared preclinical contexts, combines directional consistency with pairwise separation, and
-//! greedily selects a bounded panel of signatures that remains useful across contexts. It is a
+//! searches a bounded portfolio of signatures that remains useful across contexts. It is a
 //! transportability planning artifact: it never treats a prediction as an observation, moves raw
 //! data, executes biology, or makes a clinical decision.
 
@@ -14,11 +14,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P05-F03";
-pub const OUTPUT_SCHEMA: &str = "GliomaMechanismInvariance1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaMechanismInvariance1@2";
 pub const MAX_CONTEXTS: usize = 256;
 pub const MAX_MECHANISMS: usize = 256;
 pub const MAX_SIGNATURES: usize = 4_096;
 pub const SCORE_SCALE: u64 = 1_000;
+const INVARIANCE_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MechanismInvarianceContext {
@@ -445,7 +446,46 @@ fn score_signature(
     }
 }
 
-/// Score cross-model stability and select a bounded panel of invariant mechanistic signatures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InvarianceState {
+    selected: Vec<String>,
+    covered_pairs: BTreeSet<String>,
+    pair_value: BTreeMap<String, u64>,
+    spent_units: u64,
+}
+
+fn state_score(state: &InvarianceState) -> u128 {
+    let value = state
+        .pair_value
+        .values()
+        .copied()
+        .map(u128::from)
+        .sum::<u128>();
+    (state.covered_pairs.len() as u128)
+        .saturating_mul(1_000_000_000_000)
+        .saturating_add(value.saturating_mul(1_000_000))
+        .saturating_add((state.selected.len() as u128).saturating_mul(1_000))
+        .saturating_sub(u128::from(state.spent_units))
+}
+
+fn signature_gain(
+    signature_id: &str,
+    state: &InvarianceState,
+    pair_coverage: &BTreeMap<String, Vec<(String, u64)>>,
+) -> (u64, Vec<String>) {
+    let mut gain = 0_u64;
+    let mut covered = Vec::new();
+    for (pair_id, value) in pair_coverage.get(signature_id).into_iter().flatten() {
+        if state.covered_pairs.contains(pair_id) {
+            continue;
+        }
+        gain = gain.saturating_add(*value);
+        covered.push(pair_id.clone());
+    }
+    (gain, covered)
+}
+
+/// Score cross-model stability and select a bounded portfolio of invariant mechanistic signatures.
 pub fn analyze_glioma_mechanism_invariance(
     request: &MechanismInvarianceRequest,
 ) -> Result<MechanismInvariance, MechanismInvarianceError> {
@@ -512,90 +552,150 @@ pub fn analyze_glioma_mechanism_invariance(
             pair_records.push((pair_id(left, right), left.clone(), right.clone()));
         }
     }
-    let mut selected = BTreeSet::new();
-    let mut covered_pairs = BTreeSet::new();
-    let mut spent = 0_u64;
-    let mut utilities = Vec::new();
-    let mut budget_blocked_order = Vec::new();
-    loop {
-        if selected.len() >= request.max_selected_signatures {
-            break;
+    let mut pair_coverage = BTreeMap::<String, Vec<(String, u64)>>::new();
+    for signature in &eligible {
+        let score = score_by_id
+            .get(&signature.signature_id)
+            .expect("score for validated signature");
+        if score.context_count < request.min_contexts
+            || score.invariance_score_milli < request.invariance_floor_milli
+        {
+            continue;
         }
-        let mut best: Option<(u64, u64, String, Vec<String>)> = None;
-        for signature in &eligible {
-            if selected.contains(&signature.signature_id) {
-                continue;
+        for (pair_id, left, right) in &pair_records {
+            let separation = signature_pair_separation(signature, &request.contexts, left, right);
+            let stability = signature_pair_stability(signature, &request.contexts, left, right);
+            if separation >= request.separation_floor_milli
+                && stability >= request.invariance_floor_milli
+            {
+                pair_coverage
+                    .entry(signature.signature_id.clone())
+                    .or_default()
+                    .push((
+                        pair_id.clone(),
+                        separation.saturating_mul(stability) / SCORE_SCALE,
+                    ));
             }
-            let projected_cost = spent.saturating_add(u64::from(signature.cost_units));
-            if projected_cost > request.budget_units {
-                budget_blocked_order.push(signature.signature_id.clone());
-                continue;
-            }
-            let score = score_by_id
-                .get(&signature.signature_id)
-                .expect("score for validated signature");
-            if score.context_count < request.min_contexts
-                || score.invariance_score_milli < request.invariance_floor_milli
+        }
+    }
+    for values in pair_coverage.values_mut() {
+        values.sort_by(|left, right| left.0.cmp(&right.0));
+    }
+    let mut candidates = eligible.clone();
+    candidates.sort_by(|left, right| left.signature_id.cmp(&right.signature_id));
+    let mut states = vec![InvarianceState {
+        selected: Vec::new(),
+        covered_pairs: BTreeSet::new(),
+        pair_value: BTreeMap::new(),
+        spent_units: 0,
+    }];
+    for signature in candidates {
+        if !pair_coverage.contains_key(&signature.signature_id) {
+            continue;
+        }
+        let mut next = states.clone();
+        for state in &states {
+            if state.selected.len() >= request.max_selected_signatures
+                || state
+                    .spent_units
+                    .saturating_add(u64::from(signature.cost_units))
+                    > request.budget_units
             {
                 continue;
             }
-            let mut gain = 0_u64;
-            let mut covered = Vec::new();
-            for (id, left, right) in &pair_records {
-                if covered_pairs.contains(id) {
-                    continue;
-                }
-                let separation =
-                    signature_pair_separation(signature, &request.contexts, left, right);
-                let stability = signature_pair_stability(signature, &request.contexts, left, right);
-                if separation >= request.separation_floor_milli
-                    && stability >= request.invariance_floor_milli
-                {
-                    gain = gain.saturating_add(separation.saturating_mul(stability) / SCORE_SCALE);
-                    covered.push(id.clone());
-                }
-            }
+            let (gain, covered) = signature_gain(&signature.signature_id, state, &pair_coverage);
             if gain == 0 {
                 continue;
             }
-            let candidate = (
-                gain / u64::from(signature.cost_units),
-                gain,
-                signature.signature_id.clone(),
-                covered,
-            );
-            if best
-                .as_ref()
-                .map(|current| {
-                    candidate.0 > current.0
-                        || (candidate.0 == current.0 && candidate.1 > current.1)
-                        || (candidate.0 == current.0
-                            && candidate.1 == current.1
-                            && candidate.2 < current.2)
-                })
-                .unwrap_or(true)
+            let mut selected = state.selected.clone();
+            selected.push(signature.signature_id.clone());
+            let mut covered_pairs = state.covered_pairs.clone();
+            let mut pair_value = state.pair_value.clone();
+            for pair_id in covered {
+                if let Some(value) = pair_coverage
+                    .get(&signature.signature_id)
+                    .and_then(|values| values.iter().find(|(id, _)| id == &pair_id))
+                    .map(|(_, value)| *value)
+                {
+                    covered_pairs.insert(pair_id.clone());
+                    pair_value.insert(pair_id, value);
+                }
+            }
+            next.push(InvarianceState {
+                selected,
+                covered_pairs,
+                pair_value,
+                spent_units: state
+                    .spent_units
+                    .saturating_add(u64::from(signature.cost_units)),
+            });
+        }
+        next.sort_by(|left, right| {
+            state_score(right)
+                .cmp(&state_score(left))
+                .then_with(|| left.spent_units.cmp(&right.spent_units))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        next.dedup_by(|left, right| left.selected == right.selected);
+        next.truncate(INVARIANCE_BEAM_WIDTH);
+        states = next;
+    }
+    let chosen = states
+        .into_iter()
+        .max_by(|left, right| {
+            state_score(left)
+                .cmp(&state_score(right))
+                .then_with(|| right.spent_units.cmp(&left.spent_units))
+                .then_with(|| right.selected.cmp(&left.selected))
+        })
+        .expect("invariance beam always retains an empty state");
+    let selected = chosen.selected.into_iter().collect::<BTreeSet<_>>();
+    let spent = chosen.spent_units;
+    let mut utilities = Vec::new();
+    let mut replay_state = InvarianceState {
+        selected: Vec::new(),
+        covered_pairs: BTreeSet::new(),
+        pair_value: BTreeMap::new(),
+        spent_units: 0,
+    };
+    let mut replay_candidates = eligible.clone();
+    replay_candidates.sort_by(|left, right| left.signature_id.cmp(&right.signature_id));
+    for signature in replay_candidates
+        .into_iter()
+        .filter(|signature| selected.contains(&signature.signature_id))
+    {
+        let (gain, covered) =
+            signature_gain(&signature.signature_id, &replay_state, &pair_coverage);
+        replay_state.selected.push(signature.signature_id.clone());
+        replay_state.spent_units = replay_state
+            .spent_units
+            .saturating_add(u64::from(signature.cost_units));
+        for pair_id in &covered {
+            if let Some(value) = pair_coverage
+                .get(&signature.signature_id)
+                .and_then(|values| values.iter().find(|(id, _)| id == pair_id))
+                .map(|(_, value)| *value)
             {
-                best = Some(candidate);
+                replay_state.covered_pairs.insert(pair_id.clone());
+                replay_state.pair_value.insert(pair_id.clone(), value);
             }
         }
-        let Some((_, gain, signature_id, covered)) = best else {
-            break;
-        };
-        let signature = eligible
-            .iter()
-            .find(|signature| signature.signature_id == signature_id)
-            .expect("eligible signature");
-        selected.insert(signature_id.clone());
-        covered_pairs.extend(covered.iter().cloned());
-        spent = spent.saturating_add(u64::from(signature.cost_units));
         utilities.push(MechanismInvarianceUtility {
-            signature_id,
+            signature_id: signature.signature_id.clone(),
             marginal_value_milli: gain,
             covered_pair_order: covered,
-            projected_cost_units: spent,
+            projected_cost_units: replay_state.spent_units,
             action: "select-for-cross-model-invariance".into(),
         });
     }
+    let mut budget_blocked_order = eligible
+        .iter()
+        .filter(|signature| {
+            !selected.contains(&signature.signature_id)
+                && u64::from(signature.cost_units) > request.budget_units.saturating_sub(spent)
+        })
+        .map(|signature| signature.signature_id.clone())
+        .collect::<Vec<_>>();
     budget_blocked_order.sort();
     budget_blocked_order.dedup();
     utilities.sort_by(|left, right| left.signature_id.cmp(&right.signature_id));
@@ -845,5 +945,61 @@ mod tests {
                 .iter()
                 .any(|entry| entry == "unresolved-pair:m-a__m-b")
         );
+    }
+
+    #[test]
+    fn portfolio_beam_prefers_complementary_transport_signatures() {
+        let mut input = request();
+        input.mechanisms.push(InvarianceMechanism {
+            mechanism_id: "m-c".into(),
+            label: "vascular co-option".into(),
+        });
+        let values = |a: i32, b: i32, c: i32| {
+            BTreeMap::from([
+                (
+                    "organoid".into(),
+                    BTreeMap::from([("m-a".into(), a), ("m-b".into(), b), ("m-c".into(), c)]),
+                ),
+                (
+                    "xenograft".into(),
+                    BTreeMap::from([("m-a".into(), a), ("m-b".into(), b), ("m-c".into(), c)]),
+                ),
+            ])
+        };
+        input.signatures = vec![
+            MechanismSignature {
+                signature_id: "sig-hub".into(),
+                label: "expensive hub".into(),
+                value_milli_by_context_and_mechanism: values(1_000, 100, 1_000),
+                quality_milli: 900,
+                cost_units: 5,
+                risk_milli: 100,
+            },
+            MechanismSignature {
+                signature_id: "sig-left".into(),
+                label: "left discriminator".into(),
+                value_milli_by_context_and_mechanism: values(1_000, 100, 100),
+                quality_milli: 900,
+                cost_units: 3,
+                risk_milli: 100,
+            },
+            MechanismSignature {
+                signature_id: "sig-right".into(),
+                label: "right discriminator".into(),
+                value_milli_by_context_and_mechanism: values(500, 500, 100),
+                quality_milli: 900,
+                cost_units: 3,
+                risk_milli: 100,
+            },
+        ];
+        input.budget_units = 6;
+        input.max_selected_signatures = 2;
+        input.invariance_floor_milli = 600;
+        let output = analyze_glioma_mechanism_invariance(&input).expect("frontier");
+        assert_eq!(
+            output.selected_signature_order,
+            vec!["sig-left", "sig-right"]
+        );
+        assert!(output.unresolved_pair_order.is_empty());
     }
 }

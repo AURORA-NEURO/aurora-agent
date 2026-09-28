@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P08-F10";
-pub const OUTPUT_SCHEMA: &str = "GliomaInstrumentPreflight1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaInstrumentPreflight1@2";
 pub const MAX_ACTIONS: usize = 1_024;
 pub const MAX_PARAMETERS_PER_ACTION: usize = 64;
 pub const MAX_TICK: u64 = 10_000_000_000;
@@ -153,6 +153,10 @@ pub struct InstrumentPreflightPlan {
     pub instrument_id: String,
     pub model_system: GliomaModelSystem,
     pub authorization_id: String,
+    /// Content hash of the complete, canonical action manifest that was preflighted.  Action IDs
+    /// alone are insufficient: a caller must not be able to mutate timing, parameters, operation,
+    /// or risk after admission and still reuse the signed plan.
+    pub action_manifest_digest: ContentHash,
     pub action_order: Vec<String>,
     pub admitted_order: Vec<String>,
     pub blocked_order: Vec<String>,
@@ -193,6 +197,7 @@ fn digest_input(plan: &InstrumentPreflightPlan) -> serde_json::Value {
         "instrument_id": plan.instrument_id,
         "model_system": plan.model_system,
         "authorization_id": plan.authorization_id,
+        "action_manifest_digest": plan.action_manifest_digest,
         "action_order": plan.action_order,
         "admitted_order": plan.admitted_order,
         "blocked_order": plan.blocked_order,
@@ -209,6 +214,20 @@ fn digest_input(plan: &InstrumentPreflightPlan) -> serde_json::Value {
     })
 }
 
+/// Canonicalize an action set by stable action identity and bind every typed action field.  The
+/// preflight planner and execution gateway both use this function, so reordered JSON input cannot
+/// change the identity while any substantive action mutation does.
+pub(crate) fn action_manifest_digest(
+    actions: &[InstrumentAction],
+) -> Result<ContentHash, InstrumentPreflightError> {
+    let mut canonical_actions = actions.to_vec();
+    canonical_actions.sort_by(|left, right| left.action_id.cmp(&right.action_id));
+    let value = serde_json::to_value(&canonical_actions)
+        .map_err(|error| InstrumentPreflightError::Digest(error.to_string()))?;
+    ContentHash::of_value(&value)
+        .map_err(|error| InstrumentPreflightError::Digest(error.to_string()))
+}
+
 impl InstrumentPreflightPlan {
     pub fn validate(&self) -> Result<(), InstrumentPreflightError> {
         if self.feature_id != FEATURE_ID
@@ -216,6 +235,7 @@ impl InstrumentPreflightPlan {
             || self.objective.trim().is_empty()
             || self.instrument_id.trim().is_empty()
             || self.authorization_id.trim().is_empty()
+            || self.action_manifest_digest.as_str().len() != 64
             || self.action_order.is_empty()
             || self.action_order.windows(2).any(|pair| pair[0] == pair[1])
             || !canonical(&self.admitted_order)
@@ -684,6 +704,7 @@ pub fn preflight_glioma_instrument(
         instrument_id: request.instrument_id.clone(),
         model_system: request.model_system,
         authorization_id: request.authorization.authorization_id.clone(),
+        action_manifest_digest: action_manifest_digest(&request.actions)?,
         action_order,
         admitted_order,
         blocked_order,
@@ -862,6 +883,19 @@ mod tests {
         assert_eq!(plan.admitted_order, vec!["acquire", "wash"]);
         assert_eq!(plan.decisions[1].scheduled_start_tick, Some(3));
         plan.validate().unwrap();
+    }
+
+    #[test]
+    fn action_manifest_is_order_stable_but_mutation_sensitive() {
+        let request = request();
+        let digest = action_manifest_digest(&request.actions).unwrap();
+        let mut reversed = request.actions.clone();
+        reversed.reverse();
+        assert_eq!(digest, action_manifest_digest(&reversed).unwrap());
+
+        let mut changed = request.actions.clone();
+        changed[0].duration_ticks = changed[0].duration_ticks.saturating_add(1);
+        assert_ne!(digest, action_manifest_digest(&changed).unwrap());
     }
 
     #[test]

@@ -18,7 +18,7 @@ use super::synthesis::{
 use crate::glioma_engine::GliomaSelectionWeights;
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F24";
@@ -178,6 +178,7 @@ pub fn execute_glioma_interpretation_operating_cycle(
     let frontier = plan_glioma_adaptive_research_frontier(&AdaptiveFrontierRequest {
         synthesis: synthesis.clone(),
         completed_actions: request.completed_actions.clone(),
+        outcome_summaries: BTreeMap::new(),
         budget_units: request.budget_units,
         max_actions: request.max_actions,
         approval_granted: request.approval_granted,

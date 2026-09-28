@@ -1,4 +1,4 @@
-//! Compile mechanism-discrimination results into executable glioma research actions.
+//! Compile mechanism-discrimination results into beam-selected executable glioma research actions.
 //!
 //! Mechanism discrimination already estimates which measurements separate competing models.
 //! This module turns that scientific result into the typed action vocabulary consumed by the
@@ -6,7 +6,8 @@
 //! no biological observation, keeps uncertainty and negative evidence, and emits only local
 //! computation/read/artifact effects at A1.  A host can hand the resulting candidates to
 //! `execute_glioma_autonomous_campaign` and supply its own planner/worker when new evidence is
-//! available.
+//! available. Assay batches use a bounded deterministic portfolio search so mechanism coverage
+//! is optimized jointly with information-per-cost rather than by a myopic greedy pick.
 
 use super::super::p07_protocol_simulation::autonomous_campaign::{
     GliomaActionPlanner, GliomaAutonomousPlannerContext, GliomaPlannerFailure,
@@ -22,14 +23,20 @@ use std::collections::{BTreeSet, HashSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P05-F20";
-pub const OUTPUT_SCHEMA: &str = "GliomaMechanismActionPlan1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaMechanismActionPlan1@3";
 pub const MAX_ACTIONS: usize = 256;
+const MECHANISM_NOVELTY_BONUS: u128 = 1_000_000_000_000;
+const MECHANISM_ACTION_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MechanismActionPlannerConfig {
     pub model_system: GliomaModelSystem,
     pub modality: GliomaModality,
     pub max_actions: usize,
+    /// Total assay cost the compiled portfolio may reserve. Selection is bounded by both this
+    /// envelope and `max_actions`, so a single expensive discriminator cannot silently crowd out
+    /// a complementary set that fits the declared research budget.
+    pub budget_units: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +46,8 @@ pub struct MechanismActionPlan {
     pub source_discrimination_digest: ContentHash,
     pub model_system: GliomaModelSystem,
     pub modality: GliomaModality,
+    pub budget_units: u64,
+    pub budget_spent_units: u64,
     pub action_order: Vec<String>,
     pub candidates: Vec<GliomaActionCandidate>,
     pub uncertainty: Vec<String>,
@@ -101,6 +110,90 @@ fn to_candidate(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MechanismActionBatchState {
+    selected: Vec<usize>,
+    cost_units: u64,
+}
+
+fn mechanism_batch_score(
+    state: &MechanismActionBatchState,
+    actions: &[MechanismInformationGain],
+) -> u128 {
+    let mut score = 0_u128;
+    let mut covered = BTreeSet::new();
+    for index in &state.selected {
+        let action = &actions[*index];
+        // Normalize broad discriminator proposals by the number of mechanisms they cover. This
+        // prevents one high-scoring, shared assay from crowding out two near-tied orthogonal
+        // assays that provide independent mechanism evidence as a batch.
+        let mechanism_count = u128::from(action.mechanism_order.len().max(1) as u32);
+        score = score.saturating_add(candidate_priority(action).0 / mechanism_count);
+        let novel_count = action
+            .mechanism_order
+            .iter()
+            .filter(|mechanism| covered.insert((*mechanism).clone()))
+            .count() as u128;
+        score = score.saturating_add(novel_count.saturating_mul(MECHANISM_NOVELTY_BONUS));
+    }
+    score
+}
+
+/// Select discriminator assays with a bounded mechanism-coverage portfolio search. A
+/// high-information assay remains valuable, while a near-tied set that probes mechanisms not yet
+/// represented in the batch can displace a redundant pair. All comparisons and tie-breaks are
+/// integer and replay-stable.
+fn select_discriminator_actions(
+    actions: &[MechanismInformationGain],
+    max_actions: usize,
+    budget_units: u64,
+) -> Vec<MechanismInformationGain> {
+    if max_actions == 0 || actions.is_empty() {
+        return Vec::new();
+    }
+    let mut states = vec![MechanismActionBatchState {
+        selected: Vec::new(),
+        cost_units: 0,
+    }];
+    for index in 0..actions.len() {
+        let mut next = states.clone();
+        for state in &states {
+            let action_cost = u64::from(actions[index].cost_units);
+            if state.selected.len() < max_actions
+                && state.cost_units.saturating_add(action_cost) <= budget_units
+            {
+                let mut selected = state.selected.clone();
+                selected.push(index);
+                next.push(MechanismActionBatchState {
+                    selected,
+                    cost_units: state.cost_units.saturating_add(action_cost),
+                });
+            }
+        }
+        next.sort_by(|left, right| {
+            mechanism_batch_score(right, actions)
+                .cmp(&mechanism_batch_score(left, actions))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        next.dedup_by(|left, right| left.selected == right.selected);
+        next.truncate(MECHANISM_ACTION_BEAM_WIDTH);
+        states = next;
+    }
+    let chosen = states
+        .into_iter()
+        .max_by(|left, right| {
+            mechanism_batch_score(left, actions)
+                .cmp(&mechanism_batch_score(right, actions))
+                .then_with(|| right.selected.cmp(&left.selected))
+        })
+        .expect("mechanism action beam always retains an empty state");
+    chosen
+        .selected
+        .into_iter()
+        .map(|index| actions[index].clone())
+        .collect()
+}
+
 fn digest_input(plan: &MechanismActionPlan) -> serde_json::Value {
     serde_json::json!({
         "feature_id": plan.feature_id,
@@ -108,6 +201,8 @@ fn digest_input(plan: &MechanismActionPlan) -> serde_json::Value {
         "source_discrimination_digest": plan.source_discrimination_digest,
         "model_system": plan.model_system,
         "modality": plan.modality,
+        "budget_units": plan.budget_units,
+        "budget_spent_units": plan.budget_spent_units,
         "action_order": plan.action_order,
         "candidates": plan.candidates,
         "uncertainty": plan.uncertainty,
@@ -117,6 +212,11 @@ fn digest_input(plan: &MechanismActionPlan) -> serde_json::Value {
 
 impl MechanismActionPlan {
     pub fn validate(&self) -> Result<(), MechanismActionPlannerError> {
+        let computed_budget_spent_units = self
+            .candidates
+            .iter()
+            .map(|candidate| u64::from(candidate.cost_units))
+            .sum::<u64>();
         let ids = self
             .candidates
             .iter()
@@ -130,6 +230,13 @@ impl MechanismActionPlan {
             || ids.iter().any(|id| id.trim().is_empty())
             || ids.iter().collect::<HashSet<_>>().len() != ids.len()
             || self.candidates.len() > MAX_ACTIONS
+            || self.budget_units == 0
+            || self.budget_spent_units != computed_budget_spent_units
+            || self.budget_spent_units > self.budget_units
+            || self
+                .candidates
+                .iter()
+                .any(|candidate| candidate.cost_units == 0)
             || self.uncertainty.windows(2).any(|pair| pair[0] >= pair[1])
             || self
                 .negative_evidence
@@ -169,9 +276,9 @@ pub fn compile_mechanism_action_plan(
     discrimination
         .validate()
         .map_err(|error| MechanismActionPlannerError::InvalidRequest(error.to_string()))?;
-    if config.max_actions == 0 || config.max_actions > MAX_ACTIONS {
+    if config.max_actions == 0 || config.max_actions > MAX_ACTIONS || config.budget_units == 0 {
         return Err(MechanismActionPlannerError::InvalidRequest(
-            "max_actions must be between 1 and 256".into(),
+            "max_actions must be between 1 and 256 and budget_units must be positive".into(),
         ));
     }
     let mut actions = discrimination.actions.clone();
@@ -183,7 +290,7 @@ pub fn compile_mechanism_action_plan(
             .cmp(&left_priority.0)
             .then_with(|| left_priority.1.cmp(&right_priority.1))
     });
-    actions.truncate(config.max_actions);
+    actions = select_discriminator_actions(&actions, config.max_actions, config.budget_units);
     if actions.is_empty() {
         return Err(MechanismActionPlannerError::InvalidRequest(
             "mechanism discrimination returned no executable action".into(),
@@ -197,6 +304,10 @@ pub fn compile_mechanism_action_plan(
         .iter()
         .map(|candidate| candidate.action_id.clone())
         .collect::<Vec<_>>();
+    let budget_spent_units = candidates
+        .iter()
+        .map(|candidate| u64::from(candidate.cost_units))
+        .sum::<u64>();
     let mut uncertainty = discrimination.uncertainty.clone();
     uncertainty.push("mechanism-action-prioritization-is-not-a-biological-result".into());
     uncertainty.sort();
@@ -210,6 +321,8 @@ pub fn compile_mechanism_action_plan(
         source_discrimination_digest: discrimination.digest.clone(),
         model_system: config.model_system,
         modality: config.modality,
+        budget_units: config.budget_units,
+        budget_spent_units,
         action_order,
         candidates,
         uncertainty,
@@ -351,6 +464,7 @@ mod tests {
             model_system: GliomaModelSystem::Organoid,
             modality: GliomaModality::Transcriptomics,
             max_actions: 2,
+            budget_units: 4,
         };
         let first = compile_mechanism_action_plan(&discrimination, &config).unwrap();
         let second = compile_mechanism_action_plan(&discrimination, &config).unwrap();
@@ -359,7 +473,102 @@ mod tests {
             first.action_order,
             vec!["mechanism-assay:high", "mechanism-assay:low"]
         );
+        assert_eq!(first.budget_units, 4);
+        assert_eq!(first.budget_spent_units, 4);
         first.validate().unwrap();
+    }
+
+    #[test]
+    fn mechanism_batch_beam_prefers_complementary_mechanisms() {
+        let actions = vec![
+            MechanismInformationGain {
+                action_id: "shared-high".into(),
+                feature_id: "f-shared-high".into(),
+                mechanism_order: vec!["m1".into(), "m2".into()],
+                expected_information_milli: 1_000_000,
+                adjusted_information_milli: 1_000_000,
+                measurement_uncertainty_milli: 100,
+                feasibility_milli: 900,
+                cost_units: 1,
+            },
+            MechanismInformationGain {
+                action_id: "orthogonal-a".into(),
+                feature_id: "f-orthogonal-a".into(),
+                mechanism_order: vec!["m3".into()],
+                expected_information_milli: 900_000,
+                adjusted_information_milli: 900_000,
+                measurement_uncertainty_milli: 100,
+                feasibility_milli: 900,
+                cost_units: 1,
+            },
+            MechanismInformationGain {
+                action_id: "orthogonal-b".into(),
+                feature_id: "f-orthogonal-b".into(),
+                mechanism_order: vec!["m4".into()],
+                expected_information_milli: 900_000,
+                adjusted_information_milli: 900_000,
+                measurement_uncertainty_milli: 100,
+                feasibility_milli: 900,
+                cost_units: 1,
+            },
+        ];
+        let selected = select_discriminator_actions(&actions, 2, 2)
+            .into_iter()
+            .map(|action| action.action_id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            selected,
+            BTreeSet::from(["orthogonal-a".to_string(), "orthogonal-b".to_string(),])
+        );
+    }
+
+    #[test]
+    fn mechanism_batch_budget_rejects_expensive_shortcut_for_complementary_pair() {
+        let actions = vec![
+            MechanismInformationGain {
+                action_id: "expensive-shortcut".into(),
+                feature_id: "f-expensive-shortcut".into(),
+                mechanism_order: vec!["m1".into(), "m2".into(), "m3".into()],
+                expected_information_milli: 1_000_000,
+                adjusted_information_milli: 1_000_000,
+                measurement_uncertainty_milli: 100,
+                feasibility_milli: 900,
+                cost_units: 6,
+            },
+            MechanismInformationGain {
+                action_id: "cheap-a".into(),
+                feature_id: "f-cheap-a".into(),
+                mechanism_order: vec!["m1".into(), "m2".into()],
+                expected_information_milli: 850_000,
+                adjusted_information_milli: 850_000,
+                measurement_uncertainty_milli: 100,
+                feasibility_milli: 900,
+                cost_units: 3,
+            },
+            MechanismInformationGain {
+                action_id: "cheap-b".into(),
+                feature_id: "f-cheap-b".into(),
+                mechanism_order: vec!["m3".into(), "m4".into()],
+                expected_information_milli: 850_000,
+                adjusted_information_milli: 850_000,
+                measurement_uncertainty_milli: 100,
+                feasibility_milli: 900,
+                cost_units: 3,
+            },
+        ];
+        let selected = select_discriminator_actions(&actions, 3, 6);
+        let selected_ids = selected
+            .iter()
+            .map(|action| action.action_id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(selected_ids, BTreeSet::from(["cheap-a", "cheap-b"]));
+        assert_eq!(
+            selected
+                .iter()
+                .map(|action| u64::from(action.cost_units))
+                .sum::<u64>(),
+            6
+        );
     }
 
     #[test]
@@ -387,6 +596,7 @@ mod tests {
                 model_system: GliomaModelSystem::Organoid,
                 modality: GliomaModality::Genomics,
                 max_actions: 2,
+                budget_units: 4,
             },
         )
         .unwrap();
@@ -400,5 +610,50 @@ mod tests {
             previous_results: Vec::new(),
         };
         assert!(planner.propose_actions(&context).unwrap().is_empty());
+    }
+
+    #[test]
+    fn planner_prefers_orthogonal_mechanisms_over_a_near_tied_duplicate() {
+        let actions = vec![
+            MechanismInformationGain {
+                action_id: "primary".into(),
+                feature_id: "f-primary".into(),
+                mechanism_order: vec!["m1".into(), "m2".into()],
+                expected_information_milli: 900_000,
+                adjusted_information_milli: 800_000,
+                measurement_uncertainty_milli: 100,
+                feasibility_milli: 900,
+                cost_units: 2,
+            },
+            MechanismInformationGain {
+                action_id: "redundant".into(),
+                feature_id: "f-redundant".into(),
+                mechanism_order: vec!["m1".into(), "m2".into()],
+                expected_information_milli: 880_000,
+                adjusted_information_milli: 790_000,
+                measurement_uncertainty_milli: 100,
+                feasibility_milli: 900,
+                cost_units: 2,
+            },
+            MechanismInformationGain {
+                action_id: "orthogonal".into(),
+                feature_id: "f-orthogonal".into(),
+                mechanism_order: vec!["m3".into(), "m4".into()],
+                expected_information_milli: 820_000,
+                adjusted_information_milli: 700_000,
+                measurement_uncertainty_milli: 100,
+                feasibility_milli: 900,
+                cost_units: 2,
+            },
+        ];
+        let selected = select_discriminator_actions(&actions, 2, 4);
+        let selected_ids = selected
+            .iter()
+            .map(|action| action.action_id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(selected_ids.len(), 2);
+        assert!(selected_ids.contains("primary"));
+        assert!(selected_ids.contains("orthogonal"));
+        assert!(!selected_ids.contains("redundant"));
     }
 }

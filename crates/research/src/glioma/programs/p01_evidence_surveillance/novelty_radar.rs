@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P01-F02";
-pub const OUTPUT_SCHEMA: &str = "GliomaEvidenceNoveltyRadar1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaEvidenceNoveltyRadar1@2";
 pub const MAX_RECORDS: usize = 4_096;
 pub const MAX_ACTIONS: usize = 1_024;
 
@@ -62,6 +62,8 @@ pub struct EvidenceNoveltyAction {
     pub source_id: String,
     pub rank: u32,
     pub disposition: EvidenceNoveltyActionDisposition,
+    /// Composite acquisition priority used for deterministic queue ordering.
+    pub priority_milli: u16,
     pub novelty_milli: u16,
     pub freshness_milli: u16,
     pub quality_milli: u16,
@@ -184,7 +186,8 @@ impl EvidenceNoveltyRadar {
             || self.output_schema != OUTPUT_SCHEMA
             || self.objective.trim().is_empty()
             || self.snapshot_id.trim().is_empty()
-            || !canonical(&self.action_order)
+            || self.action_order.iter().any(|id| id.trim().is_empty())
+            || self.action_order.windows(2).any(|pair| pair[0] == pair[1])
             || !canonical(&self.candidate_order)
             || !canonical(&self.review_order)
             || !canonical(&self.unresolved_evidence_order)
@@ -198,6 +201,7 @@ impl EvidenceNoveltyRadar {
                         .domain_gap_order
                         .windows(2)
                         .any(|pair| pair[0] >= pair[1])
+                    || action.priority_milli > 1_000
                     || action.novelty_milli > 1_000
                     || action.freshness_milli > 1_000
                     || action.quality_milli > 1_000
@@ -210,6 +214,18 @@ impl EvidenceNoveltyRadar {
             return Err(EvidenceNoveltyRadarError::InvalidOutput(
                 "radar identity, canonical ordering, score bounds, or action identity is invalid"
                     .into(),
+            ));
+        }
+        let action_ids = self
+            .actions
+            .iter()
+            .map(|action| action.action_id.clone())
+            .collect::<BTreeSet<_>>();
+        if self.action_order.len() != self.actions.len()
+            || self.action_order.iter().cloned().collect::<BTreeSet<_>>() != action_ids
+        {
+            return Err(EvidenceNoveltyRadarError::InvalidOutput(
+                "ranked action order must reconcile exactly with emitted actions".into(),
             ));
         }
         let expected = ContentHash::of_value(&digest_input(self))
@@ -359,6 +375,7 @@ pub fn rank_glioma_evidence_novelty(
             source_id: record.source_id.clone(),
             rank: 0,
             disposition,
+            priority_milli: score,
             novelty_milli: novelty,
             freshness_milli: freshness,
             quality_milli: record.quality_milli,
@@ -372,8 +389,10 @@ pub fn rank_glioma_evidence_novelty(
     }
     actions.sort_by(|left, right| {
         right
-            .novelty_milli
-            .cmp(&left.novelty_milli)
+            .priority_milli
+            .cmp(&left.priority_milli)
+            .then_with(|| right.novelty_milli.cmp(&left.novelty_milli))
+            .then_with(|| right.freshness_milli.cmp(&left.freshness_milli))
             .then(right.quality_milli.cmp(&left.quality_milli))
             .then(left.evidence_id.cmp(&right.evidence_id))
     });
@@ -460,6 +479,34 @@ pub fn rank_glioma_evidence_novelty(
 mod tests {
     use super::*;
 
+    fn record(
+        evidence_id: &str,
+        publication_tick: u64,
+        quality_milli: u16,
+        term_order: &[&str],
+    ) -> EvidenceNoveltyRecord {
+        EvidenceNoveltyRecord {
+            evidence_id: evidence_id.into(),
+            source_id: format!("source-{evidence_id}"),
+            title: format!("preclinical glioma evidence {evidence_id}"),
+            term_order: term_order.iter().map(|term| (*term).into()).collect(),
+            domain_order: vec!["core".into()],
+            claim_order: Vec::new(),
+            publication_tick,
+            quality_milli,
+            citation_count: 0,
+            artifact: LocalArtifactRef {
+                artifact_id: format!("artifact-{evidence_id}"),
+                content_hash: ContentHash::of_bytes(evidence_id.as_bytes()),
+                content_type: "application/json".into(),
+                local_only: true,
+                contains_human_data: false,
+                contains_direct_identifiers: false,
+            },
+            preclinical_only: true,
+        }
+    }
+
     #[test]
     fn overlap_and_freshness_are_bounded_and_deterministic() {
         let left = BTreeSet::from(["egfr".to_string(), "mapk".to_string()]);
@@ -467,5 +514,32 @@ mod tests {
         assert_eq!(overlap_milli(&left, &right), 333);
         assert_eq!(freshness_milli(100, 90, 20), 666);
         assert_eq!(freshness_milli(100, 100, 20), 1_000);
+    }
+
+    #[test]
+    fn composite_priority_can_promote_fresh_quality_over_raw_novelty() {
+        let request = EvidenceNoveltyRadarRequest {
+            objective: "find new glioma evidence".into(),
+            snapshot_id: "snapshot-1".into(),
+            as_of_tick: 100,
+            novelty_floor_milli: 1,
+            quality_floor_milli: 0,
+            freshness_window_ticks: 10,
+            max_actions: 2,
+            known_term_order: vec!["common".into()],
+            known_domain_order: vec!["core".into()],
+            known_claim_order: Vec::new(),
+            records: vec![
+                record("old-novel", 0, 0, &["rare"]),
+                record("fresh-supported", 100, 1_000, &["common", "new"]),
+            ],
+        };
+
+        let radar = rank_glioma_evidence_novelty(&request).unwrap();
+
+        assert_eq!(radar.actions[0].evidence_id, "fresh-supported");
+        assert!(radar.actions[0].priority_milli > radar.actions[1].priority_milli);
+        assert!(radar.actions[1].novelty_milli > radar.actions[0].novelty_milli);
+        radar.validate().unwrap();
     }
 }

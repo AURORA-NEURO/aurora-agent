@@ -185,18 +185,12 @@ fn estimate(rows: &[Row<'_>], control_arm: &str, treatment_arm: &str) -> Option<
     );
     let mediator_effect = treatment_mediator_mean.saturating_sub(control_mediator_mean);
     let total_effect = treatment_outcome_mean.saturating_sub(control_outcome_mean);
-    let pooled_mediator_mean = mean(
-        &rows
-            .iter()
-            .map(|row| row.observation.mediator_milli)
-            .collect::<Vec<_>>(),
-    );
-    let pooled_outcome_mean = mean(
-        &rows
-            .iter()
-            .map(|row| row.observation.outcome_milli)
-            .collect::<Vec<_>>(),
-    );
+    // Estimate the mediator/outcome relationship *within* each arm. Centering on the
+    // pooled means would let the treatment contrast itself manufacture covariance (for
+    // example, a treatment arm with both a larger mediator and larger outcome would look
+    // mediated even when neither arm has any mediator/outcome gradient). The within-arm
+    // slope is the useful decomposition for a declared treatment/control contrast and is
+    // invariant to the arbitrary separation between the two arms.
     let mut variance_sum = 0_i128;
     let mut covariance_sum = 0_i128;
     let mut residual_sum = 0_u128;
@@ -205,10 +199,15 @@ fn estimate(rows: &[Row<'_>], control_arm: &str, treatment_arm: &str) -> Option<
         .map(|row| u128::from(row.observation.uncertainty_milli))
         .sum::<u128>();
     for row in rows {
+        let (arm_mediator_mean, arm_outcome_mean) = if row.observation.arm_id == control_arm {
+            (control_mediator_mean, control_outcome_mean)
+        } else {
+            (treatment_mediator_mean, treatment_outcome_mean)
+        };
         let mediator_delta = i128::from(row.observation.mediator_milli)
-            .saturating_sub(i128::from(pooled_mediator_mean));
-        let outcome_delta = i128::from(row.observation.outcome_milli)
-            .saturating_sub(i128::from(pooled_outcome_mean));
+            .saturating_sub(i128::from(arm_mediator_mean));
+        let outcome_delta =
+            i128::from(row.observation.outcome_milli).saturating_sub(i128::from(arm_outcome_mean));
         variance_sum = variance_sum.saturating_add(mediator_delta.saturating_mul(mediator_delta));
         covariance_sum =
             covariance_sum.saturating_add(mediator_delta.saturating_mul(outcome_delta));
@@ -223,11 +222,16 @@ fn estimate(rows: &[Row<'_>], control_arm: &str, treatment_arm: &str) -> Option<
     );
     let direct_effect = total_effect.saturating_sub(indirect_effect);
     for row in rows {
-        let fitted = i128::from(pooled_outcome_mean).saturating_add(
+        let (arm_mediator_mean, arm_outcome_mean) = if row.observation.arm_id == control_arm {
+            (control_mediator_mean, control_outcome_mean)
+        } else {
+            (treatment_mediator_mean, treatment_outcome_mean)
+        };
+        let fitted = i128::from(arm_outcome_mean).saturating_add(
             i128::from(slope)
                 .saturating_mul(
                     i128::from(row.observation.mediator_milli)
-                        .saturating_sub(i128::from(pooled_mediator_mean)),
+                        .saturating_sub(i128::from(arm_mediator_mean)),
                 )
                 .saturating_div(1_000),
         );
@@ -649,5 +653,24 @@ mod tests {
         let output = analyze_glioma_mediation(&request(), &observations).unwrap();
         assert_eq!(output.disposition, MediationDisposition::Negative);
         assert!(!output.negative_evidence.is_empty());
+    }
+
+    #[test]
+    fn between_arm_separation_does_not_create_a_mediation_signal() {
+        // The arms are far apart in both mediator and outcome, but neither arm has an
+        // outcome gradient as the mediator changes. A pooled covariance estimator would
+        // incorrectly report a large indirect effect from the treatment contrast alone.
+        let observations = vec![
+            observation("c1", "u1", "control", 100, 100),
+            observation("c2", "u2", "control", 110, 100),
+            observation("t1", "u3", "treatment", 200, 1_000),
+            observation("t2", "u4", "treatment", 210, 1_000),
+        ];
+        let output = analyze_glioma_mediation(&request(), &observations).unwrap();
+        assert_eq!(output.mediator_outcome_slope_milli, 0);
+        assert_eq!(output.indirect_effect_milli, 0);
+        assert!(output
+            .negative_evidence
+            .contains(&"indirect-effect-below-declared-threshold".into()));
     }
 }

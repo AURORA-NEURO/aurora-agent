@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F29";
-pub const OUTPUT_SCHEMA: &str = "GliomaMechanismValidationPlan1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaMechanismValidationPlan1@2";
 pub const MAX_ARMS: usize = 256;
 pub const MAX_OBSERVATIONS: usize = 16_384;
 pub const MAX_ACTIONS: usize = 512;
@@ -104,6 +104,7 @@ pub struct MechanismValidationPlan {
     pub missing_candidate_order: Vec<String>,
     pub missing_observation_order: Vec<String>,
     pub action_order: Vec<String>,
+    pub deferred_action_order: Vec<String>,
     pub actions: Vec<ValidationAction>,
     pub negative_evidence: Vec<String>,
     pub uncertainty: Vec<String>,
@@ -142,6 +143,7 @@ fn digest_input(output: &MechanismValidationPlan) -> serde_json::Value {
         "missing_candidate_order": output.missing_candidate_order,
         "missing_observation_order": output.missing_observation_order,
         "action_order": output.action_order,
+        "deferred_action_order": output.deferred_action_order,
         "actions": output.actions,
         "negative_evidence": output.negative_evidence,
         "uncertainty": output.uncertainty,
@@ -267,6 +269,8 @@ impl MechanismValidationPlan {
             || !canonical(&self.mapped_arm_order)
             || !canonical(&self.missing_candidate_order)
             || !canonical(&self.missing_observation_order)
+            || !canonical(&self.action_order)
+            || !canonical(&self.deferred_action_order)
             || self.actions.len() > MAX_ACTIONS
             || self.actions.len() != self.action_order.len()
             || !canonical(&self.negative_evidence)
@@ -316,6 +320,13 @@ impl MechanismValidationPlan {
             .collect::<BTreeSet<_>>();
         if action_ids.len() != self.actions.len()
             || action_ids != self.action_order.iter().cloned().collect::<BTreeSet<_>>()
+            || !action_ids.is_disjoint(
+                &self
+                    .deferred_action_order
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<_>>(),
+            )
             || self.actions.windows(2).any(|pair| {
                 pair[0].priority_milli < pair[1].priority_milli
                     || (pair[0].priority_milli == pair[1].priority_milli
@@ -552,11 +563,30 @@ pub fn plan_glioma_mechanism_validation(
             .cmp(&left.priority_milli)
             .then_with(|| left.action_id.cmp(&right.action_id))
     });
-    actions.truncate(MAX_ACTIONS);
-    let action_order = actions
+    let generated_action_order: Vec<String> = actions
         .iter()
         .map(|action| action.action_id.clone())
         .collect();
+    let selected_actions = actions
+        .iter()
+        .take(MAX_ACTIONS)
+        .cloned()
+        .collect::<Vec<_>>();
+    let selected_ids = selected_actions
+        .iter()
+        .map(|action| action.action_id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut action_order = selected_ids.iter().cloned().collect::<Vec<_>>();
+    action_order.sort();
+    let mut deferred_action_order = generated_action_order
+        .into_iter()
+        .filter(|action_id| !selected_ids.contains(action_id))
+        .collect::<Vec<_>>();
+    deferred_action_order.sort();
+    actions = selected_actions;
+    if !deferred_action_order.is_empty() {
+        uncertainty.push("validation-actions-deferred-at-capacity-bound".into());
+    }
     negative.sort();
     negative.dedup();
     uncertainty.sort();
@@ -623,6 +653,7 @@ pub fn plan_glioma_mechanism_validation(
         missing_candidate_order,
         missing_observation_order,
         action_order,
+        deferred_action_order,
         actions,
         negative_evidence: negative,
         uncertainty,

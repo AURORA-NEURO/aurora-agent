@@ -340,19 +340,23 @@ mod tests {
     use crate::glioma::programs::p08_instrument_robotics::campaign::InstrumentCampaignRunRequest;
     use crate::glioma::programs::p08_instrument_robotics::execution::InstrumentExecutionRequest;
     use crate::glioma::programs::p08_instrument_robotics::preflight::{
-        InstrumentActionDecision, InstrumentActionDisposition, InstrumentAuthorization,
-        InstrumentInterlockSnapshot, InstrumentPreflightPlan,
+        action_manifest_digest, InstrumentAction, InstrumentActionDecision,
+        InstrumentActionDisposition, InstrumentAuthorization, InstrumentInterlockSnapshot,
+        InstrumentPreflightPlan,
     };
     use crate::glioma_engine::GliomaModelSystem;
 
     fn blocked_request() -> InstrumentOperatingCycleRequest {
+        let empty_action_manifest_digest =
+            action_manifest_digest(&Vec::<InstrumentAction>::new()).unwrap();
         let plan_without_digest = serde_json::json!({
             "feature_id": "GAF-GLIOMA-P08-F10",
-            "output_schema": "GliomaInstrumentPreflight1@1",
+            "output_schema": "GliomaInstrumentPreflight1@2",
             "objective": "blocked instrument run",
             "instrument_id": "imager-1",
             "model_system": "organoid",
             "authorization_id": "approval-1",
+            "action_manifest_digest": empty_action_manifest_digest.clone(),
             "action_order": ["acquire"],
             "admitted_order": [],
             "blocked_order": ["acquire"],
@@ -376,11 +380,12 @@ mod tests {
         let plan_digest = ContentHash::of_value(&plan_without_digest).unwrap();
         let plan = InstrumentPreflightPlan {
             feature_id: "GAF-GLIOMA-P08-F10".into(),
-            output_schema: "GliomaInstrumentPreflight1@1".into(),
+            output_schema: "GliomaInstrumentPreflight1@2".into(),
             objective: "blocked instrument run".into(),
             instrument_id: "imager-1".into(),
             model_system: GliomaModelSystem::Organoid,
             authorization_id: "approval-1".into(),
+            action_manifest_digest: empty_action_manifest_digest,
             action_order: vec!["acquire".into()],
             admitted_order: Vec::new(),
             blocked_order: vec!["acquire".into()],

@@ -404,16 +404,25 @@ pub fn execute_glioma_robust_active_learning_campaign<E: RobustActiveLearningCam
         let mut round_failed_order = Vec::new();
         for candidate_id in &plan.selected_order {
             let candidate = candidate_map[candidate_id];
-            if candidate.cost_units > budget {
-                if failed.insert(candidate_id.clone()) {
-                    failed_order.push(candidate_id.clone());
-                    round_failed_order.push(candidate_id.clone());
-                }
-                negative.insert(format!("{candidate_id}:budget-exhausted-before-execution"));
-                continue;
-            }
             let mut accepted = None;
             for attempt in 1..=request.max_retries.saturating_add(1) {
+                // Every local model/assay invocation consumes its declared cost. Charge before
+                // dispatch so a failed attempt or retry cannot create unreported budget headroom.
+                if candidate.cost_units > budget {
+                    let reason = if attempt == 1 {
+                        "budget-exhausted-before-execution"
+                    } else {
+                        "retry-budget-exhausted-before-attempt"
+                    };
+                    uncertainty.insert(format!("{candidate_id}:{reason}"));
+                    if failed.insert(candidate_id.clone()) {
+                        failed_order.push(candidate_id.clone());
+                        round_failed_order.push(candidate_id.clone());
+                    }
+                    break;
+                }
+                budget = budget.saturating_sub(candidate.cost_units);
+                budget_spent = budget_spent.saturating_add(candidate.cost_units);
                 match executor.execute_candidate(candidate, attempt) {
                     Ok(observation) => {
                         if observation.candidate_id != candidate.candidate_id
@@ -432,7 +441,11 @@ pub fn execute_glioma_robust_active_learning_campaign<E: RobustActiveLearningCam
                         break;
                     }
                     Err(error) if error.retryable && attempt <= request.max_retries => {
-                        retry_count = retry_count.saturating_add(1);
+                        // A retry is counted only if the next loop iteration can actually fund
+                        // and dispatch it.
+                        if candidate.cost_units <= budget {
+                            retry_count = retry_count.saturating_add(1);
+                        }
                     }
                     Err(error) => {
                         if failed.insert(candidate_id.clone()) {
@@ -448,8 +461,6 @@ pub fn execute_glioma_robust_active_learning_campaign<E: RobustActiveLearningCam
                 }
             }
             if let Some(observation) = accepted {
-                budget = budget.saturating_sub(candidate.cost_units);
-                budget_spent = budget_spent.saturating_add(candidate.cost_units);
                 if completed.insert(candidate_id.clone()) {
                     completed_order.push(candidate_id.clone());
                 }
@@ -619,6 +630,73 @@ mod tests {
         let mut changed = request.clone();
         changed.robust_active_learning.models[0].intercept_milli += 1;
         assert!(campaign.validate_against(&changed).is_err());
+    }
+
+    #[derive(Default)]
+    struct RetryThenSuccess {
+        attempts: u8,
+    }
+
+    impl RobustActiveLearningCampaignExecutor for RetryThenSuccess {
+        fn execute_candidate(
+            &mut self,
+            candidate: &RobustActiveLearningCandidate,
+            attempt: u8,
+        ) -> Result<RobustActiveLearningObservation, RobustActiveLearningExecutionFailure> {
+            self.attempts = self.attempts.saturating_add(1);
+            if attempt == 1 {
+                return Err(RobustActiveLearningExecutionFailure {
+                    reason: "transient model runner lock".into(),
+                    retryable: true,
+                });
+            }
+            DryRunRobustActiveLearningCampaignExecutor::default()
+                .execute_candidate(candidate, attempt)
+        }
+    }
+
+    #[test]
+    fn retry_attempts_are_charged_before_dispatch() {
+        let mut campaign_request = request();
+        campaign_request.robust_active_learning.budget_units = 4;
+        campaign_request.max_rounds = 1;
+        let mut executor = RetryThenSuccess::default();
+        let campaign =
+            execute_glioma_robust_active_learning_campaign(&campaign_request, &mut executor)
+                .unwrap();
+
+        assert_eq!(executor.attempts, 2);
+        assert_eq!(campaign.retry_count, 1);
+        assert_eq!(campaign.budget_spent_units, 4);
+        assert_eq!(campaign.remaining_budget_units, 0);
+        assert_eq!(campaign.completed_order.len(), 1);
+        campaign.validate().unwrap();
+    }
+
+    #[test]
+    fn unfundable_retry_is_not_dispatched_or_reported_as_negative_science() {
+        let mut campaign_request = request();
+        campaign_request.robust_active_learning.budget_units = 3;
+        campaign_request.max_rounds = 1;
+        let mut executor = RetryThenSuccess::default();
+        let campaign =
+            execute_glioma_robust_active_learning_campaign(&campaign_request, &mut executor)
+                .unwrap();
+
+        assert_eq!(executor.attempts, 1);
+        assert_eq!(campaign.retry_count, 0);
+        assert_eq!(campaign.budget_spent_units, 2);
+        assert_eq!(campaign.remaining_budget_units, 1);
+        assert_eq!(campaign.failed_order.len(), 1);
+        assert!(campaign
+            .uncertainty
+            .iter()
+            .any(|item| item.ends_with(":retry-budget-exhausted-before-attempt")));
+        assert!(!campaign
+            .negative_evidence
+            .iter()
+            .any(|item| item.contains("budget-exhausted")));
+        campaign.validate().unwrap();
     }
 
     #[test]

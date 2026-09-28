@@ -19,10 +19,12 @@ pub mod feedback_replan;
 pub mod fidelity_bridge;
 pub mod graph_propagation;
 pub mod identifiability;
+pub mod instrument_campaign;
 pub mod intervention_value;
 pub mod invariance;
 pub mod mechanism_dynamics;
 pub mod mechanism_workflow;
+pub mod morphodynamic_reducer;
 pub mod multi_fidelity_control;
 pub mod multi_study_workflow;
 pub mod operating_cycle;
@@ -32,6 +34,7 @@ pub mod robust_portfolio;
 pub mod robustness_stress;
 pub mod state_filter;
 pub mod state_smoother;
+pub mod temporal_multimodal_fusion;
 pub mod workflow_assurance;
 
 pub use action_planner::{
@@ -132,6 +135,11 @@ pub use identifiability::{
     MechanismIdentifiabilityRequest, MechanismPairIdentifiability,
     analyze_glioma_mechanism_identifiability,
 };
+pub use instrument_campaign::{
+    execute_glioma_instrument_backed_mechanism_campaign, InstrumentBackedMechanismActionRun,
+    InstrumentBackedMechanismCampaignError, InstrumentBackedMechanismCampaignRun,
+    MechanismInstrumentActionBinding, MechanismPhenotypeReducer, MechanismPhenotypeReduction,
+};
 pub use intervention_value::{
     MechanismInterventionCandidate, MechanismInterventionPrediction, MechanismInterventionValue,
     MechanismInterventionValueDisposition, MechanismInterventionValueError,
@@ -154,6 +162,10 @@ pub use mechanism_workflow::{
     MechanismWorkflowAction, MechanismWorkflowDisposition, MechanismWorkflowError,
     MechanismWorkflowNode, MechanismWorkflowNodeStatus, MechanismWorkflowPlan,
     MechanismWorkflowRequest, compile_glioma_mechanism_workflow,
+};
+pub use morphodynamic_reducer::{
+    GliomaMorphodynamicMechanismReducer, LocalMorphodynamicArtifactStore,
+    MorphodynamicMechanismFeatureRoute,
 };
 pub use multi_fidelity_control::{
     MultiFidelityControlActionScore, MultiFidelityControlCandidate, MultiFidelityControlDecision,
@@ -205,6 +217,13 @@ pub use state_smoother::{
     MechanismStateSmoothPosterior, MechanismStateSmootherDisposition, MechanismStateSmootherError,
     MechanismStateSmootherRequest, MechanismStateSmootherResult, MechanismStateTransitionSupport,
     smooth_glioma_mechanism_states,
+};
+pub use temporal_multimodal_fusion::{
+    execute_glioma_temporal_multimodal_mechanism_fusion, TemporalAcquisitionCandidate,
+    TemporalMechanismAssessment, TemporalMechanismDisposition, TemporalMechanismHypothesis,
+    TemporalMechanismObservation, TemporalMechanismPrediction, TemporalMultimodalFusionDisposition,
+    TemporalMultimodalMechanismFusion, TemporalMultimodalMechanismFusionError,
+    TemporalMultimodalMechanismFusionRequest,
 };
 pub use workflow_assurance::{
     MechanismAssuranceDecision, MechanismAssuranceDisposition, MechanismAssuranceStatus,

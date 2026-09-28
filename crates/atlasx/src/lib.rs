@@ -140,6 +140,7 @@ pub mod browse;
 pub mod catalogue;
 pub mod debt;
 pub mod error;
+pub mod mechanism_contract_model;
 pub mod surface;
 
 pub use browse::{
@@ -151,6 +152,13 @@ pub use catalogue::{
 };
 pub use debt::{DebtStatement, DebtStatementFields, Discharge, Hole};
 pub use error::AtlasxError;
+pub use mechanism_contract_model::{
+    admit_atlasx_mechanism_contract, mechanism_contract_model_manifest, AtlasxMechanismCandidate5,
+    AtlasxMechanismPeer5, AtlasxMechanismPortfolio2, AtlasxMechanismPortfolio2Artifact,
+    AtlasxMechanismQuestion4, MechanismContractModelError, MechanismEvidenceState,
+    CONTRACT_VERSION as ATLASX_MECHANISM_CONTRACT_VERSION,
+    FEATURE_ID as ATLASX_MECHANISM_FEATURE_ID,
+};
 pub use surface::{
     audit, Answer, Audit, Question, Share, ShareFields, Surface, SurfaceCell, Unanswerable,
 };
@@ -164,7 +172,6 @@ pub const ATLASX_SCHEMA_VERSION: &str = "bioprism-atlasx/0.1";
 pub mod computational_execution_assurance;
 pub mod context_compilation_assurance;
 pub mod federated_execution_control_plane;
-pub mod mechanism_contract_model;
 pub use computational_execution_assurance::{
     assure_computational_execution, computational_execution_assurance_manifest,
     ComputationalExecutionError, ExecutionArtifact7, ExecutionEvidenceState, ExecutionNode3,
@@ -183,11 +190,4 @@ pub use federated_execution_control_plane::{
     ExecutionNode5, ExecutionRun8, FederatedExecutionError, PeerAttestation5,
     ResearchWorkflowSpec4, CONTRACT_VERSION as FEDERATED_EXECUTION_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_EXECUTION_CONTROL_FEATURE_ID,
-};
-pub use mechanism_contract_model::{
-    admit_atlasx_mechanism_contract, mechanism_contract_model_manifest, AtlasxMechanismCandidate5,
-    AtlasxMechanismPeer5, AtlasxMechanismPortfolio2, AtlasxMechanismPortfolio2Artifact,
-    AtlasxMechanismQuestion4, MechanismContractModelError, MechanismEvidenceState,
-    CONTRACT_VERSION as ATLASX_MECHANISM_CONTRACT_VERSION,
-    FEATURE_ID as ATLASX_MECHANISM_FEATURE_ID,
 };

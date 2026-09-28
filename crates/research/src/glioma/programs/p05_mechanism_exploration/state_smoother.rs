@@ -368,14 +368,19 @@ fn observation_coverage(
 }
 
 fn emission(model: &MechanismStateModel, observations: &[&MechanismStateObservation]) -> u64 {
-    let compatibilities = observations
+    let mut compatibilities = observations
         .iter()
         .filter_map(|observation| compatibility_milli(model, observation))
         .collect::<Vec<_>>();
     if compatibilities.is_empty() {
         1_000
     } else {
-        compatibilities.iter().sum::<u64>() / compatibilities.len() as u64
+        // A lower-median consensus prevents a model that contradicts one or more measured
+        // features from looking well-supported merely because it fits another feature extremely
+        // well. It remains bounded and replay-stable, while the per-feature negative evidence
+        // emitted by the caller keeps the disagreement inspectable.
+        compatibilities.sort_unstable();
+        compatibilities[(compatibilities.len() - 1) / 2]
     }
 }
 
@@ -772,5 +777,52 @@ mod tests {
                 .iter()
                 .any(|posterior| !posterior.negative_feature_order.is_empty())
         );
+    }
+
+    #[test]
+    fn emission_consensus_does_not_average_away_a_contradictory_feature() {
+        let growth = MechanismStateModel {
+            mechanism_id: "growth".into(),
+            statement: "growth mechanism".into(),
+            prior_milli: 500,
+            transition_milli_by_state: BTreeMap::from([
+                ("growth".into(), 900),
+                ("stress".into(), 100),
+            ]),
+            predictions_milli: BTreeMap::from([
+                ("feature-a".into(), 800),
+                ("feature-b".into(), 800),
+                ("feature-c".into(), 100),
+            ]),
+            process_uncertainty_milli: 100,
+        };
+        let observations = [
+            MechanismStateObservation {
+                timepoint: 1,
+                feature_id: "feature-a".into(),
+                modality: GliomaModality::Imaging,
+                observed_milli: 800,
+                measurement_uncertainty_milli: 50,
+                artifact: artifact("a"),
+            },
+            MechanismStateObservation {
+                timepoint: 1,
+                feature_id: "feature-b".into(),
+                modality: GliomaModality::Imaging,
+                observed_milli: 800,
+                measurement_uncertainty_milli: 50,
+                artifact: artifact("b"),
+            },
+            MechanismStateObservation {
+                timepoint: 1,
+                feature_id: "feature-c".into(),
+                modality: GliomaModality::Imaging,
+                observed_milli: 800,
+                measurement_uncertainty_milli: 50,
+                artifact: artifact("c"),
+            },
+        ];
+        let references = observations.iter().collect::<Vec<_>>();
+        assert_eq!(emission(&growth, &references), 1_000);
     }
 }

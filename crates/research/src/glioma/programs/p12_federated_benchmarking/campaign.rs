@@ -13,16 +13,17 @@ use super::consensus::{
 use crate::glioma_engine::LocalArtifactRef;
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P12-F10";
-pub const OUTPUT_SCHEMA: &str = "GliomaFederatedBenchmarkCampaign1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaFederatedBenchmarkCampaign1@2";
 pub const MAX_ROUNDS: u16 = 32;
 pub const MAX_ACTIONS: usize = 256;
 pub const MAX_RETRIES: u8 = 6;
+const PORTFOLIO_BEAM_WIDTH: usize = 64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FederatedBenchmarkActionKind {
     ReplicateSite,
@@ -285,6 +286,211 @@ fn action_score(
     value.saturating_sub(penalty)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum BenchmarkEvidenceGap {
+    SiteCoverage,
+    ReplicateFloor,
+    Heterogeneity,
+    Influence,
+    Signal,
+}
+
+/// Convert consensus diagnostics into the evidence gaps an autonomous portfolio must close.
+/// Action kind and target diversity alone are insufficient: two different actions can still spend
+/// a round without addressing the missing-site, heterogeneity, influence, or signal gate that
+/// currently blocks a federated conclusion.
+fn evidence_gaps(consensus: &FederatedBenchmarkConsensus) -> BTreeSet<BenchmarkEvidenceGap> {
+    let mut gaps = BTreeSet::new();
+    for evidence in consensus
+        .negative_evidence
+        .iter()
+        .chain(consensus.uncertainty.iter())
+    {
+        if evidence.contains("minimum-site-count") || evidence.contains("site-count") {
+            gaps.insert(BenchmarkEvidenceGap::SiteCoverage);
+        }
+        if evidence.contains("replicate-floor") {
+            gaps.insert(BenchmarkEvidenceGap::ReplicateFloor);
+        }
+        if evidence.contains("heterogeneity")
+            || evidence.contains("direction-contradiction")
+            || evidence.contains("score-spread")
+        {
+            gaps.insert(BenchmarkEvidenceGap::Heterogeneity);
+        }
+        if evidence.contains("leave-one-site") || evidence.contains("influence") {
+            gaps.insert(BenchmarkEvidenceGap::Influence);
+        }
+        if evidence.contains("signal-threshold") || evidence.contains("underperforms") {
+            gaps.insert(BenchmarkEvidenceGap::Signal);
+        }
+    }
+    gaps
+}
+
+fn action_covers_gap(action: &FederatedBenchmarkAction, gap: BenchmarkEvidenceGap) -> bool {
+    match gap {
+        BenchmarkEvidenceGap::SiteCoverage => {
+            matches!(action.kind, FederatedBenchmarkActionKind::ExpandCoverage)
+        }
+        BenchmarkEvidenceGap::ReplicateFloor => {
+            matches!(action.kind, FederatedBenchmarkActionKind::ReplicateSite)
+        }
+        BenchmarkEvidenceGap::Heterogeneity => matches!(
+            action.kind,
+            FederatedBenchmarkActionKind::ResolveHeterogeneity
+                | FederatedBenchmarkActionKind::RecalibrateSite
+                | FederatedBenchmarkActionKind::ReplicateSite
+        ),
+        BenchmarkEvidenceGap::Influence => matches!(
+            action.kind,
+            FederatedBenchmarkActionKind::AuditInfluentialSite
+                | FederatedBenchmarkActionKind::RecalibrateSite
+        ),
+        BenchmarkEvidenceGap::Signal => matches!(
+            action.kind,
+            FederatedBenchmarkActionKind::ReplicateSite
+                | FederatedBenchmarkActionKind::ExpandCoverage
+                | FederatedBenchmarkActionKind::ResolveHeterogeneity
+        ),
+    }
+}
+
+#[derive(Clone)]
+struct BenchmarkPortfolioState {
+    selected_indices: Vec<usize>,
+    spent: u64,
+    utility: u128,
+}
+
+fn portfolio_state_better(
+    left: &BenchmarkPortfolioState,
+    right: &BenchmarkPortfolioState,
+    actions: &[&FederatedBenchmarkAction],
+) -> bool {
+    if left.utility != right.utility {
+        return left.utility > right.utility;
+    }
+    if left.selected_indices.len() != right.selected_indices.len() {
+        return left.selected_indices.len() > right.selected_indices.len();
+    }
+    if left.spent != right.spent {
+        return left.spent < right.spent;
+    }
+    left.selected_indices
+        .iter()
+        .map(|index| actions[*index].action_id.as_str())
+        .cmp(
+            right
+                .selected_indices
+                .iter()
+                .map(|index| actions[*index].action_id.as_str()),
+        )
+        == std::cmp::Ordering::Less
+}
+
+fn benchmark_portfolio_utility(
+    selected_indices: &[usize],
+    actions: &[&FederatedBenchmarkAction],
+    consensus: &FederatedBenchmarkConsensus,
+) -> u128 {
+    let gaps = evidence_gaps(consensus);
+    let mut covered_gaps = BTreeSet::new();
+    let mut kind_counts = BTreeMap::<FederatedBenchmarkActionKind, u64>::new();
+    let mut target_counts = BTreeMap::<Option<&str>, u64>::new();
+    for index in selected_indices {
+        let action = actions[*index];
+        *kind_counts.entry(action.kind).or_default() += 1;
+        *target_counts
+            .entry(action.target_site_id.as_deref())
+            .or_default() += 1;
+    }
+    selected_indices
+        .iter()
+        .map(|index| {
+            let action = actions[*index];
+            let kind_diversity = 1_000_u64 / kind_counts[&action.kind];
+            let target_diversity = 1_000_u64 / target_counts[&action.target_site_id.as_deref()];
+            let diversity = (kind_diversity + target_diversity) / 2;
+            let newly_covered = gaps
+                .iter()
+                .filter(|gap| action_covers_gap(action, **gap) && !covered_gaps.contains(*gap))
+                .count() as u64;
+            for gap in gaps.iter().filter(|gap| action_covers_gap(action, **gap)) {
+                covered_gaps.insert(*gap);
+            }
+            // Closing an unresolved consortium gate is intentionally worth up to 2x a
+            // same-round raw score: a high-information action that leaves the required site
+            // coverage unresolved is not a productive autonomous research step.
+            let gap_multiplier_milli = 1_000_u64.saturating_add((newly_covered > 0) as u64 * 1_000);
+            action_score(action, consensus)
+                .saturating_mul(u128::from(diversity))
+                .saturating_mul(u128::from(gap_multiplier_milli))
+                / 1_000
+        })
+        .sum()
+}
+
+fn select_benchmark_portfolio<'a>(
+    eligible: &[&'a FederatedBenchmarkAction],
+    consensus: &FederatedBenchmarkConsensus,
+    remaining: u64,
+) -> Vec<&'a FederatedBenchmarkAction> {
+    let mut beam = vec![BenchmarkPortfolioState {
+        selected_indices: Vec::new(),
+        spent: 0,
+        utility: 0,
+    }];
+    for index in 0..eligible.len() {
+        let mut expanded = beam.clone();
+        for state in &beam {
+            if state.selected_indices.len() >= 8 {
+                continue;
+            }
+            let cost = u64::from(eligible[index].cost_units);
+            if state.spent.saturating_add(cost) > remaining {
+                continue;
+            }
+            let mut selected_indices = state.selected_indices.clone();
+            selected_indices.push(index);
+            let spent = state.spent.saturating_add(cost);
+            let utility = benchmark_portfolio_utility(&selected_indices, eligible, consensus);
+            expanded.push(BenchmarkPortfolioState {
+                selected_indices,
+                spent,
+                utility,
+            });
+        }
+        expanded.sort_by(|left, right| {
+            if portfolio_state_better(left, right, eligible) {
+                std::cmp::Ordering::Less
+            } else if portfolio_state_better(right, left, eligible) {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        });
+        let mut seen = BTreeSet::new();
+        expanded.retain(|state| seen.insert(state.selected_indices.clone()));
+        expanded.truncate(PORTFOLIO_BEAM_WIDTH);
+        beam = expanded;
+    }
+    let selected = beam
+        .iter()
+        .max_by(|left, right| {
+            if portfolio_state_better(left, right, eligible) {
+                std::cmp::Ordering::Greater
+            } else if portfolio_state_better(right, left, eligible) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .map(|state| state.selected_indices.clone())
+        .unwrap_or_default();
+    selected.into_iter().map(|index| eligible[index]).collect()
+}
+
 impl FederatedBenchmarkCampaign {
     pub fn validate(&self) -> Result<(), FederatedBenchmarkCampaignError> {
         if self.feature_id != FEATURE_ID
@@ -460,18 +666,7 @@ pub fn execute_federated_benchmark_campaign<E: FederatedBenchmarkCampaignExecuto
             };
             break;
         }
-        let mut selected = Vec::new();
-        let mut selected_cost = 0_u64;
-        for action in eligible {
-            let cost = u64::from(action.cost_units);
-            if selected.is_empty() || selected_cost.saturating_add(cost) <= remaining {
-                selected_cost = selected_cost.saturating_add(cost);
-                selected.push(action);
-            }
-            if selected.len() >= 8 {
-                break;
-            }
-        }
+        let selected = select_benchmark_portfolio(&eligible, &consensus, remaining);
         if selected.is_empty() {
             stop_reason = FederatedBenchmarkCampaignStopReason::BudgetExhausted;
             break;
@@ -481,9 +676,23 @@ pub fn execute_federated_benchmark_campaign<E: FederatedBenchmarkCampaignExecuto
         let mut failed_action_order = Vec::new();
         let mut round_retry_count = 0_u32;
         let mut progress = false;
+        let mut round_spent = 0_u64;
+        let mut budget_exhausted_during_execution = false;
         for action in selected.iter().copied() {
+            let action_cost = u64::from(action.cost_units);
+            if round_spent.saturating_add(action_cost) > remaining {
+                budget_exhausted_during_execution = true;
+                break;
+            }
             let mut returned = None;
             for attempt in 1..=request.max_retries.saturating_add(1) {
+                if round_spent.saturating_add(action_cost) > remaining {
+                    budget_exhausted_during_execution = true;
+                    failed_action_order.push(action.action_id.clone());
+                    failed.insert(action.action_id.clone());
+                    break;
+                }
+                round_spent = round_spent.saturating_add(action_cost);
                 match executor.execute_action(action, &request.benchmark, attempt) {
                     Ok(site) => {
                         validate_returned_site(&site, &request.benchmark, &sites)?;
@@ -518,7 +727,7 @@ pub fn execute_federated_benchmark_campaign<E: FederatedBenchmarkCampaignExecuto
         }
         returned_site_order.sort();
         failed_action_order.sort();
-        budget_spent = budget_spent.saturating_add(selected_cost);
+        budget_spent = budget_spent.saturating_add(round_spent);
         let after_budget = request.budget_units.saturating_sub(budget_spent);
         let updated = analyze_federated_benchmark(&request.benchmark, &sites)
             .map_err(|error| FederatedBenchmarkCampaignError::Planning(error.to_string()))?;
@@ -531,11 +740,15 @@ pub fn execute_federated_benchmark_campaign<E: FederatedBenchmarkCampaignExecuto
             returned_site_order,
             failed_action_order: failed_action_order.clone(),
             consensus_disposition: updated.disposition,
-            cost_units: selected_cost.min(u64::from(u32::MAX)) as u32,
+            cost_units: round_spent.min(u64::from(u32::MAX)) as u32,
             budget_before_units: before_budget,
             budget_after_units: after_budget,
             retry_count: round_retry_count,
         });
+        if budget_exhausted_during_execution {
+            stop_reason = FederatedBenchmarkCampaignStopReason::BudgetExhausted;
+            break;
+        }
         if !failed_action_order.is_empty() {
             stop_reason = FederatedBenchmarkCampaignStopReason::ExecutorFailed;
             break;
@@ -709,6 +922,195 @@ mod tests {
         assert_eq!(first.completed_action_order.len(), 2);
         assert_eq!(first.sites.len(), 3);
         first.validate().unwrap();
+    }
+
+    #[test]
+    fn portfolio_beam_prefers_complementary_low_cost_actions() {
+        let mut request = request();
+        request.max_rounds = 1;
+        request.budget_units = 4;
+        request.actions = vec![
+            FederatedBenchmarkAction {
+                action_id: "expensive-single".into(),
+                kind: FederatedBenchmarkActionKind::ReplicateSite,
+                target_site_id: Some("site-a".into()),
+                cost_units: 4,
+                expected_information_milli: 1_000,
+                expected_effect_milli: 300,
+                feasibility_milli: 950,
+                risk_milli: 20,
+                requested_replicates: 4,
+            },
+            FederatedBenchmarkAction {
+                action_id: "cheap-coverage".into(),
+                kind: FederatedBenchmarkActionKind::ExpandCoverage,
+                target_site_id: None,
+                cost_units: 2,
+                expected_information_milli: 820,
+                expected_effect_milli: 120,
+                feasibility_milli: 900,
+                risk_milli: 20,
+                requested_replicates: 4,
+            },
+            FederatedBenchmarkAction {
+                action_id: "cheap-heterogeneity".into(),
+                kind: FederatedBenchmarkActionKind::ResolveHeterogeneity,
+                target_site_id: Some("site-a".into()),
+                cost_units: 2,
+                expected_information_milli: 820,
+                expected_effect_milli: 120,
+                feasibility_milli: 900,
+                risk_milli: 20,
+                requested_replicates: 4,
+            },
+        ];
+        let mut executor = DryRunFederatedBenchmarkCampaignExecutor;
+        let output = execute_federated_benchmark_campaign(&request, &mut executor).unwrap();
+        assert_eq!(
+            output.completed_action_order,
+            vec!["cheap-coverage", "cheap-heterogeneity"]
+        );
+        assert!(!output
+            .completed_action_order
+            .contains(&"expensive-single".into()));
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn portfolio_closes_missing_site_evidence_before_a_redundant_high_score_action() {
+        let mut request = request();
+        request.benchmark.max_leave_one_out_shift_milli = 1_000;
+        let consensus =
+            analyze_federated_benchmark(&request.benchmark, &request.initial_sites).unwrap();
+        let actions = [
+            FederatedBenchmarkAction {
+                action_id: "audit-only".into(),
+                kind: FederatedBenchmarkActionKind::AuditInfluentialSite,
+                target_site_id: Some("site-a".into()),
+                cost_units: 1,
+                expected_information_milli: 1_000,
+                expected_effect_milli: 300,
+                feasibility_milli: 950,
+                risk_milli: 20,
+                requested_replicates: 3,
+            },
+            FederatedBenchmarkAction {
+                action_id: "coverage-action".into(),
+                kind: FederatedBenchmarkActionKind::ExpandCoverage,
+                target_site_id: None,
+                cost_units: 1,
+                expected_information_milli: 700,
+                expected_effect_milli: 100,
+                feasibility_milli: 900,
+                risk_milli: 20,
+                requested_replicates: 3,
+            },
+        ];
+        let eligible = actions.iter().collect::<Vec<_>>();
+        assert_eq!(
+            evidence_gaps(&consensus),
+            BTreeSet::from([BenchmarkEvidenceGap::SiteCoverage])
+        );
+        assert!(
+            benchmark_portfolio_utility(&[1], &eligible, &consensus)
+                > benchmark_portfolio_utility(&[0], &eligible, &consensus)
+        );
+        let selected = select_benchmark_portfolio(&eligible, &consensus, 1);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|action| action.action_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["coverage-action"]
+        );
+    }
+
+    #[test]
+    fn portfolio_distinguishes_replicate_floor_from_new_site_coverage() {
+        let mut request = request();
+        request.benchmark.minimum_sites = 1;
+        request.benchmark.minimum_replicates_per_site = 3;
+        request.benchmark.max_leave_one_out_shift_milli = 1_000;
+        request.initial_sites[0].replicate_count = 1;
+        request.initial_sites.push(site("b", 650, 3));
+        let consensus =
+            analyze_federated_benchmark(&request.benchmark, &request.initial_sites).unwrap();
+        assert_eq!(
+            evidence_gaps(&consensus),
+            BTreeSet::from([BenchmarkEvidenceGap::ReplicateFloor])
+        );
+        let actions = [
+            FederatedBenchmarkAction {
+                action_id: "expand-new-site".into(),
+                kind: FederatedBenchmarkActionKind::ExpandCoverage,
+                target_site_id: None,
+                cost_units: 1,
+                expected_information_milli: 1_000,
+                expected_effect_milli: 300,
+                feasibility_milli: 950,
+                risk_milli: 20,
+                requested_replicates: 3,
+            },
+            FederatedBenchmarkAction {
+                action_id: "replicate-underpowered-site".into(),
+                kind: FederatedBenchmarkActionKind::ReplicateSite,
+                target_site_id: Some("site-a".into()),
+                cost_units: 1,
+                expected_information_milli: 600,
+                expected_effect_milli: 100,
+                feasibility_milli: 900,
+                risk_milli: 20,
+                requested_replicates: 3,
+            },
+        ];
+        let eligible = actions.iter().collect::<Vec<_>>();
+        let selected = select_benchmark_portfolio(&eligible, &consensus, 1);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|action| action.action_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["replicate-underpowered-site"]
+        );
+    }
+
+    #[test]
+    fn retry_attempts_consume_federated_budget() {
+        struct RetryOnce {
+            calls: u8,
+        }
+
+        impl FederatedBenchmarkCampaignExecutor for RetryOnce {
+            fn execute_action(
+                &mut self,
+                action: &FederatedBenchmarkAction,
+                request: &FederatedBenchmarkRequest,
+                attempt: u8,
+            ) -> Result<FederatedBenchmarkSite, FederatedBenchmarkExecutionFailure> {
+                self.calls = self.calls.saturating_add(1);
+                if self.calls == 1 {
+                    return Err(FederatedBenchmarkExecutionFailure {
+                        reason: "transient site worker outage".into(),
+                        retryable: true,
+                    });
+                }
+                let mut dry_run = DryRunFederatedBenchmarkCampaignExecutor;
+                dry_run.execute_action(action, request, attempt)
+            }
+        }
+
+        let mut request = request();
+        request.actions.truncate(1);
+        request.budget_units = 4;
+        request.max_rounds = 1;
+        let mut executor = RetryOnce { calls: 0 };
+        let output = execute_federated_benchmark_campaign(&request, &mut executor).unwrap();
+        assert_eq!(output.retry_count, 1);
+        assert_eq!(output.rounds[0].cost_units, 4);
+        assert_eq!(output.budget_spent_units, 4);
+        assert_eq!(output.remaining_budget_units, 0);
+        assert_eq!(output.completed_action_order, vec!["expand-a"]);
+        output.validate().unwrap();
     }
 
     #[test]

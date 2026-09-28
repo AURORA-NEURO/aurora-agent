@@ -33,7 +33,7 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-research-P01-F01";
 pub const CONTRACT_VERSION: &str = "research-glioma-autonomous-engine/1.0";
-pub const OUTPUT_SCHEMA: &str = "GliomaExecutionReceipt1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaExecutionReceipt1@2";
 pub const ACTION_SELECTION_OUTPUT_SCHEMA: &str = "GliomaActionSelection1@1";
 pub const MAX_ARTIFACTS: usize = 4096;
 pub const MAX_STAGES: usize = 32;
@@ -209,7 +209,7 @@ impl GliomaStageKind {
             Self::MechanismExploration => "GliomaMechanismGraph1@1",
             Self::ExperimentDesign => "GliomaExperimentDesign1@1",
             Self::ProtocolSimulation => "GliomaProtocolSimulation1@1",
-            Self::InstrumentPreflight => "GliomaInstrumentPreflight1@1",
+            Self::InstrumentPreflight => "GliomaInstrumentPreflight1@2",
             Self::ComputationalExecution => "GliomaComputationRun1@1",
             Self::StatisticalInterpretation => "GliomaAnalysisResult1@1",
             Self::ReplicationRobustness => "GliomaReplicationAssessment1@1",
@@ -361,13 +361,14 @@ impl GliomaResearchPlan {
             ));
         }
         if self.stages.iter().any(|stage| {
-            stage
-                .depends_on
-                .iter()
-                .any(|dependency| !ids.contains(dependency))
+            stage.budget_units == 0
+                || stage
+                    .depends_on
+                    .iter()
+                    .any(|dependency| !ids.contains(dependency))
         }) {
             return Err(GliomaEngineError::InvalidPlan(
-                "stage dependency references an unknown stage".into(),
+                "stage budget must be positive and dependencies must reference known stages".into(),
             ));
         }
         let expected = plan_digest_input(self);
@@ -473,6 +474,10 @@ pub struct GliomaExecutionReceipt {
     pub research_id: String,
     pub study_id: String,
     pub plan_digest: ContentHash,
+    pub budget_limit_units: u64,
+    pub budget_spent_units: u64,
+    pub budget_remaining_units: u64,
+    pub budget_exhausted: bool,
     pub run: ExecutionRun,
     pub stages: Vec<GliomaStageExecution>,
     pub completed_order: Vec<String>,
@@ -492,6 +497,13 @@ impl GliomaExecutionReceipt {
             || self.boundary != PRECLINICAL_BOUNDARY
             || self.plan_digest != self.run.plan_hash
             || self.stages.is_empty()
+            || self.budget_limit_units == 0
+            || self.budget_spent_units > self.budget_limit_units
+            || self.budget_remaining_units > self.budget_limit_units
+            || self
+                .budget_spent_units
+                .checked_add(self.budget_remaining_units)
+                != Some(self.budget_limit_units)
             || !matches!(
                 self.disposition.as_str(),
                 "succeeded" | "partial" | "failed"
@@ -506,6 +518,10 @@ impl GliomaExecutionReceipt {
             .map_err(|error| GliomaEngineError::InvalidExecution(error.to_string()))?;
         let expected = ContentHash::of_value(&json!({
             "plan_digest": self.plan_digest,
+            "budget_limit_units": self.budget_limit_units,
+            "budget_spent_units": self.budget_spent_units,
+            "budget_remaining_units": self.budget_remaining_units,
+            "budget_exhausted": self.budget_exhausted,
             "run": self.run,
             "stages": self.stages,
             "completed_order": self.completed_order,
@@ -885,6 +901,20 @@ pub fn execute_glioma_research<E: GliomaStageExecutor>(
     for artifact in &source_artifacts {
         artifact.validate()?;
     }
+    let budget_limit_units = plan
+        .workflow
+        .budgets
+        .iter()
+        .find(|budget| budget.resource == "research-budget-units")
+        .and_then(|budget| {
+            (budget.amount.is_finite() && budget.amount > 0.0 && budget.amount.fract() == 0.0)
+                .then_some(budget.amount as u64)
+        })
+        .ok_or_else(|| {
+            GliomaEngineError::InvalidPlan(
+                "admitted plan has no positive integral research budget".into(),
+            )
+        })?;
     let run_id =
         RunId::parse(run_id.into()).map_err(|error| GliomaEngineError::RunId(error.to_string()))?;
     let mut run = ExecutionRun::planned(
@@ -906,6 +936,8 @@ pub fn execute_glioma_research<E: GliomaStageExecutor>(
     let mut omission_order = BTreeSet::new();
     let mut hard_failure = false;
     let mut partial = false;
+    let mut budget_spent_units = 0_u64;
+    let mut budget_exhausted = false;
 
     for stage_id in &plan.stage_order {
         let stage = stages_by_id.get(stage_id).ok_or_else(|| {
@@ -956,7 +988,23 @@ pub fn execute_glioma_research<E: GliomaStageExecutor>(
             .filter_map(|dependency| outputs.get(dependency).cloned())
             .collect::<Vec<_>>();
         let mut attempts = 0u8;
+        let mut budget_blocked = false;
+        let stage_cost_units = u64::from(stage.budget_units);
         let output = loop {
+            if budget_spent_units.saturating_add(stage_cost_units) > budget_limit_units {
+                budget_blocked = true;
+                budget_exhausted = true;
+                break Err(GliomaStageFailure {
+                    reason: format!(
+                        "stage budget exhausted before dispatch (required {} units)",
+                        stage_cost_units
+                    ),
+                    retryable: false,
+                });
+            }
+            // Charge each invocation before entering the provider seam. Retries therefore cannot
+            // spend work that the compiled research budget did not authorize.
+            budget_spent_units = budget_spent_units.saturating_add(stage_cost_units);
             attempts = attempts.saturating_add(1);
             let input = GliomaStageInput {
                 research_id: plan.research_id.clone(),
@@ -971,6 +1019,17 @@ pub fn execute_glioma_research<E: GliomaStageExecutor>(
             match executor.execute(stage, &input) {
                 Ok(output) => break Ok(output),
                 Err(failure) if failure.retryable && attempts <= max_retries => {
+                    if budget_spent_units.saturating_add(stage_cost_units) > budget_limit_units {
+                        budget_blocked = true;
+                        budget_exhausted = true;
+                        break Err(GliomaStageFailure {
+                            reason: format!(
+                                "stage budget exhausted before retry after provider failure: {}",
+                                failure.reason
+                            ),
+                            retryable: false,
+                        });
+                    }
                     run.retry_count = run.retry_count.saturating_add(1);
                     let payload_hash = ContentHash::of_bytes(failure.reason.as_bytes());
                     append_event(&mut run, "stage_retry", None, Some(payload_hash))?;
@@ -1015,10 +1074,23 @@ pub fn execute_glioma_research<E: GliomaStageExecutor>(
             }
             Err(failure) => {
                 let payload_hash = ContentHash::of_bytes(failure.reason.as_bytes());
-                append_event(&mut run, "stage_failed", None, Some(payload_hash))?;
+                append_event(
+                    &mut run,
+                    if budget_blocked {
+                        "stage_budget_blocked"
+                    } else {
+                        "stage_failed"
+                    },
+                    None,
+                    Some(payload_hash),
+                )?;
                 run.checkpoint(format!("checkpoint:{}", stage.stage_id))
                     .map_err(|error| GliomaEngineError::InvalidExecution(error.to_string()))?;
-                omission_order.insert(format!("{}:provider-failure", stage.stage_id));
+                if budget_blocked {
+                    omission_order.insert(format!("{}:budget-exhausted", stage.stage_id));
+                } else {
+                    omission_order.insert(format!("{}:provider-failure", stage.stage_id));
+                }
                 hard_failure = true;
                 stage_records.push(GliomaStageExecution {
                     stage_id: stage.stage_id.clone(),
@@ -1050,6 +1122,10 @@ pub fn execute_glioma_research<E: GliomaStageExecutor>(
         research_id: plan.research_id.clone(),
         study_id: plan.study_id.clone(),
         plan_digest: plan.plan_digest.clone(),
+        budget_limit_units,
+        budget_spent_units,
+        budget_remaining_units: budget_limit_units.saturating_sub(budget_spent_units),
+        budget_exhausted,
         run,
         stages: stage_records,
         completed_order,
@@ -1062,6 +1138,10 @@ pub fn execute_glioma_research<E: GliomaStageExecutor>(
     };
     receipt.execution_digest = ContentHash::of_value(&json!({
         "plan_digest": receipt.plan_digest,
+        "budget_limit_units": receipt.budget_limit_units,
+        "budget_spent_units": receipt.budget_spent_units,
+        "budget_remaining_units": receipt.budget_remaining_units,
+        "budget_exhausted": receipt.budget_exhausted,
         "run": receipt.run,
         "stages": receipt.stages,
         "completed_order": receipt.completed_order,
@@ -1165,7 +1245,7 @@ impl Default for GliomaSelectionWeights {
 }
 
 impl GliomaSelectionWeights {
-    fn validate(self) -> Result<(), GliomaEngineError> {
+    pub(crate) fn validate(self) -> Result<(), GliomaEngineError> {
         let total = self.information_gain as u32
             + self.frontier_novelty as u32
             + self.workflow_leverage as u32
@@ -1259,6 +1339,125 @@ impl GliomaActionCandidate {
     }
 }
 
+/// Observed execution outcomes used by the adaptive frontier policy.
+///
+/// The autonomous engine must learn from what a laboratory actually returned rather than
+/// repeatedly replaying a static score table.  These counters are intentionally small and
+/// value-only: payloads stay in the institution-local artifact store while the planner receives
+/// enough outcome state to estimate reliability and exploration value.  A negative result is
+/// evidence about the candidate's current utility, not a permission to discard the branch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GliomaActionOutcomeSummary {
+    pub completed: u32,
+    pub negative: u32,
+    pub partial: u32,
+    pub failed: u32,
+}
+
+impl GliomaActionOutcomeSummary {
+    pub fn total(self) -> u32 {
+        self.completed
+            .saturating_add(self.negative)
+            .saturating_add(self.partial)
+            .saturating_add(self.failed)
+    }
+
+    /// A conservative Laplace-smoothed success posterior in milli-units.
+    pub fn success_posterior_milli(self) -> u16 {
+        let total = self.total();
+        let numerator = self.completed.saturating_add(1) as u64 * 1_000;
+        let denominator = u64::from(total).saturating_add(2);
+        (numerator / denominator).min(1_000) as u16
+    }
+}
+
+/// Stable cohort key used when an outcome should inform a later action with the same scientific
+/// stage, modality, and model system.  The adaptive mission stores both the exact action key and
+/// this cohort key so a negative result can redirect the next action instead of being forgotten
+/// when the first action is retired.
+pub fn glioma_action_outcome_key(candidate: &GliomaActionCandidate) -> String {
+    format!(
+        "cohort:{:?}:{:?}:{:?}",
+        candidate.stage_kind, candidate.modality, candidate.model_system
+    )
+}
+
+/// Re-score candidates from returned execution outcomes before the next autonomous round.
+///
+/// This is a deterministic, conservative empirical-Bayes layer over the existing multi-objective
+/// selector.  With no observations it is exactly identity-preserving.  After observations it
+/// increases candidates with repeated completed outcomes, discounts branches with negative,
+/// partial, or failed outcomes, and keeps a bounded frontier-novelty bonus for uncertain arms so
+/// the engine can still falsify a weakly supported mechanism instead of locking into the first
+/// attractive result.  The function only changes typed utility fields; identities, dependencies,
+/// effects, authority, and stage contracts remain untouched.
+pub fn adapt_glioma_candidates_from_outcomes(
+    candidates: &[GliomaActionCandidate],
+    outcomes: &BTreeMap<String, GliomaActionOutcomeSummary>,
+) -> Vec<GliomaActionCandidate> {
+    candidates
+        .iter()
+        .map(|candidate| {
+            let Some(summary) = outcomes
+                .get(&candidate.action_id)
+                .or_else(|| outcomes.get(&glioma_action_outcome_key(candidate)))
+                .copied()
+            else {
+                return candidate.clone();
+            };
+            let total = summary.total();
+            if total == 0 {
+                return candidate.clone();
+            }
+            let posterior = i32::from(summary.success_posterior_milli());
+            let failures = summary
+                .negative
+                .saturating_add(summary.partial)
+                .saturating_add(summary.failed);
+            // Reliability is centered at the uninformative 0.5 prior.  Failure receives an
+            // additional penalty because a partial or failed effect is a safety signal, not a
+            // weak success.  The factor is bounded so one noisy result cannot erase a frontier.
+            let reliability_factor = (1_000 + (posterior - 500) / 2
+                - (i32::try_from(failures.min(6)).unwrap_or(6) * 40))
+                .clamp(500, 1_200) as u64;
+            let exploration_bonus = (u64::from(candidate.frontier_novelty_milli)
+                * (1_000_u64 / u64::from(total.saturating_add(1)))
+                / 20)
+                .min(80);
+            let scale = |value: u16| -> u16 {
+                (
+                    u64::from(value)
+                        .saturating_mul(reliability_factor)
+                        .saturating_div(1_000)
+                    // Exploration belongs on frontier novelty. Adding it to information,
+                    // leverage, and safety can make a repeatedly failed low-information branch
+                    // appear more informative than its untouched baseline.
+                )
+                .min(1_000) as u16
+            };
+            let mut adapted = candidate.clone();
+            adapted.information_gain_milli = scale(candidate.information_gain_milli);
+            adapted.workflow_leverage_milli = scale(candidate.workflow_leverage_milli);
+            adapted.cross_stage_unlock_milli = scale(candidate.cross_stage_unlock_milli);
+            adapted.reproducibility_safety_milli = scale(candidate.reproducibility_safety_milli);
+            adapted.feasibility_milli = scale(candidate.feasibility_milli);
+            // Novelty remains an exploration axis.  Successful outcomes reduce uncertainty;
+            // unresolved/negative outcomes preserve a bounded incentive to revisit the question.
+            let novelty_delta = if failures > summary.completed {
+                80_i32
+            } else {
+                -((posterior - 500).abs() / 8)
+            };
+            adapted.frontier_novelty_milli = (i32::from(candidate.frontier_novelty_milli)
+                + novelty_delta)
+                .saturating_add(i32::try_from(exploration_bonus).unwrap_or(i32::MAX))
+                .clamp(0, 1_000) as u16;
+            adapted
+        })
+        .collect()
+}
+
 /// Controls the autonomous selector. Approval and effect switches are explicit; a high autonomy
 /// tier never silently grants permission to touch an instrument or export data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1327,6 +1526,11 @@ impl GliomaActionSelection {
                 .collect::<BTreeSet<_>>()
                 .len()
                 != self.selected_order.len()
+            || self
+                .deferred_order
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+            || self.blocked_order.windows(2).any(|pair| pair[0] >= pair[1])
             || self.decisions.len() != self.candidate_order.len()
         {
             return Err(GliomaEngineError::InvalidExecution(
@@ -1347,10 +1551,24 @@ impl GliomaActionSelection {
         let deferred = self.deferred_order.iter().cloned().collect::<BTreeSet<_>>();
         let blocked = self.blocked_order.iter().cloned().collect::<BTreeSet<_>>();
         if decision_ids != candidate_ids
+            || !selected.is_subset(&candidate_ids)
+            || !deferred.is_subset(&candidate_ids)
+            || !blocked.is_subset(&candidate_ids)
             || selected.intersection(&deferred).next().is_some()
             || selected.intersection(&blocked).next().is_some()
             || deferred.intersection(&blocked).next().is_some()
-            || selected.union(&deferred).chain(blocked.iter()).count() != candidate_ids.len()
+            || selected
+                .union(&deferred)
+                .chain(blocked.iter())
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_ids
+            || self.decisions.iter().any(|decision| {
+                let partition_selected = selected.contains(&decision.action_id);
+                (decision.selected != partition_selected)
+                    || (partition_selected && decision.reason.is_some())
+                    || (!partition_selected && decision.reason.is_none())
+            })
         {
             return Err(GliomaEngineError::InvalidExecution(
                 "glioma action decisions do not partition candidates".into(),
@@ -1402,12 +1620,13 @@ fn action_block_reason(
 /// Select the next bounded batch of local glioma actions.
 ///
 /// The selector uses a deterministic bounded beam search over executable portfolios. Each
-/// expansion scores the candidate's weighted value per cost and applies a diminishing-return
-/// penalty to repeated modality/model pairs. Unlike a one-step greedy policy, the beam keeps
-/// alternative partial portfolios alive, allowing a prerequisite plus its downstream assay to
-/// beat an attractive but isolated action. Dependencies must be complete before a child is
-/// eligible, so every returned selection order is executable as-is. Scores, blocked actions, and
-/// deferred actions are all returned; the caller never has to infer why an assay was omitted.
+/// expansion scores the candidate's weighted value per cost and applies diminishing-return
+/// penalties to repeated modality/model pairs and repeated scientific stages. Unlike a one-step
+/// greedy policy, the beam keeps alternative partial portfolios alive, allowing a prerequisite
+/// plus its downstream assay to beat an attractive but isolated action while retaining a
+/// cross-stage research loop. Dependencies must be complete before a child is eligible, so every
+/// returned selection order is executable as-is. Scores, blocked actions, and deferred actions
+/// are all returned; the caller never has to infer why an assay was omitted.
 pub fn select_glioma_actions(
     candidates: &[GliomaActionCandidate],
     completed_actions: &BTreeSet<String>,
@@ -1441,6 +1660,10 @@ pub fn select_glioma_actions(
         .iter()
         .map(|candidate| (candidate.action_id.clone(), candidate))
         .collect::<BTreeMap<_, _>>();
+    let completed_candidates = completed_actions
+        .iter()
+        .filter_map(|action_id| candidate_map.get(action_id).copied())
+        .collect::<Vec<_>>();
     let mut blocked = BTreeMap::<String, String>::new();
     for candidate in candidates {
         if completed_actions.contains(&candidate.action_id) {
@@ -1518,8 +1741,31 @@ pub fn select_glioma_actions(
                                 && other.model_system == candidate.model_system
                         })
                     })
-                    .count() as u64;
-                let diversity_milli = 1000_u64 / (1 + siblings);
+                    .count() as u64
+                    + completed_candidates
+                        .iter()
+                        .filter(|other| {
+                            other.modality == candidate.modality
+                                && other.model_system == candidate.model_system
+                        })
+                        .count() as u64;
+                let stage_siblings = state
+                    .selected
+                    .iter()
+                    .filter(|id| {
+                        candidate_map
+                            .get(*id)
+                            .is_some_and(|other| other.stage_kind == candidate.stage_kind)
+                    })
+                    .count() as u64
+                    + completed_candidates
+                        .iter()
+                        .filter(|other| other.stage_kind == candidate.stage_kind)
+                        .count() as u64;
+                let modality_diversity_milli = 1000_u64 / (1 + siblings);
+                let stage_diversity_milli = 1000_u64 / (1 + stage_siblings);
+                let diversity_milli =
+                    modality_diversity_milli.saturating_mul(stage_diversity_milli) / 1000;
                 let score = base_scores[&candidate.action_id]
                     .saturating_mul(diversity_milli)
                     .saturating_mul(1_000_000)
@@ -1561,6 +1807,13 @@ pub fn select_glioma_actions(
     let remaining_budget = best_state.remaining_budget;
     let mut decisions = BTreeMap::<String, GliomaActionDecision>::new();
     let mut diversity_counts = BTreeMap::<(GliomaModality, GliomaModelSystem), u32>::new();
+    let mut stage_counts = BTreeMap::<GliomaStageKind, u32>::new();
+    for candidate in &completed_candidates {
+        *diversity_counts
+            .entry((candidate.modality, candidate.model_system))
+            .or_default() += 1;
+        *stage_counts.entry(candidate.stage_kind).or_default() += 1;
+    }
     for action_id in &selected {
         let candidate = candidate_map[action_id];
         let siblings = diversity_counts
@@ -1568,6 +1821,12 @@ pub fn select_glioma_actions(
             .copied()
             .unwrap_or(0);
         let diversity_milli = 1000_u64 / (1 + siblings as u64);
+        let stage_siblings = stage_counts
+            .get(&candidate.stage_kind)
+            .copied()
+            .unwrap_or(0);
+        let stage_diversity_milli = 1000_u64 / (1 + stage_siblings as u64);
+        let diversity_milli = diversity_milli.saturating_mul(stage_diversity_milli) / 1000;
         let score = base_scores[action_id]
             .saturating_mul(diversity_milli)
             .saturating_mul(1_000_000)
@@ -1575,6 +1834,7 @@ pub fn select_glioma_actions(
         *diversity_counts
             .entry((candidate.modality, candidate.model_system))
             .or_default() += 1;
+        *stage_counts.entry(candidate.stage_kind).or_default() += 1;
         decisions.insert(
             action_id.to_string(),
             GliomaActionDecision {
@@ -1735,7 +1995,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_action_portfolio_execution".into(),
-                schema: "GliomaActionPortfolioExecution1@1".into(),
+                schema: "GliomaActionPortfolioExecution1@3".into(),
                 required: false,
             },
             TypedPort {
@@ -1745,7 +2005,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_mechanism_action_plan".into(),
-                schema: "GliomaMechanismActionPlan1@1".into(),
+                schema: "GliomaMechanismActionPlan1@3".into(),
                 required: false,
             },
             TypedPort {
@@ -1790,12 +2050,12 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_computation_execution".into(),
-                schema: "GliomaComputationExecution1@1".into(),
+                schema: "GliomaComputationExecution1@3".into(),
                 required: false,
             },
             TypedPort {
                 name: "glioma_computation_portfolio".into(),
-                schema: "GliomaComputationPortfolioPlan1@1".into(),
+                schema: "GliomaComputationPortfolioPlan1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -1805,7 +2065,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_computation_campaign".into(),
-                schema: "GliomaComputationCampaign1@1".into(),
+                schema: "GliomaComputationCampaign1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -1816,6 +2076,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_autonomous_research_mission".into(),
                 schema: "GliomaAutonomousResearchMission1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_autonomous_research_engine_evaluation".into(),
+                schema: "GliomaAutonomousResearchEngineEvaluation1@1".into(),
                 required: false,
             },
             TypedPort {
@@ -1830,7 +2095,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_state_transition_analysis".into(),
-                schema: "GliomaStateTransition1@1".into(),
+                schema: "GliomaStateTransition1@3".into(),
                 required: false,
             },
             TypedPort {
@@ -1840,17 +2105,17 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_stratified_causal_adjustment".into(),
-                schema: "GliomaStratifiedCausalAdjustment1@1".into(),
+                schema: "GliomaStratifiedCausalAdjustment1@2".into(),
                 required: false,
             },
             TypedPort {
                 name: "glioma_dose_response_analysis".into(),
-                schema: "GliomaDoseResponseAnalysis1@1".into(),
+                schema: "GliomaDoseResponseAnalysis1@2".into(),
                 required: false,
             },
             TypedPort {
                 name: "glioma_combination_synergy".into(),
-                schema: "GliomaCombinationSynergy1@1".into(),
+                schema: "GliomaCombinationSynergy1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -1935,7 +2200,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_pathway_activity".into(),
-                schema: "GliomaPathwayActivity1@1".into(),
+                schema: "GliomaPathwayActivity1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -1955,12 +2220,12 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_information_design".into(),
-                schema: "GliomaInformationDesign1@1".into(),
+                schema: "GliomaInformationDesign1@2".into(),
                 required: false,
             },
             TypedPort {
                 name: "glioma_adaptive_information_campaign".into(),
-                schema: "GliomaAdaptiveInformationCampaign1@1".into(),
+                schema: "GliomaAdaptiveInformationCampaign1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -1970,7 +2235,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_evidence_surveillance".into(),
-                schema: "GliomaEvidenceSurveillance1@1".into(),
+                schema: "GliomaEvidenceSurveillance1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -1990,7 +2255,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_multimodal_ingestion_campaign".into(),
-                schema: "GliomaMultimodalIngestionCampaign1@1".into(),
+                schema: "GliomaMultimodalIngestionCampaign1@3".into(),
                 required: false,
             },
             TypedPort {
@@ -2000,12 +2265,17 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_evidence_refresh_campaign".into(),
-                schema: "GliomaEvidenceRefreshCampaign1@1".into(),
+                schema: "GliomaEvidenceRefreshCampaign1@2".into(),
                 required: false,
             },
             TypedPort {
                 name: "glioma_decision_context".into(),
-                schema: "GliomaDecisionContext1@1".into(),
+                schema: "GliomaDecisionContext1@2".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_context_refresh_schedule".into(),
+                schema: "GliomaContextRefreshSchedule1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -2020,7 +2290,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_instrument_preflight".into(),
-                schema: "GliomaInstrumentPreflight1@1".into(),
+                schema: "GliomaInstrumentPreflight1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -2031,6 +2301,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_instrument_campaign".into(),
                 schema: "GliomaInstrumentCampaign1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_adaptive_microscopy_round".into(),
+                schema: "GliomaAdaptiveMicroscopyRound1@1".into(),
                 required: false,
             },
             TypedPort {
@@ -2075,7 +2350,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_replication_meta_analysis".into(),
-                schema: "GliomaReplicationMetaAnalysis1@1".into(),
+                schema: "GliomaReplicationMetaAnalysis1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -2085,7 +2360,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_federated_benchmark_campaign".into(),
-                schema: "GliomaFederatedBenchmarkCampaign1@1".into(),
+                schema: "GliomaFederatedBenchmarkCampaign1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -2358,6 +2633,54 @@ mod tests {
     }
 
     #[test]
+    fn execution_charges_retries_and_blocks_the_next_stage_when_budget_is_exhausted() {
+        let mut request = intent();
+        request.budget_units = 30;
+        let source_artifacts = request.input_artifacts.clone();
+        let plan = compile_glioma_research(&request).unwrap();
+        let mut executor = RetryOnceExecutor { attempts: 0 };
+        let receipt = execute_glioma_research(
+            &plan,
+            "glioma-run:budget",
+            &mut executor,
+            1,
+            source_artifacts,
+        )
+        .unwrap();
+
+        // Intent normalization (1), the failed and successful surveillance attempts (8 + 8),
+        // and evidence compilation (8) consume 25 units.  The multimodal stage requires 12,
+        // so it is recorded as budget-blocked without entering the provider seam.
+        assert_eq!(receipt.budget_limit_units, 30);
+        assert_eq!(receipt.budget_spent_units, 25);
+        assert_eq!(receipt.budget_remaining_units, 5);
+        assert!(receipt.budget_exhausted);
+        assert_eq!(receipt.run.retry_count, 1);
+        assert_eq!(executor.attempts, 4);
+        assert_eq!(
+            receipt.completed_order,
+            vec![
+                "intent-normalization",
+                "evidence-surveillance",
+                "evidence-compilation"
+            ]
+        );
+        assert!(receipt
+            .omission_order
+            .iter()
+            .any(|item| item == "multimodal-ingestion-qc:budget-exhausted"));
+        assert_eq!(
+            receipt
+                .stages
+                .iter()
+                .find(|stage| stage.stage_id == "multimodal-ingestion-qc")
+                .map(|stage| (stage.attempts, stage.disposition)),
+            Some((0, GliomaStageDisposition::Blocked))
+        );
+        receipt.validate().unwrap();
+    }
+
+    #[test]
     fn adaptive_action_selection_is_dependency_safe_and_reproducible() {
         let first = action(
             "action-a",
@@ -2442,6 +2765,78 @@ mod tests {
     }
 
     #[test]
+    fn action_selection_rejects_partition_decision_drift() {
+        let selection = select_glioma_actions(
+            &[action(
+                "action-a",
+                GliomaStageKind::MolecularLandscape,
+                GliomaModality::Genomics,
+                GliomaModelSystem::Organoid,
+                1,
+                900,
+            )],
+            &BTreeSet::new(),
+            &GliomaSelectionConfig::default(),
+        )
+        .unwrap();
+        let mut tampered = selection;
+        tampered.decisions[0].selected = !tampered.decisions[0].selected;
+        assert!(tampered.validate().is_err());
+    }
+
+    #[test]
+    fn completed_actions_contribute_to_next_batch_diversity() {
+        let completed = action(
+            "completed-transcriptomics",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Transcriptomics,
+            GliomaModelSystem::Organoid,
+            1,
+            900,
+        );
+        let same_modality = action(
+            "next-transcriptomics",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Transcriptomics,
+            GliomaModelSystem::Organoid,
+            1,
+            900,
+        );
+        let orthogonal = action(
+            "next-imaging",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Imaging,
+            GliomaModelSystem::Organoid,
+            1,
+            900,
+        );
+        let selection = select_glioma_actions(
+            &[completed, same_modality, orthogonal],
+            &BTreeSet::from(["completed-transcriptomics".into()]),
+            &GliomaSelectionConfig {
+                budget_units: 1,
+                max_actions: 1,
+                weights: GliomaSelectionWeights {
+                    information_gain: 100,
+                    frontier_novelty: 0,
+                    workflow_leverage: 0,
+                    cross_stage_unlock: 0,
+                    reproducibility_safety: 0,
+                    federation_value: 0,
+                    feasibility: 0,
+                },
+                ..GliomaSelectionConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(selection.selected_order, vec!["next-imaging"]);
+        assert!(selection
+            .deferred_order
+            .contains(&"next-transcriptomics".into()));
+        selection.validate().unwrap();
+    }
+
+    #[test]
     fn portfolio_search_can_prefer_dependency_bundle_over_greedy_single_action() {
         let mut prerequisite = action(
             "cheap-prerequisite",
@@ -2491,5 +2886,99 @@ mod tests {
         );
         assert_eq!(selection.remaining_budget_units, 0);
         selection.validate().unwrap();
+    }
+
+    #[test]
+    fn portfolio_search_preserves_cross_stage_research_loop() {
+        let mechanism_a = action(
+            "mechanism-a",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Transcriptomics,
+            GliomaModelSystem::Organoid,
+            5,
+            1_000,
+        );
+        let mechanism_b = action(
+            "mechanism-b",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Genomics,
+            GliomaModelSystem::Organoid,
+            5,
+            980,
+        );
+        let experiment = action(
+            "experiment-design",
+            GliomaStageKind::ExperimentDesign,
+            GliomaModality::Imaging,
+            GliomaModelSystem::Organoid,
+            5,
+            760,
+        );
+        let selection = select_glioma_actions(
+            &[mechanism_a, mechanism_b, experiment],
+            &BTreeSet::new(),
+            &GliomaSelectionConfig {
+                budget_units: 10,
+                max_actions: 2,
+                weights: GliomaSelectionWeights {
+                    information_gain: 100,
+                    frontier_novelty: 0,
+                    workflow_leverage: 0,
+                    cross_stage_unlock: 0,
+                    reproducibility_safety: 0,
+                    federation_value: 0,
+                    feasibility: 0,
+                },
+                ..GliomaSelectionConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            selection.selected_order,
+            vec!["experiment-design", "mechanism-a"]
+        );
+        selection.validate().unwrap();
+    }
+
+    #[test]
+    fn outcome_adaptation_rewards_repeatable_actions_and_preserves_exploration() {
+        let candidate = action(
+            "assay",
+            GliomaStageKind::MechanismExploration,
+            GliomaModality::Transcriptomics,
+            GliomaModelSystem::Organoid,
+            8,
+            900,
+        );
+        let untouched = adapt_glioma_candidates_from_outcomes(
+            std::slice::from_ref(&candidate),
+            &BTreeMap::new(),
+        );
+        assert_eq!(untouched, vec![candidate.clone()]);
+
+        let mut successful = BTreeMap::new();
+        successful.insert(
+            candidate.action_id.clone(),
+            GliomaActionOutcomeSummary {
+                completed: 1,
+                ..Default::default()
+            },
+        );
+        let positive =
+            adapt_glioma_candidates_from_outcomes(std::slice::from_ref(&candidate), &successful);
+        assert!(positive[0].information_gain_milli > candidate.information_gain_milli);
+
+        let mut negative = BTreeMap::new();
+        negative.insert(
+            candidate.action_id.clone(),
+            GliomaActionOutcomeSummary {
+                negative: 1,
+                ..Default::default()
+            },
+        );
+        let negative =
+            adapt_glioma_candidates_from_outcomes(std::slice::from_ref(&candidate), &negative);
+        assert!(negative[0].information_gain_milli < candidate.information_gain_milli);
+        assert!(negative[0].frontier_novelty_milli > candidate.frontier_novelty_milli);
     }
 }

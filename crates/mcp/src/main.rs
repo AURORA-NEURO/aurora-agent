@@ -108,6 +108,9 @@ fn main() {
                      glioma_multimodal_readiness_gate,\n\
                      glioma_multimodal_operating_cycle,\n\
                      glioma_mechanism_discrimination_campaign_execute,\n\
+                     glioma_temporal_multimodal_mechanism_fusion,\n\
+                     glioma_cross_model_claim_envelope,\n\
+                     glioma_cross_model_replication_frontier,\n\
                      glioma_causal_mediation,\n\
                      glioma_multimodal_harmonize, glioma_multimodal_latent_factors, glioma_multimodal_graph_fusion, glioma_spatial_niches, glioma_spatial_communication, glioma_spatial_state_propagation, glioma_state_transition_analyze, glioma_transportability_analyze, glioma_longitudinal_transport_analyze, glioma_multistudy_concordance_analyze, glioma_prospective_contradiction_plan, glioma_registered_outcome_reporting_audit, glioma_registered_outcome_record_build, glioma_registered_outcome_evidence_panel, glioma_registered_outcome_sensitivity_analyze, glioma_protocol_branch_optimize, glioma_protocol_autonomous_execute, glioma_protocol_evidence_surface, glioma_protocol_multistudy_fusion, glioma_protocol_transport_gate, glioma_protocol_execute, glioma_protocol_compensation, glioma_action_portfolio_execute, glioma_causal_sensitivity,\n\
                      glioma_multimodal_dropout_stress,\n\
@@ -150,6 +153,8 @@ fn main() {
                      glioma_mechanism_validation_protocol_execute,\n\
                      glioma_information_design, glioma_adaptive_panel, glioma_replication_plan, glioma_replication_continuation, glioma_replication_protocol_compile,\n\
                      glioma_robust_experiment_design,\n\
+                     glioma_heterogeneity_aware_experiment_portfolio,\n\
+                     glioma_heterogeneity_portfolio_mission,\n\
                      glioma_adaptive_information_campaign,\n\
                      glioma_active_learning,\n\
                      glioma_posterior_batch,\n\
@@ -184,6 +189,7 @@ fn main() {
                      glioma_computation_execute,\n\
                      glioma_computation_portfolio_plan,\n\
                      glioma_computation_placement,\n\
+                     glioma_computation_placement_stress_evaluate,\n\
                      glioma_computation_portfolio_execute,\n\
                      glioma_computation_campaign_execute, glioma_computation_recovery_execute,\n\
                      glioma_robustness_guided_computation_execute,\n\
@@ -196,6 +202,19 @@ fn main() {
                      glioma_mechanism_discovery_engine_execute,\n\
                      glioma_evidence_gated_research_execute,\n\
                      glioma_autonomous_research_engine_execute,\n\
+                     glioma_autonomous_research_engine_evaluate,\n\
+                     glioma_autonomous_research_engine_stress_evaluate,\n\
+                     glioma_autonomous_research_engine_trace_evaluate,\n\
+                     glioma_stage_worker_routes_compile,\n\
+                     glioma_autonomous_research_engine_stage_execute,\n\
+                     glioma_autonomous_research_workflow_execute,\n\
+                     glioma_evidence_gated_stage_engine_execute,\n\
+                     glioma_evidence_gated_stage_engine_instrument_execute,\n\
+                     glioma_evidence_gated_stage_engine_computation_execute,\n\
+                     glioma_evidence_gated_stage_engine_interpretation_execute,\n\
+                     glioma_evidence_gated_stage_engine_replication_execute,\n\
+                     glioma_evidence_gated_stage_engine_release_execute,\n\
+                     glioma_evidence_gated_stage_engine_federation_execute,\n\
                      glioma_autonomous_program_cycle,\n\
                      glioma_adaptive_workflow,\n\
                      glioma_interpretation_synthesize,\n\

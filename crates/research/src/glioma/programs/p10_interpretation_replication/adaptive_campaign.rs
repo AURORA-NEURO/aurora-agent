@@ -22,7 +22,7 @@ use crate::glioma::programs::p07_protocol_simulation::{
 use crate::glioma_engine::GliomaSelectionWeights;
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F26";
@@ -45,6 +45,35 @@ pub struct AdaptiveInterpretationCampaignRequest {
     pub allow_instrument_execution: bool,
     pub allow_federation: bool,
     pub selection_weights: GliomaSelectionWeights,
+    /// Value-only action outcomes used to resume planning without importing local artifact bytes.
+    #[serde(default)]
+    pub outcome_summaries: BTreeMap<String, AdaptiveActionOutcomeSummary>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdaptiveActionOutcomeSummary {
+    pub completed: u32,
+    pub negative: u32,
+    pub partial: u32,
+    pub failed: u32,
+    pub skipped: u32,
+    pub retry_count: u32,
+}
+
+impl AdaptiveActionOutcomeSummary {
+    pub fn total(self) -> u32 {
+        self.completed
+            .saturating_add(self.negative)
+            .saturating_add(self.partial)
+            .saturating_add(self.failed)
+            .saturating_add(self.skipped)
+    }
+
+    pub fn success_posterior_milli(self) -> u16 {
+        let numerator = u64::from(self.completed.saturating_add(1)) * 1_000;
+        let denominator = u64::from(self.total()).saturating_add(2);
+        (numerator / denominator).min(1_000) as u16
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +125,7 @@ pub struct AdaptiveInterpretationCampaign {
     pub final_synthesis: InterpretationSynthesis,
     pub negative_evidence: Vec<String>,
     pub uncertainty: Vec<String>,
+    pub outcome_summaries: BTreeMap<String, AdaptiveActionOutcomeSummary>,
     pub disposition: AdaptiveInterpretationCampaignDisposition,
     pub stop_reason: AdaptiveInterpretationCampaignStopReason,
     pub digest: ContentHash,
@@ -118,6 +148,20 @@ pub trait AdaptiveInterpretationPlanner {
         execution: &AdaptiveFrontierExecution,
         round: u16,
     ) -> Result<Option<InterpretationSynthesisRequest>, AdaptiveInterpretationPlanningFailure>;
+
+    /// History-aware planning hook. Existing planners remain source-compatible through the
+    /// default implementation; autonomous planners can use typed outcome posteriors to switch
+    /// from a repeatedly failing action to a complementary robustness or mechanism action.
+    fn plan_next_with_history(
+        &mut self,
+        current_request: &InterpretationSynthesisRequest,
+        synthesis: &InterpretationSynthesis,
+        execution: &AdaptiveFrontierExecution,
+        _outcome_summaries: &BTreeMap<String, AdaptiveActionOutcomeSummary>,
+        round: u16,
+    ) -> Result<Option<InterpretationSynthesisRequest>, AdaptiveInterpretationPlanningFailure> {
+        self.plan_next(current_request, synthesis, execution, round)
+    }
 }
 
 /// Synthetic planner. It stops after one round because dry-run action artifacts are not evidence.
@@ -169,23 +213,21 @@ fn digest_input(output: &AdaptiveInterpretationCampaign) -> serde_json::Value {
         "final_synthesis": output.final_synthesis,
         "negative_evidence": output.negative_evidence,
         "uncertainty": output.uncertainty,
+        "outcome_summaries": output.outcome_summaries,
         "disposition": output.disposition,
         "stop_reason": output.stop_reason,
     })
 }
 
 fn cost_of_execution(execution: &AdaptiveFrontierExecution) -> u32 {
+    // The nested action portfolio charges each actual worker invocation, including retries.
+    // Reusing its measured spend keeps this adaptive campaign honest when a transient local
+    // failure consumes another attempt before a result is returned.
     execution
-        .frontier
-        .candidates
-        .iter()
-        .filter(|candidate| {
-            execution
-                .dispatched_order
-                .contains(&candidate.action.action_id)
-        })
-        .map(|candidate| candidate.action.cost_units)
-        .sum()
+        .execution
+        .as_ref()
+        .map(|portfolio| portfolio.budget_spent_units)
+        .unwrap_or(0)
 }
 
 fn map_disposition(
@@ -249,6 +291,11 @@ fn validate_request(
             .completed_actions
             .iter()
             .any(|action| action.trim().is_empty())
+        || request.outcome_summaries.len() > 256
+        || request
+            .outcome_summaries
+            .iter()
+            .any(|(action, summary)| action.trim().is_empty() || summary.total() == 0)
     {
         return Err(AdaptiveInterpretationCampaignError::InvalidRequest(
             "positive bounded budget, rounds, actions, retries, and completed-action identifiers are required".into(),
@@ -275,6 +322,10 @@ impl AdaptiveInterpretationCampaign {
                     .map_or(0, |round| round.budget_before_units)
             || self.final_synthesis.objective != self.objective
             || self.final_synthesis.hypothesis != self.hypothesis
+            || self
+                .outcome_summaries
+                .iter()
+                .any(|(action_id, summary)| action_id.trim().is_empty() || summary.total() == 0)
         {
             return Err(AdaptiveInterpretationCampaignError::InvalidOutput(
                 "identity, bounded rounds, budget accounting, ordering, or synthesis binding is invalid".into(),
@@ -336,6 +387,7 @@ pub fn execute_glioma_adaptive_interpretation_campaign<
     let mut rounds = Vec::new();
     let mut negative_evidence = Vec::new();
     let mut uncertainty = Vec::new();
+    let mut outcome_summaries = request.outcome_summaries.clone();
     let mut campaign_disposition = AdaptiveInterpretationCampaignDisposition::Unresolved;
     let mut stop_reason = AdaptiveInterpretationCampaignStopReason::MaxRounds;
     let mut final_synthesis = None;
@@ -394,6 +446,20 @@ pub fn execute_glioma_adaptive_interpretation_campaign<
         let frontier_request = AdaptiveFrontierRequest {
             synthesis: synthesis.clone(),
             completed_actions: completed_actions.clone(),
+            outcome_summaries: outcome_summaries
+                .iter()
+                .map(|(action_id, summary)| {
+                    (
+                        action_id.clone(),
+                        crate::glioma_engine::GliomaActionOutcomeSummary {
+                            completed: summary.completed,
+                            negative: summary.negative,
+                            partial: summary.partial,
+                            failed: summary.failed,
+                        },
+                    )
+                })
+                .collect(),
             budget_units: remaining_budget,
             max_actions: request.max_actions_per_round,
             approval_granted: request.approval_granted,
@@ -415,6 +481,33 @@ pub fn execute_glioma_adaptive_interpretation_campaign<
         remaining_budget = remaining_budget.saturating_sub(spent_units);
         completed_actions.extend(execution.completed_order.iter().cloned());
         completed_actions.extend(execution.negative_order.iter().cloned());
+        if let Some(run) = &execution.execution {
+            for result in &run.results {
+                let summary = outcome_summaries
+                    .entry(result.action_id.clone())
+                    .or_default();
+                match result.disposition {
+                    crate::glioma::programs::p07_protocol_simulation::ActionExecutionDisposition::Completed => {
+                        summary.completed = summary.completed.saturating_add(1)
+                    }
+                    crate::glioma::programs::p07_protocol_simulation::ActionExecutionDisposition::Negative => {
+                        summary.negative = summary.negative.saturating_add(1)
+                    }
+                    crate::glioma::programs::p07_protocol_simulation::ActionExecutionDisposition::Partial => {
+                        summary.partial = summary.partial.saturating_add(1)
+                    }
+                    crate::glioma::programs::p07_protocol_simulation::ActionExecutionDisposition::Failed => {
+                        summary.failed = summary.failed.saturating_add(1)
+                    }
+                    crate::glioma::programs::p07_protocol_simulation::ActionExecutionDisposition::Skipped => {
+                        summary.skipped = summary.skipped.saturating_add(1)
+                    }
+                }
+                summary.retry_count = summary
+                    .retry_count
+                    .saturating_add(u32::from(result.attempt_count.saturating_sub(1)));
+            }
+        }
         negative_evidence.extend(execution.negative_evidence.iter().cloned());
         uncertainty.extend(execution.uncertainty.iter().cloned());
         let round_disposition = map_disposition(&synthesis, Some(&execution));
@@ -457,7 +550,13 @@ pub fn execute_glioma_adaptive_interpretation_campaign<
             break;
         }
         let next = planner
-            .plan_next(&current_request, &synthesis, &execution, round_index)
+            .plan_next_with_history(
+                &current_request,
+                &synthesis,
+                &execution,
+                &outcome_summaries,
+                round_index,
+            )
             .map_err(|failure| AdaptiveInterpretationCampaignError::Planner(failure.reason))?;
         let Some(next_request) = next else {
             stop_reason = AdaptiveInterpretationCampaignStopReason::PlannerNoProgress;
@@ -538,6 +637,7 @@ pub fn execute_glioma_adaptive_interpretation_campaign<
         final_synthesis,
         negative_evidence,
         uncertainty,
+        outcome_summaries,
         disposition: campaign_disposition,
         stop_reason,
         digest: ContentHash::of_bytes(b"unsealed-glioma-adaptive-interpretation-campaign"),
@@ -637,6 +737,37 @@ mod tests {
             allow_instrument_execution: false,
             allow_federation: false,
             selection_weights: GliomaSelectionWeights::default(),
+            outcome_summaries: BTreeMap::new(),
+        }
+    }
+
+    #[derive(Default)]
+    struct RetryOnceInterpretationExecutor {
+        attempts: u8,
+    }
+
+    impl crate::glioma::programs::p07_protocol_simulation::GliomaActionExecutor
+        for RetryOnceInterpretationExecutor
+    {
+        fn execute_action(
+            &mut self,
+            candidate: &crate::glioma_engine::GliomaActionCandidate,
+            attempt: u8,
+        ) -> Result<
+            crate::glioma::programs::p07_protocol_simulation::ActionExecutionResult,
+            crate::glioma::programs::p07_protocol_simulation::ActionExecutionFailure,
+        > {
+            self.attempts = self.attempts.saturating_add(1);
+            if attempt == 1 {
+                return Err(
+                    crate::glioma::programs::p07_protocol_simulation::ActionExecutionFailure {
+                        reason: "transient interpretation worker loss".into(),
+                        retryable: true,
+                    },
+                );
+            }
+            crate::glioma::programs::p07_protocol_simulation::DryRunGliomaActionExecutor
+                .execute_action(candidate, attempt)
         }
     }
 

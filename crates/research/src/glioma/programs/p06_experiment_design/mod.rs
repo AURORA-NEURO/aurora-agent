@@ -15,7 +15,11 @@ pub mod clonal_panel;
 pub mod contrast_design;
 pub mod dose_response;
 pub mod frontier_controller;
+pub mod heterogeneity_aware_portfolio;
 pub mod information_design;
+pub mod lineage_acquisition_design;
+pub mod lineage_guided_campaign;
+pub mod lineage_response_calibration;
 pub mod mechanism_validation;
 pub mod mechanism_validation_protocol;
 pub mod multi_fidelity;
@@ -31,7 +35,11 @@ pub mod robust_active_learning;
 pub mod robust_design;
 pub mod sequential_campaign;
 pub mod sequential_design;
+pub mod simulation_gated_campaign;
+pub mod state_plasticity_instrument_campaign;
+pub mod state_stratified_campaign;
 pub mod synergy;
+pub mod transition_guided_campaign;
 pub mod validation_batch_assessment;
 pub mod validation_campaign;
 
@@ -108,6 +116,13 @@ pub use frontier_controller::{
     GliomaFrontierMechanism, GliomaFrontierObservation, GliomaFrontierOutcome, GliomaFrontierRound,
     GliomaFrontierScore, GliomaFrontierStopReason, execute_glioma_experiment_frontier_controller,
 };
+pub use heterogeneity_aware_portfolio::{
+    plan_glioma_heterogeneity_aware_experiment_portfolio, HeterogeneityAwareExperimentPortfolio,
+    HeterogeneityAwareExperimentPortfolioError, HeterogeneityAwareExperimentPortfolioRequest,
+    HeterogeneityExperimentCandidate, HeterogeneityExperimentStratum,
+    HeterogeneityPortfolioDeferral, HeterogeneityPortfolioDisposition,
+    HeterogeneityPortfolioSelection, HeterogeneityPowerStressPoint,
+};
 pub use information_design::{
     DesignAction, DesignMechanism, DesignOutcome, InformationDesignActionScore,
     InformationDesignDisposition, InformationDesignError, InformationDesignPlan,
@@ -172,6 +187,32 @@ pub use replication_plan::{
     ReplicationPlanRequest, ReplicationSiteAction, ReplicationSitePlan, plan_glioma_replication,
 };
 
+pub use lineage_acquisition_design::{
+    plan_glioma_lineage_assay_acquisition, plan_glioma_lineage_assay_acquisition_for_target,
+    update_lineage_propagation_particle_weights, LineagePropagationAcquisitionError,
+    LineagePropagationAcquisitionPlan, LineagePropagationAcquisitionPolicy,
+    LineagePropagationAcquisitionTarget, LineagePropagationAssayResponseModel,
+    LineagePropagationAssayScore, LineagePropagationJointAssayResponseModel,
+    LineagePropagationJointOutcomeLikelihood, LineagePropagationObservedAssay,
+    LineagePropagationOutcomeLikelihood, LineagePropagationOutcomeProbability,
+    LineagePropagationResponseDependence, MIN_POSTERIOR_EFFECTIVE_SAMPLE_FRACTION_MILLI,
+};
+pub use lineage_guided_campaign::{
+    execute_glioma_lineage_guided_assay_workflow,
+    execute_glioma_lineage_guided_instrument_campaign, plan_glioma_lineage_guided_state_priorities,
+    LineageGuidanceWeights, LineageGuidedAssayWorkflowError, LineageGuidedAssayWorkflowRequest,
+    LineageGuidedAssayWorkflowRun, LineageGuidedInstrumentCampaignRun, LineageGuidedStatePriority,
+};
+pub use lineage_response_calibration::{
+    calibrate_glioma_lineage_assay_response_model,
+    calibrate_glioma_lineage_joint_assay_response_model, LineageAssayCalibrationObservation,
+    LineageAssayJointCalibrationObservation, LineageAssayJointResponseCalibrationDiagnostics,
+    LineageAssayJointResponseCalibrationDisposition, LineageAssayJointResponseCalibrationRequest,
+    LineageAssayJointResponseCalibrationRun, LineageAssayResponseCalibrationDiagnostics,
+    LineageAssayResponseCalibrationDisposition, LineageAssayResponseCalibrationError,
+    LineageAssayResponseCalibrationRequest, LineageAssayResponseCalibrationRun,
+    DEFAULT_MINIMUM_BRIER_SKILL_PPM, JOINT_OUTPUT_SCHEMA,
+};
 pub use replication_continuation::{
     ReplicationContinuationAction, ReplicationContinuationDisposition,
     ReplicationContinuationError, ReplicationContinuationObservation, ReplicationContinuationPlan,
@@ -205,10 +246,41 @@ pub use sequential_design::{
     SequentialDesignDisposition, SequentialDesignError, SequentialDesignPlan,
     SequentialDesignRequest, SequentialDesignRound, plan_glioma_sequential_design,
 };
+pub use simulation_gated_campaign::{
+    execute_glioma_simulation_gated_assay_campaign,
+    execute_glioma_simulation_gated_assay_campaign_with_lineage_acquisition, AssayRouteDisposition,
+    AssayRouteReadiness, ExecutedGliomaAssayRoute, GliomaInstrumentOutcomeInterpreter,
+    InterpretedGliomaAssayOutcome, SimulationGatedAssayCampaignDisposition,
+    SimulationGatedAssayCampaignError, SimulationGatedAssayCampaignRun, SimulationGatedAssayRoute,
+};
+pub use state_plasticity_instrument_campaign::{
+    execute_glioma_lineage_propagation_guided_state_plasticity_campaign,
+    execute_glioma_lineage_propagation_guided_state_plasticity_campaign_for_target,
+    execute_glioma_lineage_response_guided_state_plasticity_campaign,
+    execute_glioma_state_plasticity_instrument_campaign, GliomaStatePlasticityInstrumentError,
+    GliomaStatePlasticityInstrumentInputs, GliomaStatePlasticityInstrumentRequest,
+    GliomaStatePlasticityInstrumentRun, LineagePropagationStatePriority,
+};
+pub use state_stratified_campaign::{
+    execute_glioma_state_stratified_campaign, CandidateSpecificAcquisitionPriority,
+    CandidateSpecificOutcomeUpdate, GliomaResearchStratum, GliomaStateStratifiedAssayExecutor,
+    RecordedStratifiedObservation, StateStratifiedCampaign, StateStratifiedCampaignError,
+    StateStratifiedCampaignRequest, StateStratifiedDisposition, StateStratifiedExecutionFailure,
+    StateStratifiedRound, StateStratifiedStopReason, StateStratumPosterior,
+    StratifiedAssayCandidate, StratifiedAssayObservation,
+};
 pub use synergy::{
     CombinationCell, CombinationCellDisposition, CombinationObservation,
     CombinationSynergyAnalysis, CombinationSynergyDisposition, CombinationSynergyError,
     CombinationSynergyRequest, DosePair, analyze_glioma_combination_synergy,
+};
+pub use transition_guided_campaign::{
+    execute_glioma_state_plasticity_research_workflow,
+    execute_glioma_transition_guided_state_campaign,
+    plan_glioma_transition_guided_state_priorities, GliomaStatePlasticityResearchRun,
+    GliomaStatePlasticityWorkflowError, GliomaStatePlasticityWorkflowRequest,
+    TransitionGuidanceRequest, TransitionGuidedStateCampaign, TransitionGuidedStateCampaignError,
+    TransitionGuidedStateCampaignRequest, TransitionGuidedStatePriority,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ExperimentDesign;
