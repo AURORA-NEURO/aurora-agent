@@ -150,12 +150,15 @@ contracts in the backlog.
 The API router keeps request dispatch and shared state in
 [`router.rs`](../crates/api/src/router.rs), with mission lifecycle routes in
 [`router/missions.rs`](../crates/api/src/router/missions.rs), evidence and artifact registry routes in
-[`router/evidence.rs`](../crates/api/src/router/evidence.rs), and operator snapshots and gate reviews
-in [`router/operations.rs`](../crates/api/src/router/operations.rs). Event pages, streaming, metrics,
-delivery receipts, and route-review history live in
-[`router/event_routes.rs`](../crates/api/src/router/event_routes.rs). Bounded local checkpoint
-adapters live in [`router/persistence.rs`](../crates/api/src/router/persistence.rs). These modules
-share one router instance and do not create separate dispatch or persistence authorities.
+[`router/evidence.rs`](../crates/api/src/router/evidence.rs), developer workbench and CI evidence
+registries in [`router/developer_artifact_routes.rs`](../crates/api/src/router/developer_artifact_routes.rs),
+domain workflows and capability routes in [`router/domain_routes.rs`](../crates/api/src/router/domain_routes.rs),
+workflow reconciliation in [`router/reconciliation_routes.rs`](../crates/api/src/router/reconciliation_routes.rs),
+and operator snapshots and gate reviews in [`router/operations.rs`](../crates/api/src/router/operations.rs).
+Event pages, streaming, metrics, delivery receipts, and route-review history live in
+[`router/event_routes.rs`](../crates/api/src/router/event_routes.rs). Bounded local checkpoint adapters
+live in [`router/persistence.rs`](../crates/api/src/router/persistence.rs). These modules share one
+router instance and do not create separate dispatch or persistence authorities.
 Router white-box tests stay under `router/tests.rs` and are grouped by transport, mission,
 operations, events, registries, and domain workflows so private route behavior remains testable
 without keeping every contract in the router implementation file.
