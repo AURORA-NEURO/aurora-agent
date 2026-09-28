@@ -26,6 +26,7 @@ from prism_sdk import MAX_AUTONOMOUS_ROUTE_DOMAINS, MAX_AUTONOMOUS_TASK_STEPS  #
 
 
 MAX_ACTION_TASK_BYTES = 32_000
+MAX_ACTION_MCP_COMMAND_BYTES = 16_384
 MAX_ACTION_RESULT_BYTES = 32_000_000
 _ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
 _RUN_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
@@ -90,9 +91,18 @@ def _boolean(environ: Mapping[str, str], name: str, *, default: bool = False) ->
 
 def _lines(environ: Mapping[str, str], name: str, *, maximum: int, item_limit: int = 256) -> tuple[str, ...]:
     raw = _input(environ, name)
-    values = tuple(line.strip() for line in raw.splitlines() if line.strip())
-    if len(values) > maximum or any(len(value.encode("utf-8")) > item_limit for value in values):
+    if len(raw) > maximum * (item_limit + 2):
         raise AutonomousAgentActionError(f"{name} exceeds its bounded list contract")
+    values: list[str] = []
+    for line in io.StringIO(raw, newline=None):
+        value = line.strip()
+        if not value:
+            continue
+        if len(value) > item_limit or len(value.encode("utf-8")) > item_limit:
+            raise AutonomousAgentActionError(f"{name} exceeds its bounded list contract")
+        values.append(value)
+        if len(values) > maximum:
+            raise AutonomousAgentActionError(f"{name} exceeds its bounded list contract")
     if len(set(values)) != len(values):
         raise AutonomousAgentActionError(f"{name} entries must be unique")
     return values
@@ -111,10 +121,22 @@ def _bounded_positive_integer(environ: Mapping[str, str], name: str, *, default:
 def build_cli_argv(environ: Mapping[str, str]) -> list[str]:
     """Build an in-process CLI argument vector; caller text never enters a shell command."""
 
-    task = _required(environ, "task")
+    task = _input(environ, "task")
+    if len(task) > MAX_ACTION_TASK_BYTES:
+        raise AutonomousAgentActionError("task exceeds the bounded UTF-8 input contract")
+    if not task.strip():
+        raise AutonomousAgentActionError("task is required")
     if len(task.encode("utf-8")) > MAX_ACTION_TASK_BYTES or "\x00" in task:
         raise AutonomousAgentActionError("task exceeds the bounded UTF-8 input contract")
-    mcp_command = _required(environ, "mcp-command")
+    mcp_command = _input(environ, "mcp-command")
+    if (
+        len(mcp_command) > MAX_ACTION_MCP_COMMAND_BYTES
+        or len(mcp_command.encode("utf-8")) > MAX_ACTION_MCP_COMMAND_BYTES
+        or "\x00" in mcp_command
+    ):
+        raise AutonomousAgentActionError("mcp-command exceeds its bounded command contract")
+    if not mcp_command.strip():
+        raise AutonomousAgentActionError("mcp-command is required")
     provider = _input(environ, "provider", "openai").strip()
     if not provider or len(provider.encode("utf-8")) > 128:
         raise AutonomousAgentActionError("provider is outside its bounded identifier contract")

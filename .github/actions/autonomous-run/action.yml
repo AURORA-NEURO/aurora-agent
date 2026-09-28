@@ -6,7 +6,7 @@ inputs:
     description: Task text passed transiently to the autonomous agent
     required: true
   mcp-command:
-    description: MCP executable and arguments; parsed and launched without a shell
+    description: MCP executable and arguments (maximum 16 KiB); parsed and launched without a shell
     required: true
   mcp-working-directory:
     description: Working directory for the MCP process; defaults to GITHUB_WORKSPACE

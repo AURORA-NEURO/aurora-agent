@@ -104,6 +104,30 @@ def test_action_accepts_exact_domain_and_step_limits(tmp_path: Path) -> None:
     assert argv[argv.index("--max-steps") + 1] == "128"
 
 
+def test_action_bounds_command_and_list_inputs_before_tokenization(tmp_path: Path) -> None:
+    oversized_command = _environment(
+        tmp_path,
+        INPUT_MCP_COMMAND="x" * (action_module.MAX_ACTION_MCP_COMMAND_BYTES + 1),
+    )
+    with pytest.raises(AutonomousAgentActionError, match="mcp-command.*bounded"):
+        build_cli_argv(oversized_command)
+
+    oversized_list = _environment(tmp_path, INPUT_MODELS="\n" * 100_000)
+    with pytest.raises(AutonomousAgentActionError, match="models.*bounded list"):
+        build_cli_argv(oversized_list)
+
+    exact_bounds = _environment(
+        tmp_path,
+        INPUT_MCP_COMMAND="x" * action_module.MAX_ACTION_MCP_COMMAND_BYTES,
+        INPUT_MODELS="\n".join(f"{index:02d}" + "m" * 254 for index in range(16)),
+    )
+    exact_argv = build_cli_argv(exact_bounds)
+    assert exact_argv[exact_argv.index("--mcp-command") + 1] == (
+        "x" * action_module.MAX_ACTION_MCP_COMMAND_BYTES
+    )
+    assert exact_argv.count("--model") == 16
+
+
 def test_action_requires_exact_tool_allowlist_and_independent_effect_approval(tmp_path: Path) -> None:
     tool_loop = _environment(tmp_path, INPUT_EXECUTION_MODE="tool_loop")
     with pytest.raises(AutonomousAgentActionError, match="exact tools"):

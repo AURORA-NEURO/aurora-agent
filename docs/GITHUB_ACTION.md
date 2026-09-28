@@ -41,7 +41,9 @@ MCP command to the Python SDK, which tokenizes it and starts it without a shell.
 must be available in the caller's runner workspace and receive any required credentials through
 its own environment. The action removes its `INPUT_*` variables and the configured provider-key
 variable while the CLI starts the MCP child process; if the MCP server needs a credential, provide
-it under a separate caller-owned environment variable.
+it under a separate caller-owned environment variable. Task input is capped at 32,000 UTF-8 bytes,
+the MCP command at 16 KiB, and each newline-separated list is bounded before its entries are
+tokenized.
 
 The action captures the CLI JSON in memory and writes only a bounded status, routing mode, run ID,
 and SHA-256 digest to `GITHUB_OUTPUT` and the workflow log. It does not upload or persist a result
