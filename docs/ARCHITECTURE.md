@@ -151,7 +151,9 @@ The API router keeps request dispatch and shared state in
 [`router.rs`](../crates/api/src/router.rs), with mission lifecycle routes in
 [`router/missions.rs`](../crates/api/src/router/missions.rs), evidence and artifact registry routes in
 [`router/evidence.rs`](../crates/api/src/router/evidence.rs), and operator snapshots and gate reviews
-in [`router/operations.rs`](../crates/api/src/router/operations.rs). Bounded local checkpoint
+in [`router/operations.rs`](../crates/api/src/router/operations.rs). Event pages, streaming, metrics,
+delivery receipts, and route-review history live in
+[`router/event_routes.rs`](../crates/api/src/router/event_routes.rs). Bounded local checkpoint
 adapters live in [`router/persistence.rs`](../crates/api/src/router/persistence.rs). These modules
 share one router instance and do not create separate dispatch or persistence authorities.
 Router white-box tests stay under `router/tests.rs` and are grouped by transport, mission,
