@@ -2,8 +2,8 @@
 //!
 //! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--allow-http-origin <host[:port]>]... [--mission-state <file>] [--mission-queue-state <file>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>] [--ci-provider-evidence-state <file>]`
 
-use bioprism_api::{serve, ApiConfig, ApiRouter};
-use std::net::{SocketAddr, TcpListener};
+use bioprism_api::{serve, validate_bind_auth, ApiConfig, ApiRouter};
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -160,8 +160,8 @@ fn main() {
             None => None,
         },
     };
-    if let Err(error) = validate_bind_auth(&bind, token.as_deref()) {
-        eprintln!("invalid API configuration: {error}");
+    if let Err(error) = validate_bind_auth(&bind, token.is_some()) {
+        eprintln!("invalid API configuration: {error}; set --token or AURORA_API_TOKEN");
         std::process::exit(2);
     }
     let config = ApiConfig {
@@ -203,29 +203,14 @@ fn main() {
     }
 }
 
-fn validate_bind_auth(bind: &str, bearer_token: Option<&str>) -> Result<(), &'static str> {
-    if bearer_token.is_some_and(str::is_empty) {
-        return Err("bearer token must not be empty");
-    }
-
-    let is_numeric_loopback = bind
-        .parse::<SocketAddr>()
-        .is_ok_and(|address| address.ip().is_loopback());
-    if !is_numeric_loopback && bearer_token.is_none() {
-        return Err("non-loopback binds require a bearer token; set --token or AURORA_API_TOKEN");
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::validate_bind_auth;
+    use bioprism_api::{validate_bind_auth, ApiConfig};
 
     #[test]
     fn anonymous_api_is_limited_to_numeric_loopback_binds() {
-        assert!(validate_bind_auth("127.0.0.1:8787", None).is_ok());
-        assert!(validate_bind_auth("[::1]:8787", None).is_ok());
+        assert!(validate_bind_auth("127.0.0.1:8787", false).is_ok());
+        assert!(validate_bind_auth("[::1]:8787", false).is_ok());
 
         for bind in [
             "0.0.0.0:8787",
@@ -234,15 +219,19 @@ mod tests {
             "localhost:8787",
         ] {
             assert!(
-                validate_bind_auth(bind, None).is_err(),
+                validate_bind_auth(bind, false).is_err(),
                 "{bind} must require auth"
             );
-            assert!(validate_bind_auth(bind, Some("operator-secret")).is_ok());
+            assert!(validate_bind_auth(bind, true).is_ok());
         }
     }
 
     #[test]
     fn empty_bearer_tokens_are_rejected() {
-        assert!(validate_bind_auth("127.0.0.1:8787", Some("")).is_err());
+        let config = ApiConfig {
+            bearer_token: Some(String::new()),
+            ..ApiConfig::default()
+        };
+        assert!(config.validate().is_err());
     }
 }

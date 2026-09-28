@@ -1067,7 +1067,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,356,268 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,356,298 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 

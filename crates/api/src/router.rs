@@ -31,6 +31,7 @@ use bioprism_scope::Timestamp;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -96,6 +97,18 @@ pub const MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES: usize =
 pub const MISSION_QUEUE_LEASE_DURATION_NANOS: i128 = 24 * 60 * 60 * 1_000_000_000;
 const MISSION_QUEUE_WORKER_ID: &str = "bioprism-api-mission-worker";
 static NEXT_CHECKPOINT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Refuse an unauthenticated listener unless it is bound to a numeric loopback address.
+pub fn validate_bind_auth(bind: &str, bearer_token_configured: bool) -> Result<(), &'static str> {
+    let is_numeric_loopback = bind
+        .parse::<SocketAddr>()
+        .is_ok_and(|address| address.ip().is_loopback());
+    if !is_numeric_loopback && !bearer_token_configured {
+        return Err("non-loopback API listeners require bearer authentication");
+    }
+
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -1028,6 +1041,10 @@ impl ApiRouter {
 
     pub fn limits(&self) -> (usize, usize) {
         (self.config.max_header_bytes, self.config.max_body_bytes)
+    }
+
+    pub(crate) fn bearer_token_configured(&self) -> bool {
+        self.config.bearer_token.is_some()
     }
 
     fn mission_persistence_status(&self) -> HttpResponse {

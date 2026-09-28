@@ -19,9 +19,11 @@ The binary permits anonymous access only when bound to a numeric loopback addres
 including wildcard, LAN, and hostname binds, requires a non-empty bearer token. Supply it with
 `--token` or through `AURORA_API_TOKEN`; the environment variable keeps the secret out of shell
 history and process arguments. When configured, bearer authentication protects every route except
-`/healthz`, `/readyz`, and the OpenAPI document. Applications embedding `ApiRouter` directly must
-configure `ApiConfig::bearer_token` themselves when exposing the listener beyond loopback. The
-server inherits MCP root confinement for every tool that reads a path.
+`/healthz`, `/readyz`, and the OpenAPI document. The crate's `serve()` entry point enforces the same
+non-loopback authentication requirement for embedded applications. Callers using a custom listener
+or server around `ApiRouter::handle()` must configure `ApiConfig::bearer_token` themselves when
+exposing it beyond loopback. The server inherits MCP root confinement for every tool that reads a
+path.
 The binary does not terminate TLS. Before exposing it outside a trusted loopback boundary, put it
 behind an operator-managed TLS endpoint; bearer credentials travel in plaintext without TLS.
 
