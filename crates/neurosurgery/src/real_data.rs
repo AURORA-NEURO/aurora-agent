@@ -409,6 +409,9 @@ pub struct RealDataQueryHit {
     /// Publication date copied from PubMed metadata, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication_date: Option<String>,
+    /// NCI PDQ page update date, when the source publishes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guideline_updated_date: Option<String>,
     /// Aggregate GDC file-type facets copied only for genomic-project hits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub genomic_data_type_counts: Vec<GenomicProjectDataTypeCount>,
@@ -488,6 +491,10 @@ impl RealDataQueryResult {
                         .as_deref()
                         .is_some_and(|date| !is_calendar_date(date))
                     || hit
+                        .guideline_updated_date
+                        .as_deref()
+                        .is_some_and(|date| !is_calendar_date(date))
+                    || hit
                         .enrollment_count
                         .is_some_and(|count| count > MAX_TRIAL_ENROLLMENT)
                     || hit
@@ -513,6 +520,8 @@ impl RealDataQueryResult {
                         && hit.sample_count.is_some())
                     || (hit.record_kind != RealDataRecordKind::LiteratureArticle
                         && hit.publication_date.is_some())
+                    || (hit.record_kind != RealDataRecordKind::GuidelineReference
+                        && hit.guideline_updated_date.is_some())
                     || (hit.record_kind != RealDataRecordKind::GenomicProject
                         && !hit.genomic_data_type_counts.is_empty())
                     || !valid_genomic_data_type_counts(&hit.genomic_data_type_counts)
@@ -1541,14 +1550,16 @@ impl RealGliomaBundle {
                 ],
                 None,
             ) {
-                hits.push(self.hit(
+                let mut hit = self.hit(
                     RealDataRecordKind::GuidelineReference,
                     &record.reference_id,
                     &record.title,
                     None,
                     &record.source_id,
                     related_records,
-                )?);
+                )?;
+                hit.guideline_updated_date = record.updated_date.clone();
+                hits.push(hit);
             }
         }
         for record in &self.literature {
@@ -1817,6 +1828,7 @@ impl RealGliomaBundle {
             intervention_names: Vec::new(),
             sample_count: None,
             publication_date: None,
+            guideline_updated_date: None,
             genomic_data_type_counts: Vec::new(),
         })
     }

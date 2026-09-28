@@ -133,6 +133,19 @@ fn guideline_update_dates_are_optional_for_old_snapshots_and_bound_into_source_h
         .content_sha256 = source_digests[&source_id].clone();
     data.validate()
         .expect("a source-reported calendar update date is valid");
+    let query = RealDataQuery {
+        record_kind: Some(RealDataRecordKind::GuidelineReference),
+        limit: 1,
+        ..RealDataQuery::default()
+    };
+    let result = data.query(&query).expect("PDQ reference can be queried");
+    assert_eq!(result.hits[0].guideline_updated_date.as_deref(), Some("2025-03-28"));
+    result
+        .validate_for_inputs(&data)
+        .expect("guideline update date is preserved by exact query replay");
+    let mut tampered_result = result.clone();
+    tampered_result.hits[0].record_kind = RealDataRecordKind::PortalStudy;
+    assert!(tampered_result.validate_integrity().is_err());
 
     data.references[0].updated_date = Some("2025-02-30".to_string());
     let source_digests = data

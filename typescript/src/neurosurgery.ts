@@ -260,7 +260,7 @@ function compactGroundedToolHits(
     const recordKind = literature ? "literature_article" : raw.record_kind;
     if (typeof recordId !== "string" || !recordId.trim() || typeof recordKind !== "string" || !recordKind.trim()) continue;
     const row: JsonObject = { record_kind: recordKind, record_id: recordId };
-    for (const key of ["specialty", "title", "journal", "source_id", "source_uri", "record_uri", "publication_date", "updated_at", "doi", "status", "molecular_alteration_type", "datatype", "molecular_description", "study_type", "last_update"] as const) {
+    for (const key of ["specialty", "title", "journal", "source_id", "source_uri", "record_uri", "publication_date", "guideline_updated_date", "updated_at", "doi", "status", "molecular_alteration_type", "datatype", "molecular_description", "study_type", "last_update"] as const) {
       const value = raw[key];
       if (typeof value === "string" && value) row[key] = value.slice(0, 2_000);
     }
@@ -4217,6 +4217,7 @@ export interface RealDataQueryHit extends JsonObject {
   intervention_names?: string[];
   sample_count?: number | null;
   publication_date?: string | null;
+  guideline_updated_date?: string | null;
 }
 
 export interface RealTrialStatusCount extends JsonObject {

@@ -2411,32 +2411,57 @@ test("grounded real-data bridge requires a keyless provider and audits structure
   );
 });
 
-test("grounded real-data tool loop executes only snapshot search and closes citations", async () => {
+test("grounded real-data tool loop exposes the PDQ update date to the model", async () => {
   const client = fakeClient();
+  const originalCallTool = client.callTool;
+  client.callTool = async (name, args = {}) => {
+    if (name === NEUROSURGERY_REAL_DATA_QUERY_TOOL) {
+      client.calls.push({ name, args });
+      return response(name, {
+        schema_version: "bioprism-neurosurgery-real/0.1",
+        bundle_digest: "p".repeat(64),
+        query: args.query,
+        total_matches: 1,
+        returned_matches: 1,
+        truncated: false,
+        hits: [{
+          record_kind: "guideline_reference",
+          record_id: "NCI-PDQ-adult-CNS",
+          title: "Central Nervous System Tumors Treatment (PDQ®)–Health Professional Version",
+          source_id: "nci_adult_cns_pdq",
+          source_uri: "https://www.cancer.gov/types/brain/hp/adult-brain-treatment-pdq",
+          guideline_updated_date: "2025-03-28",
+        }],
+      });
+    }
+    return originalCallTool(name, args);
+  };
   const agent = new LocalNeurosurgicalAgent(client);
   const runtime = new LLMRuntime();
   let turns = 0;
+  let continuationRequest = null;
   runtime.registerInMemoryProvider("ollama", (request) => {
     turns += 1;
     if (turns === 1) {
-      return { toolCalls: [{ id: "search-1", name: NEUROSURGERY_GROUNDED_REAL_DATA_PROVIDER_TOOL, arguments: { text: "trial", limit: 1 } }] };
+      return { toolCalls: [{ id: "search-1", name: NEUROSURGERY_GROUNDED_REAL_DATA_PROVIDER_TOOL, arguments: { record_kind: "guideline_reference", limit: 1 } }] };
     }
+    continuationRequest = request;
     return {
       structured: {
-        answer: "The tool returned one source-linked trial row.",
+        answer: "The source reports its PDQ update date.",
         unknowns: [],
         claims: [{
-          claim_id: "tool-trial",
+          claim_id: "pdq-update-date",
           kind: "source_observation",
           scope: "public_record_metadata",
-          text: "A bounded query returned a clinical-trial metadata row.",
-          citations: [{ record_kind: "clinical_trial", record_id: "TOOL-TRIAL" }],
+          text: "The source metadata reports its PDQ update date.",
+          citations: [{ record_kind: "guideline_reference", record_id: "NCI-PDQ-adult-CNS" }],
         }],
       },
     };
   });
   const result = await agent.groundedRealDataResearch(
-    "Find glioma trial metadata.",
+    "Inspect the NCI PDQ source metadata.",
     { schema_version: "bioprism-neurosurgery-real/0.1", synthetic_data: false },
     runtime,
     "ollama",
@@ -2446,7 +2471,9 @@ test("grounded real-data tool loop executes only snapshot search and closes cita
   assert.deepEqual(result.tool_loop, { status: "completed", turns: 2, tool_calls: 1 });
   assert.equal(result.tool_trace[0].tool, NEUROSURGERY_GROUNDED_REAL_DATA_PROVIDER_TOOL);
   assert.equal(result.tool_trace[0].query.text, undefined);
-  assert.equal(result.tool_trace[0].query.text_bytes, new TextEncoder().encode("trial").byteLength);
+  assert.equal(result.tool_trace[0].query.record_kind, "guideline_reference");
+  const toolMessage = continuationRequest.messages.find((message) => message.role === "tool");
+  assert.equal(JSON.parse(toolMessage.content).hits[0].guideline_updated_date, "2025-03-28");
   assert.equal(result.audit.status, "grounded_for_human_review");
   assert.deepEqual(client.calls.map((call) => call.name), [
     NEUROSURGERY_REAL_DATA_REASONING_CONTEXT_TOOL,
