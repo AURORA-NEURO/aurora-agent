@@ -246,6 +246,40 @@ test("goal bandit separates capability and risk contexts with deterministic rest
   assert.deepEqual(validateAutonomousGoalControlLoopSnapshot(checkpoint).learner_state, snapshot);
 });
 
+test("goal bandit rejects unbound or duplicate evaluations without mutating state", () => {
+  const goals = [{ goal_id: "known-goal", domain: "coding", status: "ready" }];
+  const evaluation = { goal_id: "known-goal", domain: "coding", reward: 0.8, passed: true };
+  const invalidBatches = [
+    [{ domain: "coding", reward: 0.8, passed: true }],
+    [{ ...evaluation, goal_id: "missing-goal" }],
+    [evaluation, evaluation],
+  ];
+
+  for (const evaluations of invalidBatches) {
+    const learner = new AutonomousGoalBanditLearner();
+    assert.throws(() => learner.update(evaluations, goals), /goal_id|unknown goal_id|duplicate goal_id/);
+    assert.equal(learner.snapshot().generation, 0);
+    assert.deepEqual(learner.snapshot().arms, []);
+  }
+
+  const duplicateGoalLearner = new AutonomousGoalBanditLearner();
+  assert.throws(() => duplicateGoalLearner.update([], [goals[0], { ...goals[0] }]), /duplicate goal_id/);
+  assert.equal(duplicateGoalLearner.snapshot().generation, 0);
+  assert.deepEqual(duplicateGoalLearner.snapshot().arms, []);
+});
+
+test("goal bandit rejects oversized goal arrays without mutating state", () => {
+  const goals = Array.from({ length: 4_097 }, (_, index) => ({
+    goal_id: `goal-${index}`,
+    domain: "coding",
+    status: "ready",
+  }));
+  const learner = new AutonomousGoalBanditLearner();
+  assert.throws(() => learner.update([], goals), /goals are outside their bounds/);
+  assert.equal(learner.snapshot().generation, 0);
+  assert.deepEqual(learner.snapshot().arms, []);
+});
+
 test("goal control loop preview is provider-free and explains all-domain admission", async () => {
   const domains = [...AUTONOMOUS_DOMAIN_NAMES];
   const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length + 1, clock: () => 100 });

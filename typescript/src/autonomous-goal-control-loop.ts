@@ -265,7 +265,7 @@ export class AutonomousGoalBanditLearner {
     return value === null || value === undefined ? null : identifier(name, value, 128);
   }
 
-  private static context(name: string, value: JsonObject): BanditContext {
+  private static context(name: string, value: Record<string, unknown>): BanditContext {
     return {
       domain: identifier(`${name}.domain`, value.domain, 128),
       capability: AutonomousGoalBanditLearner.contextPart(`${name}.capability`, value.capability),
@@ -381,33 +381,58 @@ export class AutonomousGoalBanditLearner {
 
   private updateUnlocked(evaluations: readonly AutonomousGoalEvaluation[], goals: readonly AutonomousGoalRecord[]): Record<string, unknown> {
     if (!Array.isArray(evaluations) || evaluations.length > AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS) fail("bandit evaluations are outside their bounds");
-    const goalsById = new Map<string, AutonomousGoalRecord>();
-    for (const goal of goals) {
-      if (goalsById.has(goal.goal_id)) fail("bandit goals contain duplicate goal_id values");
-      goalsById.set(goal.goal_id, goal);
+    if (!Array.isArray(goals) || goals.length > AUTONOMOUS_GOAL_MAX_GOALS) fail("bandit goals are outside their bounds");
+
+    // Copy caller-owned rows once so validation and the resulting signals use the same values.
+    const evaluationRows: Record<string, unknown>[] = [];
+    const evaluationCount = evaluations.length;
+    for (let index = 0; index < evaluationCount; index += 1) {
+      if (evaluationRows.length >= AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS) fail("bandit evaluations are outside their bounds");
+      const evaluation = evaluations[index];
+      if (!isObject(evaluation)) fail("bandit evaluation is malformed");
+      evaluationRows.push({ ...evaluation });
+    }
+
+    const goalsById = new Map<string, Record<string, unknown>>();
+    const goalRows: Record<string, unknown>[] = [];
+    const goalCount = goals.length;
+    for (let index = 0; index < goalCount; index += 1) {
+      if (goalRows.length >= AUTONOMOUS_GOAL_MAX_GOALS) fail("bandit goals are outside their bounds");
+      const rawGoal = goals[index];
+      if (!isObject(rawGoal)) fail("bandit goal is malformed");
+      const goal = { ...rawGoal };
+      const goalId = identifier("bandit goal_id", goal.goal_id);
+      if (goalsById.has(goalId)) fail("bandit goals contain duplicate goal_id values");
+      goalsById.set(goalId, goal);
+      goalRows.push(goal);
     }
     if (this.generationValue >= 2_147_483_647) fail("bandit generation is exhausted");
-    for (const evaluation of evaluations) {
-      if (typeof evaluation.passed !== "boolean") fail("bandit evaluation is malformed");
+    const seenGoalIds = new Set<string>();
+    for (const evaluation of evaluationRows) {
+      const passed = evaluation.passed;
+      if (typeof passed !== "boolean") fail("bandit evaluation is malformed");
       const domain = identifier("bandit evaluation domain", evaluation.domain, 128);
+      const goalId = identifier("bandit evaluation goal_id", evaluation.goal_id);
+      if (!goalsById.has(goalId)) fail("bandit evaluation references an unknown goal_id");
+      if (seenGoalIds.has(goalId)) fail("bandit evaluations contain duplicate goal_id values");
+      seenGoalIds.add(goalId);
       const reward = finite("bandit evaluation reward", evaluation.reward, -1, 1);
-      const evaluationGoal = goalsById.get(evaluation.goal_id);
-      const context = evaluationGoal === undefined
-        ? { domain, capability: null, risk_class: null }
-        : AutonomousGoalBanditLearner.context("bandit evaluation goal", evaluationGoal);
+      const evaluationGoal = goalsById.get(goalId)!;
+      const context = AutonomousGoalBanditLearner.context("bandit evaluation goal", evaluationGoal);
       if (context.domain !== domain) fail("bandit evaluation domain does not match its goal");
       const arm = this.ensureArm(context);
       if (arm.pulls >= 2_147_483_647) fail("bandit arm pulls are exhausted");
-      if (!evaluation.passed && arm.failures >= 2_147_483_647) fail("bandit arm failures are exhausted");
+      if (!passed && arm.failures >= 2_147_483_647) fail("bandit arm failures are exhausted");
       arm.pulls += 1;
       arm.reward_sum += reward;
-      if (!evaluation.passed) arm.failures += 1;
+      if (!passed) arm.failures += 1;
     }
     this.generationValue += 1;
     const totalPulls = Math.max(1, [...this.arms.values()].reduce((total, arm) => total + arm.pulls, 0));
     const signals: AutonomousGoalSchedulingSignal[] = [];
-    for (const goal of goals) {
-      if (!(["ready", "paused", "failed"] as readonly string[]).includes(goal.status)) continue;
+    for (const goal of goalRows) {
+      const status = goal.status;
+      if (typeof status !== "string" || !(["ready", "paused", "failed"] as readonly string[]).includes(status)) continue;
       const arm = this.armFor(AutonomousGoalBanditLearner.context("bandit goal", goal));
       const mean = arm.pulls === 0 ? 1 : (arm.reward_sum / arm.pulls + 1) / 2;
       const score = arm.pulls === 0 ? 1 : Math.min(1, Math.max(0, mean + this.exploration * Math.sqrt(Math.log(totalPulls + 1) / arm.pulls)));
