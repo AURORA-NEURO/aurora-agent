@@ -310,6 +310,7 @@ export class ReviewedNcbiGeneRetrievalConfig {
     const raw = exactObject("NCBI Gene config", value, ["schema", "gene_symbols", "gene_ids", "timeout_ms", "request_limit", "transport_id", "transport_version", "transport_config_digest", "catalogue_digest", "ncbi_registration_digest", "retention", "credentials", "config_digest"]);
     if (raw.schema !== REVIEWED_NCBI_GENE_CONFIG_SCHEMA || !Array.isArray(raw.gene_symbols)) fail("NCBI Gene config has an invalid shape");
     const config = new ReviewedNcbiGeneRetrievalConfig({ geneSymbols: raw.gene_symbols as ReviewedNcbiGeneSymbol[], timeoutMs: raw.timeout_ms as number, transportId: raw.transport_id as string, transportVersion: raw.transport_version as string, transportConfigDigest: raw.transport_config_digest as string, ...registrationValues });
+    if (config.ncbiRegistrationDigest !== raw.ncbi_registration_digest) fail("NCBI Gene registration identity changed");
     if (canonicalJson(config.toJSON()) !== canonicalJson(raw)) fail("NCBI Gene config is not normalized or its digest is invalid");
     return config;
   }
