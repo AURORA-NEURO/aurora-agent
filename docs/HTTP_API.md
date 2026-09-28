@@ -4,7 +4,8 @@
 available as a library (`bioprism_api::ApiRouter`) and as the `bioprism-api` binary:
 
 ```bash
-cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16-visible-bytes> \
+export AURORA_API_TOKEN="<random-token>"
+cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 \
   --allow-http-origin evidence.example.org:80 \
   --mission-state .local/mission-state.json --mission-queue-state .local/mission-queue.json \
   --event-state .local/event-state.json \
@@ -14,8 +15,15 @@ cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16
 
 The gateway is intentionally bounded and one-request-per-connection. Headers default to 32 KiB,
 bodies to 2 MiB, event retention to 4,096 entries, and every route reports an `X-Request-Id`.
-When configured, bearer authentication protects every route except `/healthz`, `/readyz`, and the
-OpenAPI document. The server inherits MCP root confinement for every tool that reads a path.
+The binary permits anonymous access only when bound to a numeric loopback address. Any other bind,
+including wildcard, LAN, and hostname binds, requires a non-empty bearer token. Supply it with
+`--token` or through `AURORA_API_TOKEN`; the environment variable keeps the secret out of shell
+history and process arguments. When configured, bearer authentication protects every route except
+`/healthz`, `/readyz`, and the OpenAPI document. Applications embedding `ApiRouter` directly must
+configure `ApiConfig::bearer_token` themselves when exposing the listener beyond loopback. The
+server inherits MCP root confinement for every tool that reads a path.
+The binary does not terminate TLS. Before exposing it outside a trusted loopback boundary, put it
+behind an operator-managed TLS endpoint; bearer credentials travel in plaintext without TLS.
 
 ## Routes
 

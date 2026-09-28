@@ -3,7 +3,7 @@
 //! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--allow-http-origin <host[:port]>]... [--mission-state <file>] [--mission-queue-state <file>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>] [--ci-provider-evidence-state <file>]`
 
 use bioprism_api::{serve, ApiConfig, ApiRouter};
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -120,7 +120,7 @@ fn main() {
                 println!(
                     "bioprism-api — bounded HTTP/REST and event gateway\n\n\
                      USAGE\n  bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--allow-http-origin <host[:port]>]... [--mission-state <file>] [--mission-queue-state <file>] [--mission-queue-max-jobs <n>] [--mission-queue-max-active-leases <n>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>] [--ci-provider-evidence-state <file>]\n\n\
-                     GET /healthz and /readyz are public. Other /v1 routes require --token when configured.\n\
+                     GET /healthz, /readyz, and /openapi.json are public. Numeric loopback binds may omit authentication; every other bind requires --token or AURORA_API_TOKEN.\n\
                      REST tools: POST /v1/tools/<name> with a JSON object body.\n\
                      JSON-RPC: POST /v1/rpc. Events: GET /v1/events or /v1/events/stream.\n\
                      Missions: POST /v1/missions; --mission-state enables bounded restart-aware snapshots; --mission-queue-state enables the typed factory execution authority and transition ledger; queue max flags provide explicit backpressure; /v1/missions/queue/authority/release-lock audits orphan-lock recovery.\n\
@@ -145,6 +145,23 @@ fn main() {
 
     if !root.is_dir() {
         eprintln!("root is not a directory: {}", root.display());
+        std::process::exit(2);
+    }
+    let token = match token {
+        Some(token) => Some(token),
+        None => match std::env::var_os("AURORA_API_TOKEN") {
+            Some(token) => match token.into_string() {
+                Ok(token) => Some(token),
+                Err(_) => {
+                    eprintln!("AURORA_API_TOKEN must be valid Unicode");
+                    std::process::exit(2);
+                }
+            },
+            None => None,
+        },
+    };
+    if let Err(error) = validate_bind_auth(&bind, token.as_deref()) {
+        eprintln!("invalid API configuration: {error}");
         std::process::exit(2);
     }
     let config = ApiConfig {
@@ -183,5 +200,49 @@ fn main() {
     if let Err(error) = serve(listener, router) {
         eprintln!("bioprism-api stopped: {error}");
         std::process::exit(1);
+    }
+}
+
+fn validate_bind_auth(bind: &str, bearer_token: Option<&str>) -> Result<(), &'static str> {
+    if bearer_token.is_some_and(str::is_empty) {
+        return Err("bearer token must not be empty");
+    }
+
+    let is_numeric_loopback = bind
+        .parse::<SocketAddr>()
+        .is_ok_and(|address| address.ip().is_loopback());
+    if !is_numeric_loopback && bearer_token.is_none() {
+        return Err("non-loopback binds require a bearer token; set --token or AURORA_API_TOKEN");
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_bind_auth;
+
+    #[test]
+    fn anonymous_api_is_limited_to_numeric_loopback_binds() {
+        assert!(validate_bind_auth("127.0.0.1:8787", None).is_ok());
+        assert!(validate_bind_auth("[::1]:8787", None).is_ok());
+
+        for bind in [
+            "0.0.0.0:8787",
+            "[::]:8787",
+            "192.0.2.10:8787",
+            "localhost:8787",
+        ] {
+            assert!(
+                validate_bind_auth(bind, None).is_err(),
+                "{bind} must require auth"
+            );
+            assert!(validate_bind_auth(bind, Some("operator-secret")).is_ok());
+        }
+    }
+
+    #[test]
+    fn empty_bearer_tokens_are_rejected() {
+        assert!(validate_bind_auth("127.0.0.1:8787", Some("")).is_err());
     }
 }

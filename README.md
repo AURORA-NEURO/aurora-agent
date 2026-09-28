@@ -1067,7 +1067,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,356,207 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,356,268 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 
@@ -1473,10 +1473,13 @@ graphs, bindings, and execution policy before `agentMission()` is sent. Remote r
 visible rather than becoming success. `missionFromRoute()` connects the generic capability
 catalogue to that review while keeping candidate selection and arguments explicit.
 
-The repository ships `bioprism-api` for deployments that need a network boundary:
+The repository ships `bioprism-api` for deployments that need a network boundary. Anonymous use is
+limited to numeric loopback binds; wildcard, LAN, and hostname binds require a bearer token. Set
+`AURORA_API_TOKEN` to keep the secret out of shell history and process arguments:
 
 ```bash
-cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <visible-token> \
+export AURORA_API_TOKEN="<random-token>"
+cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 \
   --mission-state .local/mission-state.json --mission-queue-state .local/mission-queue.json \
   --event-state .local/event-state.json \
   --reconciliation-state .local/reconciliation-state.json
