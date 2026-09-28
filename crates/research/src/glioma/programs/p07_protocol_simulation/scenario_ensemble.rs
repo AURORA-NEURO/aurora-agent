@@ -8,8 +8,8 @@
 //! efficacy and never dispatches an instrument or moves raw data.
 
 use super::simulator::{
-    simulate_glioma_protocol, ProtocolDisposition, ProtocolSimulation, ProtocolSimulationError,
-    ProtocolSimulationRequest,
+    ProtocolDisposition, ProtocolSimulation, ProtocolSimulationError, ProtocolSimulationRequest,
+    simulate_glioma_protocol,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_foundation::PRECLINICAL_BOUNDARY;
@@ -585,14 +585,16 @@ mod tests {
             left.disposition,
             ProtocolScenarioEnsembleDisposition::Fragile
         );
-        assert!(left
-            .results
-            .iter()
-            .any(|result| result.failure_class == ScenarioFailureClass::Approval));
-        assert!(left
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("no-approval")));
+        assert!(
+            left.results
+                .iter()
+                .any(|result| result.failure_class == ScenarioFailureClass::Approval)
+        );
+        assert!(
+            left.negative_evidence
+                .iter()
+                .any(|item| item.contains("no-approval"))
+        );
         left.validate().unwrap();
     }
 

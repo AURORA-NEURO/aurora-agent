@@ -7,11 +7,11 @@
 //! first-class output.
 
 use super::claim_frontier::{
-    prioritize_knowledge_frontier, FrontierActionKind, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeFrontierScore,
+    FrontierActionKind, KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeFrontierScore,
+    prioritize_knowledge_frontier,
 };
 use super::knowledge_graph::{
-    compile_typed_knowledge, KnowledgeDisposition, KnowledgeRequest, TypedKnowledge,
+    KnowledgeDisposition, KnowledgeRequest, TypedKnowledge, compile_typed_knowledge,
 };
 use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
 use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
@@ -704,11 +704,13 @@ mod tests {
         request.stop_on_qualified = false;
         let mut executor = DryRunKnowledgeResolutionCampaignExecutor;
         let output = execute_glioma_knowledge_resolution_campaign(&request, &mut executor).unwrap();
-        assert!(output
-            .final_knowledge
-            .uncertainty_order
-            .iter()
-            .any(|value| value.contains("e1")));
+        assert!(
+            output
+                .final_knowledge
+                .uncertainty_order
+                .iter()
+                .any(|value| value.contains("e1"))
+        );
         assert_ne!(
             output.disposition,
             KnowledgeResolutionCampaignDisposition::Qualified

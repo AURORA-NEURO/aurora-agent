@@ -563,7 +563,7 @@ mod tests {
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p01_evidence_surveillance::verification_gate::EvidenceVerificationRequest;
     use crate::glioma::programs::p02_evidence_knowledge::knowledge_graph::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
 
@@ -696,10 +696,12 @@ mod tests {
             EvidenceKnowledgeBridgeDisposition::Blocked
         );
         assert_eq!(bridge.coverage_order.len(), 1);
-        assert!(bridge
-            .omissions
-            .iter()
-            .any(|item| item.reason == "not-verification-eligible"));
+        assert!(
+            bridge
+                .omissions
+                .iter()
+                .any(|item| item.reason == "not-verification-eligible")
+        );
         bridge.validate().unwrap();
     }
 

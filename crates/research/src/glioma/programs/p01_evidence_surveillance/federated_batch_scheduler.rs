@@ -467,7 +467,7 @@ pub fn schedule_glioma_federated_evidence_batch(
     } else {
         FederatedBatchDisposition::Ready
     };
-    let mut next_routes = selected_route_order.iter().cloned().collect::<Vec<_>>();
+    let mut next_routes = selected_route_order.to_vec();
     if next_routes.is_empty() {
         next_routes.push("glioma_federated_evidence_operating_cycle".into());
     }

@@ -18,9 +18,9 @@
 //!
 //! [`NumericProperty::OrderedInstants`] parses both operands as [`UtcTimestamp`] and returns
 //! [`OracleError::NonComparableField`] if either fails. `crates/fiber/src/oracle.rs` compares
-//! timestamps lexicographically and documents that as bug-compatibility with a CPython reference;
-//! this crate is not bound by that reference, so a timestamp that cannot be ordered is a
-//! configuration error rather than a silently wrong comparison.
+//! timestamps with the broader `bioprism_scope::Timestamp` parser and reports malformed values as
+//! typed errors. This property remains stricter by accepting only canonical UTC timestamps, so a
+//! timestamp outside that wire form is a configuration error rather than an unverified ordering.
 
 use serde_json::Value;
 

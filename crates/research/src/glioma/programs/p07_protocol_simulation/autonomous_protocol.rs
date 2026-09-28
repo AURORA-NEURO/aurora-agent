@@ -7,16 +7,16 @@
 //! budget; it never performs an instrument effect from this crate and never emits a clinical claim.
 
 use super::branch_optimizer::{
-    materialize_glioma_protocol_branch, optimize_glioma_protocol_branches, ProtocolBranchCandidate,
-    ProtocolBranchEvaluation, ProtocolBranchOptimizationRequest, ProtocolBranchWeights,
+    ProtocolBranchCandidate, ProtocolBranchEvaluation, ProtocolBranchOptimizationRequest,
+    ProtocolBranchWeights, materialize_glioma_protocol_branch, optimize_glioma_protocol_branches,
 };
 use super::compensation::{
-    plan_glioma_protocol_compensation, ProtocolCompensationCandidate, ProtocolCompensationPlan,
-    ProtocolCompensationRequest,
+    ProtocolCompensationCandidate, ProtocolCompensationPlan, ProtocolCompensationRequest,
+    plan_glioma_protocol_compensation,
 };
 use super::execution::{
-    execute_glioma_protocol, GliomaProtocolExecutor, ProtocolExecution,
-    ProtocolExecutionDisposition, ProtocolExecutionRequest,
+    GliomaProtocolExecutor, ProtocolExecution, ProtocolExecutionDisposition,
+    ProtocolExecutionRequest, execute_glioma_protocol,
 };
 use super::simulator::ProtocolSimulationRequest;
 use bioprism_ids::ContentHash;
@@ -583,11 +583,12 @@ mod tests {
         );
         assert!(!run.failed_branch_order.is_empty());
         assert!(run.rounds.iter().any(|round| round.compensation.is_some()));
-        assert!(run
-            .negative_evidence
-            .iter()
-            .any(|evidence| evidence.contains("execution-refused")
-                || evidence.contains("execution-disposition")));
+        assert!(
+            run.negative_evidence
+                .iter()
+                .any(|evidence| evidence.contains("execution-refused")
+                    || evidence.contains("execution-disposition"))
+        );
         run.validate().unwrap();
     }
 }

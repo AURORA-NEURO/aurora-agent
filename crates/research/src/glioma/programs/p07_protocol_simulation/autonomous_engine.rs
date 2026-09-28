@@ -11,8 +11,8 @@ use super::action_execution::{
     ActionExecutionDisposition, ActionPortfolioExecutionDisposition, GliomaActionExecutor,
 };
 use super::director::{
-    execute_glioma_research_director, GliomaDirectorCheckpoint, GliomaDirectorFocus,
-    GliomaResearchDirectorError, GliomaResearchDirectorRequest, GliomaResearchDirectorRun,
+    GliomaDirectorCheckpoint, GliomaDirectorFocus, GliomaResearchDirectorError,
+    GliomaResearchDirectorRequest, GliomaResearchDirectorRun, execute_glioma_research_director,
 };
 use crate::glioma_engine::{GliomaResearchIntent, GliomaSelectionWeights, GliomaStageKind};
 use bioprism_ids::ContentHash;
@@ -575,14 +575,16 @@ mod tests {
         let run = execute_glioma_autonomous_research_engine(&request(), &mut executor).unwrap();
         assert!(run.cycles.len() > 1);
         assert!(!run.completed_checkpoints.is_empty());
-        assert!(run
-            .cycles
-            .windows(2)
-            .all(|pair| pair[0].budget_after_units >= pair[1].budget_after_units));
-        assert!(run
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("synthetic-dry-run")));
+        assert!(
+            run.cycles
+                .windows(2)
+                .all(|pair| pair[0].budget_after_units >= pair[1].budget_after_units)
+        );
+        assert!(
+            run.negative_evidence
+                .iter()
+                .any(|item| item.contains("synthetic-dry-run"))
+        );
         run.validate().unwrap();
     }
 

@@ -532,10 +532,12 @@ mod tests {
         let mut req = request();
         req.max_transport_gap_milli = 100;
         let output = analyze_glioma_transportability(&req, &studies).unwrap();
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("distant")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("distant"))
+        );
         assert_eq!(output.disposition, TransportabilityDisposition::Partial);
         studies[0].effect_milli = -400;
         let heterogeneous = analyze_glioma_transportability(&req, &studies).unwrap();
@@ -553,9 +555,11 @@ mod tests {
         low.replicates = 1;
         let output = analyze_glioma_transportability(&request(), &[low]).unwrap();
         assert_eq!(output.disposition, TransportabilityDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("replicate-floor")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("replicate-floor"))
+        );
     }
 }

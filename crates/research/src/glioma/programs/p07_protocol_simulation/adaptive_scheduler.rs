@@ -753,12 +753,16 @@ mod tests {
             round: 1,
         }];
         let output = plan_glioma_adaptive_workflow(&request).unwrap();
-        assert!(output
-            .negative_evidence
-            .contains(&"negative-assay:negative-result-preserved".to_string()));
-        assert!(output
-            .selected_order
-            .contains(&"negative-assay".to_string()));
+        assert!(
+            output
+                .negative_evidence
+                .contains(&"negative-assay:negative-result-preserved".to_string())
+        );
+        assert!(
+            output
+                .selected_order
+                .contains(&"negative-assay".to_string())
+        );
     }
 
     #[test]

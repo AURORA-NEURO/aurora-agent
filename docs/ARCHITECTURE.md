@@ -16,28 +16,41 @@ reaches something that can act on it.
 
 ## Layers
 
+This is a responsibility map, not the complete crate dependency graph. The workspace has 88 crates;
+Cargo manifests are authoritative for dependency edges. Python and TypeScript packages expose typed
+facades over selected Rust contracts rather than mirroring every Rust type.
+
 ```
                         ┌───────────────────────────────┐
-   agent surface        │  cli          mcp             │
+   agent interfaces     │  cli   mcp   api   SDKs       │
                         └──────────────┬────────────────┘
                                        │
-   evaluation           ┌──────────────┴────────────────┐
-                        │  prism   baseline   mutation  │
-                        │  registry                     │
+   autonomous work      ┌──────────────┴────────────────┐
+                        │ brain  autopilot  research    │
+                        │ neurosurgery  runtime  factory │
+                        └──────────────┬────────────────┘
+                                       │
+   policy and evidence  ┌──────────────┴────────────────┐
+                        │ policy  safety  bundle  ledger│
+                        │ registry  conformance  ops     │
                         └──────────────┬────────────────┘
                                        │
    composition          ┌──────────────┴────────────────┐
-                        │  weave                        │
+                        │ weave  fabric  choreography   │
+                        └──────────────┬────────────────┘
+                                       │
+   evaluation           ┌─────────────┴─────────────────┐
+                        │ prism baseline mutation eval  │
                         └──────────────┬────────────────┘
                                        │
    compilation          ┌──────────────┴────────────────┐
-                        │  fiber    section    domain   │
-                        │  project   repair             │
+                        │ fiber  section  domain        │
+                        │ project  repair  obligation    │
                         └──────────────┬────────────────┘
                                        │
-   world and storage    ┌──────────────┴────────────────┐
-                        │  world  store  worldgen       │
-                        │  adapter  bioir  onco  oracle │
+   world and biology    ┌──────────────┴────────────────┐
+                        │ world store worldgen adapter  │
+                        │ bioir onco oracle modalities  │
                         └──────────────┬────────────────┘
                                        │
    foundation           ┌──────────────┴────────────────┐
@@ -51,6 +64,15 @@ reaches something that can act on it.
 hard — matching CPython required reproducing its `repr` float threshold, exponent zero-padding and
 JSON object iteration order. One canonical implementation at the root of the graph means one place
 where that can go wrong. See [ADR-001](ADR-001-language-strategy.md).
+
+When deriving canonical bytes or hashes from typed serializable data, Rust code should use
+`to_canonical_bytes_serializable` or `ContentHash::of_serializable` before converting it to
+`serde_json::Value`. The typed path rejects NaN and infinities instead of letting an earlier JSON
+conversion turn them into `null`; the `Value`-based helpers remain for values already parsed or
+constructed as JSON, where the original numeric type is no longer available. The core receipt paths
+in `ids`, `brain`, `section`, `fiber`, `registry`, and `store` use the typed path; other legacy
+conversion-then-hash call sites remain candidates for migration when those surfaces are next
+changed.
 
 **`section` depends on neither `world` nor `fiber`.** A consumer — an MCP client, a CI gate, an
 auditor — must be able to read and *verify* a compiled context without linking the engine that
@@ -118,9 +140,23 @@ These are the properties that would be easy to lose in a refactor, so each is pi
 
 ## What is not here
 
-No network layer, no multi-tenancy, no signing keys, no hosted execution — local-first only. The
-backend portfolio of 43.19–43.24 (FAQ/InsideOut, worst-case-optimal joins, tensor networks,
-decision diagrams) is enumerated in `section::plan::Backend` so plans stay honest about which
-engine ran, but only `backward_factor_slice_reference` exists. Heavy biological formats — DICOM,
-BIDS/NIfTI, AnnData/Zarr, VCF — belong in a Python layer per ADR-001, where the mature libraries
-live; the Rust side owns the adapter *contract*, not the parsers.
+The workspace is local-first, but it does contain network-facing components. `bioprism-api` serves a
+bounded local HTTP/REST and JSON-RPC gateway, and selected Python/TypeScript research adapters make
+explicit, allow-listed public-source requests. These are not a hosted multi-tenant service: TLS
+termination, deployment identity, distributed storage, external workers, and production scheduling
+remain outside the workspace. See [HTTP_API.md](HTTP_API.md) and the source-specific adapter
+contracts in the backlog.
+
+Signed bundles, signed webhook envelopes, and caller-supplied key-registry policy are present; the
+workspace does not own production key custody or deployment trust roots. `DockerSandbox` provides a
+separate opt-in Docker command boundary for a pinned Linux image. It resolves and pins the selected
+local daemon endpoint and refuses remote contexts because bind-mount paths are interpreted by the
+daemon host. It is not wired into the SDK plugin dispatcher or trial `ContainerProvider`. Its
+caller-managed output directory, image review, credential isolation, and deployment policy remain
+explicit responsibilities. See [OCI_SANDBOX.md](OCI_SANDBOX.md).
+
+The backend portfolio for FAQ/InsideOut, worst-case-optimal joins, tensor networks, and decision
+diagrams is enumerated in `section::plan::Backend` so plans stay honest about which engine ran, but
+only `backward_factor_slice_reference` exists. Heavy biological formats — DICOM, BIDS/NIfTI,
+AnnData/Zarr, VCF — belong in a Python layer per ADR-001, where the mature libraries live; the Rust
+side owns the adapter *contract*, not the parsers.

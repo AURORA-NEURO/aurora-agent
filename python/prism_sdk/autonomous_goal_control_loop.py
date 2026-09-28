@@ -9,24 +9,37 @@ retaining task text, prompts, parameters, credentials, provider output, or live 
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from dataclasses import dataclass
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 import math
+from threading import RLock
 import time
 from typing import Any, Literal
 
-from .authoring import content_digest
-from .autonomous_goal_scheduler import AutonomousGoalSchedule, AutonomousGoalSchedulingSignal
+from .authoring import content_digest, utf8_scalar_byte_length
+from .autonomous_goal_scheduler import (
+    MAX_GOAL_SCHEDULE_SIGNALS,
+    AutonomousGoalSchedule,
+    AutonomousGoalSchedulingSignal,
+)
 from .autonomous_goal_worker import AutonomousGoalWorker, AutonomousGoalWorkerBatch
 from .autonomous_goal_control_persistence import (
+    AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA,
     seal_autonomous_goal_control_loop_snapshot,
     validate_autonomous_goal_control_loop_snapshot,
 )
-from .goals import AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord
+from .goals import MAX_GOALS, AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord
 from .autonomous_goal_preview import (
     InMemoryAutonomousGoalPreviewAdmissionLedger,
     validate_autonomous_goal_preview_admission_record,
     verify_autonomous_goal_preview_approval,
+)
+from ._async_callback_bridge import (
+    bridge_callback_to_loop,
+    is_async_callable,
+    run_in_thread_and_drain,
 )
 
 
@@ -37,6 +50,7 @@ MAX_GOAL_CONTROL_LOOP_RUNS = 8_192
 MAX_GOAL_CONTROL_LOOP_BATCH_PREFIX_BYTES = 128
 GOAL_CONTROL_EVALUATION_SCHEMA = "bioprism-autonomous-goal-control-evaluation/0.1"
 GOAL_CONTROL_BANDIT_SCHEMA = "bioprism-autonomous-goal-control-bandit/0.1"
+GOAL_CONTROL_BANDIT_RETENTIONS = frozenset({"value_only_goal_domain_bandit_state", "value_only_goal_contextual_bandit_state"})
 GOAL_CONTROL_PREVIEW_SCHEMA = "bioprism-autonomous-goal-control-preview/0.1"
 GOAL_CONTROL_PREVIEW_RETENTION = "metadata_only_goal_control_preview;tasks_prompts_parameters_credentials_and_results_not_retained"
 MAX_GOAL_CONTROL_EVALUATIONS = 128
@@ -49,14 +63,30 @@ ControlLoopStopReason = Literal[
     "run_budget_exhausted",
 ]
 GoalControlPreviewStatus = Literal["admissible_work", "all_terminal", "no_admissible_work"]
-GoalLoopOptionsFactory = Callable[["AutonomousGoalControlLoopContext"], Mapping[str, Any]]
-GoalLoopEvaluator = Callable[["AutonomousGoalControlLoopCycle"], Sequence[Any]]
-GoalLoopLearner = Callable[[Sequence[Mapping[str, Any]], Sequence[Mapping[str, Any]]], Mapping[str, Any]]
-GoalLoopCheckpoint = Callable[[Mapping[str, Any]], Any]
+GoalLoopOptionsFactory = Callable[
+    ["AutonomousGoalControlLoopContext"],
+    Mapping[str, Any] | Awaitable[Mapping[str, Any]],
+]
+GoalLoopEvaluator = Callable[
+    ["AutonomousGoalControlLoopCycle"], Sequence[Any] | Awaitable[Sequence[Any]]
+]
+GoalLoopLearner = Callable[
+    [Sequence[Mapping[str, Any]], Sequence[Mapping[str, Any]]],
+    Mapping[str, Any] | Awaitable[Mapping[str, Any]],
+]
+GoalLoopCheckpoint = Callable[[Mapping[str, Any]], Any | Awaitable[Any]]
 
 
 def _fail(message: str) -> None:
     raise AutonomousGoalError(f"autonomous goal control loop {message}")
+
+
+def _sync_callback_result(value: Any, *, name: str) -> Any:
+    if inspect.isawaitable(value):
+        if inspect.iscoroutine(value):
+            value.close()
+        _fail(f"{name} returned an awaitable; use run_async()")
+    return value
 
 
 def _integer(value: Any, *, name: str, minimum: int, maximum: int) -> int:
@@ -66,13 +96,19 @@ def _integer(value: Any, *, name: str, minimum: int, maximum: int) -> int:
 
 
 def _prefix(value: Any) -> str:
-    if not isinstance(value, str) or not value.strip() or "\x00" in value or len(value.encode("utf-8")) > MAX_GOAL_CONTROL_LOOP_BATCH_PREFIX_BYTES:
+    if not isinstance(value, str) or not value.strip() or "\x00" in value:
+        _fail("batch_id_prefix is outside its bounded contract")
+    byte_length = utf8_scalar_byte_length(value)
+    if byte_length is None or byte_length > MAX_GOAL_CONTROL_LOOP_BATCH_PREFIX_BYTES:
         _fail("batch_id_prefix is outside its bounded contract")
     return value.strip()
 
 
 def _identifier(value: Any, *, name: str, maximum: int = 256) -> str:
-    if not isinstance(value, str) or not value.strip() or "\x00" in value or len(value.encode("utf-8")) > maximum:
+    if not isinstance(value, str) or not value.strip() or "\x00" in value:
+        _fail(f"{name} is outside its bounded identifier contract")
+    byte_length = utf8_scalar_byte_length(value)
+    if byte_length is None or byte_length > maximum:
         _fail(f"{name} is outside its bounded identifier contract")
     return value.strip()
 
@@ -88,6 +124,11 @@ def _digest(value: Any, *, name: str, allow_none: bool = False) -> str | None:
 def _portable_number(value: float | int) -> float | int:
     """Match JSON number spelling across Python and TypeScript for digest parity."""
     return int(value) if isinstance(value, float) and value.is_integer() else value
+
+
+def _round_portable_score(value: float) -> float | int:
+    """Quantize non-negative scores with JavaScript Math.round's ties-up rule."""
+    return _portable_number(math.floor(value * 10_000 + 0.5) / 10_000)
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +232,7 @@ class AutonomousGoalBanditLearner:
         self.generation = 0
         self.arms: dict[str, dict[str, float | int]] = {}
         self._arm_context: dict[str, tuple[str, str | None, str | None]] = {}
+        self._state_lock = RLock()
         if state is not None:
             self._restore(state)
 
@@ -234,21 +276,46 @@ class AutonomousGoalBanditLearner:
         return self.arms.get(arm_id, {"pulls": 0, "failures": 0, "reward_sum": 0.0})
 
     def _restore(self, state: Mapping[str, Any]) -> None:
-        if not isinstance(state, Mapping) or state.get("schema") != GOAL_CONTROL_BANDIT_SCHEMA:
+        required_state_fields = {"schema", "generation", "arms", "exploration", "retention", "secret_material", "state_digest"}
+        if not isinstance(state, Mapping):
+            _fail("bandit state must be a mapping")
+        # Digest and consume the same own mapping values; custom Mapping accessors may be dynamic.
+        state_values = dict(state)
+        if set(state_values) != required_state_fields:
+            _fail("bandit state has unsupported or missing fields")
+        if state_values.get("schema") != GOAL_CONTROL_BANDIT_SCHEMA:
             _fail("bandit state schema is invalid")
-        exploration = state.get("exploration", self.exploration)
-        if isinstance(exploration, bool) or not isinstance(exploration, (int, float)) or not math.isfinite(float(exploration)) or not 0.0 <= float(exploration) <= 2.0:
-            _fail("bandit state exploration is outside its bounds")
-        self.exploration = float(exploration)
-        self.generation = _integer(state.get("generation"), name="bandit generation", minimum=0, maximum=2**31 - 1)
-        raw_arms = state.get("arms")
+        if state_values.get("retention") not in GOAL_CONTROL_BANDIT_RETENTIONS or state_values.get("secret_material") != "never_returned":
+            _fail("bandit state retention markers are invalid")
+        raw_arms = state_values["arms"]
         if not isinstance(raw_arms, Sequence) or isinstance(raw_arms, (str, bytes, bytearray)) or len(raw_arms) > 128:
             _fail("bandit arms are outside their bounds")
-        self.arms.clear()
-        self._arm_context.clear()
+        arm_values: list[dict[str, Any]] = []
         for raw in raw_arms:
             if not isinstance(raw, Mapping):
                 _fail("bandit arm is malformed")
+            arm_values.append(dict(raw))
+        state_values["arms"] = arm_values
+        state_body = {key: value for key, value in state_values.items() if key != "state_digest"}
+        supplied_state_digest = _digest(state_values.get("state_digest"), name="bandit state_digest")
+        try:
+            computed_state_digest = content_digest(state_body)
+        except Exception:
+            _fail("bandit state is not canonical JSON")
+        if supplied_state_digest != computed_state_digest:
+            _fail("bandit state digest mismatch")
+        exploration = state_values["exploration"]
+        if isinstance(exploration, bool) or not isinstance(exploration, (int, float)) or not math.isfinite(float(exploration)) or not 0.0 <= float(exploration) <= 2.0:
+            _fail("bandit state exploration is outside its bounds")
+        self.exploration = float(exploration)
+        self.generation = _integer(state_values["generation"], name="bandit generation", minimum=0, maximum=2**31 - 1)
+        self.arms.clear()
+        self._arm_context.clear()
+        for raw in arm_values:
+            required_arm_fields = {"domain", "pulls", "failures", "reward_sum"}
+            optional_arm_fields = {"capability", "risk_class", "arm_id"}
+            if set(raw).difference(required_arm_fields | optional_arm_fields) or not required_arm_fields.issubset(raw):
+                _fail("bandit arm has unsupported or missing fields")
             domain, capability, risk_class = self._context(raw, name="bandit arm")
             arm_id = raw.get("arm_id")
             expected_arm_id = self._arm_id(domain, capability, risk_class)
@@ -273,25 +340,46 @@ class AutonomousGoalBanditLearner:
     def restore(self, state: Mapping[str, Any]) -> None:
         """Replace value-only state after a process restart."""
 
-        self._restore(state)
+        with self._state_lock:
+            previous_exploration = self.exploration
+            previous_generation = self.generation
+            previous_arms = {arm_id: dict(arm) for arm_id, arm in self.arms.items()}
+            previous_contexts = dict(self._arm_context)
+            try:
+                self._restore(state)
+            except Exception:
+                self.exploration = previous_exploration
+                self.generation = previous_generation
+                self.arms.clear()
+                self.arms.update(previous_arms)
+                self._arm_context.clear()
+                self._arm_context.update(previous_contexts)
+                raise
 
     def snapshot(self) -> dict[str, Any]:
+        # Copy under the same lock as update/restore, then hash the stable copy without
+        # holding the lock across canonicalization.
+        with self._state_lock:
+            generation = self.generation
+            exploration = self.exploration
+            arms_state = {arm_id: dict(arm) for arm_id, arm in self.arms.items()}
+            arm_context = dict(self._arm_context)
         body = {
             "schema": GOAL_CONTROL_BANDIT_SCHEMA,
-            "generation": self.generation,
+            "generation": generation,
             "arms": [],
-            "exploration": _portable_number(self.exploration),
+            "exploration": _portable_number(exploration),
             "retention": "value_only_goal_contextual_bandit_state",
             "secret_material": "never_returned",
         }
         arms: list[dict[str, Any]] = []
-        for arm_id in sorted(self.arms):
-            domain, capability, risk_class = self._arm_context.get(arm_id, (arm_id, None, None))
+        for arm_id in sorted(arms_state):
+            domain, capability, risk_class = arm_context.get(arm_id, (arm_id, None, None))
             row: dict[str, Any] = {
                 "domain": domain,
-                "pulls": int(self.arms[arm_id]["pulls"]),
-                "failures": int(self.arms[arm_id]["failures"]),
-                "reward_sum": _portable_number(float(self.arms[arm_id]["reward_sum"])),
+                "pulls": int(arms_state[arm_id]["pulls"]),
+                "failures": int(arms_state[arm_id]["failures"]),
+                "reward_sum": _portable_number(float(arms_state[arm_id]["reward_sum"])),
             }
             if capability is not None or risk_class is not None:
                 row["capability"] = capability
@@ -302,6 +390,23 @@ class AutonomousGoalBanditLearner:
         return {**body, "state_digest": content_digest(body)}
 
     def update(self, evaluations: Sequence[Mapping[str, Any]], goals: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        with self._state_lock:
+            previous_exploration = self.exploration
+            previous_generation = self.generation
+            previous_arms = {arm_id: dict(arm) for arm_id, arm in self.arms.items()}
+            previous_contexts = dict(self._arm_context)
+            try:
+                return self._update_unlocked(evaluations, goals)
+            except Exception:
+                self.exploration = previous_exploration
+                self.generation = previous_generation
+                self.arms.clear()
+                self.arms.update(previous_arms)
+                self._arm_context.clear()
+                self._arm_context.update(previous_contexts)
+                raise
+
+    def _update_unlocked(self, evaluations: Sequence[Mapping[str, Any]], goals: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if not isinstance(evaluations, Sequence) or isinstance(evaluations, (str, bytes, bytearray)) or len(evaluations) > MAX_GOAL_CONTROL_EVALUATIONS:
             _fail("bandit evaluations are outside their bounds")
         goals_by_id: dict[str, Mapping[str, Any]] = {}
@@ -312,6 +417,8 @@ class AutonomousGoalBanditLearner:
             if goal_id in goals_by_id:
                 _fail("bandit goals contain duplicate goal_id values")
             goals_by_id[goal_id] = goal
+        if self.generation >= 2**31 - 1:
+            _fail("bandit generation is exhausted")
         for raw in evaluations:
             if not isinstance(raw, Mapping) or not isinstance(raw.get("passed"), bool):
                 _fail("bandit evaluation is malformed")
@@ -328,12 +435,14 @@ class AutonomousGoalBanditLearner:
                 capability = None
                 risk_class = None
             arm = self._ensure_arm(domain, capability, risk_class)
+            if int(arm["pulls"]) >= 2**31 - 1:
+                _fail("bandit arm pulls are exhausted")
+            if not bool(raw.get("passed")) and int(arm["failures"]) >= 2**31 - 1:
+                _fail("bandit arm failures are exhausted")
             arm["pulls"] = int(arm["pulls"]) + 1
             arm["reward_sum"] = float(arm["reward_sum"]) + float(reward)
             if not bool(raw.get("passed")):
                 arm["failures"] = int(arm["failures"]) + 1
-        if self.generation >= 2**31 - 1:
-            _fail("bandit generation is exhausted")
         self.generation += 1
         total_pulls = max(1, sum(int(arm["pulls"]) for arm in self.arms.values()))
         signals: list[dict[str, Any]] = []
@@ -351,7 +460,7 @@ class AutonomousGoalBanditLearner:
                 mean = (float(arm["reward_sum"]) / pulls + 1.0) / 2.0
                 score = min(1.0, max(0.0, mean + self.exploration * math.sqrt(math.log(total_pulls + 1.0) / pulls)))
             urgency = min(1.0, int(arm["failures"]) / max(1, pulls))
-            signals.append({"goal_id": goal_id, "priority": _portable_number(round(score, 4)), "urgency": _portable_number(round(urgency, 4)), "estimated_cost": 1, "dependencies": []})
+            signals.append({"goal_id": goal_id, "priority": _round_portable_score(score), "urgency": _round_portable_score(urgency), "estimated_cost": 1, "dependencies": []})
             if len(signals) >= MAX_GOAL_CONTROL_SIGNALS:
                 break
         signals.sort(key=lambda item: (-item["priority"], -item["urgency"], item["goal_id"]))
@@ -516,6 +625,42 @@ def _all_terminal(ledger: AutonomousGoalLedger) -> bool:
     return bool(counts) and set(counts).issubset({"completed", "cancelled"})
 
 
+def _merge_learned_signal_scores(
+    caller_signals: Any,
+    learned_signals: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Overlay learned ranking only; structural scheduling policy remains caller-owned."""
+
+    if caller_signals is None:
+        caller_signals = ()
+    if not isinstance(caller_signals, Sequence) or isinstance(caller_signals, (str, bytes, bytearray)):
+        _fail("schedule signals must be a sequence")
+    if len(caller_signals) > MAX_GOAL_SCHEDULE_SIGNALS:
+        _fail("schedule signals are outside their bounds")
+    by_goal: dict[str, dict[str, Any]] = {}
+    for index, raw in enumerate(caller_signals):
+        if not isinstance(raw, Mapping):
+            _fail(f"schedule signal {index} is malformed")
+        goal_id = _identifier(raw.get("goal_id"), name=f"schedule signal {index}.goal_id")
+        if goal_id in by_goal:
+            _fail(f"schedule signals contain duplicate goal_id {goal_id}")
+        by_goal[goal_id] = dict(raw)
+
+    learned_ids: set[str] = set()
+    for raw in learned_signals:
+        signal = AutonomousGoalSchedulingSignal.from_mapping(raw)
+        if signal.goal_id in learned_ids:
+            _fail(f"learner signals contain duplicate goal_id {signal.goal_id}")
+        learned_ids.add(signal.goal_id)
+        merged = by_goal.setdefault(signal.goal_id, {"goal_id": signal.goal_id})
+        merged["priority"] = signal.priority
+        merged["urgency"] = signal.urgency
+
+    if len(by_goal) > MAX_GOAL_SCHEDULE_SIGNALS:
+        _fail("merged schedule signals exceed their bounds")
+    return [by_goal[goal_id] for goal_id in sorted(by_goal)]
+
+
 class AutonomousGoalControlLoop:
     """Continue bounded goal-worker cycles until safe work is exhausted or a budget is hit.
 
@@ -561,7 +706,9 @@ class AutonomousGoalControlLoop:
         if schedule_options is not None and not isinstance(schedule_options, Mapping):
             _fail("schedule_options must be a mapping or None")
         options = {} if schedule_options is None else dict(schedule_options)
-        goals = self.worker.ledger.list(limit=512)
+        # A preview may run while the admitted loop awaits external work. Derive its schedule
+        # and terminal status from one ledger read so the receipt describes a single view.
+        goals = self.worker.ledger.list(limit=MAX_GOALS)
         schedule = self.worker.scheduler.plan(goals, options)
         rows = schedule.rows
         decision_counts: dict[str, int] = {}
@@ -580,7 +727,7 @@ class AutonomousGoalControlLoop:
         status: GoalControlPreviewStatus
         if schedule.selected_goal_ids:
             status = "admissible_work"
-        elif _all_terminal(self.worker.ledger):
+        elif goals and all(goal.status in {"completed", "cancelled"} for goal in goals):
             status = "all_terminal"
         else:
             status = "no_admissible_work"
@@ -626,6 +773,16 @@ class AutonomousGoalControlLoop:
         expected_preview_digest: str | None = None,
         preview_approval: Mapping[str, Any] | None = None,
     ) -> AutonomousGoalControlLoopResult:
+        callbacks = [
+            ("options_factory", options_factory),
+            ("evaluator", self.evaluator),
+            ("checkpoint", checkpoint),
+        ]
+        if self.learner is not None and not isinstance(self.learner, AutonomousGoalBanditLearner):
+            callbacks.append(("learner", self.learner))
+        for name, callback in callbacks:
+            if callback is not None and is_async_callable(callback):
+                _fail(f"async {name} requires run_async()")
         if schedule_options is not None and not isinstance(schedule_options, Mapping):
             _fail("schedule_options must be a mapping or None")
         if options_factory is not None and not callable(options_factory):
@@ -674,8 +831,9 @@ class AutonomousGoalControlLoop:
             if current_preview.preview_digest != expected_preview_digest:
                 _fail("expected_preview_digest does not match the current admission preview")
             if normalized_preview_approval is not None:
-                raw_now = preview_options.get("now_ns")
-                approval_now = time.time_ns() if raw_now is None else _integer(raw_now, name="schedule_options.now_ns", minimum=0, maximum=2**63 - 1)
+                # The replayable scheduler clock is caller-controlled and may be stale. Keep
+                # approval expiry on the live wall clock so replay cannot extend authorization.
+                approval_now = time.time_ns()
                 verify_autonomous_goal_preview_approval(
                     normalized_preview_approval,
                     current_preview_digest=current_preview.preview_digest,
@@ -730,7 +888,7 @@ class AutonomousGoalControlLoop:
                 return
             learner_state: Mapping[str, Any] | None = self.learner.snapshot() if isinstance(self.learner, AutonomousGoalBanditLearner) else None
             descriptor = {
-                "schema": "bioprism-autonomous-goal-control-checkpoint/0.1",
+                "schema": AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA,
                 "run_id": checkpoint_run_id,
                 "next_cycle": len(history) + 1,
                 "cycle_summaries": history,
@@ -752,8 +910,10 @@ class AutonomousGoalControlLoop:
                 "retention": "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained",
                 "secret_material": "never_returned",
             }
+            if previous_checkpoint is not None and "migration" in previous_checkpoint:
+                descriptor["migration"] = previous_checkpoint["migration"]
             snapshot = seal_autonomous_goal_control_loop_snapshot(descriptor)
-            checkpoint(snapshot)
+            _sync_callback_result(checkpoint(snapshot), name="checkpoint")
             previous_checkpoint = snapshot
 
         for cycle_number in range(start_cycle, max_cycles + 1):
@@ -767,13 +927,15 @@ class AutonomousGoalControlLoop:
                 ledger_stats=self.worker.ledger.stats(),
             )
             options = dict(base_options)
-            if learned_signals is not None:
-                options["signals"] = [dict(signal) for signal in learned_signals]
             if options_factory is not None:
-                supplied = options_factory(context)
+                supplied = _sync_callback_result(
+                    options_factory(context), name="options_factory"
+                )
                 if not isinstance(supplied, Mapping):
                     _fail("options_factory must return a mapping")
                 options.update(dict(supplied))
+            if learned_signals is not None:
+                options["signals"] = _merge_learned_signal_scores(options.get("signals", ()), learned_signals)
             requested_selected = options.get("max_selected", 1)
             requested_selected = _integer(requested_selected, name="schedule_options.max_selected", minimum=1, maximum=128)
             effective_selected = min(requested_selected, remaining_runs)
@@ -788,13 +950,16 @@ class AutonomousGoalControlLoop:
             cycle = AutonomousGoalControlLoopCycle(cycle=cycle_number, batch=batch)
             evaluations: tuple[AutonomousGoalEvaluation, ...] = ()
             next_signals: tuple[Mapping[str, Any], ...] = ()
-            if self.evaluator is not None and batch.runs:
-                raw_evaluations = self.evaluator(cycle)
+            evaluable_runs = tuple(run for run in batch.runs if run.dispatched and run.error_class is None)
+            if self.evaluator is not None and evaluable_runs:
+                raw_evaluations = _sync_callback_result(
+                    self.evaluator(cycle), name="evaluator"
+                )
                 if not isinstance(raw_evaluations, Sequence) or isinstance(raw_evaluations, (str, bytes, bytearray)):
                     _fail("evaluator must return a sequence")
-                if len(raw_evaluations) != len(batch.runs) or len(raw_evaluations) > MAX_GOAL_CONTROL_EVALUATIONS:
-                    _fail("evaluator must return exactly one evaluation for every worker run")
-                by_id = {run.goal_id: run for run in batch.runs}
+                if len(raw_evaluations) != len(evaluable_runs) or len(raw_evaluations) > MAX_GOAL_CONTROL_EVALUATIONS:
+                    _fail("evaluator must return exactly one evaluation for every dispatched worker run with a known outcome")
+                by_id = {run.goal_id: run for run in evaluable_runs}
                 normalized: list[AutonomousGoalEvaluation] = []
                 for raw in raw_evaluations:
                     packet: Mapping[str, Any] | None = None
@@ -828,12 +993,15 @@ class AutonomousGoalControlLoop:
                 evaluations = tuple(normalized)
                 evaluation_digests.append(content_digest([item.to_dict() for item in evaluations]))
                 evaluation_count += len(evaluations)
-                goals_for_learning = [record.to_dict() for record in self.worker.ledger.list(limit=512)]
+                goals_for_learning = [record.to_dict() for record in self.worker.ledger.list(limit=MAX_GOALS)]
                 if self.learner is not None:
                     if isinstance(self.learner, AutonomousGoalBanditLearner):
                         update = self.learner.update([item.to_dict() for item in evaluations], goals_for_learning)
                     else:
-                        update = self.learner([item.to_dict() for item in evaluations], goals_for_learning)
+                        update = _sync_callback_result(
+                            self.learner([item.to_dict() for item in evaluations], goals_for_learning),
+                            name="learner",
+                        )
                     if not isinstance(update, Mapping):
                         _fail("learner must return a mapping")
                     learning_state_digest = _digest(update.get("learning_state_digest"), name="learning_state_digest") if update.get("learning_state_digest") is not None else content_digest(update)
@@ -913,6 +1081,63 @@ class AutonomousGoalControlLoop:
             learning_state_digest=learning_state_digest,
             restored_cycle_count=restored_cycle_count,
             cycle_history_digest=cycle_history_digest,
+        )
+
+    async def run_async(
+        self,
+        *,
+        schedule_options: Mapping[str, Any] | None = None,
+        options_factory: GoalLoopOptionsFactory | None = None,
+        max_cycles: int = MAX_GOAL_CONTROL_LOOP_CYCLES,
+        max_total_runs: int = MAX_GOAL_CONTROL_LOOP_RUNS,
+        run_id: str | None = None,
+        resume_snapshot: Mapping[str, Any] | None = None,
+        checkpoint: GoalLoopCheckpoint | None = None,
+        expected_preview_digest: str | None = None,
+        preview_approval: Mapping[str, Any] | None = None,
+    ) -> AutonomousGoalControlLoopResult:
+        """Run the synchronous control kernel without blocking an async host.
+
+        The ledger, scheduling, and checkpoint validation remain in the same deterministic
+        implementation. Resolver, executor, option, evaluator, learner, and checkpoint
+        awaitables are resumed on the caller's event loop. Cancellation drains the admitted loop
+        before it is re-raised because completed external work cannot be rolled back locally.
+        """
+
+        loop = asyncio.get_running_loop()
+        worker = self.worker._with_async_callbacks(loop)
+        evaluator = (
+            None
+            if self.evaluator is None
+            else bridge_callback_to_loop(self.evaluator, loop)
+        )
+        learner = self.learner
+        if learner is not None and not isinstance(learner, AutonomousGoalBanditLearner):
+            learner = bridge_callback_to_loop(learner, loop)
+        control_loop = AutonomousGoalControlLoop(
+            worker,
+            batch_id_prefix=self.batch_id_prefix,
+            evaluator=evaluator,
+            learner=learner,
+            preview_admission_ledger=self.preview_admission_ledger,
+        )
+        return await run_in_thread_and_drain(
+            control_loop.run,
+            schedule_options=schedule_options,
+            options_factory=(
+                None
+                if options_factory is None
+                else bridge_callback_to_loop(options_factory, loop)
+            ),
+            max_cycles=max_cycles,
+            max_total_runs=max_total_runs,
+            run_id=run_id,
+            resume_snapshot=resume_snapshot,
+            checkpoint=(
+                None if checkpoint is None else bridge_callback_to_loop(checkpoint, loop)
+            ),
+            expected_preview_digest=expected_preview_digest,
+            preview_approval=preview_approval,
         )
 
 

@@ -46,7 +46,7 @@ function grant(ledger, grantId = "grant-1", maxUses = 2) {
   });
 }
 
-function request(requestId = "request-1", grantId = "grant-1", tenantId = "tenant-a", domain = "coding", capability = "analysis") {
+function request(requestId = "request-1", grantId = "grant-1", tenantId = "tenant-a", domain = "coding", capability = "analysis", operation = "provider_invocation") {
   return AutonomousAuthorizationRequest.create({
     request_id: requestId,
     grant_id: grantId,
@@ -55,7 +55,7 @@ function request(requestId = "request-1", grantId = "grant-1", tenantId = "tenan
     session_id: "session-a",
     authorization_digest: digest("a"),
     domains: [domain],
-    operation: "provider_invocation",
+    operation,
     capability,
     risk_class: "read_only",
     issued_at: 1100,
@@ -75,6 +75,57 @@ test("authorization scopes all domains and makes allowed requests idempotent", (
   assert.equal(ledger.verifyIntegrity().domain_coverage.coding, 1);
   assert.equal(ledger.grants()[0].allowed_domains.length, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(AUTONOMOUS_AUTHORIZATION_OPERATIONS.length, 12);
+});
+
+test("event capacity failures do not partially mutate the ledger", () => {
+  const ledger = new AutonomousAuthorizationLedger(2, 1);
+  const issued = grant(ledger, "grant-1", null);
+
+  assert.throws(() => ledger.authorize(request(), 1200), AutonomousAuthorizationError);
+  assert.equal(ledger.get(issued.grant_id).used_count, 0);
+  assert.equal(ledger.get(issued.grant_id).status, "active");
+
+  assert.throws(() => ledger.revoke(issued.grant_id, 1300), AutonomousAuthorizationError);
+  assert.equal(ledger.get(issued.grant_id).status, "active");
+
+  assert.throws(() => grant(ledger, "grant-2", null), AutonomousAuthorizationError);
+  assert.equal(ledger.get("grant-2"), null);
+  assert.equal(ledger.events().length, 1);
+  const snapshot = ledger.snapshot();
+  assert.equal(validateAutonomousAuthorizationSnapshot(snapshot).snapshot_digest, snapshot.snapshot_digest);
+});
+
+test("validated authorization objects keep their scopes immutable at runtime", () => {
+  const ledger = new AutonomousAuthorizationLedger(16, 64);
+  const issued = grant(ledger, "grant-1", null);
+  const denied = request("request-plan", "grant-1", "tenant-a", "coding", "analysis", "plan");
+  const gate = new AutonomousAuthorizationGate(ledger);
+  const context = new AutonomousAuthorizationContext(gate, "grant-1", "tenant-a", "actor-a", "session-a", digest("a"), ["coding"]);
+
+  assert.throws(() => issued.allowed_operations.push("effect_dispatch"), TypeError);
+  assert.throws(() => denied.domains.push("biology"), TypeError);
+  assert.throws(() => { denied.operation = "provider_invocation"; }, TypeError);
+  assert.equal(ledger.authorize(denied, 1200).status, "operation_denied");
+  assert.throws(() => { ledger.events()[0].reason = "forged"; }, TypeError);
+  assert.throws(() => { gate.ledger = new AutonomousAuthorizationLedger(); }, TypeError);
+  assert.throws(() => { ledger.maxEvents = 100_000; }, TypeError);
+  assert.throws(() => context.domains.push("biology"), TypeError);
+  assert.throws(() => { context.tenantId = "tenant-b"; }, TypeError);
+
+  const longPrefixContext = new AutonomousAuthorizationContext(
+    gate,
+    "grant-1",
+    "tenant-a",
+    "actor-a",
+    "session-a",
+    digest("a"),
+    ["coding"],
+    "analysis",
+    "read_only",
+    "p".repeat(129),
+    () => 1201,
+  );
+  assert.equal(longPrefixContext.authorizeProvider({ provider: "offline", model: "model-a", invocationKind: "direct" }).status, "allowed");
 });
 
 test("authorization refuses tenant drift, expiry, and revocation", () => {

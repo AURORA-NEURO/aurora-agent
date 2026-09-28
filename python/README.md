@@ -3,6 +3,17 @@
 This package is the Python integration layer above the Rust AURORA/Prism kernel. It speaks the
 repository's newline-delimited JSON-RPC MCP transport using only the Python standard library.
 
+Install the dependency-free SDK and its `aurora-agent` command from a checkout with:
+
+```sh
+python -m pip install ./python
+aurora-agent --help
+```
+
+The wheel requires Python 3.11 or newer and declares no runtime dependencies. CI builds the wheel,
+checks that every SDK module and the CLI entry point are packaged, installs it into a clean virtual
+environment, and runs the installed command without importing from the checkout.
+
 ```python
 from prism_sdk import Client, Workspace
 
@@ -778,6 +789,12 @@ provider effect. `JsonAutonomousGoalWorkerJournalPersistence` and
 `AutonomousGoalWorkerJournalPersistenceCoordinator` provide canonical caller-owned snapshot
 storage with optional compare-and-swap fencing. Journal snapshots exclude task text, prompts,
 parameters, credentials, and executor results just like the goal ledger.
+When `max_concurrent` is greater than one, both SDK workers execute independent dependency waves
+concurrently up to that bound, then expose result rows in stable schedule order. Python runs the
+caller executor in a bounded thread pool, so opt-in executor callbacks must be concurrency-safe;
+the default one-goal schedule remains serial. If an unexpected worker error occurs, the worker
+waits for every already-started sibling in that wave to settle before it releases the journal's
+single-run fence and propagates the error. Journal event order reflects actual dispatch timing.
 The worker also verifies `goal_task_digest(resolved_task)` against the immutable ledger identity
 before it claims anything, so a stale or mis-keyed protected queue cannot execute a different task.
 When parameters are present, each journal event carries only an `execution_binding_digest`; this

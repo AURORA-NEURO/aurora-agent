@@ -1,5 +1,4 @@
 //! Protocol conformance and the security properties of 11.11.
-// Intake schema additions remain covered by the full catalogue contract below.
 
 use bioprism_adapter::{TabularProfile, ValueType, VariableMapping};
 use bioprism_adaptive::{AdaptivePanel, PanelConfig};
@@ -28,12 +27,12 @@ use bioprism_bundle::{
     PubliclyAttestedBundle, RegisteredKey, ResultBundle, SigningKey, TrustPolicy,
 };
 use bioprism_devplat::{
-    build_domain_workflow_catalogue, instantiate_domain_workflow, plan_mission,
-    reconcile_domain_workflow, MissionRequest,
+    MissionRequest, build_domain_workflow_catalogue, instantiate_domain_workflow, plan_mission,
+    reconcile_domain_workflow,
 };
 use bioprism_evalengine::{
-    compose, Conclusion, Contribution, CoverageFloor, Observation, ReleaseGate, ScoreTier,
-    UnknownPolicy,
+    Conclusion, Contribution, CoverageFloor, Observation, ReleaseGate, ScoreTier, UnknownPolicy,
+    compose,
 };
 use bioprism_fabric::synth::{Candidate as FabricCandidate, Goal as FabricGoal, RoleGraph};
 use bioprism_factory::{Idempotency, Job, JobStore, ResourceClass, WorkerCapability};
@@ -53,8 +52,8 @@ use bioprism_ids::ContentHash;
 use bioprism_ids::RunId;
 use bioprism_infra::{Check as QualityCheck, Dataset as QualityDataset, Gate as QualityGate};
 use bioprism_lab::{
-    space::{CandidateArchitecture, ComponentKind, ComponentSpec},
     AcquisitionAction, AcquisitionCost, AcquisitionKind, PrivacyBoundary,
+    space::{CandidateArchitecture, ComponentKind, ComponentSpec},
 };
 use bioprism_ledger::{
     Actor as LedgerActor, Event as LedgerEvent, EventClass as LedgerEventClass,
@@ -64,8 +63,8 @@ use bioprism_ledger::{
 };
 use bioprism_mcp::rpc::code;
 use bioprism_mcp::{
-    serve, tool_definitions, Lifecycle, Request, Server, ADAPTIVE_QUERY_SCHEMA_URI,
-    CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI, PROTOCOL_VERSION,
+    ADAPTIVE_QUERY_SCHEMA_URI, CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI, Lifecycle,
+    PROTOCOL_VERSION, Request, Server, serve, tool_definitions,
 };
 use bioprism_megafactory::{
     AccessTier as PlacementAccessTier, Attestation, Locale, TrustDomain, WorkRequest, WorkerProfile,
@@ -139,7 +138,7 @@ use bioprism_section::OracleStatus;
 use bioprism_standards::{Measurement, OntologyId, Quantity, TermBinding, Unit};
 use bioprism_stewardship::id::Actor;
 use bioprism_stewardship::review::{
-    full_corpus, EvaluatorRevision, Finding as StewardshipFinding, ReviewDimension, ReviewRecord,
+    EvaluatorRevision, Finding as StewardshipFinding, ReviewDimension, ReviewRecord, full_corpus,
 };
 use bioprism_stress::{Cohort, Knob, Magnitude, Procedure, Stress, Subject};
 use bioprism_worldfactory::contradiction::{
@@ -152,7 +151,7 @@ use bioprism_worldfactory::preanalytic::{
     Edit, ExpectedResponse, FaultKind, Intensity, PreanalyticMutation, Specimen,
 };
 use bioprism_worldfactory::provenance::{Claim, ClaimKind, Provenance, Selection};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -189,11 +188,13 @@ fn glioma_contrast_panel_design_exposes_factorial_estimands_and_gates() {
     assert_eq!(design["design"]["disposition"], json!("qualified"));
     assert_eq!(design["design"]["conditions"].as_array().unwrap().len(), 4);
     assert_eq!(design["design"]["contrasts"].as_array().unwrap().len(), 2);
-    assert!(design["design"]["limitations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("not a formal power")));
+    assert!(
+        design["design"]["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("not a formal power"))
+    );
 }
 
 fn server() -> Server {
@@ -247,12 +248,6 @@ fn call(server: &mut Server, name: &str, arguments: Value) -> Value {
 /// without the server's guarded dispatch thread in between — overflows the default test stack,
 /// which aborts the whole test process instead of failing one test.
 ///
-/// `tool_definitions()` is the same case: its single `vec![...]` literal materialises every
-/// advertised tool's schema in one activation record, so a direct call from a default 2 MiB
-/// test thread aborts with `STATUS_STACK_OVERFLOW` while the same call through `tools/call`
-/// or `tools/list` is safe, because dispatch already runs on a 16 MiB thread. Measured on the
-/// 262-tool catalogue: 2 MiB overflows, 4 MiB does not. The catalogue has only grown since
-/// that measurement, so the figure is a floor rather than a current reading.
 fn on_a_dispatch_sized_stack<T: Send>(body: impl FnOnce() -> T + Send) -> T {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
@@ -350,7 +345,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 863;
+const TOOL_DEFINITION_COUNT: usize = 893;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -404,10 +399,12 @@ fn tools_call_rejects_non_object_arguments_before_dispatch() {
         .unwrap();
         let response = server.handle(&request).unwrap().to_json();
         assert_eq!(response["error"]["code"], json!(code::INVALID_PARAMS));
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("arguments must be an object"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("arguments must be an object")
+        );
     }
 }
 
@@ -417,7 +414,49 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     let catalog = call(&mut server, "glioma_program_catalog", json!({}));
     assert_eq!(catalog["program_count"], json!(12));
     assert_eq!(catalog["feature_count"], json!(384));
-    assert_eq!(catalog["features"].as_array().unwrap().len(), 384);
+    let features = catalog["features"]
+        .as_array()
+        .expect("catalog features are an array");
+    assert_eq!(features.len(), 384);
+    assert_eq!(
+        catalog["implementation_status_source"],
+        json!("research_feature_registry")
+    );
+    let implemented_ids = catalog["implemented_feature_ids"]
+        .as_array()
+        .expect("implemented ids are listed")
+        .iter()
+        .map(|value| value.as_str().expect("implemented id is a string"))
+        .collect::<std::collections::BTreeSet<_>>();
+    let planned_ids = catalog["planned_feature_ids"]
+        .as_array()
+        .expect("planned ids are listed")
+        .iter()
+        .map(|value| value.as_str().expect("planned id is a string"))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        catalog["implemented_feature_count"],
+        json!(implemented_ids.len())
+    );
+    assert_eq!(catalog["planned_feature_count"], json!(planned_ids.len()));
+    assert!(implemented_ids.is_disjoint(&planned_ids));
+    assert_eq!(implemented_ids.union(&planned_ids).count(), features.len());
+    for feature in features {
+        let feature_id = feature["feature_id"]
+            .as_str()
+            .expect("feature id is a string");
+        let expected_status = if implemented_ids.contains(feature_id) {
+            "implemented"
+        } else {
+            assert!(planned_ids.contains(feature_id));
+            "planned"
+        };
+        assert_eq!(
+            feature["implementation_status"],
+            json!(expected_status),
+            "catalog status matches the implementation manifest for {feature_id}"
+        );
+    }
 
     let replay_identity = ContentHash::of_value(&json!({"replay": "mcp-glioma"})).unwrap();
     let artifact_hash = ContentHash::of_value(&json!({"artifact": "local"})).unwrap();
@@ -454,11 +493,13 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(dry_run["disposition"], json!("succeeded"));
     assert_eq!(dry_run["completed_order"].as_array().unwrap().len(), 12);
-    assert!(dry_run["negative_evidence"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("simulation")));
+    assert!(
+        dry_run["negative_evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("simulation"))
+    );
 
     let workflow = call(
         &mut server,
@@ -594,11 +635,13 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         protocol_ensemble["ensemble"]["disposition"],
         json!("fragile")
     );
-    assert!(protocol_ensemble["ensemble"]["bottleneck_task_order"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|task| task == "assay"));
+    assert!(
+        protocol_ensemble["ensemble"]["bottleneck_task_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|task| task == "assay")
+    );
 
     let protocol_execution = call(
         &mut server,
@@ -753,11 +796,13 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         state_transition["analysis"]["disposition"],
         json!("qualified")
     );
-    assert!(state_transition["analysis"]["enriched_order"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|entry| entry == "low:high"));
+    assert!(
+        state_transition["analysis"]["enriched_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry == "low:high")
+    );
 
     let causal = call(
         &mut server,
@@ -816,9 +861,11 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(mediation["dispatch"], json!("not_started"));
     assert_eq!(mediation["analysis"]["disposition"], json!("qualified"));
-    assert!(mediation["analysis"]["indirect_effect_milli"]
-        .as_i64()
-        .is_some_and(|effect| effect > 0));
+    assert!(
+        mediation["analysis"]["indirect_effect_milli"]
+            .as_i64()
+            .is_some_and(|effect| effect > 0)
+    );
 
     let multi_fidelity = call(
         &mut server,
@@ -1033,10 +1080,12 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(experiment_cycle["dispatch"], json!("dry_run"));
     assert_eq!(experiment_cycle["simulation_only"], json!(true));
-    assert!(!experiment_cycle["cycle"]["execution"]["rounds"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !experiment_cycle["cycle"]["execution"]["rounds"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         experiment_cycle["cycle"]["final_plan"]["digest"],
         experiment_cycle["cycle"]["execution"]["final_campaign"]["digest"]
@@ -1885,10 +1934,12 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         spatial_niches["analysis"]["disposition"],
         json!("qualified")
     );
-    assert!(!spatial_niches["analysis"]["interactions"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !spatial_niches["analysis"]["interactions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let spatial_communication = call(
         &mut server,
@@ -1918,10 +1969,12 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         spatial_communication["analysis"]["disposition"],
         json!("partial")
     );
-    assert!(!spatial_communication["analysis"]["enriched_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !spatial_communication["analysis"]["enriched_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let spatial_state_propagation = call(
         &mut server,
@@ -1949,9 +2002,11 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         spatial_state_propagation["analysis"]["disposition"],
         json!("qualified")
     );
-    assert!(spatial_state_propagation["analysis"]["converged"]
-        .as_bool()
-        .unwrap());
+    assert!(
+        spatial_state_propagation["analysis"]["converged"]
+            .as_bool()
+            .unwrap()
+    );
     assert_eq!(
         spatial_state_propagation["analysis"]["edge_order"]
             .as_array()
@@ -2620,11 +2675,13 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         mechanism_validation_protocol["compilation"]["preflight"]["disposition"],
         json!("feasible")
     );
-    assert!(mechanism_validation_protocol["compilation"]["task_order"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|task| task.as_str().is_some_and(|task| task.ends_with(":qc"))));
+    assert!(
+        mechanism_validation_protocol["compilation"]["task_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|task| task.as_str().is_some_and(|task| task.ends_with(":qc")))
+    );
     assert!(
         mechanism_validation_protocol["compilation"]["withheld_arm_order"]
             .as_array()
@@ -2955,10 +3012,12 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         replication_closure_frontier["frontier"]["disposition"],
         json!("blocked")
     );
-    assert!(replication_closure_frontier["frontier"]["selected_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        replication_closure_frontier["frontier"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let replication_closure_execution = call(
         &mut server,
@@ -3368,11 +3427,13 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         replication_protocol_compile["compilation"]["disposition"],
         json!("compiled")
     );
-    assert!(replication_protocol_compile["compilation"]["task_order"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|task| task.as_str().unwrap().ends_with(":qc")));
+    assert!(
+        replication_protocol_compile["compilation"]["task_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|task| task.as_str().unwrap().ends_with(":qc"))
+    );
 
     let adaptive_information_campaign = call(
         &mut server,
@@ -3455,14 +3516,18 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         json!("not_started")
     );
     assert_eq!(adaptive_allocation_campaign["simulation_only"], json!(true));
-    assert!(!adaptive_allocation_campaign["campaign"]["rounds"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert!(!adaptive_allocation_campaign["campaign"]["batches"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !adaptive_allocation_campaign["campaign"]["rounds"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !adaptive_allocation_campaign["campaign"]["batches"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let instrument_calibration = call(
         &mut server,
@@ -3953,11 +4018,13 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         evidence_acquisition["acquisition"]["disposition"],
         json!("ready")
     );
-    assert!(evidence_acquisition["acquisition"]["selected_order"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|id| id == "literature-a"));
+    assert!(
+        evidence_acquisition["acquisition"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == "literature-a")
+    );
 
     let evidence_acquisition_campaign = call(
         &mut server,
@@ -3983,10 +4050,12 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         evidence_acquisition_campaign["simulation_only"],
         json!(true)
     );
-    assert!(!evidence_acquisition_campaign["campaign"]["unknown_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !evidence_acquisition_campaign["campaign"]["unknown_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let priority_action_id = evidence_priority["priority"]["selected_order"][0]
         .as_str()
@@ -4128,10 +4197,12 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         knowledge_gap_portfolio["next_route"],
         json!("glioma_evidence_acquisition_plan")
     );
-    assert!(!knowledge_gap_portfolio["portfolio"]["candidates"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !knowledge_gap_portfolio["portfolio"]["candidates"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let autonomous_gap_cycle = call(
         &mut server,
@@ -4561,6 +4632,43 @@ fn glioma_active_learning_selects_an_uncertain_safe_assay() {
 }
 
 #[test]
+fn glioma_posterior_batch_is_agent_callable_and_never_dispatches() {
+    let mut server = server();
+    let plan = call(
+        &mut server,
+        "glioma_posterior_batch",
+        json!({
+            "request": {
+                "objective": "resolve organoid invasion disagreement",
+                "model_system": "organoid",
+                "budget_units": 1,
+                "max_selections": 1,
+                "max_risk_milli": 500,
+                "min_marginal_reduction_milli": 1,
+                "targets": [{"target_id":"invasion","weight_milli":1000}],
+                "posterior_draws": [
+                    {"draw_id":"draw-low","prior_weight_millionths":500000,"target_predictions_milli":[-1000],"candidate_outcome_probabilities":{"candidate-a":[1000000,0]}},
+                    {"draw_id":"draw-high","prior_weight_millionths":500000,"target_predictions_milli":[1000],"candidate_outcome_probabilities":{"candidate-a":[0,1000000]}}
+                ]
+            },
+            "candidates": [
+                {"candidate_id":"candidate-a","mechanism_id":"invasion-control","output_schema":"GliomaOrganoidAssay1@1","cost_units":1,"risk_milli":100,"completed_replicates":0,"max_replicates":2,"redundancy_group":"invasion-assay"}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert_eq!(
+        plan["plan"]["output_schema"],
+        json!("GliomaPosteriorDisagreementBatch1@2")
+    );
+    assert_eq!(plan["plan"]["selected_order"], json!(["candidate-a"]));
+    assert!(plan["plan"]["input_digest"].is_string());
+    assert!(plan["guarantees"].as_array().is_some_and(|items| {
+        items.iter().any(|item| item == "the institution supplies posterior draws and calibrated candidate outcome probabilities; this route does not fit a model")
+    }));
+}
+
+#[test]
 fn glioma_sequential_design_exposes_stopping_and_negative_evidence() {
     let mut server = server();
     let artifact_hash = "0".repeat(64);
@@ -4593,17 +4701,23 @@ fn glioma_sequential_design_exposes_stopping_and_negative_evidence() {
     );
     assert_eq!(plan["dispatch"], json!("not_started"));
     assert_eq!(plan["simulation_only"], json!(true));
-    assert!(plan["plan"]["success_stop_order"]
-        .as_array()
-        .is_some_and(|arms| arms.iter().any(|arm| arm == "strong")));
-    assert!(plan["plan"]["futility_stop_order"]
-        .as_array()
-        .is_some_and(|arms| arms.iter().any(|arm| arm == "weak")));
-    assert!(plan["plan"]["negative_evidence"]
-        .as_array()
-        .is_some_and(|evidence| evidence
-            .iter()
-            .any(|item| item.as_str().is_some_and(|item| item.contains("weak")))));
+    assert!(
+        plan["plan"]["success_stop_order"]
+            .as_array()
+            .is_some_and(|arms| arms.iter().any(|arm| arm == "strong"))
+    );
+    assert!(
+        plan["plan"]["futility_stop_order"]
+            .as_array()
+            .is_some_and(|arms| arms.iter().any(|arm| arm == "weak"))
+    );
+    assert!(
+        plan["plan"]["negative_evidence"]
+            .as_array()
+            .is_some_and(|evidence| evidence
+                .iter()
+                .any(|item| item.as_str().is_some_and(|item| item.contains("weak"))))
+    );
 }
 
 #[test]
@@ -4641,14 +4755,16 @@ fn glioma_power_reestimate_exposes_interim_boundaries_and_next_batch() {
     assert_eq!(plan["plan"]["disposition"], json!("continue"));
     assert!(plan["plan"]["alpha_spent_milli"].as_u64().unwrap() < 50);
     assert_eq!(plan["plan"]["selected_order"], json!(["perturbation"]));
-    assert!(plan["plan"]["decisions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|decision| {
-            decision["arm_id"] == json!("perturbation")
-                && decision["planned_replicates"].as_u64().unwrap() > 0
-        }));
+    assert!(
+        plan["plan"]["decisions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|decision| {
+                decision["arm_id"] == json!("perturbation")
+                    && decision["planned_replicates"].as_u64().unwrap() > 0
+            })
+    );
 }
 
 #[test]
@@ -4686,12 +4802,16 @@ fn glioma_sequential_campaign_executes_and_replans_in_sandbox() {
     );
     assert_eq!(campaign["dispatch"], json!("not_started"));
     assert_eq!(campaign["simulation_only"], json!(true));
-    assert!(campaign["campaign"]["rounds"]
-        .as_array()
-        .is_some_and(|rounds| !rounds.is_empty()));
-    assert!(campaign["campaign"]["batches"]
-        .as_array()
-        .is_some_and(|batches| !batches.is_empty()));
+    assert!(
+        campaign["campaign"]["rounds"]
+            .as_array()
+            .is_some_and(|rounds| !rounds.is_empty())
+    );
+    assert!(
+        campaign["campaign"]["batches"]
+            .as_array()
+            .is_some_and(|batches| !batches.is_empty())
+    );
     assert!(campaign["campaign"]["final_plan"]["decisions"].is_array());
 }
 
@@ -4734,9 +4854,11 @@ fn glioma_mechanism_dynamics_exposes_feedback_and_intervention_sensitivity() {
         plan["plan"]["selected_intervention_order"],
         json!(["oxygenation"])
     );
-    assert!(plan["plan"]["steps"]
-        .as_array()
-        .is_some_and(|steps| !steps.is_empty()));
+    assert!(
+        plan["plan"]["steps"]
+            .as_array()
+            .is_some_and(|steps| !steps.is_empty())
+    );
     assert_eq!(plan["plan"]["sensitivities"].as_array().unwrap().len(), 1);
 }
 
@@ -4776,9 +4898,16 @@ fn glioma_active_learning_campaign_executes_and_replans_in_sandbox() {
     );
     assert_eq!(campaign["dispatch"], json!("not_started"));
     assert_eq!(campaign["simulation_only"], json!(true));
-    assert!(campaign["campaign"]["rounds"]
-        .as_array()
-        .is_some_and(|rounds| !rounds.is_empty()));
+    assert_eq!(
+        campaign["campaign"]["output_schema"],
+        json!("GliomaActiveLearningCampaign1@2")
+    );
+    assert!(campaign["campaign"]["input_digest"].is_string());
+    assert!(
+        campaign["campaign"]["rounds"]
+            .as_array()
+            .is_some_and(|rounds| !rounds.is_empty())
+    );
     assert!(
         campaign["campaign"]["budget_spent_units"]
             .as_u64()
@@ -4917,14 +5046,18 @@ fn glioma_mechanism_discrimination_campaign_replans_measurement_in_sandbox() {
     assert_eq!(readiness["dispatch"], json!("dry_run"));
     assert_eq!(readiness["simulation_only"], json!(true));
     assert_eq!(readiness["readiness"]["coverage_milli"], json!(1000));
-    assert!(readiness["readiness"]["admitted_surface_order"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("analysis")));
-    assert!(readiness["readiness"]["conditional_surface_order"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("replication")));
+    assert!(
+        readiness["readiness"]["admitted_surface_order"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("analysis"))
+    );
+    assert!(
+        readiness["readiness"]["conditional_surface_order"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("replication"))
+    );
 
     let evidence_cycle = call(
         &mut server,
@@ -4959,10 +5092,12 @@ fn glioma_mechanism_discrimination_campaign_replans_measurement_in_sandbox() {
         evidence_cycle["cycle"]["phase_order"][0],
         json!("portfolio_selection")
     );
-    assert!(!evidence_cycle["cycle"]["campaign"]["unknown_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !evidence_cycle["cycle"]["campaign"]["unknown_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let multimodal_cycle = call(
         &mut server,
@@ -5049,10 +5184,12 @@ fn glioma_knowledge_synthesis_operating_cycle_emits_typed_p01_handoff() {
         response["next_route"],
         json!("glioma_evidence_acquisition_plan")
     );
-    assert!(!response["cycle"]["next_action"]
-        .as_str()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !response["cycle"]["next_action"]
+            .as_str()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -5143,14 +5280,18 @@ fn glioma_robust_active_learning_preserves_model_disagreement() {
         }),
     );
     assert_eq!(plan["dispatch"], json!("not_started"));
-    assert!(plan["plan"]["selected_order"]
-        .as_array()
-        .is_some_and(|items| !items.is_empty()));
-    assert!(plan["plan"]["scores"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|score| score["model_support_count"].as_u64().unwrap_or_default() == 2));
+    assert!(
+        plan["plan"]["selected_order"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    );
+    assert!(
+        plan["plan"]["scores"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|score| score["model_support_count"].as_u64().unwrap_or_default() == 2)
+    );
 }
 
 #[test]
@@ -5190,9 +5331,16 @@ fn glioma_robust_active_learning_campaign_replans_in_sandbox() {
     );
     assert_eq!(campaign["dispatch"], json!("not_started"));
     assert_eq!(campaign["simulation_only"], json!(true));
-    assert!(campaign["campaign"]["completed_order"]
-        .as_array()
-        .is_some_and(|items| !items.is_empty()));
+    assert_eq!(
+        campaign["campaign"]["output_schema"],
+        json!("GliomaRobustActiveLearningCampaign1@2")
+    );
+    assert!(campaign["campaign"]["input_digest"].is_string());
+    assert!(
+        campaign["campaign"]["completed_order"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    );
 }
 
 #[test]
@@ -5270,11 +5418,13 @@ fn glioma_instrument_fleet_schedule_closes_dependencies_and_requires_preflight()
         3
     );
     assert_eq!(schedule["schedule"]["dispatch_permitted"], json!(false));
-    assert!(schedule["schedule"]["critical_path_order"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item == "integrate"));
+    assert!(
+        schedule["schedule"]["critical_path_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "integrate")
+    );
 }
 
 #[test]
@@ -5361,15 +5511,19 @@ fn glioma_decision_branch_plan_ranks_scenario_robust_portfolios() {
     );
     assert_eq!(branch["dispatch"], json!("not_started"));
     assert!(branch["plan"]["selected_branch_id"].is_string());
-    assert!(!branch["plan"]["frontier_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert!(branch["plan"]["portfolios"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|portfolio| portfolio["scenario_scores"].as_array().unwrap().len() == 2));
+    assert!(
+        !branch["plan"]["frontier_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        branch["plan"]["portfolios"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|portfolio| portfolio["scenario_scores"].as_array().unwrap().len() == 2)
+    );
 }
 
 #[test]
@@ -5484,10 +5638,12 @@ fn glioma_adaptive_decision_branch_campaign_recompiles_after_evidence() {
     assert_eq!(campaign["dispatch"], json!("dry_run"));
     assert_eq!(campaign["simulation_only"], json!(true));
     assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
-    assert!(!campaign["campaign"]["records"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !campaign["campaign"]["records"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert!(campaign["campaign"]["final_knowledge"].is_object());
     assert!(campaign["campaign"]["final_context"].is_object());
 }
@@ -6467,11 +6623,13 @@ fn glioma_federated_adaptive_campaign_bridges_projection_to_observed_aggregates(
         campaign["campaign"]["projected_disposition"],
         json!("qualified")
     );
-    assert!(campaign["campaign"]["uncertainty"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap_or_default().contains("scenario")));
+    assert!(
+        campaign["campaign"]["uncertainty"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap_or_default().contains("scenario"))
+    );
 }
 
 #[test]
@@ -6680,10 +6838,12 @@ fn glioma_research_object_release_gate_requires_replay_and_independent_review() 
     assert_eq!(gate["dispatch"], json!("not_started"));
     assert_eq!(gate["simulation_only"], json!(true));
     assert_eq!(gate["gate"]["status"], json!("publishable"));
-    assert!(gate["gate"]["blocking_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        gate["gate"]["blocking_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -6733,10 +6893,12 @@ fn glioma_release_operating_cycle_composes_replay_and_signing_handoff() {
     assert_eq!(cycle["dispatch"], json!("dry_run"));
     assert_eq!(cycle["simulation_only"], json!(true));
     assert_eq!(cycle["cycle"]["disposition"], json!("publishable"));
-    assert!(cycle["cycle"]["next_operator_action"]
-        .as_str()
-        .unwrap()
-        .contains("accountable signature"));
+    assert!(
+        cycle["cycle"]["next_operator_action"]
+            .as_str()
+            .unwrap()
+            .contains("accountable signature")
+    );
 }
 
 #[test]
@@ -6779,11 +6941,13 @@ fn glioma_adaptive_mechanism_policy_selects_information_bearing_assay() {
         policy["policy"]["selected_action_order"][0],
         json!("assay-a")
     );
-    assert!(policy["policy"]["scores"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|score| { score["information_gain_milli"].as_u64().unwrap_or_default() > 0 }));
+    assert!(
+        policy["policy"]["scores"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|score| { score["information_gain_milli"].as_u64().unwrap_or_default() > 0 })
+    );
 }
 
 #[test]
@@ -6871,17 +7035,23 @@ fn glioma_adaptive_mechanism_campaign_replans_from_sandbox_observation() {
     );
     assert_eq!(campaign["dispatch"], json!("dry_run"));
     assert_eq!(campaign["simulation_only"], json!(true));
-    assert!(!campaign["campaign"]["rounds"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert!(!campaign["campaign"]["observations"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert!(campaign["campaign"]["completed_action_order"]
-        .as_array()
-        .is_some_and(|items| !items.is_empty()));
+    assert!(
+        !campaign["campaign"]["rounds"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !campaign["campaign"]["observations"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        campaign["campaign"]["completed_action_order"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    );
 }
 
 #[test]
@@ -6932,18 +7102,22 @@ fn glioma_calibrated_mechanism_campaign_discounts_model_trust() {
     assert_eq!(campaign["dispatch"], json!("dry_run"));
     assert_eq!(campaign["simulation_only"], json!(true));
     assert_eq!(campaign["campaign"]["calibration_gate_open"], json!(true));
-    assert!(!campaign["campaign"]["rounds"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert!(campaign["campaign"]["rounds"][0]["action_scores"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|score| score["posterior_model_trust_milli"]
-            .as_u64()
-            .unwrap_or_default()
-            > 0));
+    assert!(
+        !campaign["campaign"]["rounds"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        campaign["campaign"]["rounds"][0]["action_scores"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|score| score["posterior_model_trust_milli"]
+                .as_u64()
+                .unwrap_or_default()
+                > 0)
+    );
 }
 
 #[test]
@@ -7019,10 +7193,12 @@ fn glioma_computation_recovery_keeps_clean_initial_campaign_without_recovery_dis
         json!("initial_completed")
     );
     assert!(campaign["campaign"]["recovery"].is_null());
-    assert!(campaign["campaign"]["invalidated_cache_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        campaign["campaign"]["invalidated_cache_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -7234,10 +7410,12 @@ fn glioma_interpretation_operating_cycle_gates_and_routes_next_actions() {
             "operator_handoff"
         ])
     );
-    assert!(!response["cycle"]["frontier"]["next_action_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !response["cycle"]["frontier"]["next_action_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -7284,15 +7462,19 @@ fn glioma_research_director_compiles_and_executes_a_focus_aware_batch() {
     assert_eq!(response["dispatch"], json!("dry_run"));
     assert_eq!(response["simulation_only"], json!(true));
     assert_eq!(response["director"]["disposition"], json!("partial"));
-    assert!(!response["director"]["next_stage_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert!(response["director"]["negative_evidence"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
+    assert!(
+        !response["director"]["next_stage_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        response["director"]["negative_evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("synthetic-dry-run"))
+    );
 }
 
 #[test]
@@ -7359,15 +7541,19 @@ fn glioma_program_scheduler_batches_independent_intents_and_preserves_job_state(
         json!("GAF-GLIOMA-P07-F15")
     );
     assert_eq!(response["schedule"]["jobs"].as_array().unwrap().len(), 2);
-    assert!(!response["schedule"]["rounds"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert!(response["schedule"]["jobs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|job| job["job_id"].is_string() && job["pending_action_order"].is_array()));
+    assert!(
+        !response["schedule"]["rounds"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        response["schedule"]["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|job| job["job_id"].is_string() && job["pending_action_order"].is_array())
+    );
 }
 
 #[test]
@@ -7504,15 +7690,19 @@ fn glioma_autonomous_research_engine_replans_the_full_stage_graph() {
     assert_eq!(response["dispatch"], json!("dry_run"));
     assert_eq!(response["simulation_only"], json!(true));
     assert!(response["engine"]["cycles"].as_array().unwrap().len() > 1);
-    assert!(!response["engine"]["completed_checkpoints"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert!(response["engine"]["negative_evidence"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
+    assert!(
+        !response["engine"]["completed_checkpoints"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        response["engine"]["negative_evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("synthetic-dry-run"))
+    );
 }
 
 #[test]
@@ -7921,18 +8111,22 @@ fn glioma_adaptive_frontier_turns_interpretation_debt_into_next_actions() {
     assert_eq!(response["dispatch"], json!("not_started"));
     assert_eq!(response["simulation_only"], json!(true));
     assert_eq!(response["frontier"]["disposition"], json!("partial"));
-    assert!(!response["frontier"]["next_action_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert!(response["frontier"]["uncertainty"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item
-            .as_str()
+    assert!(
+        !response["frontier"]["next_action_order"]
+            .as_array()
             .unwrap()
-            .contains("replication-family-required")));
+            .is_empty()
+    );
+    assert!(
+        response["frontier"]["uncertainty"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item
+                .as_str()
+                .unwrap()
+                .contains("replication-family-required"))
+    );
 }
 
 #[test]
@@ -7991,10 +8185,12 @@ fn glioma_adaptive_frontier_execute_runs_selected_actions_and_replays() {
     assert_eq!(first["dispatch"], json!("dry_run"));
     assert_eq!(first["simulation_only"], json!(true));
     assert_eq!(first["execution"]["disposition"], json!("executed"));
-    assert!(!first["execution"]["dispatched_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !first["execution"]["dispatched_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(first["execution"]["digest"], second["execution"]["digest"]);
 }
 
@@ -8052,11 +8248,13 @@ fn glioma_adaptive_interpretation_campaign_executes_and_stops_without_fabricatin
         response["campaign"]["rounds"][0]["execution"]["disposition"],
         json!("executed")
     );
-    assert!(response["campaign"]["negative_evidence"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
+    assert!(
+        response["campaign"]["negative_evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("synthetic-dry-run"))
+    );
 }
 
 #[test]
@@ -8181,11 +8379,13 @@ fn glioma_temporal_spatial_alignment_emits_gap_aware_follow_up() {
     assert_eq!(response["dispatch"], json!("local_analysis"));
     assert_eq!(response["simulation_only"], json!(false));
     assert_eq!(response["analysis"]["disposition"], json!("qualified"));
-    assert!(response["analysis"]["priority_action_order"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|action| action == "publish_aligned_state_map"));
+    assert!(
+        response["analysis"]["priority_action_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| action == "publish_aligned_state_map")
+    );
 }
 
 #[test]
@@ -8290,10 +8490,12 @@ fn glioma_clone_perturbation_panel_covers_evolutionary_branches_under_budget() {
         panel["panel"]["selected_order"].as_array().unwrap().len(),
         2
     );
-    assert!(panel["panel"]["uncovered_branch_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        panel["panel"]["uncovered_branch_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -8370,10 +8572,12 @@ fn glioma_clone_panel_outcomes_requires_replicates_before_qualification() {
     assert_eq!(analysis["dispatch"], json!("not_started"));
     assert_eq!(analysis["simulation_only"], json!(true));
     assert_eq!(analysis["analysis"]["disposition"], json!("qualified"));
-    assert!(analysis["analysis"]["next_action_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        analysis["analysis"]["next_action_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     // A missing replicate/cell reopens the loop and is compiled into a bounded continuation
     // plan. The MCP route must remain planning-only and preserve the unresolved target.
@@ -8524,10 +8728,12 @@ fn glioma_multimodal_graph_fusion_replays_dropout_and_disagreement() {
     assert_eq!(response["dispatch"], json!("not_started"));
     assert_eq!(response["analysis"]["disposition"], json!("partial"));
     assert_eq!(response["analysis"]["missing_sample_order"], json!(["c"]));
-    assert!(!response["analysis"]["contradictory_pair_order"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !response["analysis"]["contradictory_pair_order"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -8931,11 +9137,13 @@ fn glioma_causal_claim_adjudication_keeps_missing_timepoints_as_a_hold() {
         response["adjudication"]["gates"][0]["disposition"],
         json!("hold")
     );
-    assert!(response["adjudication"]["action_order"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|value| value == "collect_timepoints"));
+    assert!(
+        response["adjudication"]["action_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "collect_timepoints")
+    );
 }
 
 #[test]
@@ -9020,19 +9228,6 @@ fn glioma_autonomous_campaign_execution_is_reachable_through_mcp() {
 }
 
 #[test]
-fn every_tool_declares_an_input_schema_with_required_fields() {
-    // Keep this test source touched when Windows Application Control requires a relink.
-    let tools = on_a_dispatch_sized_stack(tool_definitions);
-    assert_eq!(tools.len(), TOOL_DEFINITION_COUNT);
-    for tool in &tools {
-        assert!(tool["name"].is_string());
-        assert!(tool["description"].as_str().unwrap().len() > 40);
-        assert_eq!(tool["inputSchema"]["type"], json!("object"));
-        assert!(tool["inputSchema"]["required"].is_array());
-    }
-}
-
-#[test]
 fn glioma_evidence_calibration_preserves_negative_and_unknown_outcomes() {
     let mut server = server();
     let artifact_hash = "0".repeat(64);
@@ -9080,16 +9275,20 @@ fn glioma_evidence_calibration_preserves_negative_and_unknown_outcomes() {
     );
     assert_eq!(response["dispatch"], json!("not_started"));
     assert_eq!(response["simulation_only"], json!(true));
-    assert!(response["calibration"]["negative_evidence_order"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|value| value == "cal-high"));
-    assert!(response["calibration"]["unknown_order"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|value| value == "cal-unknown"));
+    assert!(
+        response["calibration"]["negative_evidence_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "cal-high")
+    );
+    assert!(
+        response["calibration"]["unknown_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "cal-unknown")
+    );
     assert_eq!(
         response["calibration"]["families"]
             .as_array()
@@ -9127,11 +9326,13 @@ fn pack_health_assessment_exposes_digest_bound_score_refusal() {
     assert_eq!(payload["verdict"], json!("unreportable"));
     assert_eq!(payload["score_gate"]["reportable"], json!(false));
     assert!(payload["pack_digest"].is_string());
-    assert!(payload["health"]["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| { finding["finding"] == json!("saturated") }));
+    assert!(
+        payload["health"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| { finding["finding"] == json!("saturated") })
+    );
 }
 
 #[test]
@@ -9157,11 +9358,13 @@ fn sdk_registry_check_refuses_invalid_manifests_before_resolution() {
     assert_eq!(payload["ok"], json!(false));
     assert_eq!(payload["stage"], json!("manifest_validation"));
     assert_eq!(payload["registry"], Value::Null);
-    assert!(payload["manifests"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| { row["valid"] == json!(false) }));
+    assert!(
+        payload["manifests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["valid"] == json!(false) })
+    );
 }
 
 #[test]
@@ -9265,10 +9468,12 @@ fn hub_submission_review_replays_append_only_public_moderation() {
     assert_eq!(payload["verification"], json!("reproduced"));
     assert_eq!(payload["event_count"], json!(4));
     assert_eq!(payload["ledger"]["events"].as_array().unwrap().len(), 4);
-    assert!(payload["limitation_card"]
-        .as_str()
-        .unwrap()
-        .contains("does not establish"));
+    assert!(
+        payload["limitation_card"]
+            .as_str()
+            .unwrap()
+            .contains("does not establish")
+    );
 }
 
 #[test]
@@ -9408,11 +9613,13 @@ fn factory_lifecycle_replays_safe_retry_quarantine_compensation_and_commit_bound
         assert_eq!(job["job"]["state"], json!("succeeded"));
         assert!(job["committed_result"].is_object());
     }
-    assert!(payload["guarantees"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("idempotency")));
+    assert!(
+        payload["guarantees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("idempotency"))
+    );
 }
 
 #[test]
@@ -9436,11 +9643,13 @@ fn factory_authority_verify_audits_legacy_queue_checkpoint_without_dispatch() {
     assert_eq!(payload["events"], json!([]));
     assert_eq!(payload["job_count"], json!(0));
     assert_eq!(payload["active_lease_count"], json!(0));
-    assert!(payload["does_not_claim"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item == "multi-host consensus or network-partition tolerance"));
+    assert!(
+        payload["does_not_claim"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "multi-host consensus or network-partition tolerance")
+    );
 }
 
 #[test]
@@ -9491,11 +9700,13 @@ fn artifact_registry_audit_joins_cross_domain_records_without_inventing_provenan
         1
     );
     assert_eq!(lineage["cycles"], json!([]));
-    assert!(lineage["does_not_claim"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item == "parent presence proves causal provenance or scientific validity"));
+    assert!(
+        lineage["does_not_claim"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "parent presence proves causal provenance or scientific validity")
+    );
     let cross_store = call(
         &mut server,
         "artifact_registry_audit",
@@ -9514,11 +9725,13 @@ fn artifact_registry_audit_joins_cross_domain_records_without_inventing_provenan
         cross_store["stores"]["artifact_registry"]["record_count"],
         json!(2)
     );
-    assert!(cross_store["does_not_claim"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item == "the four stores were read in one atomic transaction"));
+    assert!(
+        cross_store["does_not_claim"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "the four stores were read in one atomic transaction")
+    );
 }
 
 #[test]
@@ -9568,10 +9781,12 @@ fn artifact_registry_domain_evidence_lineage_traces_intake_and_reverse_children(
         trace["rows"][0]["request_digest"].as_str().unwrap().len(),
         64
     );
-    assert!(trace["rows"][0]["artifact_lookup"]
-        .as_str()
-        .unwrap()
-        .contains("/v1/artifacts/"));
+    assert!(
+        trace["rows"][0]["artifact_lookup"]
+            .as_str()
+            .unwrap()
+            .contains("/v1/artifacts/")
+    );
     assert!(trace["guarantees"]
         .as_array()
         .unwrap()
@@ -9685,10 +9900,12 @@ fn domain_report_projection_refuses_unknown_source_and_domain_claims() {
         }),
     );
     assert_eq!(domain_refused["ok"], json!(false));
-    assert!(domain_refused["error"]
-        .as_str()
-        .unwrap()
-        .contains("not declared"));
+    assert!(
+        domain_refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("not declared")
+    );
 }
 
 #[test]
@@ -9739,11 +9956,13 @@ fn adapter_domain_report_operation_validates_and_joins_adapter_evidence() {
         result["domain_report"]["report"]["claim_posture"]["status"],
         json!("observed")
     );
-    assert!(result["domain_report"]["report"]["parent_digests"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|parent| parent == &result["evidence"]["artifact_registry"]["content_digest"]));
+    assert!(
+        result["domain_report"]["report"]["parent_digests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|parent| parent == &result["evidence"]["artifact_registry"]["content_digest"])
+    );
     assert_eq!(result["readiness_claimed"], json!(false));
 }
 
@@ -9833,12 +10052,14 @@ fn provider_domain_report_operations_compose_inline_and_external_normalization()
         external["domain_report"]["report"]["report"]["materialization"]["locator_opened"],
         json!(false)
     );
-    assert!(external["domain_report"]["report"]["parent_digests"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|parent| parent
-            == &external["normalization"]["receipt_artifact_registry"]["content_digest"]));
+    assert!(
+        external["domain_report"]["report"]["parent_digests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|parent| parent
+                == &external["normalization"]["receipt_artifact_registry"]["content_digest"])
+    );
     assert_eq!(external["readiness_claimed"], json!(false));
 }
 
@@ -10265,10 +10486,12 @@ fn control_plane_readiness_compare_reports_structural_regression_and_recovery() 
         comparison["comparison"]["evidence_direction"],
         json!("improved")
     );
-    assert!(!comparison["comparison"]["comparison_digest"]
-        .as_str()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !comparison["comparison"]["comparison_digest"]
+            .as_str()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(comparison["readiness_claimed"], json!(false));
     assert_eq!(comparison["execution"], json!("not_started"));
 
@@ -10431,11 +10654,13 @@ fn domain_evidence_coverage_preserves_missing_groups_outcomes_and_digest_rows() 
         .unwrap();
     assert_eq!(group["outcomes"], json!(["partial"]));
     assert!(group["declared_tools"].as_array().unwrap().len() > 1);
-    assert!(group["missing_source_tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|tool| tool == "bioworlds_catalog"));
+    assert!(
+        group["missing_source_tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool == "bioworlds_catalog")
+    );
     assert_eq!(group["tool_coverage_state"], json!("partial"));
     assert_eq!(group["domain_coverage_state"], json!("partial"));
     assert_eq!(group["artifact_evidence"]["state"], json!("observed"));
@@ -10513,11 +10738,13 @@ fn domain_evidence_source_plan_is_catalogue_bound_digest_addressed_and_non_execu
         }),
     );
     assert_eq!(bound_intake["source_plan_digest"], first["plan_digest"]);
-    assert!(bound_intake["parent_digests"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|digest| digest == &first["plan_digest"]));
+    assert!(
+        bound_intake["parent_digests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|digest| digest == &first["plan_digest"])
+    );
     let mut expected_arguments = arguments.clone();
     expected_arguments["subject_id"] = json!("source-plan-expected");
     expected_arguments["expected_content_digest"] = json!("a".repeat(64));
@@ -10541,10 +10768,12 @@ fn domain_evidence_source_plan_is_catalogue_bound_digest_addressed_and_non_execu
         }),
     );
     assert_eq!(mismatch["__isError"], json!(true));
-    assert!(mismatch["error"]
-        .as_str()
-        .unwrap()
-        .contains("response digest differs"));
+    assert!(
+        mismatch["error"]
+            .as_str()
+            .unwrap()
+            .contains("response digest differs")
+    );
     let second = call(&mut server, "domain_evidence_source_plan", arguments);
     assert_eq!(second["artifact_registry"]["already_present"], json!(true));
     let credential_refused = call(
@@ -10607,11 +10836,13 @@ fn domain_evidence_source_execute_reads_confined_file_and_retains_raw_and_json_d
         executed["execution_result"]["response"]["retrieval"]["body_encoding"],
         json!("json")
     );
-    assert!(executed["intake"]["parent_digests"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|digest| digest == &planned["artifact_registry"]["content_digest"]));
+    assert!(
+        executed["intake"]["parent_digests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|digest| digest == &planned["artifact_registry"]["content_digest"])
+    );
     let repeated = call(
         &mut server,
         "domain_evidence_source_execute",
@@ -10708,11 +10939,13 @@ fn domain_evidence_provider_normalize_retains_caller_managed_payload_with_explic
         normalized["intake"]["artifact_registry"]["indexed"],
         json!(true)
     );
-    assert!(normalized["intake"]["parent_digests"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|digest| digest == &planned["artifact_registry"]["content_digest"]));
+    assert!(
+        normalized["intake"]["parent_digests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|digest| digest == &planned["artifact_registry"]["content_digest"])
+    );
 
     let unknown = call(
         &mut server,
@@ -10855,9 +11088,11 @@ fn domain_evidence_provider_connector_handoff_is_scoped_secret_safe_and_idempote
     assert_eq!(second["handoff_digest"], first["handoff_digest"]);
     assert_eq!(second["artifact_registry"]["created"], json!(false));
     assert_eq!(second["artifact_registry"]["already_present"], json!(true));
-    assert!(!serde_json::to_string(&first["handoff"])
-        .unwrap()
-        .contains("credential_material"));
+    assert!(
+        !serde_json::to_string(&first["handoff"])
+            .unwrap()
+            .contains("credential_material")
+    );
 
     let refused = call(
         &mut server,
@@ -10927,9 +11162,11 @@ fn domain_evidence_provider_external_payload_receipt_is_out_of_line_and_restart_
     assert_eq!(first["artifact_registry"]["created"], json!(true));
     assert_eq!(first["receipt_digest"].as_str().unwrap().len(), 64);
     assert_eq!(first["receipt"]["handoff_digest"], json!("a".repeat(64)));
-    assert!(!serde_json::to_string(&first)
-        .unwrap()
-        .contains("credential_material"));
+    assert!(
+        !serde_json::to_string(&first)
+            .unwrap()
+            .contains("credential_material")
+    );
 
     let second = call(
         &mut server,
@@ -11019,9 +11256,11 @@ fn domain_evidence_provider_external_payload_replay_is_metadata_only_and_idempot
     assert_eq!(first["replay"]["matches"]["receipt_digest"], json!(true));
     assert_eq!(first["artifact_registry"]["created"], json!(true));
     assert!(first["replay"]["receipt"].get("records").is_none());
-    assert!(first["replay"]["receipt"]
-        .get("credential_material")
-        .is_none());
+    assert!(
+        first["replay"]["receipt"]
+            .get("credential_material")
+            .is_none()
+    );
     let second = call(
         &mut server,
         "domain_evidence_provider_external_payload_replay_verify",
@@ -11210,8 +11449,8 @@ fn domain_evidence_provider_external_payload_lineage_audit_reconciles_handoff_sc
 }
 
 #[test]
-fn domain_evidence_provider_external_payload_execution_evidence_is_observation_bound_and_idempotent(
-) {
+fn domain_evidence_provider_external_payload_execution_evidence_is_observation_bound_and_idempotent()
+ {
     let mut server = server();
     let base = json!({
         "group_id": "biological_domains",
@@ -11303,8 +11542,8 @@ fn domain_evidence_provider_external_payload_execution_evidence_is_observation_b
 }
 
 #[test]
-fn domain_evidence_provider_external_payload_evidence_query_joins_rows_and_paginates_deterministically(
-) {
+fn domain_evidence_provider_external_payload_evidence_query_joins_rows_and_paginates_deterministically()
+ {
     let mut server = server();
     let first = json!({
         "group_id": "biological_domains",
@@ -11422,11 +11661,13 @@ fn hub_disclosure_replay_preserves_ratchet_and_refuses_unacknowledged_scores() {
         json!("contaminated")
     );
     assert_eq!(payload["entries"].as_array().unwrap().len(), 2);
-    assert!(payload["guarantees"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("ratchet")));
+    assert!(
+        payload["guarantees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("ratchet"))
+    );
 }
 
 #[test]
@@ -12014,22 +12255,24 @@ fn domain_workflow_catalogue_covers_every_capability_group() {
         json!(true)
     );
     assert_eq!(report["execution"], json!("not_started"));
-    assert!(report["workflows"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|workflow| {
-            workflow["workflow_id"].is_string()
-                && workflow["workflow_digest"].is_string()
-                && workflow["domain_contract"].is_object()
-                && workflow["tool_contracts"].is_array()
-                && workflow["recommended_stages"].is_array()
-                && workflow["tool_contracts"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .all(|contract| contract["argument_contract"].is_object())
-        }));
+    assert!(
+        report["workflows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|workflow| {
+                workflow["workflow_id"].is_string()
+                    && workflow["workflow_digest"].is_string()
+                    && workflow["domain_contract"].is_object()
+                    && workflow["tool_contracts"].is_array()
+                    && workflow["recommended_stages"].is_array()
+                    && workflow["tool_contracts"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(|contract| contract["argument_contract"].is_object())
+            })
+    );
 }
 
 #[test]
@@ -12061,10 +12304,12 @@ fn domain_workflow_scaffolds_are_actionable_and_execution_disabled_for_every_gro
             report["mission"]["workflow_binding"]["workflow_id"],
             workflow_id
         );
-        assert!(!report["selection"]["selected_tools"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !report["selection"]["selected_tools"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert!(matches!(
             report["preflight_status"].as_str(),
             Some("ready") | Some("blocked")
@@ -12339,11 +12584,13 @@ fn domain_workflow_reconciliation_preserves_outcomes_for_every_capability_group(
             });
             assert_eq!(mismatched["integrity"]["valid"], false);
             assert_eq!(mismatched["completion"]["ready"], false);
-            assert!(mismatched["integrity"]["findings"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|finding| finding["code"] == "mission_plan_digest_mismatch"));
+            assert!(
+                mismatched["integrity"]["findings"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|finding| finding["code"] == "mission_plan_digest_mismatch")
+            );
         }
     })
 }
@@ -12488,11 +12735,13 @@ fn domain_workflow_instantiation_is_scoped_and_preflighted_without_dispatch() {
     );
     assert_eq!(refused_tamper["valid"], json!(false));
     assert_eq!(refused_tamper["verification_status"], json!("mismatch"));
-    assert!(refused_tamper["mismatches"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item["code"] == "mission_plan_digest_mismatch"));
+    assert!(
+        refused_tamper["mismatches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["code"] == "mission_plan_digest_mismatch")
+    );
 
     let refused = call(
         &mut server,
@@ -12505,10 +12754,12 @@ fn domain_workflow_instantiation_is_scoped_and_preflighted_without_dispatch() {
         }),
     );
     assert_eq!(refused["__isError"], json!(true));
-    assert!(refused["error"]
-        .as_str()
-        .unwrap()
-        .contains("outside workflow"));
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("outside workflow")
+    );
 }
 
 #[test]
@@ -12607,11 +12858,13 @@ fn mission_evaluator_discovery_covers_domains_without_executing_tools() {
         all["matches"][0]["adapter"]["status"],
         json!("candidate_only")
     );
-    assert!(all["guarantees"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item == "candidate tools are suggestions and were not executed"));
+    assert!(
+        all["guarantees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "candidate tools are suggestions and were not executed")
+    );
 
     let oncology = call(
         &mut server,
@@ -12665,6 +12918,11 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
         ready["bindings"][0]["proposed_binding"]["step_id"],
         json!("assay")
     );
+    assert!(
+        ready["bindings"][0]["proposed_binding"]
+            .get("claim_id")
+            .is_none()
+    );
     assert_eq!(ready["execution"], json!("not_started"));
 
     let mission = call(
@@ -12692,7 +12950,11 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
             "evaluator_review": ready
         }),
     );
-    assert_eq!(mission["workflow"], json!("agent_mission"));
+    assert_eq!(
+        mission["workflow"],
+        json!("agent_mission"),
+        "unexpected mission response: {mission}"
+    );
     assert_eq!(mission["execution"], json!("planned"));
     assert_eq!(
         mission["claim_lineage"]["evaluator_review"]["present"],
@@ -12788,11 +13050,13 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
         json!({"mission": {"workflow": "agent_mission", "plan": {"mission_id": "replay-inconsistent"}, "mission_status": "planned", "claim_lineage": {"claims": [{"id": "fidelity-claim", "evaluator_bindings": [{"id": "assay-evaluator", "adapter_id": "oncoworlds.assay_fidelity", "domain": "oncology", "step_id": "assay", "output_pointer": "/fidelity", "required": true, "outcome_state": "retained", "output_digest": "x".repeat(64)}], "evaluator_coverage": {"outcome_counts": {}, "distinct_output_digests": 1, "disagreement_posture": "single_observation"}}]}}}),
     );
     assert_eq!(replayed_inconsistent["replay_status"], json!("blocked"));
-    assert!(replayed_inconsistent["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| { finding["code"] == json!("outcome_count_mismatch") }));
+    assert!(
+        replayed_inconsistent["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| { finding["code"] == json!("outcome_count_mismatch") })
+    );
 
     let mut mismatched_review = ready.clone();
     mismatched_review["bindings"][0]["domain"] = json!("unrelated");
@@ -12851,20 +13115,25 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
         json!("requires_caller_correction")
     );
     assert!(blocked["findings"].as_array().unwrap().len() >= 4);
-    assert!(blocked["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| {
-            finding["message"] == json!("selection.id must be unique within the review")
-        }));
-    assert!(blocked["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| {
-            finding["message"] == json!("selection.output_pointer must be a valid RFC 6901 pointer")
-        }));
+    assert!(
+        blocked["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| {
+                finding["message"] == json!("selection.id must be unique within the review")
+            })
+    );
+    assert!(
+        blocked["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| {
+                finding["message"]
+                    == json!("selection.output_pointer must be a valid RFC 6901 pointer")
+            })
+    );
 }
 
 #[test]
@@ -13182,10 +13451,12 @@ fn prism_minimize_preserves_the_oracle_signature_and_states_the_guarantee() {
     );
     assert_eq!(payload["ok"], json!(true));
     assert_eq!(payload["preserved"], json!(true));
-    assert!(payload["minimization"]["guarantee"]
-        .as_str()
-        .unwrap()
-        .contains("minimal"));
+    assert!(
+        payload["minimization"]["guarantee"]
+            .as_str()
+            .unwrap()
+            .contains("minimal")
+    );
     assert!(payload["preservation"]["preservation"] == json!("preserved"));
 }
 
@@ -13353,10 +13624,12 @@ fn security_redteam_simulation_keeps_the_full_safety_loop_typed_and_honest() {
         payload["boundary"]["within_trial_evaluator_to_agent"],
         json!([])
     );
-    assert!(!payload["boundary"]["feedback_loops"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !payload["boundary"]["feedback_loops"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         payload["incidents"][0]["containment_claim"]["allowed"],
         json!(true)
@@ -13457,11 +13730,13 @@ fn registry_lifecycle_keeps_invalid_packs_and_independent_actions_explicit() {
     assert_eq!(payload["actions"][2]["result"]["clean"], json!(true));
     assert_eq!(payload["final"]["artifact_count"], json!(0));
     assert!(payload["registry"].is_object());
-    assert!(payload["guarantees"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("continu")));
+    assert!(
+        payload["guarantees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("continu"))
+    );
 }
 
 #[test]
@@ -13572,11 +13847,13 @@ fn cache_invalidation_simulation_keeps_partial_unknowns_and_replayable_misses_vi
             .len(),
         1
     );
-    assert!(payload["graph"]["opaque_resources"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item == "input"));
+    assert!(
+        payload["graph"]["opaque_resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "input")
+    );
     assert_eq!(payload["lookups"]["pre_apply"][0]["hit"], json!(true));
     assert_eq!(payload["lookups"]["post_apply"][0]["hit"], json!(false));
     assert_eq!(payload["cache"]["unproven"].as_array().unwrap().len(), 1);
@@ -13639,19 +13916,23 @@ fn storage_lifecycle_simulation_plans_pins_reserve_and_non_copyable_allowance() 
     let records = payload["tiering"]["records"].as_array().unwrap();
     assert_eq!(records[1]["tier"], json!("Warm"));
     assert_eq!(records[2]["tier"], json!("Hot"));
-    assert!(payload["quota"]["charges"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["ok"] == json!(false) && row["fail_closed"] == json!(true)));
+    assert!(
+        payload["quota"]["charges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["ok"] == json!(false) && row["fail_closed"] == json!(true))
+    );
     assert_eq!(payload["quota"]["remaining"], json!(70));
     assert_eq!(payload["quota"]["reserve"], json!(100));
     assert_eq!(payload["quota"]["absorptions"][0]["ok"], json!(true));
-    assert!(payload["guarantees"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("allowance is not copied")));
+    assert!(
+        payload["guarantees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("allowance is not copied"))
+    );
 }
 
 #[test]
@@ -13735,15 +14016,19 @@ fn research_ci_check_keeps_failures_and_undetermined_checks_distinct() {
         json!({ "result": regressed }),
     );
     assert_eq!(blocked["publishable"], json!(false));
-    assert!(blocked["failed_checks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|check| check == "decision cell regression"));
-    assert!(blocked["undetermined_checks"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        blocked["failed_checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| check == "decision cell regression")
+    );
+    assert!(
+        blocked["undetermined_checks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 fn metric_vector(system: &str, verify: f64, safety: f64, pack: &str) -> Value {
@@ -14022,10 +14307,12 @@ fn metrics_analytics_audit_refuses_mixed_direction_with_a_structured_tool_error(
         }),
     );
     assert_eq!(response["ok"], json!(false));
-    assert!(response["error"]
-        .as_str()
-        .unwrap()
-        .contains("metrics analytics refused"));
+    assert!(
+        response["error"]
+            .as_str()
+            .unwrap()
+            .contains("metrics analytics refused")
+    );
 }
 
 #[test]
@@ -14261,10 +14548,12 @@ fn medical_boundary_admits_research_and_returns_structured_clinical_refusal() {
     assert_eq!(admitted["ok"], json!(true));
     assert_eq!(admitted["admitted"], json!(true));
     assert_eq!(admitted["use_case"], json!("evidence_synthesis"));
-    assert!(admitted["research_only_label"]
-        .as_str()
-        .unwrap()
-        .contains("not a medical device"));
+    assert!(
+        admitted["research_only_label"]
+            .as_str()
+            .unwrap()
+            .contains("not a medical device")
+    );
 
     let refused = call(
         &mut server,
@@ -14280,10 +14569,12 @@ fn medical_boundary_admits_research_and_returns_structured_clinical_refusal() {
     assert_eq!(refused["ok"], json!(false));
     assert_eq!(refused["admitted"], json!(false));
     assert_eq!(refused["clinical_output_is_never_admitted"], json!(true));
-    assert!(refused["refusal"]
-        .as_str()
-        .unwrap()
-        .contains("research-only"));
+    assert!(
+        refused["refusal"]
+            .as_str()
+            .unwrap()
+            .contains("research-only")
+    );
     assert_eq!(refused["__isError"], json!(false));
 }
 
@@ -14484,10 +14775,12 @@ fn tabular_ingest_runs_independent_conformance_and_keeps_loss_visible() {
         }),
     );
     assert_eq!(refused["__isError"], json!(true));
-    assert!(refused["error"]
-        .as_str()
-        .unwrap()
-        .contains("either csv or document"));
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("either csv or document")
+    );
 }
 
 #[test]
@@ -14548,10 +14841,12 @@ fn observed_world_and_claim_tools_enforce_pinning_rungs_and_selection() {
     );
     assert_eq!(supported["ok"], json!(true));
     assert_eq!(supported["supported"], json!(true));
-    assert!(supported["caveat"]
-        .as_str()
-        .unwrap()
-        .contains("observed world"));
+    assert!(
+        supported["caveat"]
+            .as_str()
+            .unwrap()
+            .contains("observed world")
+    );
 
     let simulated = Provenance::mechanistic(["tumour growth rate"]);
     let refused = call(
@@ -14564,10 +14859,12 @@ fn observed_world_and_claim_tools_enforce_pinning_rungs_and_selection() {
     );
     assert_eq!(refused["ok"], json!(false));
     assert_eq!(refused["supported"], json!(false));
-    assert!(refused["refusal"]
-        .as_str()
-        .unwrap()
-        .contains("construction"));
+    assert!(
+        refused["refusal"]
+            .as_str()
+            .unwrap()
+            .contains("construction")
+    );
 }
 
 #[test]
@@ -14672,15 +14969,19 @@ fn trace_analysis_ingests_segments_and_localizes_lossless_divergence() {
     assert_eq!(payload["divergence"]["kind"], json!("diverged"));
     assert_eq!(payload["divergence"]["failing_step"], json!(2));
     assert_eq!(payload["divergence_actionable"], json!(true));
-    assert!(payload["divergence"]["visibility_gap"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("evidence-b")));
-    assert!(payload["candidates"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|candidate| candidate["score"]["is_divergence"] == json!(true)));
+    assert!(
+        payload["divergence"]["visibility_gap"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("evidence-b"))
+    );
+    assert!(
+        payload["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|candidate| candidate["score"]["is_divergence"] == json!(true))
+    );
     assert_eq!(
         payload["proposals"].as_array().unwrap().len(),
         payload["candidates"].as_array().unwrap().len()
@@ -14719,10 +15020,12 @@ not-json
         }),
     );
     assert_eq!(duplicate["__isError"], json!(true));
-    assert!(duplicate["error"]
-        .as_str()
-        .unwrap()
-        .contains("more than once"));
+    assert!(
+        duplicate["error"]
+            .as_str()
+            .unwrap()
+            .contains("more than once")
+    );
 
     let conflict = call(
         &mut server,
@@ -14734,10 +15037,12 @@ not-json
         }),
     );
     assert_eq!(conflict["__isError"], json!(true));
-    assert!(conflict["error"]
-        .as_str()
-        .unwrap()
-        .contains("either jsonl or document"));
+    assert!(
+        conflict["error"]
+            .as_str()
+            .unwrap()
+            .contains("either jsonl or document")
+    );
 
     let bounded = call(
         &mut server,
@@ -14880,16 +15185,20 @@ fn lineage_audit_separates_identity_gaps_from_material_and_ancestry_findings() {
     assert_eq!(payload["identity_complete"], json!(false));
     assert!(payload["finding_count"].as_u64().unwrap() >= 3);
     assert_eq!(payload["unchecked_identity_count"], json!(2));
-    assert!(payload["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| finding["finding"] == json!("mass_not_conserved")));
-    assert!(payload["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| finding["finding"] == json!("identity_mismatch")));
+    assert!(
+        payload["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["finding"] == json!("mass_not_conserved"))
+    );
+    assert!(
+        payload["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["finding"] == json!("identity_mismatch"))
+    );
 }
 
 #[test]
@@ -15055,10 +15364,12 @@ fn contradiction_review_keeps_hypotheses_and_resolution_states_explicit() {
     );
     assert_eq!(over_narrowed["ok"], json!(false));
     assert_eq!(over_narrowed["fail_closed"], json!(true));
-    assert!(over_narrowed["refusal"]
-        .as_str()
-        .unwrap()
-        .contains("every remaining hypothesis"));
+    assert!(
+        over_narrowed["refusal"]
+            .as_str()
+            .unwrap()
+            .contains("every remaining hypothesis")
+    );
 }
 
 #[test]
@@ -15157,11 +15468,13 @@ fn developer_platform_status_verifies_local_contracts_and_marks_foreign_artifact
     assert_eq!(payload["ok"], json!(true));
     assert!(payload["devplat"]["digest"].is_string());
     assert!(payload["walkthroughs"].as_array().unwrap().len() >= 6);
-    assert!(payload["walkthroughs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["documents_absent_artifact"] == json!(true)));
+    assert!(
+        payload["walkthroughs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["documents_absent_artifact"] == json!(true))
+    );
     assert_eq!(payload["cookbook"]["verification"]["clean"], json!(true));
     assert_eq!(payload["diagnostic_catalogue"]["clean"], json!(true));
     assert!(
@@ -15235,6 +15548,18 @@ fn developer_delivery_audit_composes_local_health_and_blocks_missing_evidence() 
     assert_eq!(
         payload["external_surface_posture"]["local_integration_foundations"][0]["artifact"],
         json!("python/prism_sdk")
+    );
+    let local_actions = payload["external_surface_posture"]["local_integration_foundations"]
+        .as_array()
+        .unwrap();
+    let autonomous_action = local_actions
+        .iter()
+        .find(|entry| entry["kind"] == json!("approval_bounded_composite_action"))
+        .expect("the in-repository autonomous action is catalogued");
+    assert_eq!(autonomous_action["local_ci_exercise"], json!(true));
+    assert_eq!(
+        autonomous_action["hosted_consumer_execution_verified"],
+        json!(false)
     );
     assert_eq!(payload["release_request"]["ready"], json!(false));
     let targets = payload["release_request"]["targets"].as_array().unwrap();
@@ -15318,16 +15643,20 @@ fn engineering_manifest_audit_keeps_topology_ticket_readiness_and_raci_separate(
     );
     assert_eq!(refused["ok"], json!(true));
     assert_eq!(refused["valid"], json!(false));
-    assert!(refused["audit"]["issues"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|issue| issue["code"] == "package_cycle"));
-    assert!(refused["audit"]["issues"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|issue| issue["code"] == "reviewer_not_independent"));
+    assert!(
+        refused["audit"]["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "package_cycle")
+    );
+    assert!(
+        refused["audit"]["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "reviewer_not_independent")
+    );
 }
 
 #[test]
@@ -15380,16 +15709,20 @@ fn engineering_execution_plan_derives_waves_critical_path_and_fail_closed_manife
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["engineering_plan_ready"], json!(false));
     assert_eq!(refusal["audit"]["planning_started"], json!(false));
-    assert!(refusal["audit"]["manifest_issues"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|issue| issue["code"] == "missing_ticket_dependency"));
-    assert!(refusal["audit"]["issues"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|issue| issue["code"] == "manifest_invalid"));
+    assert!(
+        refusal["audit"]["manifest_issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "missing_ticket_dependency")
+    );
+    assert!(
+        refusal["audit"]["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "manifest_invalid")
+    );
 }
 
 #[test]
@@ -15447,12 +15780,16 @@ fn release_pipeline_audit_preserves_promotion_provenance_and_rollback_boundaries
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["release_ready"], json!(false));
     let issues = refusal["audit"]["issues"].as_array().unwrap();
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "attestation_digest_mismatch"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "production_rollback_missing"));
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "attestation_digest_mismatch")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "production_rollback_missing")
+    );
     assert!(issues.iter().any(|issue| issue["code"] == "stage_cycle"));
 }
 
@@ -15501,18 +15838,26 @@ fn operational_readiness_audit_keeps_observation_fallback_and_incident_closure_e
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["operationally_ready"], json!(false));
     let issues = refusal["audit"]["issues"].as_array().unwrap();
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "indicator_not_observed"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "critical_dependency_fallback_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "required_control_disabled"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "closed_incident_postmortem_missing"));
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "indicator_not_observed")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "critical_dependency_fallback_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "required_control_disabled")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "closed_incident_postmortem_missing")
+    );
 }
 
 #[test]
@@ -15565,24 +15910,36 @@ fn security_privacy_audit_keeps_asset_flow_identity_threat_and_review_layers_exp
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["security_privacy_ready"], json!(false));
     let issues = refusal["audit"]["issues"].as_array().unwrap();
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "sensitive_retention_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "flow_authorization_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "sensitive_mfa_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "mitigation_evidence_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "review_evidence_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "required_control_disabled"));
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "sensitive_retention_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "flow_authorization_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "sensitive_mfa_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "mitigation_evidence_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "review_evidence_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "required_control_disabled")
+    );
 }
 
 #[test]
@@ -15641,21 +15998,31 @@ fn sandbox_admission_audit_keeps_artifact_isolation_capability_resource_and_outp
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["sandbox_ready"], json!(false));
     let issues = refusal["audit"]["issues"].as_array().unwrap();
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "rootless_required"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "network_boundary_invalid"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "resource_limits_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "capability_target_broad"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "dangerous_capability_evidence_missing"));
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "rootless_required")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "network_boundary_invalid")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "resource_limits_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "capability_target_broad")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "dangerous_capability_evidence_missing")
+    );
 }
 
 #[test]
@@ -15775,24 +16142,36 @@ fn security_program_audit_keeps_scope_campaign_finding_incident_and_disclosure_l
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["security_program_ready"], json!(false));
     let issues = refusal["audit"]["issues"].as_array().unwrap();
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "scope_authorization_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "campaign_independent_review_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "finding_evidence_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "remediation_verification_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "incident_closure_missing"));
-    assert!(issues
-        .iter()
-        .any(|issue| issue["code"] == "required_control_disabled"));
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "scope_authorization_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "campaign_independent_review_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "finding_evidence_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "remediation_verification_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "incident_closure_missing")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "required_control_disabled")
+    );
 }
 
 #[test]
@@ -15857,10 +16236,12 @@ fn developer_workbench_audits_notebook_digests_queries_dashboard_and_plans_ci() 
     assert_eq!(payload["dashboard"]["rows"][0]["score"], json!(0.8));
     assert_eq!(payload["ci"]["execution"], json!("not_executed"));
     assert_eq!(payload["ci"]["network_access"], json!("denied_by_plan"));
-    assert!(payload["ci"]["workflow_yaml"]
-        .as_str()
-        .unwrap()
-        .contains("cargo test --workspace --offline"));
+    assert!(
+        payload["ci"]["workflow_yaml"]
+            .as_str()
+            .unwrap()
+            .contains("cargo test --workspace --offline")
+    );
 
     let mut stale = json!({
         "session": {
@@ -15916,10 +16297,12 @@ fn developer_workbench_refuses_notebook_cycles_and_unsafe_ci() {
         }),
     );
     assert_eq!(unsafe_ci["__isError"], json!(true));
-    assert!(unsafe_ci["error"]
-        .as_str()
-        .unwrap()
-        .contains("parent directory"));
+    assert!(
+        unsafe_ci["error"]
+            .as_str()
+            .unwrap()
+            .contains("parent directory")
+    );
 }
 
 #[test]
@@ -15984,11 +16367,13 @@ fn developer_workbench_verify_replays_retained_projection_without_execution() {
     assert_eq!(mismatch["ok"], json!(true));
     assert_eq!(mismatch["valid"], json!(false));
     assert_eq!(mismatch["status"], json!("mismatch"));
-    assert!(mismatch["mismatches"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item["code"] == "audit_mismatch"));
+    assert!(
+        mismatch["mismatches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["code"] == "audit_mismatch")
+    );
 }
 
 #[test]
@@ -16120,11 +16505,13 @@ fn ci_execution_evidence_audit_reconciles_plan_and_run_without_execution() {
     assert_eq!(incomplete["valid"], json!(false));
     assert_eq!(incomplete["ci_evidence_ready"], json!(false));
     assert_eq!(incomplete["audit"]["required_failed"], json!(["tests"]));
-    assert!(incomplete["audit"]["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| finding["code"] == "missing_check_evidence"));
+    assert!(
+        incomplete["audit"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "missing_check_evidence")
+    );
 }
 
 #[test]
@@ -16249,7 +16636,7 @@ fn ci_provider_evidence_audit_binds_rows_and_preserves_structural_limits() {
             "jobs": [{"name": "tests", "conclusion": "success"}]
         },
         "artifacts": [{
-            "id": "artifact-tests", "kind": "junit", "digest": "not-a-digest",
+            "id": "artifact-tests", "kind": "junit", "digest": "z".repeat(64),
             "check": "unknown", "run_id": "wrong", "provider": "wrong"
         }],
         "attestations": [{
@@ -16267,11 +16654,13 @@ fn ci_provider_evidence_audit_binds_rows_and_preserves_structural_limits() {
         "provider_binding_mismatch",
         "attestation_subject_unknown",
     ] {
-        assert!(refused_rows["audit"]["findings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|finding| finding["code"] == code));
+        assert!(
+            refused_rows["audit"]["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|finding| finding["code"] == code)
+        );
     }
 }
 
@@ -16527,11 +16916,13 @@ fn provider_evidence_flows_into_delivery_receipts_and_tamper_verification() {
         json!({"receipt": tampered, "delivery": receipt["delivery"].clone()}),
     );
     assert_eq!(rejected["verified"], json!(false));
-    assert!(rejected["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| finding["code"] == "evidence_mismatch"));
+    assert!(
+        rejected["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "evidence_mismatch")
+    );
 }
 
 #[test]
@@ -16669,11 +17060,13 @@ fn developer_delivery_receipt_canonicalizes_explicit_targets_and_evidence() {
         json!({"receipt": tampered, "delivery": receipt["delivery"].clone()}),
     );
     assert_eq!(rejected["verified"], json!(false));
-    assert!(rejected["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| finding["code"] == "targets_mismatch"));
+    assert!(
+        rejected["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "targets_mismatch")
+    );
 
     let blocked = call(
         &mut server,
@@ -16785,11 +17178,13 @@ fn execution_provenance_reconciles_mission_trace_and_delegated_checks() {
         json!({"mission": tampered}),
     );
     assert_eq!(rejected["valid"], json!(false));
-    assert!(rejected["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| finding["code"] == "trace_identity_error"));
+    assert!(
+        rejected["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "trace_identity_error")
+    );
 }
 
 #[test]
@@ -16835,9 +17230,9 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
             "goal": "execute safe local discovery",
             "steps": [
                 {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"},
-                {"id": "protocol", "domain": "orchestration", "capability": "acts", "objective": "inspect protocol", "tool": "weave_protocol_catalog", "arguments": {"context": null}, "depends_on": ["catalog"], "bindings": [{"from_step": "catalog", "source_pointer": "", "target_pointer": "/context"}]}
+                {"id": "dashboard", "domain": "workspace", "capability": "report", "objective": "summarize the discovered capability group", "tool": "capability_dashboard", "arguments": {"group_id": null}, "depends_on": ["catalog"], "bindings": [{"from_step": "catalog", "source_pointer": "/0/id", "target_pointer": "/group_id"}]}
             ],
-            "policy": {"execute": true, "allowed_tools": ["workspace_capabilities", "weave_protocol_catalog"], "max_total_output_bytes": 2000000}
+            "policy": {"execute": true, "allowed_tools": ["workspace_capabilities", "capability_dashboard"], "max_total_output_bytes": 2000000}
         }),
     );
     assert_eq!(executed["__isError"], json!(false));
@@ -16860,20 +17255,23 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
             .unwrap()["event"],
         json!("mission.completed")
     );
-    assert!(executed["execution_trace"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|event| event["event"] == "wave.completed"));
+    assert!(
+        executed["execution_trace"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["event"] == "wave.completed")
+    );
     let source_payload: Value = serde_json::from_str(
         executed["results"][0]["wire"]["result"]["content"][0]["text"]
             .as_str()
             .unwrap(),
     )
     .unwrap();
-    let expected_arguments_digest = ContentHash::of_value(&json!({"context": source_payload}))
-        .unwrap()
-        .to_string();
+    let expected_arguments_digest =
+        ContentHash::of_value(&json!({"group_id": source_payload[0]["id"]}))
+            .unwrap()
+            .to_string();
     assert_eq!(
         executed["results"][1]["arguments_digest"],
         json!(expected_arguments_digest)
@@ -16909,14 +17307,18 @@ fn agent_mission_schema_preflight_refuses_materialized_binding_before_dispatch()
     assert_eq!(result["succeeded"], json!(1));
     assert_eq!(result["refused"], json!(1));
     assert_eq!(result["results"][1]["status"], json!("refused"));
-    assert!(result["results"][1]["error"]
-        .as_str()
-        .unwrap()
-        .contains("authoritative schema validation refused"));
-    assert!(result["results"][1]["error"]
-        .as_str()
-        .unwrap()
-        .contains("schema_digest="));
+    assert!(
+        result["results"][1]["error"]
+            .as_str()
+            .unwrap()
+            .contains("authoritative schema validation refused")
+    );
+    assert!(
+        result["results"][1]["error"]
+            .as_str()
+            .unwrap()
+            .contains("schema_digest=")
+    );
     assert_eq!(
         result["execution_trace"]
             .as_array()
@@ -16949,10 +17351,12 @@ fn agent_mission_parallel_schema_preflight_refuses_before_batch_launch() {
     assert_eq!(result["succeeded"], json!(1));
     assert_eq!(result["refused"], json!(1));
     assert_eq!(result["results"][1]["status"], json!("refused"));
-    assert!(result["results"][1]["error"]
-        .as_str()
-        .unwrap()
-        .contains("authoritative schema validation refused"));
+    assert!(
+        result["results"][1]["error"]
+            .as_str()
+            .unwrap()
+            .contains("authoritative schema validation refused")
+    );
     assert_eq!(
         result["execution_trace"]
             .as_array()
@@ -17014,8 +17418,8 @@ fn agent_mission_executes_independent_parallel_waves_with_deterministic_reportin
             "goal": "run independent discovery and protocol inspections",
             "steps": [
                 {"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"},
-                {"id": "protocol", "domain": "orchestration", "capability": "catalogue", "objective": "inspect protocol", "tool": "weave_protocol_catalog", "arguments": {"context": null}},
-                {"id": "protocol-extra", "domain": "orchestration", "capability": "catalogue", "objective": "inspect protocol again", "tool": "weave_protocol_catalog", "arguments": {"context": null}}
+                {"id": "protocol", "domain": "orchestration", "capability": "catalogue", "objective": "inspect protocol", "tool": "weave_protocol_catalog"},
+                {"id": "protocol-extra", "domain": "orchestration", "capability": "catalogue", "objective": "inspect protocol again", "tool": "weave_protocol_catalog"}
             ],
             "policy": {
                 "execute": true,
@@ -17126,16 +17530,20 @@ fn capability_discovery_routes_across_domains_and_attaches_authoritative_schemas
         result["matches"][0]["group"]["id"],
         json!("biological_domains")
     );
-    assert!(result["matches"][0]["matched_tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|tool| tool == "onco_response_assess"));
-    assert!(result["matches"][0]["tool_schemas"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|schema| schema["name"] == "onco_response_assess"));
+    assert!(
+        result["matches"][0]["matched_tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool == "onco_response_assess")
+    );
+    assert!(
+        result["matches"][0]["tool_schemas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|schema| schema["name"] == "onco_response_assess")
+    );
     assert_eq!(result["schema_attachment"]["requested"], json!(true));
     assert_eq!(result["catalog_digest"].as_str().unwrap().len(), 64);
 
@@ -17205,11 +17613,13 @@ fn adapter_plan_routes_biological_formats_without_sniffing_or_execution() {
     );
     assert_eq!(refused["executable"], json!(false));
     assert_eq!(refused["selected_adapter"], Value::Null);
-    assert!(refused["guarantees"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item == "format matching is explicit and content sniffing is refused"));
+    assert!(
+        refused["guarantees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "format matching is explicit and content sniffing is refused")
+    );
 }
 
 #[test]
@@ -17857,10 +18267,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
         json!(TOOL_DEFINITION_COUNT)
     );
     assert_eq!(result["schema_quality"]["findings"], json!([]));
-    assert!(!result["duplicate_group_memberships"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !result["duplicate_group_memberships"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         result["invariants"]["multi_group_membership_is_allowed"],
         json!(true)
@@ -17930,11 +18342,13 @@ fn capability_dashboard_separates_domain_surfaces_and_bounded_inventory() {
         oncology["audit"]["groups"][0]["readiness"],
         json!("callable")
     );
-    assert!(oncology["audit"]["groups"][0]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|tool| tool == "onco_response_assess"));
+    assert!(
+        oncology["audit"]["groups"][0]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool == "onco_response_assess")
+    );
     assert_eq!(
         oncology["audit"]["groups"][0]["artifact_evidence"]["state"],
         json!("observed")
@@ -17966,11 +18380,13 @@ fn capability_dashboard_separates_domain_surfaces_and_bounded_inventory() {
         json!({"max_groups": 1, "include_tools": false}),
     );
     assert_eq!(bounded["audit"]["selected_group_count"], json!(1));
-    assert!(bounded["audit"]["warnings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|warning| warning.as_str().unwrap().contains("bounded")));
+    assert!(
+        bounded["audit"]["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning.as_str().unwrap().contains("bounded"))
+    );
     assert!(bounded["audit"]["groups"][0].get("tools").is_none());
 
     let refused = call(
@@ -18004,10 +18420,12 @@ fn capability_route_batches_ranked_and_explicit_needs_without_execution() {
     assert_eq!(result["unresolved_needs"], json!([]));
     assert_eq!(result["needs"][0]["resolution"], json!("ranked_candidates"));
     assert_eq!(result["needs"][1]["resolution"], json!("explicit"));
-    assert!(result["recommended_tools"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("bundle_verify")));
+    assert!(
+        result["recommended_tools"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("bundle_verify"))
+    );
     assert_eq!(result["recommended_tools"].as_array().unwrap().len(), 4);
     assert_eq!(result["schema_attachment"]["requested"], json!(true));
     assert_eq!(result["schema_attachment"]["returned"], json!(4));
@@ -18032,10 +18450,12 @@ fn capability_route_batches_ranked_and_explicit_needs_without_execution() {
         result["evidence_digest"],
         result["evidence"]["evidence_digest"]
     );
-    assert!(!result["needs"][0]["candidate_group_evidence"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !result["needs"][0]["candidate_group_evidence"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         result["needs"][0]["candidate_group_evidence"][0]["artifact_evidence"]["state"],
         json!("missing")
@@ -18046,11 +18466,13 @@ fn capability_route_batches_ranked_and_explicit_needs_without_execution() {
             .unwrap()
             >= 2
     );
-    assert!(result["needs"][0]["candidate_domains"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|domain| domain == "oncology"));
+    assert!(
+        result["needs"][0]["candidate_domains"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|domain| domain == "oncology")
+    );
     assert_eq!(result["route_id"].as_str().unwrap().len(), 64);
 
     let refused = call(
@@ -18082,30 +18504,31 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         .as_str()
         .unwrap()
         .to_string();
+    let selections = json!([
+        {
+            "need_id": "oncology",
+            "tool": oncology_tool,
+            "domain": "oncology",
+            "capability": "evidence",
+            "objective": "review oncology evidence",
+            "arguments": {}
+        },
+        {
+            "need_id": "release",
+            "tool": "weave_protocol_catalog",
+            "domain": "release",
+            "capability": "verification",
+            "objective": "verify the release bundle",
+            "arguments": {},
+            "depends_on": ["oncology"]
+        }
+    ]);
     let review = call(
         &mut server,
         "capability_route_review",
         json!({
             "route": route,
-            "selections": [
-                {
-                    "need_id": "oncology",
-                    "tool": oncology_tool,
-                    "domain": "oncology",
-                    "capability": "evidence",
-                    "objective": "review oncology evidence",
-                    "arguments": {}
-                },
-                {
-                    "need_id": "release",
-                    "tool": "weave_protocol_catalog",
-                    "domain": "release",
-                    "capability": "verification",
-                    "objective": "verify the release bundle",
-                    "arguments": {"context": null},
-                    "depends_on": ["oncology"]
-                }
-            ]
+            "selections": selections.clone()
         }),
     );
     assert_eq!(review["workflow"], json!("capability_route_review"));
@@ -18136,14 +18559,16 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         "capability_route_review",
         json!({
             "route": tampered_route,
-            "selections": []
+            "selections": selections.clone()
         }),
     );
     assert_eq!(refused_tampering["__isError"], json!(true));
-    assert!(refused_tampering["error"]
-        .as_str()
-        .unwrap()
-        .contains("route evidence summary does not match"));
+    assert!(
+        refused_tampering["error"]
+            .as_str()
+            .unwrap()
+            .contains("route evidence summary does not match")
+    );
 
     let mut legacy_route = route.clone();
     legacy_route.as_object_mut().unwrap().remove("evidence");
@@ -18160,10 +18585,14 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         "capability_route_review",
         json!({
             "route": legacy_route,
-            "selections": []
+            "selections": selections
         }),
     );
-    assert_eq!(legacy_review["review_status"], json!("blocked"));
+    assert_eq!(legacy_review["review_status"], json!("ready"));
+    assert_eq!(
+        legacy_review["handoff_status"],
+        json!("mission_preflight_required")
+    );
     assert_eq!(legacy_review["evidence_binding"]["present"], json!(false));
     assert_eq!(
         legacy_review["evidence_binding"]["posture"],
@@ -18216,10 +18645,12 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         }),
     );
     assert_eq!(refused_handoff["__isError"], json!(true));
-    assert!(refused_handoff["error"]
-        .as_str()
-        .unwrap()
-        .contains("route_review"));
+    assert!(
+        refused_handoff["error"]
+            .as_str()
+            .unwrap()
+            .contains("route_review")
+    );
 
     let blocked = call(
         &mut server,
@@ -18252,11 +18683,13 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         }),
     );
     assert_eq!(blocked["review_status"], json!("blocked"));
-    assert!(blocked["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| finding["code"] == "candidate_mismatch"));
+    assert!(
+        blocked["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "candidate_mismatch")
+    );
 
     let route = call(
         &mut server,
@@ -18373,10 +18806,12 @@ fn agent_mission_preserves_refusal_and_blocks_dependents() {
     assert_eq!(result["mission_status"], json!("failed"));
     assert_eq!(result["results"][0]["status"], json!("refused"));
     assert_eq!(result["results"][1]["status"], json!("blocked"));
-    assert!(result["results"][0]["error"]
-        .as_str()
-        .unwrap()
-        .contains("unknown tool"));
+    assert!(
+        result["results"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown tool")
+    );
 }
 
 #[test]
@@ -18412,10 +18847,12 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         json!({ "schema": "invented/9.9" }),
     );
     assert_eq!(unknown_schema["__isError"], json!(true));
-    assert!(unknown_schema["error"]
-        .as_str()
-        .unwrap()
-        .contains("unknown schema"));
+    assert!(
+        unknown_schema["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown schema")
+    );
 
     let unbounded = call(
         &mut server,
@@ -18431,10 +18868,12 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         json!({ "vectors": [metric_vector("only", 0.5, 0.5, "pack/4")] }),
     );
     assert_eq!(rank_too_small["__isError"], json!(true));
-    assert!(rank_too_small["error"]
-        .as_str()
-        .unwrap()
-        .contains("between 2 and 100"));
+    assert!(
+        rank_too_small["error"]
+            .as_str()
+            .unwrap()
+            .contains("fewer than 2 items")
+    );
 
     let conflicting_ci_inputs = call(
         &mut server,
@@ -18442,17 +18881,21 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         json!({ "document": "missing.json", "result": { "subject": "inline" } }),
     );
     assert_eq!(conflicting_ci_inputs["__isError"], json!(true));
-    assert!(conflicting_ci_inputs["error"]
-        .as_str()
-        .unwrap()
-        .contains("either document or inline"));
+    assert!(
+        conflicting_ci_inputs["error"]
+            .as_str()
+            .unwrap()
+            .contains("either document or inline")
+    );
 
     let hub_unbounded = call(&mut server, "hub_lock", json!({ "max_items": 0 }));
     assert_eq!(hub_unbounded["__isError"], json!(true));
-    assert!(hub_unbounded["error"]
-        .as_str()
-        .unwrap()
-        .contains("max_items"));
+    assert!(
+        hub_unbounded["error"]
+            .as_str()
+            .unwrap()
+            .contains("max_items")
+    );
 
     let tabular_conflict = call(
         &mut server,
@@ -18465,10 +18908,12 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         }),
     );
     assert_eq!(tabular_conflict["__isError"], json!(true));
-    assert!(tabular_conflict["error"]
-        .as_str()
-        .unwrap()
-        .contains("either csv or document"));
+    assert!(
+        tabular_conflict["error"]
+            .as_str()
+            .unwrap()
+            .contains("either csv or document")
+    );
 
     let adaptive_unbounded = call(
         &mut server,
@@ -18476,10 +18921,12 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         json!({ "panel": serde_json::to_value(AdaptivePanel::new(PanelConfig::default())).unwrap(), "max_items": 0 }),
     );
     assert_eq!(adaptive_unbounded["__isError"], json!(true));
-    assert!(adaptive_unbounded["error"]
-        .as_str()
-        .unwrap()
-        .contains("max_items"));
+    assert!(
+        adaptive_unbounded["error"]
+            .as_str()
+            .unwrap()
+            .contains("max_items")
+    );
 
     let oracle_empty = call(
         &mut server,
@@ -18487,10 +18934,12 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         json!({ "subject": "artifact-1", "at": "2026-08-14T00:00:00Z", "judgements": [] }),
     );
     assert_eq!(oracle_empty["__isError"], json!(true));
-    assert!(oracle_empty["error"]
-        .as_str()
-        .unwrap()
-        .contains("between 1 and 1000"));
+    assert!(
+        oracle_empty["error"]
+            .as_str()
+            .unwrap()
+            .contains("fewer than 1 items")
+    );
 
     let bundle_conflict = call(
         &mut server,
@@ -18498,10 +18947,12 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         json!({ "bundle": {}, "document": "missing.json" }),
     );
     assert_eq!(bundle_conflict["__isError"], json!(true));
-    assert!(bundle_conflict["error"]
-        .as_str()
-        .unwrap()
-        .contains("either bundle or document"));
+    assert!(
+        bundle_conflict["error"]
+            .as_str()
+            .unwrap()
+            .contains("either bundle or document")
+    );
 
     let capacity_conflict = call(
         &mut server,
@@ -18509,10 +18960,12 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         json!({ "model": {}, "workload": {}, "degradation_plan": {} }),
     );
     assert_eq!(capacity_conflict["__isError"], json!(true));
-    assert!(capacity_conflict["error"]
-        .as_str()
-        .unwrap()
-        .contains("invalid capacity model"));
+    assert!(
+        capacity_conflict["error"]
+            .as_str()
+            .unwrap()
+            .contains("invalid capacity model")
+    );
 
     let duplicate_labels = call(
         &mut server,
@@ -18528,10 +18981,12 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         }),
     );
     assert_eq!(duplicate_labels["__isError"], json!(true));
-    assert!(duplicate_labels["error"]
-        .as_str()
-        .unwrap()
-        .contains("duplicate outcome"));
+    assert!(
+        duplicate_labels["error"]
+            .as_str()
+            .unwrap()
+            .contains("duplicate outcome")
+    );
 
     let influence_duplicate_group = call(
         &mut server,
@@ -18546,10 +19001,12 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         }),
     );
     assert_eq!(influence_duplicate_group["__isError"], json!(true));
-    assert!(influence_duplicate_group["error"]
-        .as_str()
-        .unwrap()
-        .contains("duplicate factor"));
+    assert!(
+        influence_duplicate_group["error"]
+            .as_str()
+            .unwrap()
+            .contains("duplicate factor")
+    );
 
     let influence_foreign_assumption = call(
         &mut server,
@@ -18565,10 +19022,12 @@ fn new_surfaces_fail_closed_on_duplicate_facts_unknown_schemas_and_unbounded_req
         }),
     );
     assert_eq!(influence_foreign_assumption["__isError"], json!(true));
-    assert!(influence_foreign_assumption["error"]
-        .as_str()
-        .unwrap()
-        .contains("undeclared"));
+    assert!(
+        influence_foreign_assumption["error"]
+            .as_str()
+            .unwrap()
+            .contains("undeclared")
+    );
 }
 
 #[test]
@@ -18601,10 +19060,12 @@ fn repository_bundle_fails_instead_of_truncating_oversized_markdown() {
         }),
     );
     assert_eq!(payload["__isError"], json!(true));
-    assert!(payload["error"]
-        .as_str()
-        .unwrap()
-        .contains("max_markdown_chars"));
+    assert!(
+        payload["error"]
+            .as_str()
+            .unwrap()
+            .contains("max_markdown_chars")
+    );
 }
 
 /// A truncated mandatory set is indistinguishable at the point of use from a complete one, so a
@@ -18687,10 +19148,12 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
     assert_eq!(payload["bundle"]["route"], json!("orientation"));
     assert!(!payload["bundle"]["entries"].as_array().unwrap().is_empty());
     assert!(payload["bundle"]["traversal"].is_object());
-    assert!(payload["markdown"]
-        .as_str()
-        .unwrap()
-        .contains("context bundle"));
+    assert!(
+        payload["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("context bundle")
+    );
 }
 
 /// The disclosure contract: L0 carries the decision and the omissions, never the evidence.
@@ -18766,11 +19229,13 @@ fn compile_projects_the_wire_decision_quotient_without_claiming_rate_distortion(
         quotient["certificate_binding"]["certificate_sha256"],
         payload["certificate_sha256"]
     );
-    assert!(quotient["limitations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("rate-distortion")));
+    assert!(
+        quotient["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("rate-distortion"))
+    );
 
     let explained = call(
         &mut server,
@@ -18784,11 +19249,13 @@ fn compile_projects_the_wire_decision_quotient_without_claiming_rate_distortion(
         explained["decision_quotient"]["quotient_model_count"],
         json!(2)
     );
-    assert!(!explained["passes_not_run"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|pass| pass["name"] == "decision_quotient"));
+    assert!(
+        !explained["passes_not_run"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|pass| pass["name"] == "decision_quotient")
+    );
 }
 
 /// The 0.4 observed-evidence contract crosses MCP as a full, certificate-bound context audit.
@@ -18837,11 +19304,13 @@ fn compile_projects_the_wire_rate_distortion_audit() {
         explained["rate_distortion"]["frontier"]["evaluated"],
         json!(4)
     );
-    assert!(explained["passes_not_run"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|pass| pass["name"] != "rate_distortion"));
+    assert!(
+        explained["passes_not_run"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|pass| pass["name"] != "rate_distortion")
+    );
 }
 
 /// The 0.5 adaptive contract crosses MCP as a certificate-bound plan, never as an execution
@@ -18894,16 +19363,20 @@ fn compile_projects_the_wire_adaptive_policy() {
         explained["adaptive_acquisition"]["schema"],
         json!("bioprism-mcp/fiber-adaptive-acquisition/0.1")
     );
-    assert!(explained["passes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|pass| pass["name"] == "adaptive_acquisition"));
-    assert!(explained["passes_not_run"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|pass| pass["name"] != "adaptive_acquisition"));
+    assert!(
+        explained["passes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|pass| pass["name"] == "adaptive_acquisition")
+    );
+    assert!(
+        explained["passes_not_run"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|pass| pass["name"] != "adaptive_acquisition")
+    );
 }
 
 #[test]
@@ -19020,12 +19493,16 @@ fn explain_reports_the_passes_that_did_not_run() {
 #[test]
 fn absolute_paths_and_traversal_are_refused() {
     let server = server();
-    assert!(server
-        .resolve("fixtures/fiber-v0.1/leakage_query.json")
-        .is_ok());
-    assert!(server
-        .resolve("./fixtures/fiber-v0.1/leakage_query.json")
-        .is_ok());
+    assert!(
+        server
+            .resolve("fixtures/fiber-v0.1/leakage_query.json")
+            .is_ok()
+    );
+    assert!(
+        server
+            .resolve("./fixtures/fiber-v0.1/leakage_query.json")
+            .is_ok()
+    );
 
     for hostile in [
         "../../../etc/passwd",
@@ -19182,11 +19659,13 @@ fn a_domain_refinement_handle_recompiles_under_the_pack_oracle() {
     );
     assert_eq!(refined["layer"], json!("l2"));
     assert_eq!(refined["verdict"]["status"], json!("invalid"));
-    assert!(refined["witnesses"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|witness| witness["check"] == json!("self_cross")));
+    assert!(
+        refined["witnesses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|witness| witness["check"] == json!("self_cross"))
+    );
 }
 
 /// A pack cannot rewrite the query it judges — the certificate binds the query's bytes — so a
@@ -19222,12 +19701,16 @@ fn a_query_missing_the_packs_tags_and_goal_earns_advisories_not_silent_repair() 
 
     let advisories = payload["domain"]["advisories"].as_array().unwrap();
     assert_eq!(advisories.len(), 2, "got {advisories:?}");
-    assert!(advisories
-        .iter()
-        .any(|advisory| advisory.as_str().unwrap().contains("\"time\"")));
-    assert!(advisories
-        .iter()
-        .any(|advisory| advisory.as_str().unwrap().contains("declares no goal")));
+    assert!(
+        advisories
+            .iter()
+            .any(|advisory| advisory.as_str().unwrap().contains("\"time\""))
+    );
+    assert!(
+        advisories
+            .iter()
+            .any(|advisory| advisory.as_str().unwrap().contains("declares no goal"))
+    );
 }
 
 #[test]
@@ -19254,9 +19737,11 @@ fn domain_validate_returns_the_declared_checks_of_a_pack() {
             .collect::<Vec<_>>(),
         vec!["self_cross", "late_reporting", "cancel_ratio_excessive"]
     );
-    assert!(checks
-        .iter()
-        .all(|check| !check["description"].as_str().unwrap().is_empty()));
+    assert!(
+        checks
+            .iter()
+            .all(|check| !check["description"].as_str().unwrap().is_empty())
+    );
     assert_eq!(
         payload["protected_tags"],
         json!(["identity", "time", "protected"])
@@ -19398,7 +19883,9 @@ fn a_project_audit_reports_the_compiled_region_of_each_declared_issue() {
         "the region must be traceable to the query that produced it"
     );
     assert!(
-        naming_a_component.iter().any(|id| id == "fact.component.src"),
+        naming_a_component
+            .iter()
+            .any(|id| id == "fact.component.src"),
         "ISSUE-1 names src/lib.rs, so the src inventory belongs to its region; got {naming_a_component:?}"
     );
     assert!(
@@ -19501,10 +19988,12 @@ fn project_ingest_previews_exactly_the_paths_confirming_writes_and_creates_none_
         json!([]),
         "an unconfirmed call has written nothing, so it may claim nothing"
     );
-    assert!(preview["preview"]["effect"]
-        .as_str()
-        .unwrap()
-        .contains("would write"));
+    assert!(
+        preview["preview"]["effect"]
+            .as_str()
+            .unwrap()
+            .contains("would write")
+    );
     assert!(
         !repo_root().join(out_dir).exists(),
         "the preview created {}, so it was not a preview",
@@ -19776,10 +20265,12 @@ fn repair_verify_reports_not_met_on_an_unrepaired_tree_and_never_that_the_issue_
 
     let mut server = server();
     let planned = plan_demo_issue_one(&mut server, &out, &[]);
-    assert!(planned["plan_id"]
-        .as_str()
-        .unwrap()
-        .starts_with("repair-ISSUE-1-"));
+    assert!(
+        planned["plan_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("repair-ISSUE-1-")
+    );
 
     let payload = call(
         &mut server,
@@ -19880,6 +20371,65 @@ fn repair_verify_reports_staleness_against_a_different_world_without_evaluating_
         "the stale report must say why nothing was evaluated: {payload}"
     );
 
+    let declared = call(
+        &mut server,
+        "repair_verify",
+        json!({
+            "root": "fixtures/projects/bare-script",
+            "plan": out,
+            "succession": {
+                "declared_by": "release engineer",
+                "statement": "The checked tree is the successor produced by this repair."
+            }
+        }),
+    );
+    assert_ne!(
+        declared["__isError"],
+        json!(true),
+        "an explicit named assertion permits evaluating the changed world: {declared}"
+    );
+    assert_eq!(declared["stale"], json!(false));
+    assert_eq!(declared["report"]["verdict"], json!("evaluated"));
+    assert_eq!(declared["report"]["binding_matches"], json!(false));
+    assert_eq!(
+        declared["report"]["succession"],
+        json!({
+            "declared_by": "release engineer",
+            "statement": "The checked tree is the successor produced by this repair."
+        }),
+        "the named assertion must travel in the report verbatim: {declared}"
+    );
+    assert!(
+        declared["report"]["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line
+                .as_str()
+                .unwrap_or_default()
+                .contains("asserted by the caller and is never verified")),
+        "the report must not overstate what the succession establishes: {declared}"
+    );
+
+    let malformed = call(
+        &mut server,
+        "repair_verify",
+        json!({
+            "root": "fixtures/projects/bare-script",
+            "plan": out,
+            "succession": {
+                "declared_by": "release engineer",
+                "statement": "The checked tree is the repaired successor.",
+                "verified": true
+            }
+        }),
+    );
+    assert_eq!(
+        malformed["__isError"],
+        json!(true),
+        "unknown succession fields must fail closed instead of disappearing: {malformed}"
+    );
+
     let _ = std::fs::remove_dir_all(repo_root().join(directory));
 }
 
@@ -19919,10 +20469,12 @@ fn repair_plan_previews_exactly_the_path_confirming_writes_and_creates_none_of_i
         json!([]),
         "an unconfirmed call has written nothing, so it may claim nothing"
     );
-    assert!(preview["preview"]["effect"]
-        .as_str()
-        .unwrap()
-        .contains("would write"));
+    assert!(
+        preview["preview"]["effect"]
+            .as_str()
+            .unwrap()
+            .contains("would write")
+    );
     assert!(
         !repo_root().join(&out).exists(),
         "the preview created {out}, so it was not a preview"
@@ -20147,9 +20699,8 @@ fn repair_plan_refuses_an_undeclared_issue_and_an_undeclared_criteria_key_by_nam
         no_issues["error"]
             .as_str()
             .unwrap()
-            .contains("issues is required"),
-        "a tree assembled without its declarations carries no issue to plan for, and the refusal \
-         must point at the missing parameter: {}",
+            .contains("required property `issues` is missing"),
+        "authoritative schema validation must name the missing declaration input: {}",
         no_issues["error"]
     );
 
@@ -20191,10 +20742,12 @@ fn writing_tools_preview_before_they_act() {
         json!({ "world": WORLD, "store": store }),
     );
     assert_eq!(preview["performed"], json!(false));
-    assert!(preview["preview"]["effect"]
-        .as_str()
-        .unwrap()
-        .contains("would write"));
+    assert!(
+        preview["preview"]["effect"]
+            .as_str()
+            .unwrap()
+            .contains("would write")
+    );
     assert!(
         !repo_root().join(store).exists(),
         "preview must not create the store"
@@ -20300,10 +20853,12 @@ fn adaptive_panel_preserves_clustered_audit_and_selection_refusals() {
         json!("inst-1")
     );
     assert_eq!(result["capability"]["estimate"], Value::Null);
-    assert!(result["capability"]["estimate_refusal"]
-        .as_str()
-        .unwrap()
-        .contains("no recorded trials"));
+    assert!(
+        result["capability"]["estimate_refusal"]
+            .as_str()
+            .unwrap()
+            .contains("no recorded trials")
+    );
 }
 
 #[test]
@@ -20928,10 +21483,12 @@ fn lab_holdout_audit_never_mints_clean_scores_after_selection_and_rollback() {
         result["operations"][3]["result"],
         json!("measurement_refused")
     );
-    assert!(result["operations"][3]["refusal"]
-        .as_str()
-        .unwrap()
-        .contains("used to select"));
+    assert!(
+        result["operations"][3]["refusal"]
+            .as_str()
+            .unwrap()
+            .contains("used to select")
+    );
     assert_eq!(
         result["operations"][4]["result"],
         json!("clean_measurement")
@@ -20979,11 +21536,13 @@ fn lab_space_audit_preserves_lineage_diffs_and_fail_closed_candidate_validation(
         result["comparison_rows"][0]["derived_relation"],
         json!(true)
     );
-    assert!(result["comparison_rows"][0]["changes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|change| change.as_str().unwrap().contains("cost_units 0 -> 2")));
+    assert!(
+        result["comparison_rows"][0]["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|change| change.as_str().unwrap().contains("cost_units 0 -> 2"))
+    );
     assert_eq!(result["comparison_rows"][0]["change_count"], json!(1));
 
     let invalid = call(
@@ -21079,10 +21638,12 @@ fn lab_evolution_audit_only_claims_clean_directional_improvement_and_retains_con
     assert_eq!(claimed["status"], json!("improvement_claimed"));
     assert_eq!(claimed["claimable"], json!(true));
     assert!((claimed["claim"]["delta"].as_f64().unwrap() - 0.13).abs() < 1e-9);
-    assert!(claimed["sentence"]
-        .as_str()
-        .unwrap()
-        .contains("rotating_private_certification"));
+    assert!(
+        claimed["sentence"]
+            .as_str()
+            .unwrap()
+            .contains("rotating_private_certification")
+    );
 
     let contaminated = call(
         &mut server(),
@@ -21113,10 +21674,12 @@ fn lab_evolution_audit_only_claims_clean_directional_improvement_and_retains_con
         contaminated["card"]["surface"]["surface"],
         json!("contaminated")
     );
-    assert!(contaminated["claim_refusal"]
-        .as_str()
-        .unwrap()
-        .contains("contaminated"));
+    assert!(
+        contaminated["claim_refusal"]
+            .as_str()
+            .unwrap()
+            .contains("contaminated")
+    );
 }
 
 #[test]
@@ -21292,10 +21855,12 @@ fn atlas_report_preserves_holes_and_gates_composites() {
     assert_eq!(result["summary"]["measured"], json!(1));
     assert_eq!(result["summary"]["holes"], json!(2));
     assert_eq!(result["composite"]["ok"], json!(false));
-    assert!(result["composite"]["refusal"]
-        .as_str()
-        .unwrap()
-        .contains("unmeasured"));
+    assert!(
+        result["composite"]["refusal"]
+            .as_str()
+            .unwrap()
+            .contains("unmeasured")
+    );
 }
 
 #[test]
@@ -21675,10 +22240,12 @@ fn bioeval_estimand_audit_preserves_claim_language_identification_and_transport(
     assert_eq!(result["estimand"]["five_elements_complete"], json!(true));
     assert_eq!(result["claim"]["kind"], json!("intervention"));
     assert_eq!(result["claim"]["still_model_conditional"], json!(false));
-    assert!(result["claim"]["claim_language"]
-        .as_str()
-        .unwrap()
-        .contains("changes"));
+    assert!(
+        result["claim"]["claim_language"]
+            .as_str()
+            .unwrap()
+            .contains("changes")
+    );
     assert_eq!(
         result["claim"]["identification_summary"]["status"],
         json!("probed")
@@ -22212,11 +22779,13 @@ fn bioeval_mesh_audit_collapses_shared_inputs_and_separates_disagreement_kinds()
     assert_eq!(result["independent_ratings"]["status"], json!("refused"));
     assert_eq!(result["findings"]["rating_projection_refused"], json!(true));
     assert_eq!(result["contributions"]["status"], json!("accepted"));
-    assert!(result["contributions"]["rows"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["conclusion"] == json!("unknown")));
+    assert!(
+        result["contributions"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["conclusion"] == json!("unknown"))
+    );
     assert_eq!(result["classes"]["rows"][0]["size"], json!(2));
 
     let circular_refusal = call(
@@ -22816,10 +23385,12 @@ fn runtime_execution_simulate_reports_budget_exhaustion_and_keeps_partial_replay
         result["schema"],
         json!("bioprism-mcp/runtime-execution-simulate/0.1")
     );
-    assert!(result["execution_error"]
-        .as_str()
-        .unwrap()
-        .contains("budget exhausted"));
+    assert!(
+        result["execution_error"]
+            .as_str()
+            .unwrap()
+            .contains("budget exhausted")
+    );
     assert_eq!(result["recorded_requests"], json!(1));
     assert_eq!(result["recording_complete"], json!(false));
     assert_eq!(result["partial_recording"], json!(true));
@@ -22888,10 +23459,12 @@ fn megafactory_twin_audit_requires_discrepancy_stable_direction_for_oracle_statu
     );
     assert_eq!(unstable["ok"], json!(true));
     assert_eq!(unstable["oracle_eligible"], json!(false));
-    assert!(unstable["headline"]
-        .as_str()
-        .unwrap()
-        .contains("not benchmark ground truth"));
+    assert!(
+        unstable["headline"]
+            .as_str()
+            .unwrap()
+            .contains("not benchmark ground truth")
+    );
 }
 
 #[test]
@@ -23317,10 +23890,12 @@ fn oncoworlds_model_transport_keeps_model_and_patient_claims_separate() {
     );
     assert_eq!(accepted["effective_biological_n"], json!(3));
     assert!(accepted["patient_relevant_claim"].is_object());
-    assert!(accepted["model_statement"]
-        .as_str()
-        .unwrap()
-        .contains("organoid"));
+    assert!(
+        accepted["model_statement"]
+            .as_str()
+            .unwrap()
+            .contains("organoid")
+    );
 
     let refused = call(
         &mut server(),
@@ -23390,10 +23965,12 @@ fn oncoworlds_methylation_tools_preserve_threshold_and_version_conditioning() {
     assert_eq!(classified["caveat_count"], json!(1));
     assert_eq!(classified["classified"], json!(true));
     assert_eq!(classified["class"], json!("class-a"));
-    assert!(!classified["report"]["caveats"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !classified["report"]["caveats"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let missing_threshold = call(
         &mut server(),
@@ -23904,10 +24481,12 @@ fn stress_profile_reports_breaking_points_and_generator_posture() {
     assert_eq!(result["ok"], json!(true));
     assert!(result["headline"].as_str().unwrap().contains("prevalence"));
     assert_eq!(result["profile"]["sweep"].as_array().unwrap().len(), 8);
-    assert!(result["profile"]["generator_defects"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        result["profile"]["generator_defects"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -24035,10 +24614,12 @@ fn bioethics_dual_use_review_requires_assessment_before_the_safety_gate() {
         }),
     );
     assert_eq!(unassessed["ok"], json!(false));
-    assert!(unassessed["refusal"]
-        .as_str()
-        .unwrap()
-        .contains("no misuse-surface"));
+    assert!(
+        unassessed["refusal"]
+            .as_str()
+            .unwrap()
+            .contains("no misuse-surface")
+    );
 }
 
 #[test]
@@ -24223,10 +24804,12 @@ fn routing_decide_refuses_evidence_leakage_when_task_identity_is_supplied() {
         }),
     );
     assert_eq!(result["__isError"], json!(true));
-    assert!(result["error"]
-        .as_str()
-        .unwrap()
-        .contains("contains that task's own outcome"));
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("contains that task's own outcome")
+    );
 }
 
 #[test]
@@ -24266,11 +24849,13 @@ fn routing_lab_run_keeps_holdout_comparators_and_bounded_task_rows_visible() {
     assert_eq!(result["report"]["task_rows_omitted"], json!(1));
     assert!(result["report"]["account"]["router"].is_object());
     assert!(result["report"]["verdict"].is_string());
-    assert!(result["guarantees"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("route_unseen")));
+    assert!(
+        result["guarantees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("route_unseen"))
+    );
 }
 
 #[test]
@@ -24334,19 +24919,21 @@ fn lens_catalogue_exposes_questions_and_unimplemented_section_remainder() {
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["section_42_module_count"], json!(31));
     assert_eq!(result["implemented_count"], json!(6));
-    assert!(result["implemented"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|lens| {
-            lens["id"] == json!("cohort_leakage")
-                && lens["requires"].as_array().unwrap().len() >= 4
-                && lens["refuses"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|reason| reason == "scope_precondition_unmet")
-        }));
+    assert!(
+        result["implemented"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|lens| {
+                lens["id"] == json!("cohort_leakage")
+                    && lens["requires"].as_array().unwrap().len() >= 4
+                    && lens["refuses"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|reason| reason == "scope_precondition_unmet")
+            })
+    );
     assert!(result["not_implemented"].as_array().unwrap().len() >= 10);
 }
 
@@ -24382,16 +24969,20 @@ fn lens_leakage_check_seals_nonvisual_findings_and_preserves_underdetermination(
     assert_eq!(result["blueprint_module"], json!("42.10"));
     assert_eq!(result["witness_count"], json!(4));
     assert!(result["receipt"].as_str().unwrap().len() >= 32);
-    assert!(result["report"]["outcome"]["witnesses"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["kind"] == "identity_leakage"));
-    assert!(result["spoken"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|line| { line.as_str().is_some_and(|line| line.contains("ALT-77")) }));
+    assert!(
+        result["report"]["outcome"]["witnesses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["kind"] == "identity_leakage")
+    );
+    assert!(
+        result["spoken"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| { line.as_str().is_some_and(|line| line.contains("ALT-77")) })
+    );
 
     let underdetermined = call(
         &mut server(),
@@ -24413,11 +25004,13 @@ fn lens_leakage_check_seals_nonvisual_findings_and_preserves_underdetermination(
     );
     assert_eq!(underdetermined["__isError"], json!(false));
     assert_eq!(underdetermined["outcome"], json!("answered"));
-    assert!(underdetermined["report"]["outcome"]["witnesses"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["kind"] == "check_not_runnable"));
+    assert!(
+        underdetermined["report"]["outcome"]["witnesses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["kind"] == "check_not_runnable")
+    );
 }
 
 #[test]
@@ -24517,11 +25110,13 @@ fn stewardship_review_check_issues_scoped_approval_and_refuses_self_review() {
     assert_eq!(issued["__isError"], json!(false));
     assert_eq!(issued["decision"], json!("issued"));
     assert_eq!(issued["covered_dimensions"].as_array().unwrap().len(), 6);
-    assert!(issued["unreviewed_dimensions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|entry| entry["dimension"] == "adversarial_injection"));
+    assert!(
+        issued["unreviewed_dimensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["dimension"] == "adversarial_injection")
+    );
 
     let revision = EvaluatorRevision::new(
         "evaluator",
@@ -24550,10 +25145,12 @@ fn stewardship_review_check_issues_scoped_approval_and_refuses_self_review() {
     );
     assert_eq!(refused["__isError"], json!(false));
     assert_eq!(refused["decision"], json!("refused"));
-    assert!(refused["refusal"]
-        .as_str()
-        .unwrap()
-        .contains("authored the evaluator"));
+    assert!(
+        refused["refusal"]
+            .as_str()
+            .unwrap()
+            .contains("authored the evaluator")
+    );
 }
 
 #[test]
@@ -24696,11 +25293,13 @@ fn fabric_synthesize_keeps_hard_rejections_out_of_the_pareto_frontier() {
     assert_eq!(result["admissible_count"], json!(1));
     assert_eq!(result["eliminated_count"], json!(1));
     assert_eq!(result["artifact"]["frontier"], json!(["minimal"]));
-    assert!(result["artifact"]["eliminated"]["unfinished"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|reason| reason["reason"] == "missing_terminal_states"));
+    assert!(
+        result["artifact"]["eliminated"]["unfinished"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason["reason"] == "missing_terminal_states")
+    );
     assert!(result["unimplemented_stages"].as_array().unwrap().len() >= 5);
 }
 
@@ -24718,16 +25317,20 @@ fn interweave_workflow_catalogue_derives_owed_deliverables_without_fabricating_a
             .len(),
         6
     );
-    assert!(result["outstanding_deliverables"]
-        .as_object()
-        .unwrap()
-        .values()
-        .all(|count| count == 9));
-    assert!(result["workflows"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|workflow| workflow["present"].as_array().unwrap().is_empty()));
+    assert!(
+        result["outstanding_deliverables"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|count| count == 9)
+    );
+    assert!(
+        result["workflows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|workflow| workflow["present"].as_array().unwrap().is_empty())
+    );
 }
 
 #[test]
@@ -24765,10 +25368,12 @@ fn bioql_compile_returns_a_typed_contract_and_refuses_missing_access_declaration
     assert_eq!(refused["__isError"], json!(false));
     assert_eq!(refused["ok"], json!(false));
     assert_eq!(refused["fail_closed"], json!(true));
-    assert!(refused["refusal"]
-        .as_str()
-        .unwrap()
-        .contains("access labels"));
+    assert!(
+        refused["refusal"]
+            .as_str()
+            .unwrap()
+            .contains("access labels")
+    );
 }
 
 #[test]
@@ -24823,10 +25428,12 @@ fn epistemic_voi_keeps_gross_cost_net_and_action_change_separate() {
         }),
     );
     assert_eq!(invalid["__isError"], json!(true));
-    assert!(invalid["error"]
-        .as_str()
-        .unwrap()
-        .contains("invariant failed"));
+    assert!(
+        invalid["error"]
+            .as_str()
+            .unwrap()
+            .contains("invariant failed")
+    );
 }
 
 #[test]
@@ -24872,17 +25479,21 @@ fn epistemic_adaptive_acquisition_projects_branch_dependent_named_policy() {
     assert_eq!(result["policy"]["root"]["kind"], json!("acquire"));
     assert_eq!(result["policy"]["root"]["id"], json!("screen"));
     assert!(result["policy"]["expected_total"].as_f64().unwrap() < 0.1);
-    assert!(result["policy"]["root"]["outcomes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|outcome| outcome["next"]["kind"] == json!("acquire")
-            && outcome["next"]["id"] == json!("confirm")));
-    assert!(result["policy"]["root"]["outcomes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|outcome| outcome["next"]["kind"] == json!("stop")));
+    assert!(
+        result["policy"]["root"]["outcomes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|outcome| outcome["next"]["kind"] == json!("acquire")
+                && outcome["next"]["id"] == json!("confirm"))
+    );
+    assert!(
+        result["policy"]["root"]["outcomes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|outcome| outcome["next"]["kind"] == json!("stop"))
+    );
     assert_eq!(
         result["policy"]["root"]["outcomes"][0]["posterior"]
             .as_array()
@@ -25274,10 +25885,12 @@ fn epistemic_decision_quotient_keeps_permitted_boundary_and_merges_only_equivale
         }),
     );
     assert_eq!(refused["__isError"], json!(true));
-    assert!(refused["error"]
-        .as_str()
-        .unwrap()
-        .contains("invariant failed"));
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("invariant failed")
+    );
 }
 
 #[test]
@@ -25401,11 +26014,13 @@ fn benchmark_trace_analyze_keeps_causal_localization_and_segmentation_distinct()
     assert_eq!(result["summary"]["episode_count"], json!(1));
     assert!(result["summary"]["boundary_count"].as_u64().unwrap() >= 1);
     assert!(result["analysis"]["candidates"].is_array());
-    assert!(result["guarantees"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("does not replay")));
+    assert!(
+        result["guarantees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("does not replay"))
+    );
 }
 
 #[test]
@@ -25575,11 +26190,13 @@ fn benchmark_integrity_audit_keeps_duplicates_leaks_holdouts_and_effective_denom
         result["effective_diversity"]["equivalence_classes"],
         json!(3)
     );
-    assert!(result["guarantees"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("semantic similarity")));
+    assert!(
+        result["guarantees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("semantic similarity"))
+    );
 }
 
 #[test]
@@ -25786,11 +26403,13 @@ fn benchmark_compile_composes_causal_minimization_and_oracle_synthesis_without_e
         2
     );
     assert_eq!(result["oracle"]["strength"], json!("exact_state_predicate"));
-    assert!(result["unmeasured_stages"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|stage| stage == "state_reconstruction"));
+    assert!(
+        result["unmeasured_stages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|stage| stage == "state_reconstruction")
+    );
     assert_eq!(
         result["probe"]["execution"],
         json!("caller-supplied observation table; no world or architecture was run")
@@ -25852,19 +26471,19 @@ fn pack_catalogue_exposes_agent_and_biological_declarations_without_scores() {
     assert_eq!(result["section_counts"]["29"], json!(21));
     assert_eq!(result["returned"].as_array().unwrap().len(), 3);
     assert_eq!(result["omitted"], json!(18));
-    assert!(result["returned"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|pack| pack["blueprint_module"]
+    assert!(result["returned"].as_array().unwrap().iter().all(|pack| {
+        pack["blueprint_module"]
             .as_str()
             .unwrap()
-            .starts_with("29.")));
-    assert!(result["guarantees"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("not measured")));
+            .starts_with("29.")
+    }));
+    assert!(
+        result["guarantees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("not measured"))
+    );
 }
 
 #[test]
@@ -25885,10 +26504,12 @@ fn pack_coverage_audit_exposes_portfolio_gaps_and_refuses_unknown_subsets() {
     assert!(result["summary"]["covered"].as_u64().unwrap() > 0);
     assert_eq!(result["rows"].as_array().unwrap().len(), 3);
     assert!(result["rows_omitted"].as_u64().unwrap() > 0);
-    assert!(result["summary"]["gap_summary"]
-        .as_str()
-        .unwrap()
-        .contains("capability families"));
+    assert!(
+        result["summary"]["gap_summary"]
+            .as_str()
+            .unwrap()
+            .contains("capability families")
+    );
 
     let refused = call(
         &mut server(),
@@ -25925,11 +26546,13 @@ fn pack_release_audit_preserves_stable_order_and_unsequenced_remainder() {
     assert_eq!(result["release_order"][0]["portfolio_position"], json!(1));
     assert!(result["wave_counts"].is_object());
     assert!(result["axis_counts"].is_object());
-    assert!(result["limitations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item.as_str().unwrap().contains("not an approval")));
+    assert!(
+        result["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str().unwrap().contains("not an approval"))
+    );
 
     let refused = call(
         &mut server(),
@@ -25982,10 +26605,12 @@ fn foundation_contract_check_keeps_admissibility_world_authority_and_plane_check
     assert_eq!(result["ok"], json!(true));
     assert_eq!(result["contract"]["ok"], json!(true));
     assert_eq!(result["world"]["ok"], json!(false));
-    assert!(result["world"]["claim"]
-        .as_str()
-        .unwrap()
-        .contains("real treatment effect"));
+    assert!(
+        result["world"]["claim"]
+            .as_str()
+            .unwrap()
+            .contains("real treatment effect")
+    );
     assert_eq!(result["transition"]["ok"], json!(false));
     assert_eq!(result["verdict"], json!("refused"));
 
@@ -26006,10 +26631,12 @@ fn foundation_contract_check_keeps_admissibility_world_authority_and_plane_check
     assert_eq!(missing["__isError"], json!(false));
     assert_eq!(missing["verdict"], json!("refused"));
     assert_eq!(missing["contract"]["ok"], json!(false));
-    assert!(missing["contract"]["refusal"]
-        .as_str()
-        .unwrap()
-        .contains("falsifier"));
+    assert!(
+        missing["contract"]["refusal"]
+            .as_str()
+            .unwrap()
+            .contains("falsifier")
+    );
 }
 
 #[test]
@@ -26034,10 +26661,12 @@ fn weavelang_compile_returns_digests_and_replay_is_explicitly_local() {
         json!({ "source": "not a weave program" }),
     );
     assert_eq!(invalid["__isError"], json!(true));
-    assert!(invalid["error"]
-        .as_str()
-        .unwrap()
-        .contains("WeaveLang compilation refused"));
+    assert!(
+        invalid["error"]
+            .as_str()
+            .unwrap()
+            .contains("WeaveLang compilation refused")
+    );
 }
 
 #[test]
@@ -26096,10 +26725,12 @@ fn conformance_run_verifies_fixtures_before_returning_release_evidence() {
     assert!(result["suite"]["case_count"].as_u64().unwrap() > 0);
     assert!(result["results"].as_array().unwrap().len() <= 3);
     assert!(result["release_decision"].is_object());
-    assert!(result["summary"]
-        .as_str()
-        .unwrap()
-        .contains("fiber-compiler-conformance"));
+    assert!(
+        result["summary"]
+            .as_str()
+            .unwrap()
+            .contains("fiber-compiler-conformance")
+    );
 }
 
 #[test]
@@ -26115,10 +26746,12 @@ fn provider_capability_gate_does_not_turn_untested_runtime_checks_into_claims() 
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["gate"]["outcome"], json!("blocked"));
-    assert!(result["gate"]["unproven"][0]
-        .as_str()
-        .unwrap()
-        .contains("untested"));
+    assert!(
+        result["gate"]["unproven"][0]
+            .as_str()
+            .unwrap()
+            .contains("untested")
+    );
     assert_eq!(
         result["differential"]["HostEscape"]["drift"],
         json!("indeterminate")

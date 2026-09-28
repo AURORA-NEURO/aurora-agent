@@ -751,7 +751,7 @@ pub fn protocol_request_from_experiment_design(
 mod tests {
     use super::*;
     use crate::glioma::experiment::{
-        design_preclinical_experiment, ExperimentArm, ExperimentRequest, OutcomeKind,
+        ExperimentArm, ExperimentRequest, OutcomeKind, design_preclinical_experiment,
     };
 
     fn request() -> ProtocolSimulationRequest {
@@ -887,9 +887,11 @@ mod tests {
         request.tasks[0].requires_instrument = true;
         let output = simulate_glioma_protocol(&request).unwrap();
         assert_eq!(output.disposition, ProtocolDisposition::ApprovalRequired);
-        assert!(output
-            .stop_conditions
-            .iter()
-            .any(|item| item.contains("instrument-approval-required")));
+        assert!(
+            output
+                .stop_conditions
+                .iter()
+                .any(|item| item.contains("instrument-approval-required"))
+        );
     }
 }

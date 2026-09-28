@@ -481,9 +481,11 @@ mod tests {
         input.actions[1].risk_milli = 900;
         let output = plan_glioma_carryover_sequence(&input).expect("sequence");
         assert_eq!(output.risk_blocked_order, vec!["b"]);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry == "risk-gate-blocked:b"));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry == "risk-gate-blocked:b")
+        );
     }
 }

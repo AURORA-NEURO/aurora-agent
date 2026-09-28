@@ -9,6 +9,13 @@
 //! from the identical state, so a difference between them is attributable to the one component the
 //! cell left free — here, the context policy. That is the whole argument for cells over end-to-end
 //! comparison, and it is why the fork reports *attribution* rather than a score.
+//!
+//! # Not implemented
+//!
+//! - Launching or sandboxing model and agent processes, executing their tools, or collecting human
+//!   ratings. The evaluation contract consumes deterministic continuations and oracle outcomes.
+//! - Clinical outcome or deployment-safety assessment. A matched decision-state comparison is
+//!   evidence about the tested context policy under its declared acceptance contract.
 
 pub mod analysis_workbench;
 pub mod architecture;

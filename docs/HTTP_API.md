@@ -954,8 +954,9 @@ identity, and the same explicit non-claim about external effects.
 ## Explicit nonclaims
 
 The dependency-free boundary does not implement HTTP/2 gRPC, TLS termination, an identity provider,
-distributed event storage, a distributed mission queue, or a consumer-repository GitHub Action.
-Those are deployment/artifact surfaces. The optional event snapshot is bounded local recovery, not
+distributed event storage, a distributed mission queue, hosted consumer-workflow execution, or
+publishing a reviewed revision of the in-repository composite GitHub Action. Those are
+deployment/artifact surfaces. The optional event snapshot is bounded local recovery, not
 a consensus log or distributed delivery service; the mission snapshot restores bounded mission
 state and explicitly fails interrupted work instead of claiming recovery. The `capabilities`
 response reports these distinctions so clients can route to an operator's proxy, queue, or delivery

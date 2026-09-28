@@ -487,11 +487,11 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::composition::{
-        compose_knowledge_graph, KnowledgeCompositionRequest, KnowledgeRelation,
-        KnowledgeRelationKind,
+        KnowledgeCompositionRequest, KnowledgeRelation, KnowledgeRelationKind,
+        compose_knowledge_graph,
     };
     use crate::glioma::programs::p02_evidence_knowledge::knowledge_graph::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma::programs::p04_decision_context::compile_decision_context;
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};

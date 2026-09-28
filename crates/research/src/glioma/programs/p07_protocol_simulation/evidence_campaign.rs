@@ -7,9 +7,9 @@
 //! silently turn an unexecutable queue into a success.
 
 use super::action_execution::{
-    execute_glioma_action_portfolio, ActionPortfolioExecution, ActionPortfolioExecutionDisposition,
-    ActionPortfolioExecutionError, ActionPortfolioExecutionRequest, GliomaActionExecutor,
-    MAX_ACTIONS, MAX_RETRIES,
+    ActionPortfolioExecution, ActionPortfolioExecutionDisposition, ActionPortfolioExecutionError,
+    ActionPortfolioExecutionRequest, GliomaActionExecutor, MAX_ACTIONS, MAX_RETRIES,
+    execute_glioma_action_portfolio,
 };
 use crate::glioma::programs::p01_evidence_surveillance::EvidencePriorityPlan;
 use crate::glioma_engine::{GliomaActionCandidate, GliomaSelectionConfig};
@@ -437,7 +437,7 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::EvidenceSourceKind;
     use crate::glioma::programs::p01_evidence_surveillance::{
-        prioritize_glioma_evidence, EvidencePriorityRequest, EvidencePriorityWeights,
+        EvidencePriorityRequest, EvidencePriorityWeights, prioritize_glioma_evidence,
     };
     use crate::glioma_engine::{
         GliomaModality, GliomaModelSystem, GliomaStageKind, LocalArtifactRef,
@@ -583,13 +583,15 @@ mod tests {
             GliomaEvidenceCampaignDisposition::Blocked
         );
         assert!(output.execution.is_some());
-        assert!(output
-            .execution
-            .as_ref()
-            .unwrap()
-            .selection
-            .blocked_order
-            .contains(&action_id));
+        assert!(
+            output
+                .execution
+                .as_ref()
+                .unwrap()
+                .selection
+                .blocked_order
+                .contains(&action_id)
+        );
     }
 
     #[test]

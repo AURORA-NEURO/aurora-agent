@@ -11,7 +11,7 @@
 //! That sentence has been true and unenforceable. The explanations existed — ten crates had read
 //! their section's remainder and written down what they found — but they lived in ten `lib.rs` doc
 //! comments, in prose, in whichever crate happened to be built next to them. Nothing could ask *how
-//! many of the forty-eight are process*, nothing noticed when two crates disagreed, and nothing
+//! many of the forty-four are process*, nothing noticed when two crates disagreed, and nothing
 //! failed when a module left the backlog and its explanation did not. That last one is no longer
 //! hypothetical: twenty-seven modules left in a single pass, and the register said so before anybody
 //! read it.
@@ -52,8 +52,8 @@
 //! # The trap this crate is shaped around
 //!
 //! `tools/coverage.sh` counts a blueprint module as covered when its `NN.MM` token appears anywhere
-//! under `crates/` or `docs/`. A register listing forty-eight uncovered ids would mark all
-//! forty-eight covered and take the headline to 100% — a number produced entirely by the document
+//! under `crates/` or `docs/`. A register listing forty-four uncovered ids would mark all
+//! forty-four covered and take the headline to 100% — a number produced entirely by the document
 //! complaining that the number is produced that way.
 //!
 //! Two crates have already been bitten. `docs/BACKLOG.md` emptied itself on its second run, because
@@ -75,25 +75,25 @@
 //! | Verdict | Established by | The test |
 //! |---|---|---|
 //! | [`Classification::Process`] | `crates/stewardship` | is the detailed design a set of predicates over an artifact, or a description of what people do? |
-//! | [`Classification::ForeignArtifact`] | `crates/ops`, `crates/devplat` | code-bearing, precise and testable, and not Rust and not in this repository |
+//! | [`Classification::ForeignArtifact`] | `crates/ops`, `crates/devplat` | complete blueprint surface is precise and testable, but remains outside this repository |
 //! | [`Classification::DischargedElsewhere`] | `crates/worldfactory`, `crates/sweep` | the content is implemented under a different section's id, by a crate that never names this one |
 //! | [`Classification::BlockLevelSplit`] | `crates/bioevalx` | the prose/code division runs *inside* the module, so it is simultaneously implemented and not |
 //! | [`Classification::GenuinelyUncovered`] | the honest default | nobody has read it, or it is real work not yet done |
 //!
 //! # What the register says
 //!
-//! Forty-eight modules, seventy-three recorded verdicts. By primary verdict:
+//! Forty-four modules, sixty-nine recorded verdicts. By primary verdict:
 //!
 //! ```text
-//! process                37   councils, cadence, appeals, a dashboard somebody reads
-//! foreign artifact        4   Python, two GitHub Actions, and a workflow file
+//! process                35   councils, cadence, appeals, a dashboard somebody reads
+//! foreign artifact        2   the full Python SDK and hosted workflow execution surfaces
 //! discharged elsewhere    7   the content exists, under another section's id
 //! genuinely uncovered     0   nobody has read it, or it is real work not yet done
 //! ```
 //!
 //! **Exactly one module carries work on any reading**, and it is a second reading rather than a
-//! headline — see the regeneration note below before reading that zero as good news. **Seventy-two of
-//! the seventy-three verdicts are transcriptions** of a sentence a classifying crate wrote about the
+//! headline — see the regeneration note below before reading that zero as good news. **Sixty-eight of
+//! the sixty-nine verdicts are transcriptions** of a sentence a classifying crate wrote about the
 //! module named; the one exception is marked [`Standing::InferredHere`] and sits beside a
 //! transcription on the same module, so the disagreement has somewhere to land.
 //!
@@ -123,11 +123,13 @@
 //! The twenty-sixth is the one to keep looking at. `crates/bioethics` read the sandboxing module and
 //! declined it as perimeter infrastructure a sibling already positioned, which is a discharge — and
 //! in the same paragraph recorded that all thirteen of its required controls need a process
-//! boundary, a network stack or a scanner, none of which exists here. The discharge is transcribed;
-//! the reading that the control therefore exists nowhere is this register's, marked as such, and
-//! kept as a second verdict. A register showing zero work remaining while the workspace has no
-//! sandbox would be the flattering answer, and `AGENTS.md` already names that failure: a missing
-//! capability that is stated is a limitation, one that is implied to exist is a lie.
+//! boundary, a network stack or a scanner. `bioprism-runtime::DockerSandbox` now supplies a narrow,
+//! opt-in command boundary, but neither the SDK declaration path nor the trial provider invokes it;
+//! scanning, quarantine, secret isolation, and deployment egress policy also remain absent. The
+//! register's second verdict therefore records the missing integrated control set, not the absence
+//! of every container API. A register showing zero work remaining while declarations still lack an
+//! enforcement path would be the flattering answer, and `AGENTS.md` already names that failure: a
+//! missing capability that is stated is a limitation, one that is implied to exist is a lie.
 //!
 //! # This crate does not classify anything
 //!

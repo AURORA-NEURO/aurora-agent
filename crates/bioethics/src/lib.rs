@@ -36,12 +36,14 @@
 //! or microVM isolation, read-only source mounts, network disabled by default, resource quotas, a
 //! separate grader, signed dependencies and artifact scanning; its required controls are escape
 //! tests, secret canaries, filesystem and network policy, supply-chain scans, malware and macro
-//! controls, and quarantine. All thirteen need a process boundary, a network stack or a scanner.
-//! `bioprism-safety` states this workspace's position on every one of them under 13.03, 13.04,
-//! 13.15 and 13.22 — a library of plain Rust types may model such a control and may never claim one
-//! — and `bioprism_sdk::sandbox` holds the isolation-request ladder with its single
-//! `Enforcement::DeclaredOnly` variant. Implementing it here would produce a second threat model
-//! with its own opinion about what isolation means.
+//! controls, and quarantine. These controls cross process or deployment boundaries. The workspace
+//! now exposes `bioprism-runtime::DockerSandbox` for a bounded, opt-in Linux command boundary, but
+//! SDK isolation requests and the trial `ContainerProvider` do not invoke it, and it does not
+//! supply scanning, quarantine, secret isolation, or deployment egress policy. `bioprism-safety`
+//! states the declared-only position under 13.03, 13.04, 13.15 and 13.22, and
+//! `bioprism_sdk::sandbox` holds the isolation-request ladder with its single
+//! `Enforcement::DeclaredOnly` variant. Implementing a second control registry here would produce a
+//! second threat model with its own opinion about what isolation means.
 //!
 //! **Security, Privacy, and Safety Red-Team Program** (§36, module nineteen). An attack library, an
 //! independent team, canary assets, a severity and remediation scale, regression packs and a public

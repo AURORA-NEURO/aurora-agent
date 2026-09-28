@@ -7,10 +7,10 @@
 //! silently become a campaign.
 
 use super::campaign::{
-    execute_glioma_replication_campaign, GliomaReplicationCampaign,
-    GliomaReplicationCampaignDisposition, GliomaReplicationCampaignError,
-    GliomaReplicationCampaignExecutor, GliomaReplicationCampaignRequest,
-    GliomaReplicationCampaignStopReason,
+    GliomaReplicationCampaign, GliomaReplicationCampaignDisposition,
+    GliomaReplicationCampaignError, GliomaReplicationCampaignExecutor,
+    GliomaReplicationCampaignRequest, GliomaReplicationCampaignStopReason,
+    execute_glioma_replication_campaign,
 };
 use super::replication_closure_frontier::{
     ReplicationClosureDisposition, ReplicationClosureFrontier,
@@ -139,15 +139,19 @@ fn validate_request(
     Ok(executable)
 }
 
-fn finish(
-    request: &ReplicationClosureExecutionRequest,
+struct ReplicationClosureExecutionOutcome {
     executable_action_order: Vec<String>,
     campaign: Option<GliomaReplicationCampaign>,
     disposition: ReplicationClosureExecutionDisposition,
     stop_reason: Option<GliomaReplicationCampaignStopReason>,
     negative_evidence: Vec<String>,
     uncertainty: Vec<String>,
-    next_action: &str,
+    next_action: &'static str,
+}
+
+fn finish(
+    request: &ReplicationClosureExecutionRequest,
+    outcome: ReplicationClosureExecutionOutcome,
 ) -> Result<ReplicationClosureExecutionRun, ReplicationClosureExecutionError> {
     let mut output = ReplicationClosureExecutionRun {
         feature_id: FEATURE_ID.into(),
@@ -157,13 +161,13 @@ fn finish(
         frontier_digest: request.frontier.digest.clone(),
         source_frontier_disposition: request.frontier.disposition,
         selected_action_order: request.frontier.selected_order.clone(),
-        executable_action_order,
-        campaign,
-        disposition,
-        stop_reason,
-        negative_evidence: sorted_unique(negative_evidence),
-        uncertainty: sorted_unique(uncertainty),
-        next_action: next_action.into(),
+        executable_action_order: outcome.executable_action_order,
+        campaign: outcome.campaign,
+        disposition: outcome.disposition,
+        stop_reason: outcome.stop_reason,
+        negative_evidence: sorted_unique(outcome.negative_evidence),
+        uncertainty: sorted_unique(outcome.uncertainty),
+        next_action: outcome.next_action.into(),
         boundary: PRECLINICAL_BOUNDARY.into(),
         digest: ContentHash::of_bytes(b"unsealed-glioma-replication-closure-execution"),
     };
@@ -229,13 +233,15 @@ pub fn execute_glioma_replication_closure<E: GliomaReplicationCampaignExecutor>(
         );
         return finish(
             request,
-            executable_action_order,
-            None,
-            ReplicationClosureExecutionDisposition::HeldByFrontier,
-            None,
-            negative_evidence,
-            uncertainty,
-            "revise the bounded frontier or complete methods review before campaign execution",
+            ReplicationClosureExecutionOutcome {
+                executable_action_order,
+                campaign: None,
+                disposition: ReplicationClosureExecutionDisposition::HeldByFrontier,
+                stop_reason: None,
+                negative_evidence,
+                uncertainty,
+                next_action: "revise the bounded frontier or complete methods review before campaign execution",
+            },
         );
     }
     let campaign = execute_glioma_replication_campaign(&request.campaign, executor)?;
@@ -258,20 +264,23 @@ pub fn execute_glioma_replication_closure<E: GliomaReplicationCampaignExecutor>(
             ReplicationClosureExecutionDisposition::Unresolved,
             "resolve missing or contradictory replication evidence before another execution wave",
         ),
-        GliomaReplicationCampaignDisposition::Failed | GliomaReplicationCampaignDisposition::Blocked => (
+        GliomaReplicationCampaignDisposition::Failed
+        | GliomaReplicationCampaignDisposition::Blocked => (
             ReplicationClosureExecutionDisposition::Blocked,
             "repair the institution-local executor or policy boundary before retrying",
         ),
     };
     finish(
         request,
-        executable_action_order,
-        Some(campaign.clone()),
-        disposition,
-        Some(campaign.stop_reason),
-        negative_evidence,
-        uncertainty,
-        next_action,
+        ReplicationClosureExecutionOutcome {
+            executable_action_order,
+            campaign: Some(campaign.clone()),
+            disposition,
+            stop_reason: Some(campaign.stop_reason),
+            negative_evidence,
+            uncertainty,
+            next_action,
+        },
     )
 }
 

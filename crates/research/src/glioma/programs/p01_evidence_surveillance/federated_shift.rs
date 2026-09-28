@@ -194,11 +194,11 @@ fn pooled(sites: &[&FederatedEvidenceShiftSite]) -> PooledShift {
         .filter(|site| delta(site).signum() == weighted_delta.signum())
         .map(|site| weight(site))
         .sum::<u128>();
-    let consensus_milli = if total_weight == 0 {
-        0
-    } else {
-        (mass.saturating_mul(1_000) / total_weight).min(1_000) as u16
-    };
+    let consensus_milli = mass
+        .saturating_mul(1_000)
+        .checked_div(total_weight)
+        .unwrap_or_default()
+        .min(1_000) as u16;
     let max_deviation = sites
         .iter()
         .map(|site| delta(site).abs_diff(weighted_delta))
@@ -642,10 +642,12 @@ mod tests {
             result.disposition,
             FederatedEvidenceShiftDisposition::SiteSpecific
         );
-        assert!(result
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.contains("not consensus")));
+        assert!(
+            result
+                .negative_evidence
+                .iter()
+                .any(|entry| entry.contains("not consensus"))
+        );
         assert!(result.actions.is_empty());
     }
 }

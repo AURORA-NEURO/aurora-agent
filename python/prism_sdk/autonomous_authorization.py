@@ -776,10 +776,13 @@ class AutonomousAuthorizationLedger:
         self._lock = RLock()
 
     def _append_event(self, *, event_type: str, grant_id: str, request_digest: str | None, occurred_at: int, reason: str) -> None:
-        if len(self._events) >= self.max_events:
-            _fail("event capacity is exhausted")
+        self._ensure_event_capacity()
         previous = None if not self._events else self._events[-1].event_digest
         self._events.append(AutonomousAuthorizationEvent.create(sequence=len(self._events) + 1, event_type=event_type, grant_id=grant_id, request_digest=request_digest, occurred_at=occurred_at, reason=_identifier("event reason", reason), previous_event_digest=previous))
+
+    def _ensure_event_capacity(self) -> None:
+        if len(self._events) >= self.max_events:
+            _fail("event capacity is exhausted")
 
     def issue(self, *, grant_id: str, tenant_id: str, actor_id: str, session_id: str, authorization_digest: str, allowed_domains: Sequence[str], allowed_operations: Sequence[str], allowed_capabilities: Sequence[str] = (), allowed_risk_classes: Sequence[str] = (), issued_at: int, expires_at: int, max_uses: int | None = 1) -> AutonomousAuthorizationGrant:
         with self._lock:
@@ -789,6 +792,7 @@ class AutonomousAuthorizationLedger:
             if len(self._grants) >= self.max_grants:
                 _fail("grant capacity is exhausted")
             grant = AutonomousAuthorizationGrant.issue(grant_id=normalized_id, tenant_id=tenant_id, actor_id=actor_id, session_id=session_id, authorization_digest=authorization_digest, allowed_domains=allowed_domains, allowed_operations=allowed_operations, allowed_capabilities=allowed_capabilities, allowed_risk_classes=allowed_risk_classes, issued_at=issued_at, expires_at=expires_at, max_uses=max_uses)
+            self._ensure_event_capacity()
             self._grants[normalized_id] = grant
             self._append_event(event_type="grant_issued", grant_id=normalized_id, request_digest=None, occurred_at=issued_at, reason="issued")
             return grant
@@ -803,6 +807,7 @@ class AutonomousAuthorizationLedger:
                 return current
             reason_id = _identifier("revocation reason", reason)
             updated = replace(current, status="revoked", revoked_at=_timestamp("revoked_at", revoked_at), revocation_reason_digest=content_digest(reason_id))
+            self._ensure_event_capacity()
             self._grants[normalized_id] = updated
             self._append_event(event_type="grant_revoked", grant_id=normalized_id, request_digest=None, occurred_at=revoked_at, reason=reason_id)
             return updated
@@ -851,6 +856,7 @@ class AutonomousAuthorizationLedger:
             next_count = grant.used_count + 1
             next_status = "exhausted" if grant.max_uses is not None and next_count >= grant.max_uses else "active"
             grant = replace(grant, used_count=next_count, used_request_digests=(*grant.used_request_digests, normalized.request_digest), status=next_status)
+            self._ensure_event_capacity()
             self._grants[grant.grant_id] = grant
             self._append_event(event_type="request_allowed", grant_id=grant.grant_id, request_digest=normalized.request_digest, occurred_at=checked_at, reason="allowed")
             return AutonomousAuthorizationDecision.create(status="allowed", request=normalized, grant=grant, checked_at=checked_at, reason="allowed", remaining_uses=None if grant.max_uses is None else max(0, grant.max_uses - grant.used_count))

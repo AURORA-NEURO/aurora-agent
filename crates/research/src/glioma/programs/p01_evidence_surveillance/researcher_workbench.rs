@@ -774,16 +774,18 @@ mod tests {
         request.minimum_quality_milli = 800;
         let plan = query_glioma_evidence_workbench(&request).unwrap();
         assert!(plan.selected_order.contains(&"evidence-a".to_string()));
-        assert!(plan
-            .omissions
-            .iter()
-            .any(|omission| omission.evidence_id == "evidence-b"
-                && omission.reason == "contradiction-excluded"));
-        assert!(plan
-            .omissions
-            .iter()
-            .any(|omission| omission.evidence_id == "evidence-c"
-                && omission.reason == "negative-excluded"));
+        assert!(
+            plan.omissions
+                .iter()
+                .any(|omission| omission.evidence_id == "evidence-b"
+                    && omission.reason == "contradiction-excluded")
+        );
+        assert!(
+            plan.omissions
+                .iter()
+                .any(|omission| omission.evidence_id == "evidence-c"
+                    && omission.reason == "negative-excluded")
+        );
         plan.validate().unwrap();
     }
 

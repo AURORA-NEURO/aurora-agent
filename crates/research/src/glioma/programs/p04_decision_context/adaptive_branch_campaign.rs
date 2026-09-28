@@ -8,20 +8,20 @@
 //! next round.
 
 use super::branch_campaign::{
-    execute_glioma_decision_branch_campaign, DecisionBranchCampaign,
-    DecisionBranchCampaignDisposition, DecisionBranchCampaignError, DecisionBranchCampaignRequest,
+    DecisionBranchCampaign, DecisionBranchCampaignDisposition, DecisionBranchCampaignError,
+    DecisionBranchCampaignRequest, execute_glioma_decision_branch_campaign,
 };
 use super::branch_planner::{
-    plan_glioma_decision_branches, DecisionBranchPlan, DecisionBranchPlannerError,
-    DecisionBranchPlannerRequest,
+    DecisionBranchPlan, DecisionBranchPlannerError, DecisionBranchPlannerRequest,
+    plan_glioma_decision_branches,
 };
 use super::campaign::DecisionContextCampaignExecutor;
 use super::context_compiler::{
-    compile_decision_context, DecisionContext, DecisionContextError, DecisionContextRequest,
+    DecisionContext, DecisionContextError, DecisionContextRequest, compile_decision_context,
 };
 use crate::glioma::evidence::EvidenceRecord;
 use crate::glioma::programs::p02_evidence_knowledge::{
-    compile_typed_knowledge, KnowledgeError, KnowledgeRequest, TypedKnowledge,
+    KnowledgeError, KnowledgeRequest, TypedKnowledge, compile_typed_knowledge,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -481,8 +481,8 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p04_decision_context::{
-        compile_decision_context, DecisionScenario, DecisionScenarioOutcome,
-        DryRunDecisionContextCampaignExecutor,
+        DecisionScenario, DecisionScenarioOutcome, DryRunDecisionContextCampaignExecutor,
+        compile_decision_context,
     };
     use crate::glioma_engine::{
         GliomaModality, GliomaModelSystem, GliomaSelectionWeights, LocalArtifactRef,

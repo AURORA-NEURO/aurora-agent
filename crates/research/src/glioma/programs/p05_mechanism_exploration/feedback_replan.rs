@@ -496,20 +496,11 @@ pub fn replan_glioma_mechanism_feedback(
             .iter()
             .find(|action_id| candidates[*action_id].mechanism_id == *mechanism_id)
             .cloned();
-        let rationale = if outcomes
-            .iter()
-            .any(|outcome| *outcome == MechanismFeedbackOutcome::Contradicted)
-        {
+        let rationale = if outcomes.contains(&MechanismFeedbackOutcome::Contradicted) {
             "contradiction feedback increases pressure for a discriminating next action"
-        } else if outcomes
-            .iter()
-            .any(|outcome| *outcome == MechanismFeedbackOutcome::Unresolved)
-        {
+        } else if outcomes.contains(&MechanismFeedbackOutcome::Unresolved) {
             "unresolved feedback retains exploration pressure and explicit uncertainty"
-        } else if outcomes
-            .iter()
-            .any(|outcome| *outcome == MechanismFeedbackOutcome::Supported)
-        {
+        } else if outcomes.contains(&MechanismFeedbackOutcome::Supported) {
             "supportive feedback shifts the frontier toward bounded validation"
         } else if next_action_id.is_some() {
             "no returned outcome is available; prior uncertainty keeps a bounded action visible"
@@ -573,8 +564,8 @@ pub fn replan_glioma_mechanism_feedback(
 #[cfg(test)]
 mod tests {
     use super::super::closed_loop::{
-        digest_input, MechanismClosedLoopActionScore, MechanismClosedLoopDecision,
-        MechanismClosedLoopDisposition,
+        MechanismClosedLoopActionScore, MechanismClosedLoopDecision,
+        MechanismClosedLoopDisposition, digest_input,
     };
     use super::super::evidence_assimilation::AssimilatedMechanismStatus;
     use super::*;
@@ -664,10 +655,12 @@ mod tests {
         .unwrap();
         assert_eq!(output.selected_action_order, vec!["action-a"]);
         assert_eq!(output.scores[0].feedback_adjustment_milli, 220);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("contradicted")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("contradicted"))
+        );
         output.validate().unwrap();
     }
 
@@ -695,9 +688,11 @@ mod tests {
             output.disposition,
             MechanismFeedbackReplanDisposition::Partial
         );
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("no-feedback")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("no-feedback"))
+        );
     }
 }

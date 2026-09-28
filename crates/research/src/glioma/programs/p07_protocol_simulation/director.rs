@@ -7,14 +7,14 @@
 //! dry-run as biological evidence, or turns a stage completion into a clinical conclusion.
 
 use super::action_execution::{
-    execute_glioma_action_portfolio_with_context, ActionPortfolioExecution,
-    ActionPortfolioExecutionError, ActionPortfolioExecutionRequest, GliomaActionArtifactInput,
-    GliomaActionExecutor, GliomaActionWorkflowScope,
+    ActionPortfolioExecution, ActionPortfolioExecutionError, ActionPortfolioExecutionRequest,
+    GliomaActionArtifactInput, GliomaActionExecutor, GliomaActionWorkflowScope,
+    execute_glioma_action_portfolio_with_context,
 };
 use crate::glioma_engine::{
-    compile_glioma_research, select_glioma_actions, GliomaActionCandidate, GliomaActionSelection,
-    GliomaModality, GliomaModelSystem, GliomaResearchIntent, GliomaResearchPlan,
-    GliomaSelectionConfig, GliomaSelectionWeights, GliomaStage, GliomaStageKind, StageReadiness,
+    GliomaActionCandidate, GliomaActionSelection, GliomaModality, GliomaModelSystem,
+    GliomaResearchIntent, GliomaResearchPlan, GliomaSelectionConfig, GliomaSelectionWeights,
+    GliomaStage, GliomaStageKind, StageReadiness, compile_glioma_research, select_glioma_actions,
 };
 use bioprism_foundation::Effect;
 use bioprism_ids::ContentHash;
@@ -839,14 +839,18 @@ mod tests {
                 })
         }));
         assert_eq!(output.disposition, GliomaDirectorDisposition::Partial);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("synthetic-dry-run")));
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("simulation-only")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("synthetic-dry-run"))
+        );
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("simulation-only"))
+        );
     }
 
     #[test]
@@ -856,14 +860,18 @@ mod tests {
         alternate.focus = GliomaDirectorFocus::EvidenceFirst;
         let second = plan_glioma_research_director(&alternate).unwrap();
         assert_ne!(first.digest, second.digest);
-        assert!(first
-            .actions
-            .iter()
-            .all(|action| action.readiness == StageReadiness::Ready));
-        assert!(first
-            .blocked_order
-            .iter()
-            .all(|entry| !entry.ends_with("dependency-omitted")));
+        assert!(
+            first
+                .actions
+                .iter()
+                .all(|action| action.readiness == StageReadiness::Ready)
+        );
+        assert!(
+            first
+                .blocked_order
+                .iter()
+                .all(|entry| !entry.ends_with("dependency-omitted"))
+        );
     }
 
     #[test]

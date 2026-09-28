@@ -806,10 +806,12 @@ mod tests {
         ));
         let output = analyze_glioma_latent_factors(&request(), &vectors).unwrap();
         assert_eq!(output.disposition, LatentFactorDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|reason| reason == "required-modality-coverage-incomplete"));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|reason| reason == "required-modality-coverage-incomplete")
+        );
     }
 
     #[test]
@@ -847,10 +849,12 @@ mod tests {
         request.require_all_modalities = false;
         let output = analyze_glioma_latent_factors(&request, &vectors).unwrap();
         assert_eq!(output.disposition, LatentFactorDisposition::Partial);
-        assert!(output
-            .missing_feature_order
-            .iter()
-            .any(|feature| feature == "imaging::y"));
+        assert!(
+            output
+                .missing_feature_order
+                .iter()
+                .any(|feature| feature == "imaging::y")
+        );
         vectors.reverse();
         let replay = analyze_glioma_latent_factors(&request, &vectors).unwrap();
         assert_eq!(output.digest, replay.digest);

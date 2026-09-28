@@ -332,10 +332,12 @@ mod tests {
         .unwrap();
         assert_eq!(report.disposition, MultimodalDisposition::Unresolved);
         assert_eq!(report.missing_modality_order, vec![GliomaModality::Imaging]);
-        assert!(report
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("required-modality-missing")));
+        assert!(
+            report
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("required-modality-missing"))
+        );
     }
 
     #[test]

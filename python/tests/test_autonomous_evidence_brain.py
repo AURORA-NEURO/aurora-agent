@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import replace
 import http.client
 import json
 
@@ -24,6 +24,7 @@ from prism_sdk import (
     InMemoryAutonomousEvidenceRuntimeJournal,
     JsonAutonomousEvidenceBackedCheckpointPersistence,
     LLMRuntime,
+    MAX_MODEL_CONTINUATION_STEPS,
     ModelCatalogue,
     ProviderError,
     ProviderRequest,
@@ -440,6 +441,7 @@ class _RecordingCheckpointStore:
             AutonomousEvidenceBackedProviderDispatchReceipt
         ] = []
         self.reject_dispatch = False
+        self.reject_dispatch_index: int | None = None
         self.commit_dispatch_then_throw = False
 
     def read(self) -> dict[str, object] | None:
@@ -478,7 +480,12 @@ class _RecordingCheckpointStore:
             private_receipt
         )
         observed = None if self.current is None else self.current.checkpoint_digest
-        if observed != expected or self.force_conflict or self.reject_dispatch:
+        if (
+            observed != expected
+            or self.force_conflict
+            or self.reject_dispatch
+            or receipt.dispatch_index == self.reject_dispatch_index
+        ):
             return False
         assert verified.status == "provider_in_flight"
         assert verified.provider_dispatch_count == receipt.dispatch_index
@@ -2738,20 +2745,135 @@ def test_resumable_provider_fence_rejects_unbound_multi_provider_modes_before_wo
     assert provider_calls == 0
 
 
-def test_resumable_provider_fence_rejects_adaptive_model_failover_before_work() -> None:
+def test_resumable_provider_failover_records_each_model_dispatch_receipt() -> None:
+    provider_requests: list[ProviderRequest] = []
+    candidates = [
+        {**_model()[0], "model": "test-model"},
+        {**_model()[0], "model": "fallback-model"},
+    ]
+
+    def provider_handler(request: ProviderRequest) -> dict[str, object]:
+        provider_requests.append(request)
+        if request.model == "test-model":
+            raise ProviderError("primary model timed out", status_code=408)
+        return {"text": "bounded answer", "usage": {"total_tokens": 4}}
+
+    runtime, credential_store = _in_memory_runtime(provider_handler)
+    agent = AutonomousAgent(
+        _Workspace(), runtime, model_catalogue=ModelCatalogue(candidates)
+    )
+    handle = credential_store.register("openai", "resumable-model-failover-test")
+    store = _RecordingCheckpointStore()
+    controller = AutonomousEvidenceBackedController(
+        agent, "resumable-model-failover-job", store
+    )
+
+    def projector(_value: object, context: object) -> list[dict[str, object]]:
+        requirement = context["requirement"]  # type: ignore[index]
+        return [{"label": requirement.label}]
+
+    result = controller.run(
+        task="use the reviewed fallback model after a provider failure",
+        requests=_requests(agent, ("science",)),
+        acquirer=_ResumableFixtureAcquirer("resumable-model-failover-evidence"),
+        projector=projector,
+        evaluator=_ResumableFixtureEvaluator(),
+        journal=InMemoryAutonomousEvidenceRuntimeJournal(),
+        credentials={"openai": handle},
+        model_candidates=candidates,
+        domains=("science",),
+        run_mode="domain",
+        run_options={"max_provider_failovers": 1},
+        approve_source_dispatch=True,
+        approve_provider_call=True,
+        resumable_policy_identity=_provider_policy_identity(),
+    )
+
+    assert result["run"].status == "completed"
+    assert [request.model for request in provider_requests] == [
+        "test-model",
+        "fallback-model",
+    ]
+    assert [receipt.model for receipt in store.dispatch_receipts] == [
+        request.model for request in provider_requests
+    ]
+    assert [receipt.dispatch_index for receipt in store.dispatch_receipts] == [1, 2]
+    assert result["run"].checkpoint.provider_dispatch_count == 2
+
+
+def test_resumable_provider_failover_stops_when_fallback_receipt_commit_fails() -> None:
+    provider_requests: list[ProviderRequest] = []
+    candidates = [
+        {**_model()[0], "model": "test-model"},
+        {**_model()[0], "model": "fallback-model"},
+    ]
+
+    def provider_handler(request: ProviderRequest) -> dict[str, object]:
+        provider_requests.append(request)
+        if request.model == "test-model":
+            raise ProviderError("primary model timed out", status_code=408)
+        return {"text": "must not dispatch", "usage": {"total_tokens": 4}}
+
+    runtime, credential_store = _in_memory_runtime(provider_handler)
+    agent = AutonomousAgent(
+        _Workspace(), runtime, model_catalogue=ModelCatalogue(candidates)
+    )
+    handle = credential_store.register("openai", "resumable-model-failover-commit-test")
+    store = _RecordingCheckpointStore()
+    store.reject_dispatch_index = 2
+    controller = AutonomousEvidenceBackedController(
+        agent, "resumable-model-failover-commit-job", store
+    )
+
+    def projector(_value: object, context: object) -> list[dict[str, object]]:
+        requirement = context["requirement"]  # type: ignore[index]
+        return [{"label": requirement.label}]
+
+    with pytest.raises(
+        BrainRunError,
+        match="provider dispatch atomic compare-and-swap conflict or lost acknowledgement",
+    ):
+        controller.run(
+            task="refuse fallback dispatch without its durable receipt",
+            requests=_requests(agent, ("science",)),
+            acquirer=_ResumableFixtureAcquirer("resumable-failover-commit-evidence"),
+            projector=projector,
+            evaluator=_ResumableFixtureEvaluator(),
+            journal=InMemoryAutonomousEvidenceRuntimeJournal(),
+            credentials={"openai": handle},
+            model_candidates=candidates,
+            domains=("science",),
+            run_mode="domain",
+            run_options={"max_provider_failovers": 1},
+            approve_source_dispatch=True,
+            approve_provider_call=True,
+            resumable_policy_identity=_provider_policy_identity(),
+        )
+
+    assert [request.model for request in provider_requests] == ["test-model"]
+    assert [receipt.dispatch_index for receipt in store.dispatch_receipts] == [1]
+    assert store.current is not None
+    assert store.current.status == "provider_in_flight"
+    assert store.current.provider_dispatch_count == 1
+
+
+def test_resumable_provider_fence_bounds_model_failover_candidates_before_work() -> None:
     class ForbiddenAgent:
         def evidence_plan(self, *_args: object, **_kwargs: object) -> object:
-            raise AssertionError("adaptive provider candidates reached planning")
+            raise AssertionError("over-limit provider candidates reached planning")
 
-    candidates = [*_model(), {**_model()[0], "model": "second-model"}]
-    with pytest.raises(ArgumentError, match="exactly one explicit model candidate"):
+    candidates = [
+        {**_model()[0], "model": f"model-{index}"}
+        for index in range(MAX_MODEL_CONTINUATION_STEPS + 1)
+    ]
+    with pytest.raises(ArgumentError, match="explicit model candidates"):
         run_autonomous_evidence_backed_resumable(
             ForbiddenAgent(),
-            task="reject ambiguous adaptive provider retries",
-            job_id="adaptive-provider-candidates-job",
+            task="reject an over-limit provider continuation ladder",
+            job_id="over-limit-provider-candidates-job",
             requests=({},),
             acquirer=lambda _context: (_ for _ in ()).throw(
-                AssertionError("adaptive provider candidates reached source dispatch")
+                AssertionError("over-limit candidates reached source dispatch")
             ),
             credentials={},
             checkpoint_sink=lambda _checkpoint: None,

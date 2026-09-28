@@ -14,124 +14,145 @@ pub mod context_replay;
 pub mod decision_context_artifact;
 pub mod decision_cycle;
 pub mod decision_loop_governor;
+pub mod federated_continual_promotion;
 pub mod federated_decision_context;
 pub mod mission_bridge;
 pub mod multi_study_context_artifact;
+pub mod multi_study_epoch_replay;
+pub mod multi_study_execution_receipt;
 pub mod multi_study_workflow;
 pub mod omission_certificate;
 pub mod value_calibration;
 pub mod value_optimizer;
 
 pub use action_bridge::{
-    plan_decision_actions, DecisionActionPlan, DecisionActionPlanDisposition,
-    DecisionActionPlanError, DecisionActionPlanRequest,
+    DecisionActionPlan, DecisionActionPlanDisposition, DecisionActionPlanError,
+    DecisionActionPlanRequest, plan_decision_actions,
 };
 pub use action_graph::{
-    compile_decision_action_graph, DecisionActionGraph, DecisionActionGraphDisposition,
-    DecisionActionGraphError, DecisionActionGraphRequest, DecisionGraphNode,
+    DecisionActionGraph, DecisionActionGraphDisposition, DecisionActionGraphError,
+    DecisionActionGraphRequest, DecisionGraphNode, compile_decision_action_graph,
 };
 pub use adaptive_branch_campaign::{
+    AdaptiveDecisionBranchCampaign, AdaptiveDecisionBranchCampaignDisposition,
+    AdaptiveDecisionBranchCampaignError, AdaptiveDecisionBranchCampaignRequest,
+    AdaptiveDecisionBranchCampaignRound, AdaptiveDecisionBranchCampaignStopReason,
     execute_glioma_adaptive_decision_branch_campaign,
-    execute_glioma_adaptive_decision_branch_campaign_dry_run, AdaptiveDecisionBranchCampaign,
-    AdaptiveDecisionBranchCampaignDisposition, AdaptiveDecisionBranchCampaignError,
-    AdaptiveDecisionBranchCampaignRequest, AdaptiveDecisionBranchCampaignRound,
-    AdaptiveDecisionBranchCampaignStopReason,
+    execute_glioma_adaptive_decision_branch_campaign_dry_run,
 };
 pub use adaptive_controller::{
-    execute_glioma_adaptive_decision_controller, AdaptiveDecisionCampaignDisposition,
-    AdaptiveDecisionCandidateScore, AdaptiveDecisionControllerError,
-    AdaptiveDecisionControllerRequest, AdaptiveDecisionControllerResult,
+    AdaptiveDecisionCampaignDisposition, AdaptiveDecisionCandidateScore,
+    AdaptiveDecisionControllerError, AdaptiveDecisionControllerRequest,
+    AdaptiveDecisionControllerResult, execute_glioma_adaptive_decision_controller,
 };
 pub use admission_gate::{
-    admit_glioma_decision_actions, DecisionAdmissionAction, DecisionAdmissionCampaignDisposition,
-    DecisionAdmissionDisposition, DecisionAdmissionError, DecisionAdmissionRecord,
-    DecisionAdmissionRequest, DecisionAdmissionResult,
+    DecisionAdmissionAction, DecisionAdmissionCampaignDisposition, DecisionAdmissionDisposition,
+    DecisionAdmissionError, DecisionAdmissionRecord, DecisionAdmissionRequest,
+    DecisionAdmissionResult, admit_glioma_decision_actions,
 };
 pub use branch_campaign::{
-    execute_glioma_decision_branch_campaign, BranchExecutionDisposition, DecisionBranchCampaign,
-    DecisionBranchCampaignDisposition, DecisionBranchCampaignError, DecisionBranchCampaignRequest,
-    DecisionBranchCampaignStopReason, DecisionBranchExecution,
+    BranchExecutionDisposition, DecisionBranchCampaign, DecisionBranchCampaignDisposition,
+    DecisionBranchCampaignError, DecisionBranchCampaignRequest, DecisionBranchCampaignStopReason,
+    DecisionBranchExecution, execute_glioma_decision_branch_campaign,
 };
 pub use branch_evidence::{
-    assimilate_glioma_decision_branch_evidence, DecisionBranchEvidence,
-    DecisionBranchEvidenceDisposition, DecisionBranchEvidenceError, DecisionBranchEvidenceOutcome,
-    DecisionBranchEvidenceOutcomeStatus, DecisionBranchEvidenceRecord,
-    DecisionBranchEvidenceRequest, DecisionBranchEvidenceStatus,
+    DecisionBranchEvidence, DecisionBranchEvidenceDisposition, DecisionBranchEvidenceError,
+    DecisionBranchEvidenceOutcome, DecisionBranchEvidenceOutcomeStatus,
+    DecisionBranchEvidenceRecord, DecisionBranchEvidenceRequest, DecisionBranchEvidenceStatus,
+    assimilate_glioma_decision_branch_evidence,
 };
 pub use branch_planner::{
-    plan_glioma_decision_branches, DecisionBranchPlan, DecisionBranchPlanDisposition,
-    DecisionBranchPlannerError, DecisionBranchPlannerRequest, DecisionBranchPortfolio,
-    DecisionScenario, DecisionScenarioOutcome, DecisionScenarioScore,
+    DecisionBranchPlan, DecisionBranchPlanDisposition, DecisionBranchPlannerError,
+    DecisionBranchPlannerRequest, DecisionBranchPortfolio, DecisionScenario,
+    DecisionScenarioOutcome, DecisionScenarioScore, plan_glioma_decision_branches,
 };
 pub use campaign::{
-    execute_glioma_decision_context_campaign, DecisionContextCampaign,
-    DecisionContextCampaignDisposition, DecisionContextCampaignError,
+    DecisionContextCampaign, DecisionContextCampaignDisposition, DecisionContextCampaignError,
     DecisionContextCampaignExecutionFailure, DecisionContextCampaignExecutor,
     DecisionContextCampaignRequest, DecisionContextCampaignRound,
     DecisionContextCampaignStopReason, DryRunDecisionContextCampaignExecutor,
+    execute_glioma_decision_context_campaign,
 };
 pub use context_compiler::{
-    compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,
-    DecisionContextDisposition, DecisionContextError, DecisionContextRequest,
+    DecisionAction, DecisionActionKind, DecisionContext, DecisionContextDisposition,
+    DecisionContextError, DecisionContextRequest, compile_decision_context,
 };
 pub use context_replay::{
-    replay_glioma_decision_context, DecisionContextActionOutcome,
-    DecisionContextActionOutcomeStatus, DecisionContextEpoch, DecisionContextReplay,
-    DecisionContextReplayDisposition, DecisionContextReplayError, DecisionContextReplayRequest,
-    DecisionContextReplayTransition,
+    DecisionContextActionOutcome, DecisionContextActionOutcomeStatus, DecisionContextEpoch,
+    DecisionContextReplay, DecisionContextReplayDisposition, DecisionContextReplayError,
+    DecisionContextReplayRequest, DecisionContextReplayTransition, replay_glioma_decision_context,
 };
 pub use decision_context_artifact::{
-    materialize_glioma_decision_context_artifact, DecisionContextArtifact,
-    DecisionContextArtifactAction, DecisionContextArtifactCompatibility,
+    DecisionContextArtifact, DecisionContextArtifactAction, DecisionContextArtifactCompatibility,
     DecisionContextArtifactConsumer, DecisionContextArtifactError, DecisionContextArtifactRequest,
+    materialize_glioma_decision_context_artifact,
 };
 pub use decision_cycle::{
-    execute_glioma_decision_operating_cycle, DecisionOperatingCycle,
-    DecisionOperatingCycleDisposition, DecisionOperatingCycleError, DecisionOperatingCycleRequest,
+    DecisionOperatingCycle, DecisionOperatingCycleDisposition, DecisionOperatingCycleError,
+    DecisionOperatingCycleRequest, execute_glioma_decision_operating_cycle,
 };
 pub use decision_loop_governor::{
-    govern_glioma_decision_loop, DecisionLoopGovernorDisposition, DecisionLoopGovernorError,
-    DecisionLoopGovernorRequest, DecisionLoopGovernorResult, DecisionLoopRound,
-    DecisionLoopRoundAssessment, DecisionLoopRoundDisposition, DecisionLoopStopReason,
+    DecisionLoopGovernorDisposition, DecisionLoopGovernorError, DecisionLoopGovernorRequest,
+    DecisionLoopGovernorResult, DecisionLoopRound, DecisionLoopRoundAssessment,
+    DecisionLoopRoundDisposition, DecisionLoopStopReason, govern_glioma_decision_loop,
+};
+pub use federated_continual_promotion::{
+    FederatedContinualPromotionDisposition, FederatedContinualPromotionError,
+    FederatedContinualPromotionReport, FederatedContinualPromotionRequest,
+    promote_glioma_federated_continual_context,
 };
 pub use federated_decision_context::{
-    aggregate_glioma_federated_decision_context, FederatedBranchDisposition,
-    FederatedBranchOutcome, FederatedDecisionBranchObservation, FederatedDecisionBranchSummary,
-    FederatedDecisionContextError, FederatedDecisionContextReport, FederatedDecisionContextRequest,
-    FederatedDecisionDisposition, FederatedDecisionSiteSummary,
+    FederatedBranchDisposition, FederatedBranchOutcome, FederatedDecisionBranchObservation,
+    FederatedDecisionBranchSummary, FederatedDecisionContextError, FederatedDecisionContextReport,
+    FederatedDecisionContextRequest, FederatedDecisionDisposition, FederatedDecisionSiteSummary,
+    aggregate_glioma_federated_decision_context,
 };
 pub use mission_bridge::{
-    execute_glioma_decision_mission, DecisionMissionBridgeDisposition, DecisionMissionBridgeError,
-    DecisionMissionBridgeRequest, DecisionMissionBridgeRun,
+    DecisionMissionBridgeDisposition, DecisionMissionBridgeError, DecisionMissionBridgeRequest,
+    DecisionMissionBridgeRun, execute_glioma_decision_mission,
 };
 pub use multi_study_context_artifact::{
-    align_glioma_multi_study_context_artifacts, MultiStudyActionDisposition,
-    MultiStudyContextDisposition, MultiStudyContextError, MultiStudyContextInput,
-    MultiStudyContextRequest, MultiStudyDecisionAction, MultiStudyDecisionContextArtifact,
+    MultiStudyActionDisposition, MultiStudyActionOutcome, MultiStudyContextDisposition,
+    MultiStudyContextError, MultiStudyContextInput, MultiStudyContextRequest,
+    MultiStudyDecisionAction, MultiStudyDecisionContextArtifact,
+    align_glioma_multi_study_context_artifacts,
+};
+pub use multi_study_epoch_replay::{
+    MultiStudyActionEpochAssessment, MultiStudyActionEpochDisposition,
+    MultiStudyActionTemporalAssessment, MultiStudyContextEpochReplay,
+    MultiStudyContextEpochReplayDisposition, MultiStudyContextEpochReplayError,
+    MultiStudyContextEpochReplayRequest, MultiStudyContextEpochTransition,
+    MultiStudyTemporalActionDisposition, replay_glioma_multi_study_context_epochs,
+};
+pub use multi_study_execution_receipt::{
+    MultiStudyExecutionActionOutcome, MultiStudyExecutionReceiptBinding,
+    MultiStudyExecutionReceiptDisposition, MultiStudyExecutionReceiptError,
+    MultiStudyExecutionReceiptReport, MultiStudyExecutionReceiptRequest,
+    MultiStudyExecutionSourceSnapshot, MultiStudyExecutionStageSnapshot,
+    MultiStudyExecutionTaskSnapshot, reconcile_glioma_multi_study_execution_receipts,
 };
 pub use multi_study_workflow::{
-    plan_glioma_multi_study_workflow, MultiStudyStudyBudget, MultiStudyTaskDisposition,
-    MultiStudyWorkflowDisposition, MultiStudyWorkflowError, MultiStudyWorkflowPlan,
-    MultiStudyWorkflowRequest, MultiStudyWorkflowTask,
+    MultiStudyStudyBudget, MultiStudyTaskDisposition, MultiStudyWorkflowDisposition,
+    MultiStudyWorkflowError, MultiStudyWorkflowPlan, MultiStudyWorkflowRequest,
+    MultiStudyWorkflowTask, plan_glioma_multi_study_workflow,
 };
 pub use omission_certificate::{
-    certify_decision_omissions, DecisionCoverageState, DecisionOmissionCertificate,
-    DecisionOmissionCertificateError, DecisionOmissionCertificateRequest,
-    DecisionOmissionDisposition, DecisionOmissionEntry,
+    DecisionCoverageState, DecisionOmissionCertificate, DecisionOmissionCertificateError,
+    DecisionOmissionCertificateRequest, DecisionOmissionDisposition, DecisionOmissionEntry,
+    certify_decision_omissions,
 };
 pub use value_calibration::{
-    calibrate_glioma_decision_value, DecisionValueCalibrationCampaignDisposition,
-    DecisionValueCalibrationDisposition, DecisionValueCalibrationError,
-    DecisionValueCalibrationRecord, DecisionValueCalibrationRequest,
-    DecisionValueCalibrationResult, DecisionValueObservation,
+    DecisionValueCalibrationCampaignDisposition, DecisionValueCalibrationDisposition,
+    DecisionValueCalibrationError, DecisionValueCalibrationRecord, DecisionValueCalibrationRequest,
+    DecisionValueCalibrationResult, DecisionValueObservation, calibrate_glioma_decision_value,
 };
 pub use value_optimizer::{
-    optimize_glioma_decision_value, DecisionValueCampaignDisposition, DecisionValueCandidate,
-    DecisionValueCandidateScore, DecisionValueDisposition, DecisionValueError,
-    DecisionValuePortfolio, DecisionValueRequest, DecisionValueResult, DecisionValueWeights,
+    DecisionValueCampaignDisposition, DecisionValueCandidate, DecisionValueCandidateScore,
+    DecisionValueDisposition, DecisionValueError, DecisionValuePortfolio, DecisionValueRequest,
+    DecisionValueResult, DecisionValueWeights, optimize_glioma_decision_value,
 };
 
-use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
+use crate::glioma::catalog::{GliomaProgramDescriptor, GliomaProgramId, glioma_program_catalog};
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::DecisionContext;
 

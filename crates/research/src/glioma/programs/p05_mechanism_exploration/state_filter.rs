@@ -595,10 +595,12 @@ mod tests {
         request.mechanisms[1] = stress;
         let result = filter_glioma_mechanism_states(&request).expect("state filter");
         assert_eq!(result.disposition, MechanismStateFilterDisposition::Partial);
-        assert!(result
-            .uncertainty_order
-            .iter()
-            .any(|item| item.contains("coverage")));
+        assert!(
+            result
+                .uncertainty_order
+                .iter()
+                .any(|item| item.contains("coverage"))
+        );
     }
 
     #[test]
@@ -609,9 +611,11 @@ mod tests {
         ]))
         .expect("state filter");
         assert!(result.change_point_order.contains(&2));
-        assert!(result
-            .negative_evidence_order
-            .iter()
-            .any(|item| item.contains("time-2")));
+        assert!(
+            result
+                .negative_evidence_order
+                .iter()
+                .any(|item| item.contains("time-2"))
+        );
     }
 }

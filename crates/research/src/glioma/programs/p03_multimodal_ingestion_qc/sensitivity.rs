@@ -356,7 +356,7 @@ pub fn analyze_glioma_multimodal_sensitivity(
         let leave_delta =
             leave_one_out.map(|value| abs_difference(value, baseline.unwrap_or(value)));
         let low_value = {
-            let mut altered = eligible.iter().copied().collect::<Vec<_>>();
+            let mut altered = eligible.to_vec();
             let altered_observation = EndpointEvidence {
                 value_milli: clamp_value(
                     i128::from(observation.value_milli) - i128::from(request.perturbation_milli),
@@ -368,7 +368,7 @@ pub fn analyze_glioma_multimodal_sensitivity(
             aggregate(&altered)
         };
         let high_value = {
-            let mut altered = eligible.iter().copied().collect::<Vec<_>>();
+            let mut altered = eligible.to_vec();
             let altered_observation = EndpointEvidence {
                 value_milli: clamp_value(
                     i128::from(observation.value_milli) + i128::from(request.perturbation_milli),
@@ -576,13 +576,17 @@ mod tests {
         let output = analyze_glioma_multimodal_sensitivity(&request).expect("blocked output");
         assert_eq!(output.disposition, SensitivityDisposition::Blocked);
         assert_eq!(output.baseline_value_milli, Some(700));
-        assert!(output
-            .missing_modality_order
-            .contains(&GliomaModality::Imaging));
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|value| value.contains("required-modality-missing")));
+        assert!(
+            output
+                .missing_modality_order
+                .contains(&GliomaModality::Imaging)
+        );
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|value| value.contains("required-modality-missing"))
+        );
     }
 
     #[test]

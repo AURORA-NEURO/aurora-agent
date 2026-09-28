@@ -478,11 +478,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.disposition, ContradictionCutDisposition::Covered);
-        assert_eq!(output.conflicts[0].covered_by_audit, true);
-        assert!(output
-            .next_action_order
-            .iter()
-            .any(|item| item == "audit:contradict"));
+        assert!(output.conflicts[0].covered_by_audit);
+        assert!(
+            output
+                .next_action_order
+                .iter()
+                .any(|item| item == "audit:contradict")
+        );
         output.validate().unwrap();
     }
 
@@ -503,10 +505,12 @@ mod tests {
             ContradictionCutDisposition::BudgetBlocked
         );
         assert_eq!(output.unresolved_claim_order, vec!["claim-a"]);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("uncovered")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("uncovered"))
+        );
     }
 
     #[test]

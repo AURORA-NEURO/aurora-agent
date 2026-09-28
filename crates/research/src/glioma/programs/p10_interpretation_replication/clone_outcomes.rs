@@ -662,12 +662,12 @@ pub fn analyze_glioma_clone_panel_outcomes(
 mod tests {
     use super::*;
     use crate::glioma::programs::p05_mechanism_exploration::{
-        analyze_glioma_clonal_evolution, ClonalEvolutionRequest, CloneMarker, CloneMarkerState,
-        CloneProfile,
+        ClonalEvolutionRequest, CloneMarker, CloneMarkerState, CloneProfile,
+        analyze_glioma_clonal_evolution,
     };
     use crate::glioma::programs::p06_experiment_design::{
-        plan_glioma_clone_perturbation_panel, ClonePerturbationCandidate, ClonePerturbationKind,
-        ClonePerturbationPanelRequest,
+        ClonePerturbationCandidate, ClonePerturbationKind, ClonePerturbationPanelRequest,
+        plan_glioma_clone_perturbation_panel,
     };
     use bioprism_ids::ContentHash;
 
@@ -818,14 +818,18 @@ mod tests {
         let output =
             analyze_glioma_clone_panel_outcomes(&request(), &panel, &observations).unwrap();
         assert_eq!(output.disposition, ClonePanelOutcomeDisposition::Partial);
-        assert!(output
-            .next_action_order
-            .iter()
-            .any(|item| item.starts_with("measure:")));
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item == "selected-panel-cells-are-missing"));
+        assert!(
+            output
+                .next_action_order
+                .iter()
+                .any(|item| item.starts_with("measure:"))
+        );
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item == "selected-panel-cells-are-missing")
+        );
     }
 
     #[test]
@@ -836,10 +840,12 @@ mod tests {
         let output =
             analyze_glioma_clone_panel_outcomes(&request(), &panel, &observations).unwrap();
         assert_eq!(output.disposition, ClonePanelOutcomeDisposition::Partial);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("declared-contradictory-measurement")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("declared-contradictory-measurement"))
+        );
     }
 
     #[test]

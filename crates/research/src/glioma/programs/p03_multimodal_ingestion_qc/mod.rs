@@ -1,6 +1,6 @@
 //! Multimodal ingestion and quality-control program ownership.
 
-use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
+use crate::glioma::catalog::{GliomaProgramDescriptor, GliomaProgramId, glioma_program_catalog};
 
 pub mod campaign;
 pub mod concordance;
@@ -36,170 +36,167 @@ pub mod temporal_fusion;
 pub mod temporal_spatial_alignment;
 
 pub use campaign::{
-    execute_glioma_multimodal_ingestion_campaign, DryRunMultimodalIngestionCampaignExecutor,
-    IngestionQcAction, IngestionQcActionKind, MultimodalIngestionCampaign,
-    MultimodalIngestionCampaignDisposition, MultimodalIngestionCampaignError,
-    MultimodalIngestionCampaignExecutor, MultimodalIngestionCampaignRequest,
-    MultimodalIngestionCampaignRound, MultimodalIngestionCampaignStopReason,
-    MultimodalIngestionExecutionFailure,
+    DryRunMultimodalIngestionCampaignExecutor, IngestionQcAction, IngestionQcActionKind,
+    MultimodalIngestionCampaign, MultimodalIngestionCampaignDisposition,
+    MultimodalIngestionCampaignError, MultimodalIngestionCampaignExecutor,
+    MultimodalIngestionCampaignRequest, MultimodalIngestionCampaignRound,
+    MultimodalIngestionCampaignStopReason, MultimodalIngestionExecutionFailure,
+    execute_glioma_multimodal_ingestion_campaign,
 };
 pub use concordance::{
-    analyze_multimodal_concordance, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
-    FeatureValue, ModalityConcordance, ModalityVector, MultimodalConcordance,
-    PairConcordanceDisposition,
+    ConcordanceDisposition, ConcordanceError, ConcordanceRequest, FeatureValue,
+    ModalityConcordance, ModalityVector, MultimodalConcordance, PairConcordanceDisposition,
+    analyze_multimodal_concordance,
 };
 pub use consensus::{
-    analyze_multimodal_consensus, ConsensusAssignment, ConsensusCluster, ConsensusDisposition,
-    ConsensusError, ConsensusRequest, MultimodalConsensus,
+    ConsensusAssignment, ConsensusCluster, ConsensusDisposition, ConsensusError, ConsensusRequest,
+    MultimodalConsensus, analyze_multimodal_consensus,
 };
 pub use contradiction_adjudication::{
-    adjudicate_glioma_multimodal_contradictions, ContradictionAdjudication,
-    ContradictionAdjudicationDisposition, ContradictionAdjudicationError,
-    ContradictionAdjudicationRequest, ContradictionKind, ModalityPairAdjudication,
+    ContradictionAdjudication, ContradictionAdjudicationDisposition,
+    ContradictionAdjudicationError, ContradictionAdjudicationRequest, ContradictionKind,
+    ModalityPairAdjudication, adjudicate_glioma_multimodal_contradictions,
 };
 pub use decision_gate::{
-    analyze_glioma_multimodal_decision_gate, DecisionDirection, DecisionGateModalityObservation,
-    MultimodalDecisionGateAnalysis, MultimodalDecisionGateDisposition, MultimodalDecisionGateError,
-    MultimodalDecisionGateRequest,
+    DecisionDirection, DecisionGateModalityObservation, MultimodalDecisionGateAnalysis,
+    MultimodalDecisionGateDisposition, MultimodalDecisionGateError, MultimodalDecisionGateRequest,
+    analyze_glioma_multimodal_decision_gate,
 };
 pub use drift_surveillance::{
-    surveil_glioma_multimodal_drift, DriftDisposition, DriftMetricSummary, DriftObservation,
-    DriftSurveillance, DriftSurveillanceError, DriftSurveillanceRequest,
+    DriftDisposition, DriftMetricSummary, DriftObservation, DriftSurveillance,
+    DriftSurveillanceError, DriftSurveillanceRequest, surveil_glioma_multimodal_drift,
 };
 pub use dropout_stress::{
-    analyze_glioma_multimodal_dropout_stress, DropoutModalitySignal, DropoutScenario,
-    DropoutScenarioDisposition, DropoutScenarioResult, DropoutStressAnalysis,
-    DropoutStressDisposition, DropoutStressError, DropoutStressRequest,
+    DropoutModalitySignal, DropoutScenario, DropoutScenarioDisposition, DropoutScenarioResult,
+    DropoutStressAnalysis, DropoutStressDisposition, DropoutStressError, DropoutStressRequest,
+    analyze_glioma_multimodal_dropout_stress,
 };
 pub use evidence_fusion::{
-    analyze_glioma_multimodal_evidence_fusion, EndpointEvidence, EvidenceContribution,
-    EvidenceFusionAnalysis, EvidenceFusionDisposition, EvidenceFusionError, EvidenceFusionRequest,
+    EndpointEvidence, EvidenceContribution, EvidenceFusionAnalysis, EvidenceFusionDisposition,
+    EvidenceFusionError, EvidenceFusionRequest, analyze_glioma_multimodal_evidence_fusion,
 };
 pub use graph_fusion::{
-    analyze_glioma_multimodal_graph_fusion, GraphFusionAnalysis, GraphFusionDisposition,
-    GraphFusionError, GraphFusionNeighbour, GraphFusionRequest, GraphFusionState,
-    GraphFusionVector,
+    GraphFusionAnalysis, GraphFusionDisposition, GraphFusionError, GraphFusionNeighbour,
+    GraphFusionRequest, GraphFusionState, GraphFusionVector,
+    analyze_glioma_multimodal_graph_fusion,
 };
 pub use harmonization::{
-    harmonize_glioma_multimodal_batches, BatchHarmonizationDiagnostic, HarmonizationDisposition,
-    HarmonizationError, HarmonizationRequest, HarmonizationVector, HarmonizedFeature,
-    HarmonizedVector, MultimodalHarmonization,
+    BatchHarmonizationDiagnostic, HarmonizationDisposition, HarmonizationError,
+    HarmonizationRequest, HarmonizationVector, HarmonizedFeature, HarmonizedVector,
+    MultimodalHarmonization, harmonize_glioma_multimodal_batches,
 };
 pub use ingestion_manifest::{
-    build_glioma_multimodal_ingestion_manifest, IngestionManifestDisposition,
-    IngestionManifestError, MultimodalIngestionItem, MultimodalIngestionManifest,
-    MultimodalIngestionManifestRequest,
+    IngestionManifestDisposition, IngestionManifestError, MultimodalIngestionItem,
+    MultimodalIngestionManifest, MultimodalIngestionManifestRequest,
+    build_glioma_multimodal_ingestion_manifest,
 };
 pub use latent_factors::{
-    analyze_glioma_latent_factors, LatentFactorAnalysis, LatentFactorComponent,
-    LatentFactorDisposition, LatentFactorError, LatentFactorRequest, LatentFactorVector,
-    LatentLoading, LatentScore,
+    LatentFactorAnalysis, LatentFactorComponent, LatentFactorDisposition, LatentFactorError,
+    LatentFactorRequest, LatentFactorVector, LatentLoading, LatentScore,
+    analyze_glioma_latent_factors,
 };
 pub use missingness_audit::{
-    analyze_glioma_multimodal_missingness, MissingnessAudit, MissingnessAuditDisposition,
-    MissingnessAuditError, MissingnessAuditRequest, MissingnessModalitySummary,
-    MissingnessObservation, MissingnessPairSummary, MissingnessPattern,
-    MissingnessPatternDisposition, MissingnessState,
+    MissingnessAudit, MissingnessAuditDisposition, MissingnessAuditError, MissingnessAuditRequest,
+    MissingnessModalitySummary, MissingnessObservation, MissingnessPairSummary, MissingnessPattern,
+    MissingnessPatternDisposition, MissingnessState, analyze_glioma_multimodal_missingness,
 };
 pub use modality_portfolio::{
-    plan_glioma_multimodal_portfolio, ModalityCapability, ModalityPortfolioAlternative,
-    ModalityPortfolioDisposition, ModalityPortfolioError, ModalityPortfolioPlan,
-    ModalityPortfolioRequest,
+    ModalityCapability, ModalityPortfolioAlternative, ModalityPortfolioDisposition,
+    ModalityPortfolioError, ModalityPortfolioPlan, ModalityPortfolioRequest,
+    plan_glioma_multimodal_portfolio,
 };
 pub use operating_cycle::{
-    execute_glioma_multimodal_operating_cycle, execute_glioma_multimodal_operating_cycle_dry_run,
     GliomaMultimodalOperatingCycle, GliomaMultimodalOperatingCycleDisposition,
     GliomaMultimodalOperatingCycleError, GliomaMultimodalOperatingCycleRequest,
-    MultimodalExecutionMode,
+    MultimodalExecutionMode, execute_glioma_multimodal_operating_cycle,
+    execute_glioma_multimodal_operating_cycle_dry_run,
 };
 pub use prospective_quality::{
-    forecast_glioma_multimodal_quality, ModalityQualityForecast, ProspectiveQualityError,
-    ProspectiveQualityForecast, ProspectiveQualityRequest, QualityForecastDisposition,
-    QualityForecastObservation,
+    ModalityQualityForecast, ProspectiveQualityError, ProspectiveQualityForecast,
+    ProspectiveQualityRequest, QualityForecastDisposition, QualityForecastObservation,
+    forecast_glioma_multimodal_quality,
 };
 pub use quality_adaptive_campaign::{
-    execute_glioma_multimodal_quality_adaptive_campaign, QualityAdaptiveCampaign,
-    QualityAdaptiveCampaignDisposition, QualityAdaptiveCampaignError,
+    QualityAdaptiveCampaign, QualityAdaptiveCampaignDisposition, QualityAdaptiveCampaignError,
     QualityAdaptiveCampaignRequest, QualityAdaptiveCampaignRound,
-    QualityAdaptiveCampaignStopReason,
+    QualityAdaptiveCampaignStopReason, execute_glioma_multimodal_quality_adaptive_campaign,
 };
 pub use quality_execution::{
-    execute_glioma_multimodal_quality_schedule, DryRunQualityScheduleExecutor,
-    QualityExecutionApproval, QualityExecutionDisposition, QualityExecutionError,
-    QualityExecutionFailure, QualityExecutionMode, QualityExecutionObservation,
-    QualityExecutionRequest, QualityExecutionResult, QualityExecutionRun,
-    QualityExecutionStopReason, QualityRunDisposition, QualityScheduleExecutor,
+    DryRunQualityScheduleExecutor, QualityExecutionApproval, QualityExecutionDisposition,
+    QualityExecutionError, QualityExecutionFailure, QualityExecutionMode,
+    QualityExecutionObservation, QualityExecutionRequest, QualityExecutionResult,
+    QualityExecutionRun, QualityExecutionStopReason, QualityRunDisposition,
+    QualityScheduleExecutor, execute_glioma_multimodal_quality_schedule,
 };
 pub use quality_recovery::{
-    verify_glioma_multimodal_quality_recovery, QualityRecoveryCampaignDisposition,
-    QualityRecoveryError, QualityRecoveryModalityDisposition, QualityRecoveryModalityResult,
-    QualityRecoveryObservation, QualityRecoveryPhase, QualityRecoveryRequest,
-    QualityRecoveryResult,
+    QualityRecoveryCampaignDisposition, QualityRecoveryError, QualityRecoveryModalityDisposition,
+    QualityRecoveryModalityResult, QualityRecoveryObservation, QualityRecoveryPhase,
+    QualityRecoveryRequest, QualityRecoveryResult, verify_glioma_multimodal_quality_recovery,
 };
 pub use quality_remediation::{
-    plan_glioma_multimodal_quality_remediation, QualityRemediationActionKind,
-    QualityRemediationCandidate, QualityRemediationDisposition, QualityRemediationError,
-    QualityRemediationPlan, QualityRemediationRequest, QualityRemediationStep,
+    QualityRemediationActionKind, QualityRemediationCandidate, QualityRemediationDisposition,
+    QualityRemediationError, QualityRemediationPlan, QualityRemediationRequest,
+    QualityRemediationStep, plan_glioma_multimodal_quality_remediation,
 };
 pub use quality_root_cause::{
-    attribute_glioma_multimodal_quality_root_cause, QualityIncidentSignal, QualityRootCause,
-    QualityRootCauseAttribution, QualityRootCauseAttributionResult,
-    QualityRootCauseCampaignDisposition, QualityRootCauseDisposition, QualityRootCauseError,
-    QualityRootCauseRequest, QualitySignalScope,
+    QualityIncidentSignal, QualityRootCause, QualityRootCauseAttribution,
+    QualityRootCauseAttributionResult, QualityRootCauseCampaignDisposition,
+    QualityRootCauseDisposition, QualityRootCauseError, QualityRootCauseRequest,
+    QualitySignalScope, attribute_glioma_multimodal_quality_root_cause,
 };
 pub use quality_scheduler::{
-    plan_glioma_multimodal_quality_schedule, QualityAcquisitionCandidate,
-    QualityScheduleAlternative, QualityScheduleDisposition, QualityScheduleError,
-    QualityScheduleItem, QualitySchedulePlan, QualityScheduleRequest,
+    QualityAcquisitionCandidate, QualityScheduleAlternative, QualityScheduleDisposition,
+    QualityScheduleError, QualityScheduleItem, QualitySchedulePlan, QualityScheduleRequest,
+    plan_glioma_multimodal_quality_schedule,
 };
 pub use quality_transport::{
-    calibrate_glioma_multimodal_quality_transport, QualityTransportCalibration,
-    QualityTransportCell, QualityTransportDisposition, QualityTransportError,
-    QualityTransportModalityDisposition, QualityTransportModalitySummary, QualityTransportRequest,
+    QualityTransportCalibration, QualityTransportCell, QualityTransportDisposition,
+    QualityTransportError, QualityTransportModalityDisposition, QualityTransportModalitySummary,
+    QualityTransportRequest, calibrate_glioma_multimodal_quality_transport,
 };
 pub use readiness_gate::{
-    execute_glioma_multimodal_readiness_gate, MultimodalReadinessError, MultimodalReadinessRequest,
-    MultimodalResearchReadiness, MultimodalResearchReadinessDisposition, MultimodalResearchSurface,
-    MultimodalSurfaceDecision, MultimodalSurfaceReadiness,
+    MultimodalReadinessError, MultimodalReadinessRequest, MultimodalResearchReadiness,
+    MultimodalResearchReadinessDisposition, MultimodalResearchSurface, MultimodalSurfaceDecision,
+    MultimodalSurfaceReadiness, execute_glioma_multimodal_readiness_gate,
 };
 pub use reliability_calibration::{
-    calibrate_glioma_multimodal_reliability, ReliabilityCalibration, ReliabilityCalibrationError,
-    ReliabilityCalibrationRequest, ReliabilityDisposition, ReliabilityModalitySummary,
-    ReliabilityObservation,
+    ReliabilityCalibration, ReliabilityCalibrationError, ReliabilityCalibrationRequest,
+    ReliabilityDisposition, ReliabilityModalitySummary, ReliabilityObservation,
+    calibrate_glioma_multimodal_reliability,
 };
 pub use sensitivity::{
-    analyze_glioma_multimodal_sensitivity, ModalitySensitivity, SensitivityAnalysis,
-    SensitivityDisposition, SensitivityError, SensitivityRequest,
+    ModalitySensitivity, SensitivityAnalysis, SensitivityDisposition, SensitivityError,
+    SensitivityRequest, analyze_glioma_multimodal_sensitivity,
 };
 pub use spatial_communication::{
-    analyze_glioma_spatial_communication, LigandReceptorPair, SpatialCommunicationAnalysis,
-    SpatialCommunicationCell, SpatialCommunicationDisposition, SpatialCommunicationError,
-    SpatialCommunicationPair, SpatialCommunicationPairDisposition, SpatialCommunicationRequest,
+    LigandReceptorPair, SpatialCommunicationAnalysis, SpatialCommunicationCell,
+    SpatialCommunicationDisposition, SpatialCommunicationError, SpatialCommunicationPair,
+    SpatialCommunicationPairDisposition, SpatialCommunicationRequest,
+    analyze_glioma_spatial_communication,
 };
 pub use spatial_niche::{
-    analyze_glioma_spatial_niches, SpatialCell, SpatialNiche, SpatialNicheAnalysis,
-    SpatialNicheDisposition, SpatialNicheError, SpatialNicheInteraction, SpatialNicheRequest,
+    SpatialCell, SpatialNiche, SpatialNicheAnalysis, SpatialNicheDisposition, SpatialNicheError,
+    SpatialNicheInteraction, SpatialNicheRequest, analyze_glioma_spatial_niches,
 };
 pub use spatial_propagation::{
-    analyze_glioma_spatial_state_propagation, SpatialPropagationAnalysis,
-    SpatialPropagationDisposition, SpatialPropagationEdge, SpatialPropagationError,
-    SpatialPropagationRequest, SpatialPropagationTrajectory,
+    SpatialPropagationAnalysis, SpatialPropagationDisposition, SpatialPropagationEdge,
+    SpatialPropagationError, SpatialPropagationRequest, SpatialPropagationTrajectory,
+    analyze_glioma_spatial_state_propagation,
 };
 pub use spatial_registration::{
-    register_glioma_spatial_samples, RegisteredSpatialCell, RegistrationLandmark,
-    SampleRegistration, SampleRegistrationDisposition, SpatialRegistrationAnalysis,
-    SpatialRegistrationCell, SpatialRegistrationDisposition, SpatialRegistrationError,
-    SpatialRegistrationRequest,
+    RegisteredSpatialCell, RegistrationLandmark, SampleRegistration, SampleRegistrationDisposition,
+    SpatialRegistrationAnalysis, SpatialRegistrationCell, SpatialRegistrationDisposition,
+    SpatialRegistrationError, SpatialRegistrationRequest, register_glioma_spatial_samples,
 };
 pub use temporal_fusion::{
-    analyze_glioma_temporal_multimodal_fusion, TemporalFusionAnalysis, TemporalFusionDisposition,
-    TemporalFusionError, TemporalFusionRequest, TemporalObservation, TemporalState,
-    TemporalStateFeature, TemporalTransition, TemporalTransitionDirection,
+    TemporalFusionAnalysis, TemporalFusionDisposition, TemporalFusionError, TemporalFusionRequest,
+    TemporalObservation, TemporalState, TemporalStateFeature, TemporalTransition,
+    TemporalTransitionDirection, analyze_glioma_temporal_multimodal_fusion,
 };
 pub use temporal_spatial_alignment::{
-    analyze_glioma_temporal_spatial_alignment, AlignedSampleState, AlignmentGate, SampleTimepoint,
-    TemporalSpatialAction, TemporalSpatialAlignment, TemporalSpatialAlignmentError,
-    TemporalSpatialAlignmentRequest, TemporalSpatialDisposition,
+    AlignedSampleState, AlignmentGate, SampleTimepoint, TemporalSpatialAction,
+    TemporalSpatialAlignment, TemporalSpatialAlignmentError, TemporalSpatialAlignmentRequest,
+    TemporalSpatialDisposition, analyze_glioma_temporal_spatial_alignment,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MultimodalIngestionQc;

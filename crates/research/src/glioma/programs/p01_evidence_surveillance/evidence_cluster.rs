@@ -578,10 +578,12 @@ mod tests {
             ),
         ]))
         .expect("cluster");
-        assert!(output
-            .clusters
-            .iter()
-            .any(|cluster| cluster.verdict == EvidenceClusterVerdict::Contradicted));
+        assert!(
+            output
+                .clusters
+                .iter()
+                .any(|cluster| cluster.verdict == EvidenceClusterVerdict::Contradicted)
+        );
         assert!(output.clusters.iter().any(|cluster| {
             cluster
                 .members

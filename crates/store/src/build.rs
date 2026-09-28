@@ -8,6 +8,7 @@
 use crate::error::StoreError;
 use crate::sorted_index::SortedIndexWriter;
 use bioprism_ids::ContentHash;
+use bioprism_world::World;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -38,6 +39,7 @@ pub struct StoreManifest {
 
 /// Writes an indexed store for `world` into `directory`.
 pub fn build(world: &Value, directory: &Path) -> Result<StoreManifest, StoreError> {
+    World::from_json(world.clone()).map_err(|_| StoreError::MalformedWorld)?;
     std::fs::create_dir_all(directory)?;
 
     let object = world.as_object().ok_or(StoreError::MalformedWorld)?;
@@ -79,7 +81,9 @@ pub fn build(world: &Value, directory: &Path) -> Result<StoreManifest, StoreErro
             .push(id.to_string());
 
         if let Some(tags) = fact.get("tags").and_then(Value::as_array) {
-            for tag in tags.iter().filter_map(Value::as_str) {
+            let unique_tags: std::collections::BTreeSet<&str> =
+                tags.iter().filter_map(Value::as_str).collect();
+            for tag in unique_tags {
                 *tag_counts.entry(tag.to_string()).or_default() += 1;
                 tag_members
                     .entry(tag.to_string())

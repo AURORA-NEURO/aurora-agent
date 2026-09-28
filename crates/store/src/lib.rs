@@ -9,6 +9,13 @@
 //! A store is built once per world release and answers point queries by binary search over
 //! on-disk sorted indices, with aggregates served from a manifest. Compiling against it costs what
 //! the compiled region costs.
+//!
+//! # Not implemented
+//!
+//! - A network database, multi-writer coordination, replication, or distributed transactions. A
+//!   store is a locally built, immutable index for one world release.
+//! - Authentication, access control, or automatic refresh of source worlds. Callers control the
+//!   release inputs and the environment that can read the store.
 
 pub mod build;
 pub mod error;

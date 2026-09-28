@@ -1,6 +1,6 @@
 //! Instrument and robotics preflight program ownership.
 
-use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
+use crate::glioma::catalog::{GliomaProgramDescriptor, GliomaProgramId, glioma_program_catalog};
 
 pub mod adaptive_campaign;
 pub mod assay_adjudication;
@@ -20,100 +20,100 @@ pub mod science_loop;
 pub mod signal_extraction;
 
 pub use assay_adjudication::{
-    adjudicate_glioma_assay_evidence, AssayEvidenceDisposition, AssayEvidenceError,
-    AssayEvidenceObservation, AssayEvidenceRecord, AssayEvidenceRequest,
-    InstrumentAssayEvidenceAssessment,
+    AssayEvidenceDisposition, AssayEvidenceError, AssayEvidenceObservation, AssayEvidenceRecord,
+    AssayEvidenceRequest, InstrumentAssayEvidenceAssessment, adjudicate_glioma_assay_evidence,
 };
 pub use batch_stability::{
-    analyze_glioma_instrument_batch_stability, BatchStabilityDisposition, BatchStabilityError,
-    ChannelStability, ChannelStabilityDisposition, InstrumentBatchStability, InstrumentSignalRun,
-    SignalBatchStabilityRequest,
+    BatchStabilityDisposition, BatchStabilityError, ChannelStability, ChannelStabilityDisposition,
+    InstrumentBatchStability, InstrumentSignalRun, SignalBatchStabilityRequest,
+    analyze_glioma_instrument_batch_stability,
 };
 pub use federated_consensus::{
-    analyze_glioma_federated_instrument_consensus, FederatedConsensusDisposition,
-    FederatedConsensusError, FederatedEndpointConsensus, FederatedEndpointDisposition,
-    FederatedEndpointValue, FederatedInstrumentConsensus, FederatedInstrumentConsensusRequest,
-    FederatedInstrumentSite,
+    FederatedConsensusDisposition, FederatedConsensusError, FederatedEndpointConsensus,
+    FederatedEndpointDisposition, FederatedEndpointValue, FederatedInstrumentConsensus,
+    FederatedInstrumentConsensusRequest, FederatedInstrumentSite,
+    analyze_glioma_federated_instrument_consensus,
 };
 
 pub use adaptive_campaign::{
-    dry_run_adaptive_instrument_executor, execute_glioma_adaptive_instrument_campaign,
     AdaptiveInstrumentCampaign, AdaptiveInstrumentCampaignDisposition,
     AdaptiveInstrumentCampaignError, AdaptiveInstrumentCampaignRequest,
-    AdaptiveInstrumentCandidate, AdaptiveInstrumentDecision,
+    AdaptiveInstrumentCandidate, AdaptiveInstrumentDecision, dry_run_adaptive_instrument_executor,
+    execute_glioma_adaptive_instrument_campaign,
 };
 
 pub use calibration::{
-    analyze_instrument_calibration, CalibrationDisposition, CalibrationError, CalibrationPoint,
-    CalibrationRequest, CalibrationRun, InstrumentCalibration,
+    CalibrationDisposition, CalibrationError, CalibrationPoint, CalibrationRequest, CalibrationRun,
+    InstrumentCalibration, analyze_instrument_calibration,
 };
 
 pub use preflight::{
-    preflight_glioma_instrument, InstrumentAction, InstrumentActionDecision,
-    InstrumentActionDisposition, InstrumentAuthorization, InstrumentInterlockSnapshot,
-    InstrumentOperation, InstrumentParameter, InstrumentPreflightDisposition,
-    InstrumentPreflightError, InstrumentPreflightPlan, InstrumentPreflightRequest,
+    InstrumentAction, InstrumentActionDecision, InstrumentActionDisposition,
+    InstrumentAuthorization, InstrumentInterlockSnapshot, InstrumentOperation, InstrumentParameter,
+    InstrumentPreflightDisposition, InstrumentPreflightError, InstrumentPreflightPlan,
+    InstrumentPreflightRequest, preflight_glioma_instrument,
 };
 
 pub use recovery::{
-    plan_glioma_instrument_recovery, InstrumentRecoveryAction, InstrumentRecoveryDecision,
-    InstrumentRecoveryDisposition, InstrumentRecoveryError, InstrumentRecoveryPlan,
-    InstrumentRecoveryPriority, InstrumentRecoveryRequest,
+    InstrumentRecoveryAction, InstrumentRecoveryDecision, InstrumentRecoveryDisposition,
+    InstrumentRecoveryError, InstrumentRecoveryPlan, InstrumentRecoveryPriority,
+    InstrumentRecoveryRequest, plan_glioma_instrument_recovery,
 };
 
 pub use execution::{
-    execute_glioma_instrument_plan, DryRunInstrumentExecutor, InstrumentExecutionDisposition,
-    InstrumentExecutionError, InstrumentExecutionFailure, InstrumentExecutionRequest,
-    InstrumentExecutionResult, InstrumentExecutionRun, InstrumentExecutionStopReason,
-    InstrumentExecutor,
+    DryRunInstrumentExecutor, InstrumentExecutionDisposition, InstrumentExecutionError,
+    InstrumentExecutionFailure, InstrumentExecutionRequest, InstrumentExecutionResult,
+    InstrumentExecutionRun, InstrumentExecutionStopReason, InstrumentExecutor,
+    execute_glioma_instrument_plan,
 };
 
 pub use fleet_scheduler::{
-    schedule_glioma_instrument_fleet, InstrumentFleetAssignment, InstrumentFleetBlockedTask,
-    InstrumentFleetDisposition, InstrumentFleetResource, InstrumentFleetSchedule,
-    InstrumentFleetScheduleRequest, InstrumentFleetSchedulerError, InstrumentFleetTask,
-    InstrumentFleetUtilization,
+    InstrumentFleetAssignment, InstrumentFleetBlockedTask, InstrumentFleetDisposition,
+    InstrumentFleetResource, InstrumentFleetSchedule, InstrumentFleetScheduleRequest,
+    InstrumentFleetSchedulerError, InstrumentFleetTask, InstrumentFleetUtilization,
+    schedule_glioma_instrument_fleet,
 };
 
 pub use fleet_execution::{
-    execute_glioma_instrument_fleet, InstrumentFleetExecution, InstrumentFleetExecutionDisposition,
-    InstrumentFleetExecutionError, InstrumentFleetExecutionFailure,
-    InstrumentFleetExecutionRequest, InstrumentFleetExecutionResult,
-    InstrumentFleetExecutionRunRequest, InstrumentFleetExecutionStopReason,
+    InstrumentFleetExecution, InstrumentFleetExecutionDisposition, InstrumentFleetExecutionError,
+    InstrumentFleetExecutionFailure, InstrumentFleetExecutionRequest,
+    InstrumentFleetExecutionResult, InstrumentFleetExecutionRunRequest,
+    InstrumentFleetExecutionStopReason, execute_glioma_instrument_fleet,
 };
 
 pub use campaign::{
-    execute_glioma_instrument_campaign, InstrumentCampaign, InstrumentCampaignDisposition,
-    InstrumentCampaignError, InstrumentCampaignFailure, InstrumentCampaignRequest,
-    InstrumentCampaignRunRequest, InstrumentCampaignRunResult, InstrumentCampaignStopReason,
+    InstrumentCampaign, InstrumentCampaignDisposition, InstrumentCampaignError,
+    InstrumentCampaignFailure, InstrumentCampaignRequest, InstrumentCampaignRunRequest,
+    InstrumentCampaignRunResult, InstrumentCampaignStopReason, execute_glioma_instrument_campaign,
 };
 
 pub use operating_cycle::{
-    dry_run_instrument_executor_from_request, execute_glioma_instrument_operating_cycle,
     InstrumentExecutionMode, InstrumentOperatingCycle, InstrumentOperatingCycleDisposition,
     InstrumentOperatingCycleError, InstrumentOperatingCycleRequest, InstrumentPreflightSummary,
+    dry_run_instrument_executor_from_request, execute_glioma_instrument_operating_cycle,
 };
 
 pub use multichannel_concordance::{
-    analyze_glioma_instrument_multichannel_concordance, ChannelConcordance,
-    ChannelConcordanceDisposition, InstrumentMultichannelConcordance,
+    ChannelConcordance, ChannelConcordanceDisposition, InstrumentMultichannelConcordance,
     MultichannelConcordanceDisposition, MultichannelConcordanceError,
     MultichannelConcordanceRequest, MultichannelInput, MultichannelPoint,
+    analyze_glioma_instrument_multichannel_concordance,
 };
 pub use research_frontier::{
-    compile_glioma_instrument_research_frontier, execute_glioma_instrument_research_frontier,
     InstrumentResearchFrontier, InstrumentResearchFrontierDisposition,
     InstrumentResearchFrontierError, InstrumentResearchFrontierRequest,
-    InstrumentResearchFrontierRun,
+    InstrumentResearchFrontierRun, compile_glioma_instrument_research_frontier,
+    execute_glioma_instrument_research_frontier,
 };
 pub use science_loop::{
-    execute_glioma_instrument_science_loop, InstrumentScienceLoop,
+    InstrumentAssayEvidenceRunObservation, InstrumentScienceLoop, InstrumentScienceLoopAssessment,
     InstrumentScienceLoopDisposition, InstrumentScienceLoopError, InstrumentScienceLoopRequest,
+    execute_glioma_instrument_science_loop,
 };
 pub use signal_extraction::{
-    extract_glioma_instrument_signal, InstrumentSignalChannel, InstrumentSignalExtraction,
-    InstrumentSignalPeak, InstrumentSignalPoint, SignalChannelDisposition,
-    SignalExtractionDisposition, SignalExtractionError, SignalExtractionRequest,
+    InstrumentSignalChannel, InstrumentSignalExtraction, InstrumentSignalPeak,
+    InstrumentSignalPoint, SignalChannelDisposition, SignalExtractionDisposition,
+    SignalExtractionError, SignalExtractionRequest, extract_glioma_instrument_signal,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::InstrumentRobotics;

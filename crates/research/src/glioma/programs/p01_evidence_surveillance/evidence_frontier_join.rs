@@ -220,11 +220,10 @@ fn weighted_mean(records: &[&EvidenceRecord], selector: fn(&EvidenceRecord) -> u
         numerator = numerator.saturating_add(weight * u64::from(selector(record)));
         denominator = denominator.saturating_add(weight);
     }
-    if denominator == 0 {
-        0
-    } else {
-        (numerator / denominator).min(1_000) as u16
-    }
+    numerator
+        .checked_div(denominator)
+        .unwrap_or_default()
+        .min(1_000) as u16
 }
 
 /// Join local evidence into a deterministic, executable frontier for the autonomous research
@@ -278,10 +277,10 @@ pub fn join_glioma_evidence_frontier(
         let mut by_artifact = BTreeMap::<String, &EvidenceRecord>::new();
         for record in records {
             let artifact = record.source_artifact.content_hash.as_str().to_string();
-            if by_artifact.contains_key(&artifact) {
-                deduplicated_order.insert(record.evidence_id.clone());
+            if let std::collections::btree_map::Entry::Vacant(e) = by_artifact.entry(artifact) {
+                e.insert(record);
             } else {
-                by_artifact.insert(artifact, record);
+                deduplicated_order.insert(record.evidence_id.clone());
             }
         }
         let unique = by_artifact.into_values().collect::<Vec<_>>();

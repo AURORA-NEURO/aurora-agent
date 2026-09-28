@@ -301,9 +301,8 @@ fn priority_score(
         + u32::from(candidate.reproducibility_milli) * 15
         + u32::from(trend) * 5)
         / 100;
-    let penalty = (u32::from(candidate.risk_milli) * 20
-        + u32::try_from(candidate.cost_units.min(1_000)).unwrap_or(1_000) * 5)
-        / 100;
+    let penalty =
+        (u32::from(candidate.risk_milli) * 20 + candidate.cost_units.min(1_000) * 5) / 100;
     let score = raw.saturating_sub(penalty).min(1_000) as u16;
     (
         score,
@@ -466,13 +465,13 @@ pub fn plan_glioma_mechanism_closed_loop(
 #[cfg(test)]
 mod tests {
     use super::super::bayesian_update::{
-        update_glioma_mechanism_posterior, BayesianMechanismHypothesis,
-        BayesianMechanismUpdateRequest,
+        BayesianMechanismHypothesis, BayesianMechanismUpdateRequest,
+        update_glioma_mechanism_posterior,
     };
     use super::super::discrimination::{MechanismFeatureObservation, MechanismPrediction};
     use super::super::evidence_assimilation::{
-        assimilate_glioma_mechanism_evidence, MechanismEvidenceAssimilationRequest,
-        MechanismEvidenceSnapshot,
+        MechanismEvidenceAssimilationRequest, MechanismEvidenceSnapshot,
+        assimilate_glioma_mechanism_evidence,
     };
     use super::*;
     use crate::glioma_engine::{GliomaModelSystem, LocalArtifactRef};

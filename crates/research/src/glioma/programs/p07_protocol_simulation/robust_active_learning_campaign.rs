@@ -1,15 +1,16 @@
-//! Autonomous execution loop for robust ensemble active learning.
+//! GAF-GLIOMA-P07-F24: autonomous execution loop for robust ensemble active learning.
 //!
 //! P06's robust planner is useful only when its conservative, model-disagreement-aware decisions
 //! can be carried through repeated local rounds. This controller provides that seam: it invokes a
-//! caller-owned assay/analysis executor, verifies candidate-bound observations, spends a bounded
-//! budget, and replans until a declared gate stops the campaign. The bundled dry-run executor is
-//! synthetic and has no instrument or biological side effects.
+//! caller-owned assay/analysis executor, verifies each response's candidate binding, unique
+//! identity, uncertainty bound, and local artifact before replanning, spends a bounded budget, and
+//! stops at a declared gate. The bundled dry-run executor is synthetic and has no instrument or
+//! biological side effects.
 
 use crate::glioma::programs::p06_experiment_design::robust_active_learning::{
-    plan_glioma_robust_active_learning, RobustActiveLearningCandidate,
-    RobustActiveLearningDisposition, RobustActiveLearningObservation, RobustActiveLearningPlan,
-    RobustActiveLearningRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningDisposition,
+    RobustActiveLearningObservation, RobustActiveLearningPlan, RobustActiveLearningRequest,
+    plan_glioma_robust_active_learning,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -17,7 +18,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P07-F24";
-pub const OUTPUT_SCHEMA: &str = "GliomaRobustActiveLearningCampaign1@1";
+pub const INPUT_SCHEMA: &str = "GliomaRobustActiveLearningCampaignInput1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaRobustActiveLearningCampaign1@2";
 pub const MAX_ROUNDS: u16 = 64;
 pub const MAX_RETRIES: u8 = 8;
 
@@ -136,6 +138,8 @@ pub struct RobustActiveLearningCampaign {
     pub feature_id: String,
     pub output_schema: String,
     pub objective: String,
+    /// Commitment to the exact source request, candidate inventory, seed observations, and limits.
+    pub input_digest: ContentHash,
     pub rounds: Vec<RobustActiveLearningCampaignRound>,
     pub observations: Vec<RobustActiveLearningObservation>,
     pub completed_order: Vec<String>,
@@ -178,6 +182,7 @@ fn digest_input(campaign: &RobustActiveLearningCampaign) -> serde_json::Value {
         "feature_id": campaign.feature_id,
         "output_schema": campaign.output_schema,
         "objective": campaign.objective,
+        "input_digest": campaign.input_digest,
         "rounds": campaign.rounds,
         "observations": campaign.observations,
         "completed_order": campaign.completed_order,
@@ -192,7 +197,37 @@ fn digest_input(campaign: &RobustActiveLearningCampaign) -> serde_json::Value {
     })
 }
 
+fn request_digest(
+    request: &RobustActiveLearningCampaignRequest,
+) -> Result<ContentHash, RobustActiveLearningCampaignError> {
+    #[derive(Serialize)]
+    struct Input<'a> {
+        input_schema: &'static str,
+        request: &'a RobustActiveLearningCampaignRequest,
+    }
+    ContentHash::of_serializable(&Input {
+        input_schema: INPUT_SCHEMA,
+        request,
+    })
+    .map_err(|error| RobustActiveLearningCampaignError::Digest(error.to_string()))
+}
+
 impl RobustActiveLearningCampaign {
+    /// Check the output digest and bind it to the exact request retained by the caller.
+    /// This does not replay or authenticate effects performed by a caller-owned executor.
+    pub fn validate_against(
+        &self,
+        request: &RobustActiveLearningCampaignRequest,
+    ) -> Result<(), RobustActiveLearningCampaignError> {
+        self.validate()?;
+        if request_digest(request)? != self.input_digest {
+            return Err(RobustActiveLearningCampaignError::InvalidOutput(
+                "campaign input digest does not match the supplied request".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), RobustActiveLearningCampaignError> {
         if self.feature_id != FEATURE_ID
             || self.output_schema != OUTPUT_SCHEMA
@@ -250,6 +285,24 @@ fn validate_request(
             "positive bounded rounds and retries are required".into(),
         ));
     }
+    let mut observation_ids = BTreeSet::new();
+    for observation in &request.observations {
+        if observation.observation_id.trim().is_empty()
+            || observation.candidate_id.trim().is_empty()
+            || observation.uncertainty_milli > 1_000
+            || !observation_ids.insert(observation.observation_id.as_str())
+        {
+            return Err(RobustActiveLearningCampaignError::InvalidRequest(
+                "seed observations must have unique non-empty identifiers and bounded uncertainty"
+                    .into(),
+            ));
+        }
+        observation.artifact.validate().map_err(|_| {
+            RobustActiveLearningCampaignError::InvalidRequest(
+                "seed observation artifact is invalid".into(),
+            )
+        })?;
+    }
     Ok(())
 }
 
@@ -273,6 +326,7 @@ pub fn execute_glioma_robust_active_learning_campaign<E: RobustActiveLearningCam
     executor: &mut E,
 ) -> Result<RobustActiveLearningCampaign, RobustActiveLearningCampaignError> {
     validate_request(request)?;
+    let input_digest = request_digest(request)?;
     let mut candidates = request.candidates.clone();
     let mut observations = request.observations.clone();
     let mut budget = request.robust_active_learning.budget_units;
@@ -362,9 +416,16 @@ pub fn execute_glioma_robust_active_learning_campaign<E: RobustActiveLearningCam
             for attempt in 1..=request.max_retries.saturating_add(1) {
                 match executor.execute_candidate(candidate, attempt) {
                     Ok(observation) => {
-                        if observation.candidate_id != candidate.candidate_id {
-                            return Err(RobustActiveLearningCampaignError::InvalidRequest(
-                                "executor observation candidate binding does not match selected candidate".into(),
+                        if observation.candidate_id != candidate.candidate_id
+                            || observation.observation_id.trim().is_empty()
+                            || observation.uncertainty_milli > 1_000
+                            || observation.artifact.validate().is_err()
+                            || observations.iter().any(|existing| {
+                                existing.observation_id == observation.observation_id
+                            })
+                        {
+                            return Err(RobustActiveLearningCampaignError::InvalidOutput(
+                                "executor returned an invalid, duplicate, or candidate-unbound observation".into(),
                             ));
                         }
                         accepted = Some(observation);
@@ -443,6 +504,7 @@ pub fn execute_glioma_robust_active_learning_campaign<E: RobustActiveLearningCam
         feature_id: FEATURE_ID.into(),
         output_schema: OUTPUT_SCHEMA.into(),
         objective: request.robust_active_learning.objective.clone(),
+        input_digest,
         rounds,
         observations,
         completed_order,
@@ -458,7 +520,7 @@ pub fn execute_glioma_robust_active_learning_campaign<E: RobustActiveLearningCam
     };
     campaign.digest = ContentHash::of_value(&digest_input(&campaign))
         .map_err(|error| RobustActiveLearningCampaignError::Digest(error.to_string()))?;
-    campaign.validate()?;
+    campaign.validate_against(request)?;
     Ok(campaign)
 }
 
@@ -525,13 +587,38 @@ mod tests {
 
     #[test]
     fn campaign_replans_from_synthetic_observations() {
+        let request = request();
         let mut executor = DryRunRobustActiveLearningCampaignExecutor::default();
         let campaign =
-            execute_glioma_robust_active_learning_campaign(&request(), &mut executor).unwrap();
+            execute_glioma_robust_active_learning_campaign(&request, &mut executor).unwrap();
         assert!(!campaign.rounds.is_empty());
         assert!(!campaign.completed_order.is_empty());
         assert!(campaign.budget_spent_units > 0);
-        campaign.validate().unwrap();
+        assert_eq!(
+            campaign.output_schema,
+            "GliomaRobustActiveLearningCampaign1@2"
+        );
+        campaign.validate_against(&request).unwrap();
+    }
+
+    #[test]
+    fn campaign_input_commitment_rejects_changed_policy_or_candidate_inputs() {
+        let request = request();
+        let mut executor = DryRunRobustActiveLearningCampaignExecutor::default();
+        let campaign =
+            execute_glioma_robust_active_learning_campaign(&request, &mut executor).unwrap();
+
+        let mut changed = request.clone();
+        changed.max_retries += 1;
+        assert!(campaign.validate_against(&changed).is_err());
+
+        let mut changed = request.clone();
+        changed.candidates[0].cost_units += 1;
+        assert!(campaign.validate_against(&changed).is_err());
+
+        let mut changed = request.clone();
+        changed.robust_active_learning.models[0].intercept_milli += 1;
+        assert!(campaign.validate_against(&changed).is_err());
     }
 
     #[test]
@@ -549,5 +636,50 @@ mod tests {
             campaign.stop_reason,
             RobustActiveLearningCampaignStopReason::NoCandidates
         );
+    }
+
+    #[test]
+    fn malformed_executor_observation_stops_before_another_assay_is_called() {
+        #[derive(Default)]
+        struct InvalidArtifact {
+            calls: usize,
+            sandbox: DryRunRobustActiveLearningCampaignExecutor,
+        }
+
+        impl RobustActiveLearningCampaignExecutor for InvalidArtifact {
+            fn execute_candidate(
+                &mut self,
+                candidate: &RobustActiveLearningCandidate,
+                attempt: u8,
+            ) -> Result<RobustActiveLearningObservation, RobustActiveLearningExecutionFailure>
+            {
+                self.calls += 1;
+                let mut observation = self.sandbox.execute_candidate(candidate, attempt)?;
+                observation.artifact.local_only = false;
+                Ok(observation)
+            }
+        }
+
+        let mut request = request();
+        request.robust_active_learning.max_selections = 2;
+        assert_eq!(
+            plan_glioma_robust_active_learning(
+                &request.robust_active_learning,
+                &request.candidates,
+                &request.observations
+            )
+            .unwrap()
+            .selected_order
+            .len(),
+            2
+        );
+        let mut executor = InvalidArtifact::default();
+        let error =
+            execute_glioma_robust_active_learning_campaign(&request, &mut executor).unwrap_err();
+        assert!(matches!(
+            error,
+            RobustActiveLearningCampaignError::InvalidOutput(_)
+        ));
+        assert_eq!(executor.calls, 1);
     }
 }

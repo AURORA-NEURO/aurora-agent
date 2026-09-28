@@ -12,8 +12,8 @@ use super::{
     InterpretationEvidenceFamily, InterpretationSynthesis, InterpretationSynthesisDisposition,
 };
 use crate::glioma_engine::{
-    select_glioma_actions, GliomaActionCandidate, GliomaActionSelection, GliomaEngineError,
-    GliomaModality, GliomaModelSystem, GliomaSelectionWeights, GliomaStageKind,
+    GliomaActionCandidate, GliomaActionSelection, GliomaEngineError, GliomaModality,
+    GliomaModelSystem, GliomaSelectionWeights, GliomaStageKind, select_glioma_actions,
 };
 use bioprism_foundation::{AutonomyTier, Effect};
 use bioprism_ids::ContentHash;
@@ -136,20 +136,27 @@ fn action_id(target: AdaptiveTarget) -> &'static str {
 
 fn required_observation(target: AdaptiveTarget) -> &'static str {
     match target {
-        AdaptiveTarget::ContradictionResolution =>
-            "an independent preclinical assay or reanalysis that resolves the signed family disagreement",
-        AdaptiveTarget::ReplicationStrengthening =>
-            "an independent-group replication with the same estimand and model binding",
-        AdaptiveTarget::StabilityStressTest =>
-            "a bounded leave-one-family, batch, or modality stress result with its omission ledger",
-        AdaptiveTarget::EvidenceGapClosure =>
-            "a qualified local source or multimodal observation covering the missing evidence family",
-        AdaptiveTarget::NegativeResultConfirmation =>
-            "an independent null/negative observation that preserves the original estimand and power record",
-        AdaptiveTarget::CrossModelExtension =>
-            "a preclinical model-system transfer with explicit transportability and comparability checks",
-        AdaptiveTarget::MechanismDiscrimination =>
-            "a perturbation or computational contrast that separates the leading competing mechanisms",
+        AdaptiveTarget::ContradictionResolution => {
+            "an independent preclinical assay or reanalysis that resolves the signed family disagreement"
+        }
+        AdaptiveTarget::ReplicationStrengthening => {
+            "an independent-group replication with the same estimand and model binding"
+        }
+        AdaptiveTarget::StabilityStressTest => {
+            "a bounded leave-one-family, batch, or modality stress result with its omission ledger"
+        }
+        AdaptiveTarget::EvidenceGapClosure => {
+            "a qualified local source or multimodal observation covering the missing evidence family"
+        }
+        AdaptiveTarget::NegativeResultConfirmation => {
+            "an independent null/negative observation that preserves the original estimand and power record"
+        }
+        AdaptiveTarget::CrossModelExtension => {
+            "a preclinical model-system transfer with explicit transportability and comparability checks"
+        }
+        AdaptiveTarget::MechanismDiscrimination => {
+            "a perturbation or computational contrast that separates the leading competing mechanisms"
+        }
     }
 }
 
@@ -552,8 +559,8 @@ impl From<GliomaEngineError> for AdaptiveFrontierError {
 mod tests {
     use super::*;
     use crate::glioma::programs::p10_interpretation_replication::{
-        synthesize_glioma_interpretation, InterpretationEvidence, InterpretationEvidenceDirection,
-        InterpretationSynthesisRequest,
+        InterpretationEvidence, InterpretationEvidenceDirection, InterpretationSynthesisRequest,
+        synthesize_glioma_interpretation,
     };
     use crate::glioma_engine::LocalArtifactRef;
 
@@ -662,10 +669,12 @@ mod tests {
         let output = synthesis(InterpretationSynthesisDisposition::Unresolved);
         let frontier = plan_glioma_adaptive_research_frontier(&request(output)).unwrap();
         assert_eq!(frontier.disposition, AdaptiveFrontierDisposition::Hold);
-        assert!(frontier
-            .hold_order
-            .iter()
-            .any(|item| item.contains("synthesis-unresolved")));
+        assert!(
+            frontier
+                .hold_order
+                .iter()
+                .any(|item| item.contains("synthesis-unresolved"))
+        );
         assert!(!frontier.next_action_order.is_empty());
     }
 
@@ -676,13 +685,17 @@ mod tests {
             .completed_actions
             .insert(action_id(AdaptiveTarget::ReplicationStrengthening).into());
         let frontier = plan_glioma_adaptive_research_frontier(&request).unwrap();
-        assert!(!frontier
-            .next_action_order
-            .contains(&action_id(AdaptiveTarget::ReplicationStrengthening).into()));
-        assert!(frontier
-            .selection
-            .blocked_order
-            .contains(&action_id(AdaptiveTarget::ReplicationStrengthening).into()));
+        assert!(
+            !frontier
+                .next_action_order
+                .contains(&action_id(AdaptiveTarget::ReplicationStrengthening).into())
+        );
+        assert!(
+            frontier
+                .selection
+                .blocked_order
+                .contains(&action_id(AdaptiveTarget::ReplicationStrengthening).into())
+        );
     }
 
     #[test]
@@ -692,10 +705,12 @@ mod tests {
         )))
         .unwrap();
         assert_eq!(frontier.disposition, AdaptiveFrontierDisposition::Partial);
-        assert!(frontier
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("negative-synthesis")));
+        assert!(
+            frontier
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("negative-synthesis"))
+        );
     }
 
     #[test]

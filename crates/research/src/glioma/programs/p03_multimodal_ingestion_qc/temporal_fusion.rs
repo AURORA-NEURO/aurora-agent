@@ -968,10 +968,12 @@ mod tests {
         let output = analyze_glioma_temporal_multimodal_fusion(&request(), &observations).unwrap();
         assert_eq!(output.disposition, TemporalFusionDisposition::Partial);
         assert_eq!(output.missing_modality_order, vec![GliomaModality::Imaging]);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("missing-modality")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("missing-modality"))
+        );
     }
 
     #[test]
@@ -998,10 +1000,12 @@ mod tests {
         ];
         let output = analyze_glioma_temporal_multimodal_fusion(&request(), &observations).unwrap();
         assert_eq!(output.stable_transition_order.len(), 1);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("stable-state-transition")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("stable-state-transition"))
+        );
     }
 
     #[test]

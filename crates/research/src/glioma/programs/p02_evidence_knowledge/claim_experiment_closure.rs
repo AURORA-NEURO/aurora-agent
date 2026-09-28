@@ -437,12 +437,9 @@ pub fn close_glioma_claims_to_experiments(
         let contradiction = average_score(&contradictory);
         let modality_coverage = coverage_score(&request.required_modalities, &observed_modalities);
         let model_coverage = coverage_score(&request.required_model_systems, &observed_models);
-        let artifact_coverage = if request.min_independent_artifacts == 0 {
-            1_000
-        } else {
-            ((artifacts.len().min(request.min_independent_artifacts) * 1_000)
-                / request.min_independent_artifacts) as u16
-        };
+        let artifact_coverage = ((artifacts.len().min(request.min_independent_artifacts) * 1_000)
+            .checked_div(request.min_independent_artifacts)
+            .unwrap_or(1_000)) as u16;
         let closure = support
             .min(modality_coverage)
             .min(model_coverage)
@@ -757,10 +754,12 @@ mod tests {
             output.disposition,
             ClaimExperimentClosureDisposition::Blocked
         );
-        assert!(output.claims[0]
-            .omission_order
-            .iter()
-            .any(|item| item.contains("failed-outcome")));
+        assert!(
+            output.claims[0]
+                .omission_order
+                .iter()
+                .any(|item| item.contains("failed-outcome"))
+        );
     }
 
     #[test]

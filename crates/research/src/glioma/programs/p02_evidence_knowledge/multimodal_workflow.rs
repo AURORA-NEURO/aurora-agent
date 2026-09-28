@@ -786,10 +786,12 @@ mod tests {
         .expect("workflow");
         assert_eq!(output.disposition, MultimodalWorkflowDisposition::Degraded);
         assert_eq!(output.selected_branch.as_deref(), Some("degraded_coverage"));
-        assert!(output
-            .barriers
-            .iter()
-            .any(|barrier| barrier.kind == MultimodalWorkflowBarrierKind::MissingModality));
+        assert!(
+            output
+                .barriers
+                .iter()
+                .any(|barrier| barrier.kind == MultimodalWorkflowBarrierKind::MissingModality)
+        );
     }
 
     #[test]

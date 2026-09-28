@@ -1,6 +1,6 @@
 //! Power-aware experiment-design program ownership.
 
-use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
+use crate::glioma::catalog::{GliomaProgramDescriptor, GliomaProgramId, glioma_program_catalog};
 
 pub mod active_learning;
 pub mod adaptive_allocation;
@@ -36,181 +36,179 @@ pub mod validation_batch_assessment;
 pub mod validation_campaign;
 
 pub use active_learning::{
-    plan_glioma_active_learning, ActiveLearningCandidate, ActiveLearningCandidateDisposition,
-    ActiveLearningDirection, ActiveLearningDisposition, ActiveLearningError,
-    ActiveLearningObservation, ActiveLearningPlan, ActiveLearningRequest, ActiveLearningScore,
+    ActiveLearningCandidate, ActiveLearningCandidateDisposition, ActiveLearningDirection,
+    ActiveLearningDisposition, ActiveLearningError, ActiveLearningObservation, ActiveLearningPlan,
+    ActiveLearningRequest, ActiveLearningScore, plan_glioma_active_learning,
 };
 pub use adaptive_allocation::{
-    allocate_glioma_assays, AdaptiveAllocation, AdaptiveAllocationActionKind,
-    AdaptiveAllocationDisposition, AdaptiveAllocationError, AdaptiveAllocationRequest,
-    AdaptiveArmObservation, AdaptiveArmPosterior,
+    AdaptiveAllocation, AdaptiveAllocationActionKind, AdaptiveAllocationDisposition,
+    AdaptiveAllocationError, AdaptiveAllocationRequest, AdaptiveArmObservation,
+    AdaptiveArmPosterior, allocate_glioma_assays,
 };
 pub use adaptive_allocation_campaign::{
-    execute_glioma_adaptive_allocation_campaign, AdaptiveAllocationBatchObservation,
-    AdaptiveAllocationCampaign, AdaptiveAllocationCampaignDisposition,
-    AdaptiveAllocationCampaignError, AdaptiveAllocationCampaignExecutionFailure,
-    AdaptiveAllocationCampaignExecutor, AdaptiveAllocationCampaignRequest,
-    AdaptiveAllocationCampaignRound, AdaptiveAllocationCampaignStopReason,
-    DryRunAdaptiveAllocationCampaignExecutor,
+    AdaptiveAllocationBatchObservation, AdaptiveAllocationCampaign,
+    AdaptiveAllocationCampaignDisposition, AdaptiveAllocationCampaignError,
+    AdaptiveAllocationCampaignExecutionFailure, AdaptiveAllocationCampaignExecutor,
+    AdaptiveAllocationCampaignRequest, AdaptiveAllocationCampaignRound,
+    AdaptiveAllocationCampaignStopReason, DryRunAdaptiveAllocationCampaignExecutor,
+    execute_glioma_adaptive_allocation_campaign,
 };
 pub use adaptive_dose_surface::{
-    plan_adaptive_glioma_dose_surface, AdaptiveDoseSurfaceDisposition, AdaptiveDoseSurfaceError,
-    AdaptiveDoseSurfacePlan, AdaptiveDoseSurfaceRequest, DoseSurfaceCellState, DoseSurfaceEstimate,
-    DoseSurfaceObservation,
+    AdaptiveDoseSurfaceDisposition, AdaptiveDoseSurfaceError, AdaptiveDoseSurfacePlan,
+    AdaptiveDoseSurfaceRequest, DoseSurfaceCellState, DoseSurfaceEstimate, DoseSurfaceObservation,
+    plan_adaptive_glioma_dose_surface,
 };
 pub use adaptive_information_campaign::{
-    execute_glioma_adaptive_information_campaign, plan_glioma_adaptive_information_campaign,
     AdaptiveInformationCampaignDisposition, AdaptiveInformationCampaignError,
     AdaptiveInformationCampaignExecution, AdaptiveInformationCampaignPlan,
     AdaptiveInformationCampaignRequest, AdaptiveInformationCampaignRound,
     AdaptiveInformationCampaignTermination, AdaptiveInformationExecutionFailure,
     AdaptiveInformationObservation, AdaptiveMechanismPosterior, GliomaInformationDesignExecutor,
+    execute_glioma_adaptive_information_campaign, plan_glioma_adaptive_information_campaign,
 };
 pub use adaptive_panel::{
-    plan_glioma_adaptive_panel, AdaptivePanelActionKind, AdaptivePanelDesign,
-    AdaptivePanelDisposition, AdaptivePanelError, AdaptivePanelRequest, AdaptivePanelSelection,
-    PanelAction, PanelMechanism, PanelOutcome,
+    AdaptivePanelActionKind, AdaptivePanelDesign, AdaptivePanelDisposition, AdaptivePanelError,
+    AdaptivePanelRequest, AdaptivePanelSelection, PanelAction, PanelMechanism, PanelOutcome,
+    plan_glioma_adaptive_panel,
 };
 pub use blocked_randomization::{
-    plan_glioma_blocked_randomization, BlockArmAllocation, BlockedRandomizationDesign,
-    BlockedRandomizationDisposition, BlockedRandomizationError, BlockedRandomizationRequest,
-    RandomizationArm, RandomizationBlock,
+    BlockArmAllocation, BlockedRandomizationDesign, BlockedRandomizationDisposition,
+    BlockedRandomizationError, BlockedRandomizationRequest, RandomizationArm, RandomizationBlock,
+    plan_glioma_blocked_randomization,
 };
 pub use campaign::{
-    execute_glioma_closed_loop_campaign, plan_glioma_closed_loop_campaign, CampaignAction,
-    CampaignActionScore, CampaignExecutionFailure, CampaignExecutionRound, CampaignMechanism,
-    CampaignMechanismPosterior, CampaignObservation, CampaignRound, CampaignStopReason,
-    ClosedLoopCampaign, ClosedLoopCampaignDisposition, ClosedLoopCampaignError,
-    ClosedLoopCampaignExecution, ClosedLoopCampaignRequest, GliomaCampaignExecutor,
-    EXECUTION_OUTPUT_SCHEMA,
+    CampaignAction, CampaignActionScore, CampaignExecutionFailure, CampaignExecutionRound,
+    CampaignMechanism, CampaignMechanismPosterior, CampaignObservation, CampaignRound,
+    CampaignStopReason, ClosedLoopCampaign, ClosedLoopCampaignDisposition, ClosedLoopCampaignError,
+    ClosedLoopCampaignExecution, ClosedLoopCampaignRequest, EXECUTION_OUTPUT_SCHEMA,
+    GliomaCampaignExecutor, execute_glioma_closed_loop_campaign, plan_glioma_closed_loop_campaign,
 };
 pub use carryover_sequence::{
-    plan_glioma_carryover_sequence, CarryoverAction, CarryoverSequenceDesign,
-    CarryoverSequenceDisposition, CarryoverSequenceError, CarryoverSequenceRequest,
-    CarryoverSequenceStep,
+    CarryoverAction, CarryoverSequenceDesign, CarryoverSequenceDisposition, CarryoverSequenceError,
+    CarryoverSequenceRequest, CarryoverSequenceStep, plan_glioma_carryover_sequence,
 };
 pub use clonal_panel::{
-    plan_glioma_clone_perturbation_panel, CloneBranchCoverage, ClonePerturbationCandidate,
-    ClonePerturbationDecision, ClonePerturbationKind, ClonePerturbationPanel,
-    ClonePerturbationPanelDisposition, ClonePerturbationPanelError, ClonePerturbationPanelRequest,
+    CloneBranchCoverage, ClonePerturbationCandidate, ClonePerturbationDecision,
+    ClonePerturbationKind, ClonePerturbationPanel, ClonePerturbationPanelDisposition,
+    ClonePerturbationPanelError, ClonePerturbationPanelRequest,
+    plan_glioma_clone_perturbation_panel,
 };
 pub use contrast_design::{
-    design_glioma_contrast_panel, ContrastCondition, ContrastDesign, ContrastDesignDisposition,
-    ContrastDesignError, ContrastDesignRequest, ContrastFactor, EstimandContrast,
+    ContrastCondition, ContrastDesign, ContrastDesignDisposition, ContrastDesignError,
+    ContrastDesignRequest, ContrastFactor, EstimandContrast, design_glioma_contrast_panel,
 };
 pub use dose_response::{
-    analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,
-    DoseResponseError, DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,
+    DoseDirection, DoseResponseAnalysis, DoseResponseDisposition, DoseResponseError,
+    DoseResponseObservation, DoseResponsePoint, DoseResponseRequest, analyze_glioma_dose_response,
 };
 pub use frontier_controller::{
-    execute_glioma_experiment_frontier_controller, DryRunGliomaExperimentFrontierExecutor,
-    GliomaExperimentFrontierError, GliomaExperimentFrontierExecutor,
-    GliomaExperimentFrontierRequest, GliomaExperimentFrontierRun, GliomaFrontierCandidate,
-    GliomaFrontierDisposition, GliomaFrontierExecutionFailure, GliomaFrontierMechanism,
-    GliomaFrontierObservation, GliomaFrontierOutcome, GliomaFrontierRound, GliomaFrontierScore,
-    GliomaFrontierStopReason,
+    DryRunGliomaExperimentFrontierExecutor, GliomaExperimentFrontierError,
+    GliomaExperimentFrontierExecutor, GliomaExperimentFrontierRequest, GliomaExperimentFrontierRun,
+    GliomaFrontierCandidate, GliomaFrontierDisposition, GliomaFrontierExecutionFailure,
+    GliomaFrontierMechanism, GliomaFrontierObservation, GliomaFrontierOutcome, GliomaFrontierRound,
+    GliomaFrontierScore, GliomaFrontierStopReason, execute_glioma_experiment_frontier_controller,
 };
 pub use information_design::{
-    plan_glioma_information_design, DesignAction, DesignMechanism, DesignOutcome,
-    InformationDesignActionScore, InformationDesignDisposition, InformationDesignError,
-    InformationDesignPlan, InformationDesignRequest,
+    DesignAction, DesignMechanism, DesignOutcome, InformationDesignActionScore,
+    InformationDesignDisposition, InformationDesignError, InformationDesignPlan,
+    InformationDesignRequest, plan_glioma_information_design,
 };
 pub use multi_fidelity::{
-    plan_glioma_multi_fidelity_optimization, EstimateSource, FidelityCalibration,
-    FidelityCandidate, FidelityEstimate, FidelityLevel, FidelityObservation,
-    MultiFidelityDisposition, MultiFidelityOptimizationError, MultiFidelityOptimizationPlan,
-    MultiFidelityOptimizationRequest, OptimizationDirection,
+    EstimateSource, FidelityCalibration, FidelityCandidate, FidelityEstimate, FidelityLevel,
+    FidelityObservation, MultiFidelityDisposition, MultiFidelityOptimizationError,
+    MultiFidelityOptimizationPlan, MultiFidelityOptimizationRequest, OptimizationDirection,
+    plan_glioma_multi_fidelity_optimization,
 };
 pub use multi_fidelity_campaign::{
-    execute_glioma_multi_fidelity_campaign, DryRunMultiFidelityCampaignExecutor,
-    MultiFidelityCampaign, MultiFidelityCampaignDisposition, MultiFidelityCampaignError,
-    MultiFidelityCampaignExecutor, MultiFidelityCampaignRequest, MultiFidelityCampaignRound,
-    MultiFidelityCampaignStopReason, MultiFidelityExecutionFailure,
+    DryRunMultiFidelityCampaignExecutor, MultiFidelityCampaign, MultiFidelityCampaignDisposition,
+    MultiFidelityCampaignError, MultiFidelityCampaignExecutor, MultiFidelityCampaignRequest,
+    MultiFidelityCampaignRound, MultiFidelityCampaignStopReason, MultiFidelityExecutionFailure,
+    execute_glioma_multi_fidelity_campaign,
 };
 pub use posterior_batch::{
-    plan_glioma_posterior_batch, PosteriorBatchCandidate, PosteriorBatchCandidateDisposition,
-    PosteriorBatchDisposition, PosteriorBatchError, PosteriorBatchPlan, PosteriorBatchRequest,
-    PosteriorBatchScore, PosteriorBatchTarget, PosteriorPredictiveDraw,
+    PosteriorBatchCandidate, PosteriorBatchCandidateDisposition, PosteriorBatchDisposition,
+    PosteriorBatchError, PosteriorBatchPlan, PosteriorBatchRequest, PosteriorBatchScore,
+    PosteriorBatchTarget, PosteriorPredictiveDraw, plan_glioma_posterior_batch,
 };
 
 pub use mechanism_validation::{
-    plan_glioma_mechanism_validation, MechanismValidationArm, MechanismValidationDisposition,
-    MechanismValidationError, MechanismValidationPlan, MechanismValidationPlanRequest,
-    ValidationAction, ValidationActionKind, ValidationArmRole,
+    MechanismValidationArm, MechanismValidationDisposition, MechanismValidationError,
+    MechanismValidationPlan, MechanismValidationPlanRequest, ValidationAction,
+    ValidationActionKind, ValidationArmRole, plan_glioma_mechanism_validation,
 };
 pub use mechanism_validation_protocol::{
-    compile_glioma_mechanism_validation_protocol, MechanismValidationProtocolCompilation,
-    MechanismValidationProtocolCompileRequest, MechanismValidationProtocolDisposition,
-    MechanismValidationProtocolError,
+    MechanismValidationProtocolCompilation, MechanismValidationProtocolCompileRequest,
+    MechanismValidationProtocolDisposition, MechanismValidationProtocolError,
+    compile_glioma_mechanism_validation_protocol,
 };
 pub use operating_cycle::{
-    execute_glioma_experiment_operating_cycle, DryRunExperimentOperatingCycleExecutor,
-    ExperimentOperatingCycle, ExperimentOperatingCycleDisposition, ExperimentOperatingCycleError,
-    ExperimentOperatingCycleRequest,
+    DryRunExperimentOperatingCycleExecutor, ExperimentOperatingCycle,
+    ExperimentOperatingCycleDisposition, ExperimentOperatingCycleError,
+    ExperimentOperatingCycleRequest, execute_glioma_experiment_operating_cycle,
 };
 pub use power_reestimation::{
-    plan_glioma_power_reestimation, PowerArmDecision, PowerArmObservation, PowerDecisionKind,
-    PowerReestimationDisposition, PowerReestimationError, PowerReestimationPlan,
-    PowerReestimationRequest,
+    PowerArmDecision, PowerArmObservation, PowerDecisionKind, PowerReestimationDisposition,
+    PowerReestimationError, PowerReestimationPlan, PowerReestimationRequest,
+    plan_glioma_power_reestimation,
 };
 pub use power_stress_surface::{
-    plan_glioma_power_stress_surface, PowerStressArm, PowerStressArmResult, PowerStressDisposition,
-    PowerStressError, PowerStressScenario, PowerStressScenarioResult, PowerStressSurface,
-    PowerStressSurfaceRequest,
+    PowerStressArm, PowerStressArmResult, PowerStressDisposition, PowerStressError,
+    PowerStressScenario, PowerStressScenarioResult, PowerStressSurface, PowerStressSurfaceRequest,
+    plan_glioma_power_stress_surface,
 };
 pub use validation_batch_assessment::{
-    assess_glioma_validation_batch, ValidationBatchAssessment,
-    ValidationBatchAssessmentDisposition, ValidationBatchAssessmentError,
-    ValidationBatchAssessmentRequest,
+    ValidationBatchAssessment, ValidationBatchAssessmentDisposition,
+    ValidationBatchAssessmentError, ValidationBatchAssessmentRequest,
+    assess_glioma_validation_batch,
 };
 pub use validation_campaign::{
-    execute_glioma_validation_campaign, ValidationCampaignDisposition, ValidationCampaignError,
-    ValidationCampaignRequest, ValidationCampaignRound, ValidationCampaignRun,
-    ValidationCampaignStopReason,
+    ValidationCampaignDisposition, ValidationCampaignError, ValidationCampaignRequest,
+    ValidationCampaignRound, ValidationCampaignRun, ValidationCampaignStopReason,
+    execute_glioma_validation_campaign,
 };
 
 pub use replication_plan::{
-    plan_glioma_replication, ReplicationObservation, ReplicationPlan, ReplicationPlanDisposition,
-    ReplicationPlanError, ReplicationPlanRequest, ReplicationSiteAction, ReplicationSitePlan,
+    ReplicationObservation, ReplicationPlan, ReplicationPlanDisposition, ReplicationPlanError,
+    ReplicationPlanRequest, ReplicationSiteAction, ReplicationSitePlan, plan_glioma_replication,
 };
 
 pub use replication_continuation::{
-    plan_glioma_replication_continuation, ReplicationContinuationAction,
-    ReplicationContinuationDisposition, ReplicationContinuationError,
-    ReplicationContinuationObservation, ReplicationContinuationPlan,
+    ReplicationContinuationAction, ReplicationContinuationDisposition,
+    ReplicationContinuationError, ReplicationContinuationObservation, ReplicationContinuationPlan,
     ReplicationContinuationRequest, ReplicationContinuationSiteAction,
+    plan_glioma_replication_continuation,
 };
 pub use replication_protocol::{
-    compile_glioma_replication_protocol, ReplicationProtocolCompilation,
-    ReplicationProtocolCompilationDisposition, ReplicationProtocolCompilationError,
-    ReplicationProtocolCompileRequest,
+    ReplicationProtocolCompilation, ReplicationProtocolCompilationDisposition,
+    ReplicationProtocolCompilationError, ReplicationProtocolCompileRequest,
+    compile_glioma_replication_protocol,
 };
 pub use robust_active_learning::{
-    plan_glioma_robust_active_learning, RobustActiveLearningCandidate,
-    RobustActiveLearningCandidateDisposition, RobustActiveLearningDisposition,
-    RobustActiveLearningError, RobustActiveLearningModel, RobustActiveLearningObservation,
-    RobustActiveLearningPlan, RobustActiveLearningRequest, RobustActiveLearningScore,
+    RobustActiveLearningCandidate, RobustActiveLearningCandidateDisposition,
+    RobustActiveLearningDisposition, RobustActiveLearningError, RobustActiveLearningModel,
+    RobustActiveLearningObservation, RobustActiveLearningPlan, RobustActiveLearningRequest,
+    RobustActiveLearningScore, plan_glioma_robust_active_learning,
 };
 pub use robust_design::{
-    design_glioma_robust_experiment, RobustCandidateAllocation, RobustDesignActionKind,
-    RobustDesignCandidate, RobustDesignScenario, RobustExperimentDesign,
-    RobustExperimentDesignDisposition, RobustExperimentDesignError, RobustExperimentDesignRequest,
+    RobustCandidateAllocation, RobustDesignActionKind, RobustDesignCandidate, RobustDesignScenario,
+    RobustExperimentDesign, RobustExperimentDesignDisposition, RobustExperimentDesignError,
+    RobustExperimentDesignRequest, design_glioma_robust_experiment,
 };
 pub use sequential_campaign::{
-    execute_glioma_sequential_campaign, DryRunSequentialCampaignExecutor,
-    SequentialBatchObservation, SequentialCampaign, SequentialCampaignDisposition,
-    SequentialCampaignError, SequentialCampaignExecutionFailure, SequentialCampaignExecutor,
-    SequentialCampaignRequest, SequentialCampaignRound, SequentialCampaignStopReason,
+    DryRunSequentialCampaignExecutor, SequentialBatchObservation, SequentialCampaign,
+    SequentialCampaignDisposition, SequentialCampaignError, SequentialCampaignExecutionFailure,
+    SequentialCampaignExecutor, SequentialCampaignRequest, SequentialCampaignRound,
+    SequentialCampaignStopReason, execute_glioma_sequential_campaign,
 };
 pub use sequential_design::{
-    plan_glioma_sequential_design, SequentialArmDecision, SequentialArmObservation,
-    SequentialDecisionKind, SequentialDesignDisposition, SequentialDesignError,
-    SequentialDesignPlan, SequentialDesignRequest, SequentialDesignRound,
+    SequentialArmDecision, SequentialArmObservation, SequentialDecisionKind,
+    SequentialDesignDisposition, SequentialDesignError, SequentialDesignPlan,
+    SequentialDesignRequest, SequentialDesignRound, plan_glioma_sequential_design,
 };
 pub use synergy::{
-    analyze_glioma_combination_synergy, CombinationCell, CombinationCellDisposition,
-    CombinationObservation, CombinationSynergyAnalysis, CombinationSynergyDisposition,
-    CombinationSynergyError, CombinationSynergyRequest, DosePair,
+    CombinationCell, CombinationCellDisposition, CombinationObservation,
+    CombinationSynergyAnalysis, CombinationSynergyDisposition, CombinationSynergyError,
+    CombinationSynergyRequest, DosePair, analyze_glioma_combination_synergy,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ExperimentDesign;

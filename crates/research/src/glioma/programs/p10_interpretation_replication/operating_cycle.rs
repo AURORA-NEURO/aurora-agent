@@ -8,12 +8,12 @@
 //! authorization.
 
 use super::adaptive_frontier::{
-    plan_glioma_adaptive_research_frontier, AdaptiveFrontierError, AdaptiveFrontierRequest,
-    AdaptiveResearchFrontier,
+    AdaptiveFrontierError, AdaptiveFrontierRequest, AdaptiveResearchFrontier,
+    plan_glioma_adaptive_research_frontier,
 };
 use super::synthesis::{
-    synthesize_glioma_interpretation, InterpretationSynthesis, InterpretationSynthesisDisposition,
-    InterpretationSynthesisError, InterpretationSynthesisRequest,
+    InterpretationSynthesis, InterpretationSynthesisDisposition, InterpretationSynthesisError,
+    InterpretationSynthesisRequest, synthesize_glioma_interpretation,
 };
 use crate::glioma_engine::GliomaSelectionWeights;
 use bioprism_ids::ContentHash;

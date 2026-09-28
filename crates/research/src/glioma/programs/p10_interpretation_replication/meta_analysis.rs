@@ -574,10 +574,12 @@ mod tests {
         ];
         let output = analyze_replication_meta_analysis(&request(), &studies).unwrap();
         assert_eq!(output.disposition, MetaAnalysisDisposition::Heterogeneous);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("direction-contradiction")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("direction-contradiction"))
+        );
         assert!(output.i2_milli > 200);
         assert!(output.between_study_variance_milli > 0);
     }

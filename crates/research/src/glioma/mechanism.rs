@@ -355,9 +355,11 @@ mod tests {
         };
         let portfolio = explore_mechanisms(&request, &[]).unwrap();
         assert_eq!(portfolio.disposition, MechanismDisposition::Unresolved);
-        assert!(portfolio
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("no-mechanism")));
+        assert!(
+            portfolio
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("no-mechanism"))
+        );
     }
 }

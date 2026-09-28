@@ -73,7 +73,13 @@ fn comparison_fixture() -> Value {
     })
 }
 
-fn sweep_row(strategy: &str, facts: u64, sound: Option<bool>, closure: f64, admissible: bool) -> Value {
+fn sweep_row(
+    strategy: &str,
+    facts: u64,
+    sound: Option<bool>,
+    closure: f64,
+    admissible: bool,
+) -> Value {
     let mut row = json!({
         "strategy": strategy,
         "facts_selected": facts,
@@ -87,7 +93,14 @@ fn sweep_row(strategy: &str, facts: u64, sound: Option<bool>, closure: f64, admi
     row
 }
 
-fn sweep_cell(world_id: &str, attachment: &str, relay: u64, tag: &str, distractors: u64, rows: Vec<Value>) -> Value {
+fn sweep_cell(
+    world_id: &str,
+    attachment: &str,
+    relay: u64,
+    tag: &str,
+    distractors: u64,
+    rows: Vec<Value>,
+) -> Value {
     json!({
         "world_id": world_id,
         "attachment": attachment,
@@ -163,7 +176,10 @@ fn wide_sweep_fixture(columns: u64) -> Value {
 
 /// The viewBox width of a rendered figure.
 fn viewbox_width(svg: &str) -> f64 {
-    let start = svg.find("viewBox=\"0 0 ").expect("every figure declares a viewBox") + 13;
+    let start = svg
+        .find("viewBox=\"0 0 ")
+        .expect("every figure declares a viewBox")
+        + 13;
     let rest = &svg[start..];
     let end = rest.find('"').expect("the viewBox attribute is quoted");
     rest[..end]
@@ -208,7 +224,12 @@ fn diversity_fixture() -> Value {
     })
 }
 
-fn drive_attempt(index: u64, kind: &str, mission_status: Option<&str>, dispatch_error: Option<&str>) -> Value {
+fn drive_attempt(
+    index: u64,
+    kind: &str,
+    mission_status: Option<&str>,
+    dispatch_error: Option<&str>,
+) -> Value {
     json!({
         "attempt_index": index,
         "kind": kind,
@@ -253,15 +274,35 @@ fn drive_no_report_fixture() -> Value {
     })
 }
 
-type FigureCase = (&'static str, fn(&Value) -> Result<String, FigureError>, Value);
+type FigureCase = (
+    &'static str,
+    fn(&Value) -> Result<String, FigureError>,
+    Value,
+);
 
 fn all_figures() -> Vec<(&'static str, String, Value)> {
     let cases: Vec<FigureCase> = vec![
-        ("Equal-engineering baseline panel", baseline_panel, comparison_fixture()),
-        ("Context selection ratio", selection_ratio, golden_certificate()),
-        ("Reference omission accounting", omission_accounting, golden_certificate()),
+        (
+            "Equal-engineering baseline panel",
+            baseline_panel,
+            comparison_fixture(),
+        ),
+        (
+            "Context selection ratio",
+            selection_ratio,
+            golden_certificate(),
+        ),
+        (
+            "Reference omission accounting",
+            omission_accounting,
+            golden_certificate(),
+        ),
         ("Structural family sweep", sweep_grid, sweep_fixture()),
-        ("Effective diversity", mutation_diversity, diversity_fixture()),
+        (
+            "Effective diversity",
+            mutation_diversity,
+            diversity_fixture(),
+        ),
         ("Autopilot drive", autopilot_drive, drive_fixture()),
     ];
     cases
@@ -307,9 +348,9 @@ fn assert_valid_text_node(text: &str, context: &str) {
                 .unwrap_or_else(|| panic!("unterminated entity in {context}: {tail:.20}"));
             let entity = &tail[1..semicolon];
             let named = matches!(entity, "amp" | "lt" | "gt" | "quot" | "apos");
-            let numeric = entity
-                .strip_prefix('#')
-                .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()));
+            let numeric = entity.strip_prefix('#').is_some_and(|digits| {
+                !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+            });
             assert!(named || numeric, "invalid entity &{entity}; in {context}");
             index += semicolon + 1;
         } else {
@@ -333,7 +374,11 @@ fn assert_well_formed_xml(svg: &str) {
         let tag = &rest[open + 1..close];
         assert!(!tag.is_empty(), "empty tag");
         assert!(!tag.contains('<'), "nested '<' inside tag <{tag}>");
-        assert_eq!(tag.matches('"').count() % 2, 0, "unbalanced quotes in <{tag}>");
+        assert_eq!(
+            tag.matches('"').count() % 2,
+            0,
+            "unbalanced quotes in <{tag}>"
+        );
         if let Some(name) = tag.strip_prefix('/') {
             let expected = stack
                 .pop()
@@ -344,7 +389,11 @@ fn assert_well_formed_xml(svg: &str) {
             }
         } else {
             let self_closing = tag.ends_with('/');
-            let body = if self_closing { &tag[..tag.len() - 1] } else { tag };
+            let body = if self_closing {
+                &tag[..tag.len() - 1]
+            } else {
+                tag
+            };
             let name = body
                 .split_whitespace()
                 .next()
@@ -371,8 +420,7 @@ const SELECTION_RATIO_SHA256: &str =
     "d4e6bae9049b455c10e0e3d78fa0b08e6d41fbba3bb486c0c6f0b3d420722c61";
 const OMISSION_ACCOUNTING_SHA256: &str =
     "8a89ff459d8dae60473bd392e7b2b8b1cf63b37bd80eb99b421ffb1ce252154a";
-const SWEEP_GRID_SHA256: &str =
-    "eabe3595be81974d83b84f52d4d722aaf0498a9ab0dfb69924258f2a1c9f0545";
+const SWEEP_GRID_SHA256: &str = "eabe3595be81974d83b84f52d4d722aaf0498a9ab0dfb69924258f2a1c9f0545";
 const MUTATION_DIVERSITY_SHA256: &str =
     "f3696ea8847ccafce00d0d81cac37e2ec169c54a9ed03a07bffa747dd5a8a4df";
 const AUTOPILOT_DRIVE_SHA256: &str =
@@ -385,9 +433,15 @@ fn assert_byte_stable(
 ) {
     let first = figure(input).expect("the fixture renders");
     let second = figure(input).expect("the fixture renders twice");
-    assert_eq!(first, second, "two renders of the same value must be identical bytes");
+    assert_eq!(
+        first, second,
+        "two renders of the same value must be identical bytes"
+    );
     let digest = sha256_hex(first.as_bytes());
-    assert_eq!(digest, pinned, "figure bytes changed; actual sha256 is {digest}");
+    assert_eq!(
+        digest, pinned,
+        "figure bytes changed; actual sha256 is {digest}"
+    );
 }
 
 #[test]
@@ -397,12 +451,20 @@ fn a_baseline_panel_is_byte_stable_for_a_fixed_comparison() {
 
 #[test]
 fn a_selection_ratio_figure_is_byte_stable_for_the_golden_reference_certificate() {
-    assert_byte_stable(selection_ratio, &golden_certificate(), SELECTION_RATIO_SHA256);
+    assert_byte_stable(
+        selection_ratio,
+        &golden_certificate(),
+        SELECTION_RATIO_SHA256,
+    );
 }
 
 #[test]
 fn an_omission_accounting_figure_is_byte_stable_for_the_golden_reference_certificate() {
-    assert_byte_stable(omission_accounting, &golden_certificate(), OMISSION_ACCOUNTING_SHA256);
+    assert_byte_stable(
+        omission_accounting,
+        &golden_certificate(),
+        OMISSION_ACCOUNTING_SHA256,
+    );
 }
 
 #[test]
@@ -412,7 +474,11 @@ fn a_sweep_figure_is_byte_stable_for_a_fixed_table() {
 
 #[test]
 fn a_mutation_diversity_figure_is_byte_stable_for_a_fixed_diversity_document() {
-    assert_byte_stable(mutation_diversity, &diversity_fixture(), MUTATION_DIVERSITY_SHA256);
+    assert_byte_stable(
+        mutation_diversity,
+        &diversity_fixture(),
+        MUTATION_DIVERSITY_SHA256,
+    );
 }
 
 #[test]
@@ -442,7 +508,10 @@ fn a_refused_row_is_rendered_as_refused_and_never_as_a_zero_length_bar() {
 fn every_figure_is_well_formed_xml_with_exactly_one_root_element() {
     for (title, svg, _) in all_figures() {
         assert_well_formed_xml(&svg);
-        assert!(svg.starts_with("<svg "), "{title} must start with the svg root");
+        assert!(
+            svg.starts_with("<svg "),
+            "{title} must start with the svg root"
+        );
     }
 }
 
@@ -467,16 +536,28 @@ fn hostile_strings_are_escaped_rather_than_injected_into_the_markup() {
     comparison["results"][4]["refusal"] = json!("refused & \"quoted\" <detail>");
     let svg = baseline_panel(&comparison).expect("hostile strings still render");
     assert_well_formed_xml(&svg);
-    assert!(!svg.contains("a<b&"), "raw hostile bytes must never reach the markup");
-    assert!(!svg.contains("<script>"), "markup injection must be impossible");
-    assert!(svg.contains("a&lt;b&amp;&quot;c&quot;"), "the hostile text survives, escaped");
+    assert!(
+        !svg.contains("a<b&"),
+        "raw hostile bytes must never reach the markup"
+    );
+    assert!(
+        !svg.contains("<script>"),
+        "markup injection must be impossible"
+    );
+    assert!(
+        svg.contains("a&lt;b&amp;&quot;c&quot;"),
+        "the hostile text survives, escaped"
+    );
 
     let mut diversity = diversity_fixture();
     diversity["caveat"] = json!("evil\u{0001}\tcaveat with 'quotes' & <tags>");
     let svg = mutation_diversity(&diversity).expect("hostile caveats still render");
     assert_well_formed_xml(&svg);
     assert!(svg.contains("&apos;quotes&apos; &amp; &lt;tags&gt;"));
-    assert!(!svg.contains('\u{0001}'), "control bytes must not survive into XML");
+    assert!(
+        !svg.contains('\u{0001}'),
+        "control bytes must not survive into XML"
+    );
 }
 
 #[test]
@@ -488,7 +569,9 @@ fn a_missing_field_is_an_error_naming_the_dotted_path_never_a_silent_zero() {
         .remove("facts_exposed");
     assert_eq!(
         baseline_panel(&comparison),
-        Err(FigureError::MissingField { field: "results[0].facts_exposed".to_string() })
+        Err(FigureError::MissingField {
+            field: "results[0].facts_exposed".to_string()
+        })
     );
 
     let mut certificate = golden_certificate();
@@ -498,7 +581,9 @@ fn a_missing_field_is_an_error_naming_the_dotted_path_never_a_silent_zero() {
         .remove("compiled_fact_count");
     assert_eq!(
         selection_ratio(&certificate),
-        Err(FigureError::MissingField { field: "plan.compiled_fact_count".to_string() })
+        Err(FigureError::MissingField {
+            field: "plan.compiled_fact_count".to_string()
+        })
     );
 
     let mut certificate = golden_certificate();
@@ -508,7 +593,9 @@ fn a_missing_field_is_an_error_naming_the_dotted_path_never_a_silent_zero() {
         .remove("classification");
     assert_eq!(
         omission_accounting(&certificate),
-        Err(FigureError::MissingField { field: "omissions.classification".to_string() })
+        Err(FigureError::MissingField {
+            field: "omissions.classification".to_string()
+        })
     );
 
     let mut table = sweep_fixture();
@@ -518,14 +605,21 @@ fn a_missing_field_is_an_error_naming_the_dotted_path_never_a_silent_zero() {
         .remove("rows");
     assert_eq!(
         sweep_grid(&table),
-        Err(FigureError::MissingField { field: "cells[0].rows".to_string() })
+        Err(FigureError::MissingField {
+            field: "cells[0].rows".to_string()
+        })
     );
 
     let mut diversity = diversity_fixture();
-    diversity.as_object_mut().expect("diversity is an object").remove("caveat");
+    diversity
+        .as_object_mut()
+        .expect("diversity is an object")
+        .remove("caveat");
     assert_eq!(
         mutation_diversity(&diversity),
-        Err(FigureError::MissingField { field: "caveat".to_string() })
+        Err(FigureError::MissingField {
+            field: "caveat".to_string()
+        })
     );
 
     let mut report = drive_fixture();
@@ -535,7 +629,9 @@ fn a_missing_field_is_an_error_naming_the_dotted_path_never_a_silent_zero() {
         .remove("attempts_used");
     assert_eq!(
         autopilot_drive(&report),
-        Err(FigureError::MissingField { field: "totals.attempts_used".to_string() })
+        Err(FigureError::MissingField {
+            field: "totals.attempts_used".to_string()
+        })
     );
 }
 
@@ -567,11 +663,15 @@ fn an_internally_contradictory_document_is_refused_rather_than_rendered() {
         .as_array_mut()
         .expect("rows is an array")
         .retain(|row| row["strategy"] != "fiber");
-    assert!(matches!(sweep_grid(&table), Err(FigureError::Inconsistent { .. })));
+    assert!(matches!(
+        sweep_grid(&table),
+        Err(FigureError::Inconsistent { .. })
+    ));
 }
 
 #[test]
-fn the_sweep_figure_draws_ties_as_prominently_as_wins_and_carries_the_unswept_knob_caveat_verbatim() {
+fn the_sweep_figure_draws_ties_as_prominently_as_wins_and_carries_the_unswept_knob_caveat_verbatim()
+{
     let svg = sweep_grid(&sweep_fixture()).expect("the fixture renders");
     let text = visible_text(&svg);
     assert!(
@@ -588,10 +688,15 @@ fn the_sweep_figure_draws_ties_as_prominently_as_wins_and_carries_the_unswept_kn
         "the sweep's own scope caveat must travel verbatim"
     );
     assert!(
-        text.contains("† cell contains a row the oracle refused — counted as neither sound nor unsound"),
+        text.contains(
+            "† cell contains a row the oracle refused — counted as neither sound nor unsound"
+        ),
         "a refused sweep row must be marked, not absorbed into unsound"
     );
-    assert!(svg.contains("url(#hatch-accent)"), "tie cells use the accent hatch, not a washed-out tone");
+    assert!(
+        svg.contains("url(#hatch-accent)"),
+        "tie cells use the accent hatch, not a washed-out tone"
+    );
 }
 
 #[test]
@@ -639,13 +744,19 @@ fn a_caption_longer_than_one_line_wraps_instead_of_losing_its_tail() {
         "the caption states the reference verdict every other row is judged against; truncating \
          it away leaves the panel unreadable"
     );
-    assert!(!text.contains('…'), "nothing in this caption needed eliding");
+    assert!(
+        !text.contains('…'),
+        "nothing in this caption needed eliding"
+    );
     assert_eq!(
         svg.matches("font-size=\"11.5\"").count(),
         2,
         "a wrapped caption occupies two header lines rather than one clipped one"
     );
-    assert!(svg.contains("y=\"60.00\""), "the second caption line sits under the first");
+    assert!(
+        svg.contains("y=\"60.00\""),
+        "the second caption line sits under the first"
+    );
     assert!(
         svg.contains("<g transform=\"translate(0,74)\">"),
         "the body starts below the wrapped caption, never underneath it"
@@ -672,7 +783,10 @@ fn an_attempts_total_that_contradicts_the_attempts_array_is_refused_rather_than_
     let mut report = drive_fixture();
     report["totals"]["attempts_used"] = json!(3);
     assert!(
-        matches!(autopilot_drive(&report), Err(FigureError::Inconsistent { .. })),
+        matches!(
+            autopilot_drive(&report),
+            Err(FigureError::Inconsistent { .. })
+        ),
         "a caption may not claim more attempts than the figure below it draws"
     );
 
@@ -686,7 +800,10 @@ fn an_attempts_total_that_contradicts_the_attempts_array_is_refused_rather_than_
     let mut report = drive_fixture();
     report["totals"]["max_attempts"] = json!(1);
     assert!(
-        matches!(autopilot_drive(&report), Err(FigureError::Inconsistent { .. })),
+        matches!(
+            autopilot_drive(&report),
+            Err(FigureError::Inconsistent { .. })
+        ),
         "attempts used may not exceed the budget the same totals block declares"
     );
 }
@@ -701,15 +818,65 @@ fn the_autopilot_axis_is_labelled_as_a_logical_clock_free_sequence() {
 }
 
 #[test]
+fn a_paused_autopilot_drive_renders_its_valid_continuation_status() {
+    let mut report = drive_fixture();
+    report["final_status"] = json!("paused");
+
+    let svg = autopilot_drive(&report).expect("a caller-bounded report is renderable");
+    assert!(svg.contains("final: paused"));
+    assert_well_formed_xml(&svg);
+}
+
+#[test]
+fn an_unknown_autopilot_outcome_is_rendered_as_a_distinct_terminal_status() {
+    let mut report = drive_no_report_fixture();
+    report["final_status"] = json!("outcome_unknown");
+
+    let svg = autopilot_drive(&report).expect("an unknown dispatch outcome is renderable");
+    assert!(svg.contains("final: outcome_unknown"));
+    assert!(svg.contains("outcome unknown (transport)"));
+    assert_well_formed_xml(&svg);
+}
+
+#[test]
+fn an_invalid_mission_report_is_distinguished_from_an_undelivered_dispatch() {
+    let mut report = drive_no_report_fixture();
+    report["final_status"] = json!("outcome_unknown");
+    let attempt = report["attempts"]
+        .as_array_mut()
+        .expect("attempts are an array")
+        .last_mut()
+        .expect("the fixture has a final attempt");
+    attempt["report_digest"] = json!("1".repeat(64));
+    attempt["dispatch_error"] = Value::Null;
+    attempt["report_validation_error"] = json!("mission report failed schema validation");
+
+    let svg = autopilot_drive(&report).expect("an invalid mission report is renderable");
+    assert!(svg.contains("invalid report"));
+    assert!(svg.contains("outcome unknown"));
+    assert!(!svg.contains("outcome unknown (transport)"));
+    assert_well_formed_xml(&svg);
+}
+
+#[test]
 fn an_attempt_without_a_report_is_drawn_as_no_report_not_as_a_failure() {
     let svg = autopilot_drive(&drive_no_report_fixture()).expect("the fixture renders");
-    assert!(svg.contains("no report"), "an undelivered dispatch has no outcome to draw");
+    assert!(
+        svg.contains("no report"),
+        "an undelivered dispatch has no outcome to draw"
+    );
     assert!(
         svg.contains("outcome unknown (transport)"),
         "a transport error must be labelled unknown, not failed"
     );
-    assert!(svg.contains("stroke-dasharray"), "the no-report box is an outline, not a verdict fill");
-    assert!(svg.contains("final: refused"), "the final-status badge names the report's own stop state");
+    assert!(
+        svg.contains("stroke-dasharray"),
+        "the no-report box is an outline, not a verdict fill"
+    );
+    assert!(
+        svg.contains("final: refused"),
+        "the final-status badge names the report's own stop state"
+    );
 }
 
 #[test]

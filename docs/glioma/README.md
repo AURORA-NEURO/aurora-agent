@@ -10,13 +10,17 @@ protocol simulation, computation, replication, and research-object release. It c
 prognose, recommend treatment, triage care, enroll people, or accept human-subject/clinical-source
 data.
 
+The 384 entries in the feature catalog are stable product slots, not a claim that all 384 have
+executable implementations. The MCP catalog marks each slot `implemented` only when the research
+crate registers its feature id; unregistered slots remain explicitly `planned`.
+
 ## Folder map
 
 ```text
 crates/research/src/glioma_engine.rs       cross-program plan, execution, retries, checkpoints
 crates/research/src/glioma/
   mod.rs                                   public program API and ownership boundary
-  catalog.rs                               12 programs × 32 feature slots = 384 product features
+  catalog.rs                               12 programs × 32 stable feature slots; runtime status comes from the implementation registry
   evidence.rs                              P01 evidence qualification
   programs/p01_evidence_surveillance/evidence_cluster.rs
                                              P01 claim-scope evidence clustering, exact-artifact deduplication, and source-independence scoring
@@ -122,14 +126,19 @@ crates/research/src/glioma/
                                              P03 local, schema/version, duplicate, and modality/model admission before harmonization
   programs/p04_decision_context/context_replay.rs
                                              P04 epoch-aware decision-context replay with promotion, retirement, negative, and unresolved action partitions
+  programs/p04_decision_context/multi_study_epoch_replay.rs
+                                             P04 consecutive multi-study frontier replay with stable action, quorum, disagreement, adverse-history, and omission accounting
   programs/p04_decision_context/decision_context_artifact.rs
                                              P04 portable typed decision-context artifact with consumer compatibility, action/effect metadata, semantic-loss, and replay guarantees
   programs/p04_decision_context/multi_study_context_artifact.rs
-                                             P04 independent-study context alignment with quality/group quorum, typed conflicts, and namespaced negative/unknown partitions
+                                             P04 independent-study context alignment with quality/group quorum, typed conflicts, and digested completed/negative/failed/blocked/unknown local outcomes
   programs/p04_decision_context/multi_study_workflow.rs
-                                             P04 dependency-closed multi-study action planning with local resource allocation, replication quorum, autonomy gates, and deterministic waves
+                                             P04 dependency-closed multi-study planning with local resource allocation, completion-aware dependencies, replication quorum, autonomy gates, and deterministic waves
+  programs/p04_decision_context/multi_study_execution_receipt.rs
+                                             P04 digest-valid cross-program stage receipt binding to exact study-local action tasks
   programs/p04_decision_context/federated_decision_context.rs
                                              P04 aggregate-only continual decision frontier with independent-site quorum, heterogeneity, influence, and negative-result gates
+                                             P04 temporal promotion gate across consecutive aggregate federation epochs with replay and adverse-evidence retention
   programs/p04_decision_context/branch_evidence.rs
                                              P04 branch-outcome assimilation with contradiction, blocked/unobserved preservation, and deterministic next-frontier ranking
   programs/p05_mechanism_exploration/evidence_assimilation.rs
@@ -347,6 +356,12 @@ crates/research/src/glioma/
     p11_research_object_release/
     p11_research_object_release/release_gate.rs
                                              P11 replay-, provenance-, and review-aware release gate for accountable signing
+    p11_research_object_release/disclosure_register.rs
+                                             P11 digest-bound index covering manifest negative results and limitations
+    p11_research_object_release/disclosure_panel.rs
+                                             P11 multi-study expected-cohort reconciliation of validated disclosure registers
+    p11_research_object_release/disclosure_batch.rs
+                                             P11 priority-ordered high-throughput ledger for exact, independently validated disclosure panels
     p11_research_object_release/multimodal_bundle.rs
                                              P11 modality-coverage, semantic-loss, provenance-closure, and cross-modal alignment compiler
     p11_research_object_release/migration.rs
@@ -355,6 +370,26 @@ crates/research/src/glioma/
                                              P11 transitive artifact/program closure analysis with cycle, orphan, depth, and coverage gates
     p11_research_object_release/operating_cycle.rs
                                              P11 manifest replay, release gating, and accountable operator handoff
+    p11_research_object_release/replay_history.rs
+                                             P11 cross-epoch archive replay reconciliation with site and quorum accounting
+    p11_research_object_release/local_release_workflow.rs
+                                             P11 manifest-to-replay local workflow with exact phase and digest binding
+    p11_research_object_release/multistudy_release.rs
+                                             P11 expected-cohort accounting across independently reviewed local workflows
+    p11_research_object_release/release_batch.rs
+                                             P11 budget-bounded prospective release queue with preflight and failure-stop rules
+    p11_research_object_release/federated_continual.rs
+                                             P11 cross-epoch manifest change control with exact independent-review binding
+    p11_research_object_release/review_workbench.rs
+                                             P11 digest-bound local human checklist packet with explicit unresolved states
+    p11_research_object_release/portfolio_review_workbench.rs
+                                             P11 expected-cohort review reconciliation without cross-study promotion
+    p11_research_object_release/batch_review_workbench.rs
+                                             P11 per-job batch review reconciliation preserving queue failures and deferrals
+    p11_research_object_release/signature_protocol.rs
+                                             P11 canonical detached Ed25519 signature payload preparation and verification
+    p11_research_object_release/trust_policy.rs
+                                             P11 pinned-root signed-policy evaluation for project-scoped release keys
     p12_federated_benchmarking/
     p12_federated_benchmarking/mechanism_transport.rs
                                              P12 aggregate-only cross-model mechanism transport and fragility analysis
@@ -473,12 +508,26 @@ crates/research/src/glioma/
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/transportability.rs
                                              P10 model-system transportability and portability-gap analysis
+    p10_interpretation_replication/longitudinal_transport.rs
+                                             P10 complete-time-grid replication transport with source-preserving exclusions and leave-one-study-out influence
     p10_interpretation_replication/campaign.rs
                                              P10 autonomous replication/interpretation campaign and next-action executor
     p10_interpretation_replication/state_transition.rs
                                              P10 discrete-state transition matrices and treatment contrasts
   p10_interpretation_replication/causal_contrast.rs
                                              P10 exact pre/post difference-in-differences analysis
+  p10_interpretation_replication/replication_concordance.rs
+                                             P10 bounded pairwise concordance across independent estimand-aligned studies
+  p10_interpretation_replication/outcome_reporting_audit.rs
+                                             P10 registered versus reported outcome completeness, maturity, and uncertainty audit
+  p10_interpretation_replication/outcome_missingness_sensitivity.rs
+                                             P10 scenario-bounded missing registered-outcome sensitivity analysis
+  p10_interpretation_replication/outcome_record.rs
+                                             P10 digest-bound single-study registered-outcome evidence record
+  p10_interpretation_replication/outcome_evidence_panel.rs
+                                             P10 canonical multi-study panel of registered-outcome evidence records
+  p10_interpretation_replication/prospective_contradiction.rs
+                                             P10 prospective evidence plan for resolving contradictions
   p10_interpretation_replication/mediation.rs
                                              P10 mediator/direct/indirect effect decomposition with influence bounds
   p10_interpretation_replication/causal_adjustment.rs
@@ -605,7 +654,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, local and multimodal researcher evidence workbenches, evidence verification gates, researcher-capacity-aware prospective triage, aggregate-only federation transport, ranked autonomous federation cycles, high-throughput batch scheduling, continual promotion/rollback control, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, explicit multi-study alignment and influence diagnostics, prospective change-point monitoring with multiplicity control, robust aggregate-only federated continual consensus, autonomous evidence-to-action ranking with budget/dependency/autonomy gates, local dependency-wave workflow compilation with checkpoint/compensation planning, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
-| P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, portable and multi-study typed context artifacts, dependency-closed replicated task waves, local resource allocation, autonomy/approval gates, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, aggregate-only federated branch consensus, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |
+| P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, portable and multi-study typed context artifacts, dependency-closed replicated task waves, local resource allocation, autonomy/approval gates, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, aggregate-only federated branch consensus with consecutive-epoch promotion, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, pairwise identifiability analysis with quality/risk/budget-gated feature selection, cross-model mechanistic invariance and transport-stable panel selection, calibrated trust-discounted posterior action selection, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, observation-driven feedback replanning, dependency-closed workflow compilation, local single-study workflow assurance, multimodal multi-study portfolio compilation, prospective high-throughput control, and an end-to-end next-assay operating cycle |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, an end-to-end plan/execute/replan cycle, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, evolution-aware clone campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
@@ -614,6 +663,12 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, cross-site verdicts, guarded adaptive-frontier execution, bounded resynthesis campaigns, and computation-evidence adjudication |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence, dependency-aware replay, accountable release gating, and operator handoff |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, planner-to-campaign adaptive execution, robust pooling, heterogeneity, and site-influence analysis |
+
+The P05 `glioma_mechanism_robustness_stress` output schema v2 distinguishes measured scenarios from
+omissions. An omitted mechanism-scenario pair carries no score or rank. Each mechanism has a tagged
+`measured` or `unmeasured` evaluation; only the measured variant carries aggregates, and its
+stability uses the available-scenario denominator. If the scenarios measure no mechanism at all,
+the stress disposition is `blocked`.
 
 ## Feature expansion
 
@@ -687,11 +742,24 @@ combines information gain and uncertainty reduction into a bounded net-progress 
 failures, contradictions, and negative outcomes, and stops for budget exhaustion, repeated
 no-progress, failure limits, incomplete closure, or human review. A qualified round is sent to
 independent validation rather than being treated as a clinical or biological conclusion.
+The decision-context replay (`replay_glioma_decision_context`) retains its validated epoch ledger,
+outcomes, and replay thresholds in the report. Verification recomputes the action transitions and
+result partitions from those source epochs, so changing a summary and recomputing its digest cannot
+make it valid.
+Request and report size, epoch count, outcome count, and action-row limits bound the retained audit
+record; the versioned replay output is a research-planning record, not an observation or authorization.
 The federated decision-context engine (`aggregate_glioma_federated_decision_context`) combines
 site-local branch plans without moving raw data. It applies independent-group quorum, site quality,
 branch support, heterogeneity, and leave-one-site-out influence gates, ranking only robust branches
 for promotion. Denied, underpowered, negative, contradicted, failed, and unknown site outcomes are
 retained with deterministic omissions and a route back to the decision cycle or researcher review.
+The continual promotion gate (`promote_glioma_federated_continual_context`) consumes consecutive,
+digest-validated aggregate reports and advances a branch only after it remains the qualified top
+branch for the configured stability window. It requires new observation identities across epochs,
+applies explicit temporal support and risk thresholds, replays its retained epoch ledger during
+verification, and holds historical adverse evidence visible. It returns a research-plan route only;
+site identity, raw data, assay execution, release authority, and clinical decisions remain outside
+this contract.
 The typed context artifact (`materialize_glioma_decision_context_artifact`) packages the same
 decision state for local agents, workbenches, Rust/Python/TypeScript SDKs, and MCP clients. It
 retains candidate dependencies, autonomy tiers, effects, deferred actions, omissions, negatives,
@@ -700,14 +768,33 @@ context content-addressed and the preclinical boundary explicit.
 The multi-study context artifact (`align_glioma_multi_study_context_artifacts`) aligns those
 portable contracts across independent studies without moving raw evidence. It filters denied or
 low-quality studies, requires independent-group support, retains typed action conflicts as
-unresolved, and namespaces each study's negative and unknown partitions before producing a
-deterministic shared frontier.
+unresolved, and namespaces each study's negative, failed, blocked, and unknown outcomes with their
+result digests. Explicit adverse outcomes hold that action out of the shared frontier; omitted
+outcomes remain distinct from an explicitly unknown result.
+The multi-study epoch replay (`replay_glioma_multi_study_context_epochs`) then compares those
+frontiers over consecutive study epochs. It requires stable study-to-group identity, rechecks study,
+group, support, and disagreement thresholds at every epoch, and marks an action stable only after
+the configured qualified streak with no negative, failed, blocked, unknown, or conflicted history.
+Added, retired, qualified, and dequalified actions remain explicit; source artifacts, typed local
+outcome digests, omissions, negative evidence, and uncertainty are retained for deterministic replay. A stable frontier routes to the P04 research
+cycle, while partial or blocked histories route to review or workflow planning without dispatch.
 The multi-study workflow planner (`plan_glioma_multi_study_workflow`) then closes selected
 frontier actions over prerequisites, allocates them only to policy-approved institution-local
-budgets, and schedules deterministic waves. It refuses to schedule a partial independent-group
-replication quorum, reserves compute/material/instrument capacity, and marks physical, material,
-external-data, federation, or elevated-autonomy effects as requiring approval/preflight. Its output
-is still a plan; dispatch remains a separate policy- and operator-gated step.
+budgets, and schedules deterministic waves. Digest-bound completed local outcomes satisfy their
+study-specific dependencies and prevent duplicate scheduling; the plan retains completion receipts
+and can report when the frontier's independent-group work is already complete. It refuses to
+schedule a partial independent-group replication quorum, reserves compute/material/instrument
+capacity, and marks physical, material, external-data, federation, or elevated-autonomy effects as
+requiring approval/preflight. Its output is still a plan; dispatch remains a separate policy- and
+operator-gated step.
+The cross-program receipt adapter (`reconcile_glioma_multi_study_execution_receipts`) binds a
+validated shared-engine receipt to the exact P04 task, study, and action stage. It retains only
+digest-addressed stage snapshots, rejects approval-held tasks, and converts the result into the
+per-study F06 outcome input. Engine `negative` and `partial` labels become `unknown` because the
+value-free generic receipt cannot establish that either label came from a measured biological
+result; blocked stages remain blocked or failed according to whether the engine recorded an error.
+The adapter performs no execution, does not copy run error text, and does not make a biological or
+clinical conclusion.
 P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,
@@ -1027,6 +1114,28 @@ P10 also includes fixed-point replication meta-analysis (`analyze_replication_me
 fixed and random-effects inverse-uncertainty pooling, estimated between-study variance,
 Cochran/I² heterogeneity, leave-one-study-out influence, and explicit negative or unresolved
 outcomes for contradiction, underpowered sites, weak signal, and unstable pools.
+The separate multi-study pairwise concordance analysis (`analyze_glioma_multistudy_concordance`)
+requires exact estimand and effect-unit binding and one row per independent group. It compares full
+effect intervals only within the same model system, preserves cross-model pairs as incomparable,
+retains null, unresolved, and low-quality evidence with explicit states, and never pools study
+effects. This repository-defined analysis reports support, refutation, interval gaps, and every
+eligible pair for deterministic replay.
+The single-study registered-outcome record (`build_glioma_registered_outcome_record`) then binds
+one reviewed outcome state, source reports, and local artifacts into a typed digest-checked value.
+The multi-study panel (`build_glioma_registered_outcome_evidence_panel`) accepts only compatible
+records from unique independent groups, preserves every availability state, and emits a canonical
+digest and counts without pooling estimates. A companion sensitivity view applies explicit missing
+result scenarios separately from those evidence records.
+The registered-outcome completeness audit (`audit_glioma_registered_outcome_reporting`) compares
+local registry protocols with reviewed result-report metadata. It distinguishes overdue missing
+primary outcomes from results that are not due, preserves incomplete and ambiguous reports, and
+flags retrospective registration or outcomes absent from a registry plan as review signals.
+Reports carry identifiers and completeness states only; the audit does not infer effect direction,
+publication bias, or misconduct from missing or changed outcomes.
+The registered-outcome sensitivity envelope (`analyze_glioma_outcome_missingness_sensitivity`)
+then compares observed estimates with caller-declared bounded scenarios for missing, incomplete,
+ambiguous, or unresolved reports. It reports support and directional-concordance bounds without
+imputing or pooling effects; not-due outcomes stay outside those scenarios.
 P10 now also includes the autonomous replication campaign (`execute_glioma_replication_campaign`).
 It composes site-level replication, fixed/random-effects pooling, and model-system transportability;
 scores missing coverage, heterogeneity, influential studies, and transport gaps; dispatches only
@@ -1313,6 +1422,14 @@ P11 now adds a dependency-aware reproducibility replay campaign
 hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a
 reproducible release-readiness state when the manifest, required coverage, and replay gates all
 clear. Non-deterministic tasks remain unavailable rather than being fabricated as successful.
+P11 also composes that replay path into local and multi-study release workflows, a bounded
+prospective batch queue, cross-epoch change control, and checklist-based operator review. Detached
+Ed25519 signatures bind the manifest, workflow, review packet, release gate, key ID, public-key
+digest, and challenge; a separately signed, root-pinned policy can establish whether the exact key
+has a current grant for that research identity. Trust-policy pins remain deployment configuration,
+and neither key trust nor a mathematically valid signature grants publication authority or prevents
+challenge replay. The detailed P11 contracts are in
+[`PROGRAM_PLAN.md`](PROGRAM_PLAN.md).
 P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
 qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The
@@ -1357,6 +1474,14 @@ gate. Hardware completion never qualifies biology by itself; qualified, negative
 actions remain partitioned with explicit next actions for missing observations, repeat work, or
 instrument recalibration. The MCP route only consumes value summaries and never moves raw data,
 executes hardware, or makes a clinical decision.
+The F16 science loop now binds each supplied assay observation to both `run_id` and `action_id`, so
+repeated action names across campaign runs cannot exchange measurements. Its v2 output preserves
+assessments in campaign order, commits the original request and observations in `input_digest`, and
+retains each exact execution digest and local assay artifact. Call `validate_against` with the
+source request and observations to recheck the declared preflight/run mapping and recompute each
+assessment from that run's observations. The F25 frontier consumes the run-bound assessments
+directly and commits to the science-loop digest. Its MCP input description names the run-scoped
+observation contract; MCP remains simulation-only.
 P08 now also exposes adaptive instrument campaign selection (`execute_glioma_adaptive_instrument_campaign`). It
 scores already-preflighted assay candidates by expected information, frontier novelty,
 reproducibility, instrument time, and physical risk, then chooses a dependency-closed,
@@ -1499,8 +1624,15 @@ per-assay predictive outcome distributions, then greedily chooses a cost-adjuste
 pairwise posterior disagreement. A Bhattacharyya-overlap product is used as a deterministic
 conditional-independence surrogate so a second assay that predicts the same outcome split receives
 less marginal value than an orthogonal assay. Risk ceilings, replicate limits, cost, and unresolved
-posterior disagreement remain explicit. The institution supplies the fitted model and calibrated
-posterior inputs; this planner neither trains a glioma model nor executes assays.
+posterior disagreement remain explicit. Schema `GliomaPosteriorDisagreementBatch1@2` includes an
+`input_digest` over the normalized objective, model system, planning limits, targets, candidates,
+and posterior draws; it binds the result to the exact model inputs without copying posterior values
+into the plan. `validate_against()` reruns the bounded planner and checks that caller-retained inputs
+reproduce the full plan, while `validate()` checks only the plan's own structure and digest. This
+digest is a provenance commitment, not authentication or confidentiality. The institution supplies
+the fitted model and calibrated posterior inputs; this planner neither trains a glioma model nor
+executes assays. Agents can call the planner through MCP as `glioma_posterior_batch`; the response
+marks `dispatch` as `not_started` and returns the typed plan and its explicit validation limits.
 
 The design is informed by BATCHIE/PDBAL's posterior-draw, information-oriented batch selection
 ([Tosh et al., Nature Communications, 2025](https://doi.org/10.1038/s41467-024-55287-7)), but it is
@@ -1513,23 +1645,38 @@ assay/model calibration before research use.
 
 P07 closes that planning loop with `execute_glioma_active_learning_campaign`. The campaign
 controller repeatedly invokes the P06 surrogate, sends each admitted candidate to a caller-owned
-local executor, validates candidate-bound content-addressed observations, and replans from those
-observations. Retry, budget, replicate, redundancy, unresolved-evidence, executor-failure, and
+local executor, and validates each response's candidate binding, unique observation identity,
+uncertainty bound, and local artifact before accepting it or planning another assay. Seed
+observations receive the same preflight checks. Retry, budget, replicate, redundancy,
+unresolved-evidence, executor-failure, and
 maximum-round gates are persisted in a replayable campaign record; the bundled MCP route uses a
 deterministic sandbox executor and cannot contact hardware, move raw data, or make a clinical
-decision.
+decision. Schema `GliomaActiveLearningCampaign1@2` includes an `input_digest` commitment to the
+exact source request, seed observations, candidates, and campaign limits. `validate_against()`
+checks that commitment and the campaign output digest; it does not replay or authenticate effects
+from a caller-owned executor.
 
 P07 also exposes `execute_glioma_robust_active_learning_campaign`, which carries the ensemble
-planner through repeated local assay rounds. It re-evaluates model disagreement after every typed
-observation, keeps lower-tail and contradiction holds visible, and stops on explicit budget,
+planner through repeated local assay rounds. It validates each typed response and local artifact
+before re-evaluating model disagreement, keeps lower-tail and contradiction holds visible, and stops on explicit budget,
 replicate, reliability, unresolved, retry, or executor-failure gates. The result is a resumable
-research campaign rather than a one-shot ranking.
+research campaign rather than a one-shot ranking. Schema `GliomaRobustActiveLearningCampaign1@2`
+also commits to the exact initial request; `validate_against()` checks source binding and the output
+digest without claiming that executor effects were replayed or authenticated.
 
 P10 adds `analyze_glioma_transportability` for the common preclinical question of whether an
 effect learned in one model system is portable to another. It combines declared population
 signatures, quality, replicate count, and measurement uncertainty; reports heterogeneity,
 transport gap, and leave-one-study-out shifts; and refuses to promote distant, unstable, negative,
 or insufficient evidence into a portability claim.
+P10-F32 adds `analyze_glioma_longitudinal_transport` for repeated independent-study effects across
+a declared time grid. It requires one common eligible study set at every timepoint, retains each
+study's local artifact reference, reports per-timepoint weighted estimates and influence, and
+estimates the pooled trend and between-study directional agreement. Incomplete trajectories remain
+excluded with reasons rather than receiving imputed values; quorum, target-model gap, heterogeneity,
+influence, and direction gates can hold the result, while stable sub-threshold trends remain
+negative evidence. Its thresholds and completeness policy are an explicit repository contract
+because the blueprint distribution is not configured in this checkout.
 
 The robust active-learning surface (`plan_glioma_robust_active_learning`) keeps competing
 mechanistic and spatial surrogates separate. It shrinks local observations toward reliability- and

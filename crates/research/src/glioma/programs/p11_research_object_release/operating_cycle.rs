@@ -6,12 +6,12 @@
 //! data; institution-owned executors provide the only path to real replay computation.
 
 use super::release_gate::{
-    evaluate_glioma_release_gate, ReleaseGateError, ReleaseGateEvaluation, ReleaseGateRequest,
-    ReleaseGateStatus,
+    ReleaseGateError, ReleaseGateEvaluation, ReleaseGateRequest, ReleaseGateStatus,
+    evaluate_glioma_release_gate,
 };
 use super::replay::{
-    execute_glioma_replay_campaign, DryRunReplayCampaignExecutor, ReplayCampaign,
-    ReplayCampaignError, ReplayCampaignExecutor, ReplayCampaignRequest,
+    DryRunReplayCampaignExecutor, ReplayCampaign, ReplayCampaignError, ReplayCampaignExecutor,
+    ReplayCampaignRequest, execute_glioma_replay_campaign,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};

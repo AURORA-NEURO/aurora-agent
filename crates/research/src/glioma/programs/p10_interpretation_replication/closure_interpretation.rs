@@ -11,9 +11,9 @@ use super::replication_closure_campaign::{
     ReplicationClosureCampaignError, ReplicationClosureCampaignRun,
 };
 use super::synthesis::{
-    synthesize_glioma_interpretation, InterpretationEvidence, InterpretationEvidenceDirection,
-    InterpretationEvidenceFamily, InterpretationSynthesis, InterpretationSynthesisError,
-    InterpretationSynthesisRequest,
+    InterpretationEvidence, InterpretationEvidenceDirection, InterpretationEvidenceFamily,
+    InterpretationSynthesis, InterpretationSynthesisError, InterpretationSynthesisRequest,
+    synthesize_glioma_interpretation,
 };
 use crate::glioma_engine::{GliomaModelSystem, LocalArtifactRef};
 use bioprism_foundation::PRECLINICAL_BOUNDARY;

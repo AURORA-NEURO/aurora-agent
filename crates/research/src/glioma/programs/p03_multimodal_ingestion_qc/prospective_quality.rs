@@ -331,11 +331,9 @@ pub fn forecast_glioma_multimodal_quality(
             0
         };
         let forecast_gap = forecast_quality.map_or(1_000, |quality| {
-            u16::from(
-                request
-                    .minimum_forecast_quality_milli
-                    .saturating_sub(quality),
-            )
+            request
+                .minimum_forecast_quality_milli
+                .saturating_sub(quality)
         });
         let quality_risk = ((u32::from(missing_fraction) * 400 / 1_000)
             .saturating_add(u32::from(slope_risk) * 400 / 1_000)
@@ -386,7 +384,7 @@ pub fn forecast_glioma_multimodal_quality(
             next_action,
         });
     }
-    summaries.sort_by(|left, right| left.modality.cmp(&right.modality));
+    summaries.sort_by_key(|left| left.modality);
     risk_rank.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
     let forecast_order = risk_rank
         .iter()

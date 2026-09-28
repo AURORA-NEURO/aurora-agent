@@ -186,7 +186,13 @@ impl VerifiedCampaignReceipt {
                 ));
             }
             Some("exhausted") => CampaignReceiptDisposition::Exhausted,
+            Some("outcome_unknown") => CampaignReceiptDisposition::UnknownCompletion,
             Some("refused") => CampaignReceiptDisposition::Refused,
+            Some("paused") => {
+                return Err(invalid_receipt(
+                    "a paused autopilot report is a continuation boundary, not terminal campaign evidence",
+                ));
+            }
             _ => return Err(invalid_receipt("autopilot final_status is not recognized")),
         };
         let detail_digest = digest_value(&verification)?;
@@ -215,12 +221,20 @@ impl VerifiedCampaignReceipt {
                     FinalDisposition::Exhausted { accounting },
                     CampaignReceiptDisposition::Exhausted,
                 ),
+                NextAction::StopOutcomeUnknown { outcome_unknown } => (
+                    FinalDisposition::OutcomeUnknown { outcome_unknown },
+                    CampaignReceiptDisposition::UnknownCompletion,
+                ),
                 NextAction::StopRefused {
                     first_terminal_refusal,
                 } => (
                     FinalDisposition::Refused {
                         first_terminal_refusal,
                     },
+                    CampaignReceiptDisposition::Refused,
+                ),
+                NextAction::StopRepairRefused { refusal } => (
+                    FinalDisposition::RepairRefused { refusal },
                     CampaignReceiptDisposition::Refused,
                 ),
                 NextAction::DispatchFull { .. } | NextAction::DispatchRepair { .. } => {

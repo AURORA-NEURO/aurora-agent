@@ -237,11 +237,9 @@ pub fn build_glioma_multimodal_ingestion_manifest(
             .iter()
             .filter(|model| models.contains(model))
             .count();
-    let coverage = if coverage_denominator == 0 {
-        1_000
-    } else {
-        ((coverage_numerator * 1_000) / coverage_denominator) as u16
-    };
+    let coverage = (coverage_numerator * 1_000)
+        .checked_div(coverage_denominator)
+        .unwrap_or(1_000) as u16;
     let integrity = if request.item_order.is_empty() {
         0
     } else {

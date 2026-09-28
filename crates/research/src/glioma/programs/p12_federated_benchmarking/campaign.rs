@@ -7,8 +7,8 @@
 //! is intentionally synthetic and is useful only for replay and integration tests.
 
 use super::consensus::{
-    analyze_federated_benchmark, FederatedBenchmarkConsensus, FederatedBenchmarkDisposition,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkConsensus, FederatedBenchmarkDisposition, FederatedBenchmarkRequest,
+    FederatedBenchmarkSite, analyze_federated_benchmark,
 };
 use crate::glioma_engine::LocalArtifactRef;
 use bioprism_ids::ContentHash;
@@ -746,10 +746,12 @@ mod tests {
             output.stop_reason,
             FederatedBenchmarkCampaignStopReason::BudgetExhausted
         );
-        assert!(output
-            .final_consensus
-            .contributions
-            .iter()
-            .all(|item| item.disposition == FederatedBenchmarkSiteDisposition::Included));
+        assert!(
+            output
+                .final_consensus
+                .contributions
+                .iter()
+                .all(|item| item.disposition == FederatedBenchmarkSiteDisposition::Included)
+        );
     }
 }

@@ -635,7 +635,7 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::knowledge_graph::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
     use bioprism_ids::ContentHash;
@@ -753,9 +753,11 @@ mod tests {
             output.paths[0].disposition,
             KnowledgePathDisposition::Contested
         );
-        assert!(output
-            .negative_evidence_order
-            .contains(&"r-contradiction".into()));
+        assert!(
+            output
+                .negative_evidence_order
+                .contains(&"r-contradiction".into())
+        );
         assert_eq!(
             output.disposition,
             KnowledgeCompositionDisposition::Unresolved

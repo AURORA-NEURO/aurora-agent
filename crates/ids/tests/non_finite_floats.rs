@@ -15,10 +15,11 @@
 //! therefore disagree about what a non-finite float *is*, and they only agree today because no
 //! producer has emitted one.
 //!
-//! This cannot be closed inside `of_value`: by the time a `Value` exists the information is gone.
-//! Closing it needs either a `Serialize`-generic hashing entry point with its own float handling,
-//! or validation at each producer — which is what `bioprism_biolang::BioState::validate` does for
-//! its ledger. These tests exist so the hole is known rather than discovered.
+//! The typed `ContentHash::of_serializable` path now rejects non-finite floats before conversion.
+//! This file keeps the separate `of_value` limit explicit: once callers have converted data to a
+//! `Value`, a stated null cannot be distinguished from a float that serde_json already mapped to
+//! null. Producers should hash their typed value before that lossy conversion, or validate the
+//! numeric fields before constructing a `Value`.
 
 use bioprism_ids::ContentHash;
 use serde_json::json;
@@ -66,7 +67,7 @@ fn a_stated_null_and_an_absent_key_remain_different_documents() {
 }
 
 #[test]
-fn the_non_finite_error_is_reachable_only_by_constructing_a_number_serde_cannot_produce() {
+fn serde_json_values_cannot_represent_non_finite_numbers() {
     let finite = single_float(1.5);
     assert!(ContentHash::of_value(&finite).is_ok());
 

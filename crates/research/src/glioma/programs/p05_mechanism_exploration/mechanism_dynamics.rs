@@ -765,9 +765,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(first, second);
-        assert!(first
-            .selected_intervention_order
-            .contains(&"oxygenation".into()));
+        assert!(
+            first
+                .selected_intervention_order
+                .contains(&"oxygenation".into())
+        );
         assert_eq!(first.sensitivities.len(), 1);
         first.validate().unwrap();
     }

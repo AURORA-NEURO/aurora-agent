@@ -7,8 +7,8 @@
 //! decision.
 
 use super::information_design::{
-    plan_glioma_information_design, DesignAction, DesignMechanism, InformationDesignActionScore,
-    InformationDesignDisposition, InformationDesignRequest,
+    DesignAction, DesignMechanism, InformationDesignActionScore, InformationDesignDisposition,
+    InformationDesignRequest, plan_glioma_information_design,
 };
 use crate::glioma_engine::{GliomaModelSystem, LocalArtifactRef};
 use bioprism_ids::ContentHash;

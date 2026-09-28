@@ -657,10 +657,12 @@ mod tests {
             output.disposition,
             EvidenceSurveillanceDisposition::Qualified
         );
-        assert!(output
-            .changes
-            .iter()
-            .any(|change| change.kind == EvidenceChangeKind::StateTransition));
+        assert!(
+            output
+                .changes
+                .iter()
+                .any(|change| change.kind == EvidenceChangeKind::StateTransition)
+        );
         assert_eq!(
             output.actions[0].kind,
             EvidenceSurveillanceActionKind::InvestigateContradiction

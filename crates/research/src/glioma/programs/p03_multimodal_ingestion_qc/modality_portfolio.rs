@@ -584,9 +584,11 @@ mod tests {
             ModalityPortfolioDisposition::Conditional
         );
         assert!(!output.uncovered_dimension_order.is_empty());
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("uncovered-dimension")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("uncovered-dimension"))
+        );
     }
 }

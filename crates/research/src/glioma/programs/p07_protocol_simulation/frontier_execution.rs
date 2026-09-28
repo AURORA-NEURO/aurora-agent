@@ -8,8 +8,8 @@
 //! effect is added by this bridge.
 
 use super::action_execution::{
-    execute_glioma_action_portfolio, ActionPortfolioExecution, ActionPortfolioExecutionError,
-    ActionPortfolioExecutionRequest, GliomaActionExecutor, MAX_RETRIES,
+    ActionPortfolioExecution, ActionPortfolioExecutionError, ActionPortfolioExecutionRequest,
+    GliomaActionExecutor, MAX_RETRIES, execute_glioma_action_portfolio,
 };
 use super::scientific_frontier::ScientificFrontierPlan;
 use crate::glioma_engine::{GliomaActionCandidate, GliomaSelectionConfig};
@@ -362,7 +362,7 @@ pub fn execute_glioma_scientific_frontier<E: GliomaActionExecutor>(
 mod tests {
     use super::*;
     use crate::glioma_engine::{
-        select_glioma_actions, GliomaModality, GliomaModelSystem, GliomaStageKind,
+        GliomaModality, GliomaModelSystem, GliomaStageKind, select_glioma_actions,
     };
     use bioprism_foundation::{AutonomyTier, Effect};
     use serde_json::json;

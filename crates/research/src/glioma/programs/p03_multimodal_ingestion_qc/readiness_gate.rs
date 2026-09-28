@@ -7,9 +7,9 @@
 //! missing modality, upgrades a partial report, or makes a clinical decision.
 
 use super::campaign::{
-    execute_glioma_multimodal_ingestion_campaign, MultimodalIngestionCampaign,
-    MultimodalIngestionCampaignError, MultimodalIngestionCampaignExecutor,
-    MultimodalIngestionCampaignRequest,
+    MultimodalIngestionCampaign, MultimodalIngestionCampaignError,
+    MultimodalIngestionCampaignExecutor, MultimodalIngestionCampaignRequest,
+    execute_glioma_multimodal_ingestion_campaign,
 };
 use crate::glioma::multimodal::{MultimodalDisposition, MultimodalQcReport};
 use bioprism_ids::ContentHash;
@@ -522,12 +522,16 @@ mod tests {
         let output = execute_glioma_multimodal_readiness_gate(&request(), &mut executor).unwrap();
         assert!(output.simulation_only);
         assert_eq!(output.coverage_milli, 1_000);
-        assert!(output
-            .admitted_surface_order
-            .contains(&MultimodalResearchSurface::Analysis));
-        assert!(output
-            .conditional_surface_order
-            .contains(&MultimodalResearchSurface::Replication));
+        assert!(
+            output
+                .admitted_surface_order
+                .contains(&MultimodalResearchSurface::Analysis)
+        );
+        assert!(
+            output
+                .conditional_surface_order
+                .contains(&MultimodalResearchSurface::Replication)
+        );
         assert!(output.next_action_order.is_empty());
         output.validate().unwrap();
     }

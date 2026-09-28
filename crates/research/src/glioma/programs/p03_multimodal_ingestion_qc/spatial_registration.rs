@@ -702,12 +702,14 @@ mod tests {
         let second = register_glioma_spatial_samples(&request(), &cells()).unwrap();
         assert_eq!(first, second);
         assert_eq!(first.disposition, SpatialRegistrationDisposition::Qualified);
-        assert!(first
-            .registered_cells
-            .iter()
-            .any(|cell| cell.cell_id == "s-a"
-                && cell.aligned_x_milli == 0
-                && cell.aligned_y_milli == 0));
+        assert!(
+            first
+                .registered_cells
+                .iter()
+                .any(|cell| cell.cell_id == "s-a"
+                    && cell.aligned_x_milli == 0
+                    && cell.aligned_y_milli == 0)
+        );
         assert!(first.unregistered_cell_order.is_empty());
         first.validate().unwrap();
     }
@@ -723,10 +725,12 @@ mod tests {
             output.disposition,
             SpatialRegistrationDisposition::Unresolved
         );
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("insufficient-shared-lineages")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("insufficient-shared-lineages"))
+        );
         assert!(output.unregistered_cell_order.iter().any(|id| id == "s-a"));
     }
 

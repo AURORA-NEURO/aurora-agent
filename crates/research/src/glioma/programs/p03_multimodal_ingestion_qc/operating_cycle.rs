@@ -7,8 +7,8 @@
 
 use super::campaign::MultimodalIngestionCampaignExecutor;
 use super::readiness_gate::{
-    execute_glioma_multimodal_readiness_gate, MultimodalReadinessError, MultimodalReadinessRequest,
-    MultimodalResearchReadiness, MultimodalResearchReadinessDisposition,
+    MultimodalReadinessError, MultimodalReadinessRequest, MultimodalResearchReadiness,
+    MultimodalResearchReadinessDisposition, execute_glioma_multimodal_readiness_gate,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -278,10 +278,12 @@ mod tests {
         assert_eq!(first, second);
         assert!(first.simulation_only);
         assert_eq!(first.phase_order[0], "ingestion_qc");
-        assert!(first
-            .readiness
-            .admitted_surface_order
-            .contains(&super::super::readiness_gate::MultimodalResearchSurface::Analysis));
+        assert!(
+            first
+                .readiness
+                .admitted_surface_order
+                .contains(&super::super::readiness_gate::MultimodalResearchSurface::Analysis)
+        );
         first.validate().unwrap();
     }
 }

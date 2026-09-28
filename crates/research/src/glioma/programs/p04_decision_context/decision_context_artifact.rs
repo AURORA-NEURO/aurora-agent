@@ -290,7 +290,7 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma::programs::p04_decision_context::context_compiler::DecisionContextRequest;
     use crate::glioma_engine::{GliomaModality, LocalArtifactRef};

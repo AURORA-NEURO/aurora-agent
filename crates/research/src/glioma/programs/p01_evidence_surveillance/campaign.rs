@@ -7,8 +7,8 @@
 //! records into biological conclusions.
 
 use super::surveillance::{
-    surveil_glioma_evidence, EvidenceSurveillance, EvidenceSurveillanceAction,
-    EvidenceSurveillanceActionKind, EvidenceSurveillanceDisposition, EvidenceSurveillanceRequest,
+    EvidenceSurveillance, EvidenceSurveillanceAction, EvidenceSurveillanceActionKind,
+    EvidenceSurveillanceDisposition, EvidenceSurveillanceRequest, surveil_glioma_evidence,
 };
 use crate::glioma::evidence::{EvidenceRecord, EvidenceState};
 use crate::glioma_engine::LocalArtifactRef;
@@ -641,10 +641,12 @@ mod tests {
         request.stop_on_qualified = false;
         let mut executor = DryRunEvidenceRefreshCampaignExecutor;
         let output = execute_glioma_evidence_refresh_campaign(&request, &mut executor).unwrap();
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|value| value.contains("e1")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|value| value.contains("e1"))
+        );
         assert_ne!(
             output.disposition,
             EvidenceRefreshCampaignDisposition::Qualified

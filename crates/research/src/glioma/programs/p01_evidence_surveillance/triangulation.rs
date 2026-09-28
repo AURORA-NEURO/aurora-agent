@@ -699,14 +699,18 @@ mod tests {
             EvidenceTriangulationDisposition::Partial
         );
         assert!(output.partial_order.len() == 1);
-        assert!(output
-            .next_action_order
-            .iter()
-            .any(|action| action.starts_with("resolve-contradiction:")));
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.starts_with("incomplete-claim:")));
+        assert!(
+            output
+                .next_action_order
+                .iter()
+                .any(|action| action.starts_with("resolve-contradiction:"))
+        );
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.starts_with("incomplete-claim:"))
+        );
     }
 
     #[test]
@@ -723,10 +727,12 @@ mod tests {
             EvidenceTriangulationDisposition::Unresolved
         );
         assert_eq!(output.unresolved_order.len(), 1);
-        assert!(output
-            .next_action_order
-            .iter()
-            .any(|action| action.starts_with("add-independent-source:")));
+        assert!(
+            output
+                .next_action_order
+                .iter()
+                .any(|action| action.starts_with("add-independent-source:"))
+        );
     }
 
     #[test]
@@ -763,13 +769,17 @@ mod tests {
             EvidenceTriangulationDisposition::Partial
         );
         assert_eq!(output.claims[0].verdict, TriangulatedClaimVerdict::Partial);
-        assert!(output
-            .next_action_order
-            .iter()
-            .any(|action| action.starts_with("replicate-independent-source:")));
-        assert!(output.claims[0]
-            .rationale_order
-            .iter()
-            .any(|item| item == "source-dominance-gate-failed"));
+        assert!(
+            output
+                .next_action_order
+                .iter()
+                .any(|action| action.starts_with("replicate-independent-source:"))
+        );
+        assert!(
+            output.claims[0]
+                .rationale_order
+                .iter()
+                .any(|item| item == "source-dominance-gate-failed")
+        );
     }
 }

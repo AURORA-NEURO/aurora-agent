@@ -8,8 +8,8 @@
 
 use super::action_execution::GliomaActionExecutor;
 use super::mission::{
-    execute_glioma_autonomous_research_mission, GliomaAutonomousResearchMission,
-    GliomaMissionDisposition, GliomaMissionError, GliomaMissionRequest,
+    GliomaAutonomousResearchMission, GliomaMissionDisposition, GliomaMissionError,
+    GliomaMissionRequest, execute_glioma_autonomous_research_mission,
 };
 use crate::glioma_engine::GliomaActionCandidate;
 use bioprism_ids::ContentHash;
@@ -433,12 +433,16 @@ mod tests {
             output.initial.disposition,
             GliomaMissionDisposition::Blocked
         );
-        assert!(output
-            .invalidated_action_order
-            .contains(&"a-failed".to_string()));
-        assert!(output
-            .invalidated_action_order
-            .contains(&"b-dependent".to_string()));
+        assert!(
+            output
+                .invalidated_action_order
+                .contains(&"a-failed".to_string())
+        );
+        assert!(
+            output
+                .invalidated_action_order
+                .contains(&"b-dependent".to_string())
+        );
         assert_eq!(output.alternate_candidate_order, vec!["c-alternate"]);
         assert!(output.recovery.is_some());
         output.validate().unwrap();

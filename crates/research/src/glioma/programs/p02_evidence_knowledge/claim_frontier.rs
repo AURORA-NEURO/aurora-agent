@@ -420,7 +420,7 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
 
@@ -492,10 +492,12 @@ mod tests {
     fn frontier_exposes_action_mode_and_ranked_claims() {
         let output = prioritize_knowledge_frontier(&request(), &knowledge()).unwrap();
         assert_eq!(output.ranking.len(), 2);
-        assert!(output
-            .ranking
-            .iter()
-            .any(|score| score.action_kind == FrontierActionKind::RevalidateNegative));
+        assert!(
+            output
+                .ranking
+                .iter()
+                .any(|score| score.action_kind == FrontierActionKind::RevalidateNegative)
+        );
         assert_eq!(output.selected_order.len(), 2);
         output.validate().unwrap();
     }

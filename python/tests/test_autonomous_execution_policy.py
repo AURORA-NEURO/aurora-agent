@@ -153,6 +153,32 @@ def test_joint_execution_policy_accepts_negative_evaluator_credit_for_failure_le
     assert state.arms[0].last_reward == -1
 
 
+def test_joint_execution_policy_rejects_integer_values_that_overflow_float_conversion() -> None:
+    policy = AutonomousExecutionPolicy()
+
+    with pytest.raises(ArgumentError, match="quality_prior is outside its numeric bound"):
+        policy.select(
+            {"requested_domains": ["coding"]},
+            [_candidate("huge-prior", "coding", quality_prior=10**10_000)],
+        )
+
+
+def test_joint_execution_policy_text_bounds_count_unicode_code_points() -> None:
+    policy = AutonomousExecutionPolicy()
+    accepted = policy.select(
+        {"requested_domains": ["coding"]},
+        [_candidate("unicode-provider", "coding", provider="😀" * 256)],
+    )
+    assert accepted.posture == "selected"
+    assert accepted.selected_candidate.candidate_digest == "046e214e0e0b3aaec11a86d49f69d3d74c7084b643d68a7a315b98020eadb0a6"
+
+    with pytest.raises(ArgumentError, match="candidate provider is outside its bound"):
+        policy.select(
+            {"requested_domains": ["coding"]},
+            [_candidate("unicode-provider-too-long", "coding", provider="😀" * 257)],
+        )
+
+
 def test_brain_composes_route_admission_with_joint_policy_without_provider_dispatch() -> None:
     brain = AutonomousBrain(object(), LLMRuntime())
     result = brain.select_execution_policy(

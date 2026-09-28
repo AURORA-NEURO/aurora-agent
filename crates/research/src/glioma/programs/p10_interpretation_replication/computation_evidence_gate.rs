@@ -6,9 +6,9 @@
 //! summaries, negative results, replay drift, and incomplete frontier coverage remain explicit.
 
 use super::synthesis::{
-    synthesize_glioma_interpretation, InterpretationEvidence, InterpretationEvidenceDirection,
-    InterpretationEvidenceFamily, InterpretationSynthesis, InterpretationSynthesisDisposition,
-    InterpretationSynthesisError, InterpretationSynthesisRequest,
+    InterpretationEvidence, InterpretationEvidenceDirection, InterpretationEvidenceFamily,
+    InterpretationSynthesis, InterpretationSynthesisDisposition, InterpretationSynthesisError,
+    InterpretationSynthesisRequest, synthesize_glioma_interpretation,
 };
 use crate::glioma::programs::p09_reproducible_computation::{
     ComputationInterpretationFrontierError, ComputationInterpretationFrontierRun,

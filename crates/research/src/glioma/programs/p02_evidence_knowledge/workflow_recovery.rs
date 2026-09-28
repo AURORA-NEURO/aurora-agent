@@ -261,7 +261,7 @@ pub fn plan_glioma_workflow_recovery(
     let mut actions = Vec::new();
     let mut hold = BTreeSet::new();
     let mut uncertainty = BTreeSet::new();
-    for (action_id, _step) in &steps {
+    for action_id in steps.keys() {
         if let Some(observation) = observations.get(action_id) {
             let checkpoint_valid = observation.checkpoint_hash.is_some()
                 && (!request.require_checkpoint_artifact

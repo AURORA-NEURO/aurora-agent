@@ -1,14 +1,16 @@
-//! Autonomous active-learning campaign execution for preclinical glioma research.
+//! GAF-GLIOMA-P07-F23: autonomous active-learning campaign execution for preclinical research.
 //!
 //! This controller closes the loop between the P06 active learner and a local assay gateway. It
 //! repeatedly compiles an uncertainty-aware next batch, executes only selected candidates through
 //! a caller-owned executor, appends the returned typed observations, and replans until a bounded
-//! budget/round/replicate/uncertainty gate stops progress. The research crate never contacts a
-//! device, moves raw data, or turns a synthetic result into biological evidence.
+//! budget/round/replicate/uncertainty gate stops progress. Seed observations are preflighted, and
+//! every executor response is checked for candidate binding, unique identity, bounded uncertainty,
+//! and a valid local artifact before it can inform another plan. The research crate never contacts
+//! a device, moves raw data, or turns a synthetic result into biological evidence.
 
 use crate::glioma::programs::p06_experiment_design::active_learning::{
-    plan_glioma_active_learning, ActiveLearningCandidate, ActiveLearningDisposition,
-    ActiveLearningObservation, ActiveLearningPlan, ActiveLearningRequest,
+    ActiveLearningCandidate, ActiveLearningDisposition, ActiveLearningObservation,
+    ActiveLearningPlan, ActiveLearningRequest, plan_glioma_active_learning,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -16,7 +18,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P07-F23";
-pub const OUTPUT_SCHEMA: &str = "GliomaActiveLearningCampaign1@1";
+pub const INPUT_SCHEMA: &str = "GliomaActiveLearningCampaignInput1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaActiveLearningCampaign1@2";
 pub const MAX_ROUNDS: u16 = 64;
 pub const MAX_RETRIES: u8 = 8;
 
@@ -134,6 +137,8 @@ pub struct ActiveLearningCampaign {
     pub feature_id: String,
     pub output_schema: String,
     pub objective: String,
+    /// Commitment to the exact source request, candidate inventory, seed observations, and limits.
+    pub input_digest: ContentHash,
     pub rounds: Vec<ActiveLearningCampaignRound>,
     pub observations: Vec<ActiveLearningObservation>,
     pub completed_order: Vec<String>,
@@ -176,6 +181,7 @@ fn digest_input(campaign: &ActiveLearningCampaign) -> serde_json::Value {
         "feature_id": campaign.feature_id,
         "output_schema": campaign.output_schema,
         "objective": campaign.objective,
+        "input_digest": campaign.input_digest,
         "rounds": campaign.rounds,
         "observations": campaign.observations,
         "completed_order": campaign.completed_order,
@@ -190,7 +196,37 @@ fn digest_input(campaign: &ActiveLearningCampaign) -> serde_json::Value {
     })
 }
 
+fn request_digest(
+    request: &ActiveLearningCampaignRequest,
+) -> Result<ContentHash, ActiveLearningCampaignError> {
+    #[derive(Serialize)]
+    struct Input<'a> {
+        input_schema: &'static str,
+        request: &'a ActiveLearningCampaignRequest,
+    }
+    ContentHash::of_serializable(&Input {
+        input_schema: INPUT_SCHEMA,
+        request,
+    })
+    .map_err(|error| ActiveLearningCampaignError::Digest(error.to_string()))
+}
+
 impl ActiveLearningCampaign {
+    /// Check the output digest and bind it to the exact request retained by the caller.
+    /// This does not replay or authenticate effects performed by a caller-owned executor.
+    pub fn validate_against(
+        &self,
+        request: &ActiveLearningCampaignRequest,
+    ) -> Result<(), ActiveLearningCampaignError> {
+        self.validate()?;
+        if request_digest(request)? != self.input_digest {
+            return Err(ActiveLearningCampaignError::InvalidOutput(
+                "campaign input digest does not match the supplied request".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), ActiveLearningCampaignError> {
         if self.feature_id != FEATURE_ID
             || self.output_schema != OUTPUT_SCHEMA
@@ -248,11 +284,23 @@ fn validate_request(
             "positive bounded rounds and retries are required".into(),
         ));
     }
+    let mut observation_ids = BTreeSet::new();
     for observation in &request.observations {
-        observation
-            .artifact
-            .validate()
-            .map_err(|error| ActiveLearningCampaignError::InvalidRequest(error.to_string()))?;
+        if observation.observation_id.trim().is_empty()
+            || observation.candidate_id.trim().is_empty()
+            || observation.uncertainty_milli > 1_000
+            || !observation_ids.insert(observation.observation_id.as_str())
+        {
+            return Err(ActiveLearningCampaignError::InvalidRequest(
+                "seed observations must have unique non-empty identifiers and bounded uncertainty"
+                    .into(),
+            ));
+        }
+        observation.artifact.validate().map_err(|_| {
+            ActiveLearningCampaignError::InvalidRequest(
+                "seed observation artifact is invalid".into(),
+            )
+        })?;
     }
     Ok(())
 }
@@ -279,6 +327,7 @@ pub fn execute_glioma_active_learning_campaign<E: ActiveLearningCampaignExecutor
     executor: &mut E,
 ) -> Result<ActiveLearningCampaign, ActiveLearningCampaignError> {
     validate_request(request)?;
+    let input_digest = request_digest(request)?;
     let mut candidates = request.candidates.clone();
     let mut observations = request.observations.clone();
     let mut budget = request.active_learning.budget_units;
@@ -371,9 +420,16 @@ pub fn execute_glioma_active_learning_campaign<E: ActiveLearningCampaignExecutor
             for attempt in 1..=request.max_retries.saturating_add(1) {
                 match executor.execute_candidate(candidate, attempt) {
                     Ok(observation) => {
-                        if observation.candidate_id != candidate.candidate_id {
-                            return Err(ActiveLearningCampaignError::InvalidRequest(
-                                "executor observation candidate binding does not match selected candidate".into(),
+                        if observation.candidate_id != candidate.candidate_id
+                            || observation.observation_id.trim().is_empty()
+                            || observation.uncertainty_milli > 1_000
+                            || observation.artifact.validate().is_err()
+                            || observations.iter().any(|existing| {
+                                existing.observation_id == observation.observation_id
+                            })
+                        {
+                            return Err(ActiveLearningCampaignError::InvalidOutput(
+                                "executor returned an invalid, duplicate, or candidate-unbound observation".into(),
                             ));
                         }
                         accepted = Some(observation);
@@ -453,6 +509,7 @@ pub fn execute_glioma_active_learning_campaign<E: ActiveLearningCampaignExecutor
         feature_id: FEATURE_ID.into(),
         output_schema: OUTPUT_SCHEMA.into(),
         objective: request.active_learning.objective.clone(),
+        input_digest,
         rounds,
         observations,
         completed_order,
@@ -468,7 +525,7 @@ pub fn execute_glioma_active_learning_campaign<E: ActiveLearningCampaignExecutor
     };
     campaign.digest = ContentHash::of_value(&digest_input(&campaign))
         .map_err(|error| ActiveLearningCampaignError::Digest(error.to_string()))?;
-    campaign.validate()?;
+    campaign.validate_against(request)?;
     Ok(campaign)
 }
 
@@ -542,13 +599,34 @@ mod tests {
 
     #[test]
     fn campaign_executes_and_replans_from_returned_observations() {
+        let request = request();
         let mut executor = DryRunActiveLearningCampaignExecutor;
-        let campaign = execute_glioma_active_learning_campaign(&request(), &mut executor).unwrap();
+        let campaign = execute_glioma_active_learning_campaign(&request, &mut executor).unwrap();
         assert!(!campaign.rounds.is_empty());
         assert!(!campaign.observations.is_empty());
         assert!(!campaign.completed_order.is_empty());
         assert!(campaign.budget_spent_units > 0);
-        campaign.validate().unwrap();
+        assert_eq!(campaign.output_schema, "GliomaActiveLearningCampaign1@2");
+        campaign.validate_against(&request).unwrap();
+    }
+
+    #[test]
+    fn campaign_input_commitment_rejects_changed_policy_or_candidate_inputs() {
+        let request = request();
+        let mut executor = DryRunActiveLearningCampaignExecutor;
+        let campaign = execute_glioma_active_learning_campaign(&request, &mut executor).unwrap();
+
+        let mut changed = request.clone();
+        changed.max_rounds += 1;
+        assert!(campaign.validate_against(&changed).is_err());
+
+        let mut changed = request.clone();
+        changed.candidates[0].cost_units += 1;
+        assert!(campaign.validate_against(&changed).is_err());
+
+        let mut changed = request.clone();
+        changed.observations[0].outcome_milli += 1;
+        assert!(campaign.validate_against(&changed).is_err());
     }
 
     #[test]
@@ -596,5 +674,51 @@ mod tests {
         );
         assert_eq!(campaign.failed_order, vec!["matrix"]);
         campaign.validate().unwrap();
+    }
+
+    #[test]
+    fn malformed_executor_observation_stops_before_another_assay_is_called() {
+        #[derive(Default)]
+        struct DuplicateObservation {
+            calls: usize,
+        }
+
+        impl ActiveLearningCampaignExecutor for DuplicateObservation {
+            fn execute_candidate(
+                &mut self,
+                candidate: &ActiveLearningCandidate,
+                _attempt: u8,
+            ) -> Result<ActiveLearningObservation, ActiveLearningExecutionFailure> {
+                self.calls += 1;
+                Ok(ActiveLearningObservation {
+                    observation_id: "seed".into(),
+                    candidate_id: candidate.candidate_id.clone(),
+                    outcome_milli: 100,
+                    uncertainty_milli: 10,
+                    artifact: artifact("duplicate-seed"),
+                })
+            }
+        }
+
+        let mut request = request();
+        request.active_learning.max_selections = 2;
+        assert_eq!(
+            plan_glioma_active_learning(
+                &request.active_learning,
+                &request.candidates,
+                &request.observations
+            )
+            .unwrap()
+            .selected_order
+            .len(),
+            2
+        );
+        let mut executor = DuplicateObservation::default();
+        let error = execute_glioma_active_learning_campaign(&request, &mut executor).unwrap_err();
+        assert!(matches!(
+            error,
+            ActiveLearningCampaignError::InvalidOutput(_)
+        ));
+        assert_eq!(executor.calls, 1);
     }
 }

@@ -4,8 +4,8 @@
 //!
 //! `tools/coverage.sh` counts a blueprint module as covered when its `NN.MM` token appears anywhere
 //! under `crates/` or `docs/`. It says so, and says the criterion is weak on purpose. This crate is
-//! a list of eighty-four modules that are *not* covered, living under `crates/`. Written the
-//! obvious way it would mark all eighty-four covered and take the headline to 100% — a number
+//! a list of forty-four modules that are *not* covered, living under `crates/`. Written the
+//! obvious way it would mark all forty-four covered and take the headline to 100% — a number
 //! produced entirely by the document complaining that the number is produced that way.
 //!
 //! This is not hypothetical. `docs/BACKLOG.md` emptied itself on its second run, because the run

@@ -294,11 +294,7 @@ fn update_record(
     } else {
         1
     };
-    let status = if !sufficient {
-        MechanismPosteriorStatus::Unresolved
-    } else {
-        MechanismPosteriorStatus::Unresolved
-    };
+    let status = MechanismPosteriorStatus::Unresolved;
     let record = MechanismPosteriorRecord {
         mechanism_id: hypothesis.mechanism_id.clone(),
         statement: hypothesis.statement.clone(),
@@ -543,10 +539,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.disposition, BayesianUpdateDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("insufficient-shared-feature")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("insufficient-shared-feature"))
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Causal interpretation and replication program ownership.
 
-use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
+use crate::glioma::catalog::{GliomaProgramDescriptor, GliomaProgramId, glioma_program_catalog};
 
 pub mod adaptive_campaign;
 pub mod adaptive_execution;
@@ -13,12 +13,19 @@ pub mod clone_outcomes;
 pub mod closure_interpretation;
 pub mod computation_evidence_gate;
 pub mod dynamic_policy;
+pub mod longitudinal_transport;
 pub mod mediation;
 pub mod meta_analysis;
 pub mod operating_cycle;
+pub mod outcome_evidence_panel;
+pub mod outcome_missingness_sensitivity;
+pub mod outcome_record;
+pub mod outcome_reporting_audit;
+pub mod prospective_contradiction;
 pub mod replication_closure_campaign;
 pub mod replication_closure_execution;
 pub mod replication_closure_frontier;
+pub mod replication_concordance;
 pub mod sensitivity;
 pub mod state_transition;
 pub mod synthesis;
@@ -28,134 +35,172 @@ pub mod validation_replication_campaign;
 pub mod validation_replication_gate;
 
 pub use adaptive_campaign::{
-    execute_glioma_adaptive_interpretation_campaign,
-    execute_glioma_adaptive_interpretation_campaign_dry_run, AdaptiveInterpretationCampaign,
-    AdaptiveInterpretationCampaignDisposition, AdaptiveInterpretationCampaignError,
-    AdaptiveInterpretationCampaignRequest, AdaptiveInterpretationCampaignRound,
-    AdaptiveInterpretationCampaignStopReason, AdaptiveInterpretationPlanner,
-    AdaptiveInterpretationPlanningFailure, DryRunAdaptiveInterpretationPlanner,
+    AdaptiveInterpretationCampaign, AdaptiveInterpretationCampaignDisposition,
+    AdaptiveInterpretationCampaignError, AdaptiveInterpretationCampaignRequest,
+    AdaptiveInterpretationCampaignRound, AdaptiveInterpretationCampaignStopReason,
+    AdaptiveInterpretationPlanner, AdaptiveInterpretationPlanningFailure,
+    DryRunAdaptiveInterpretationPlanner, execute_glioma_adaptive_interpretation_campaign,
+    execute_glioma_adaptive_interpretation_campaign_dry_run,
 };
 pub use adaptive_execution::{
-    dry_run_glioma_adaptive_frontier_executor, execute_glioma_adaptive_frontier,
     AdaptiveFrontierExecution, AdaptiveFrontierExecutionDisposition,
     AdaptiveFrontierExecutionError, AdaptiveFrontierExecutionRequest,
+    dry_run_glioma_adaptive_frontier_executor, execute_glioma_adaptive_frontier,
 };
 pub use adaptive_frontier::{
-    plan_glioma_adaptive_research_frontier, AdaptiveFrontierCandidate, AdaptiveFrontierDisposition,
-    AdaptiveFrontierError, AdaptiveFrontierRequest, AdaptiveResearchFrontier, AdaptiveTarget,
+    AdaptiveFrontierCandidate, AdaptiveFrontierDisposition, AdaptiveFrontierError,
+    AdaptiveFrontierRequest, AdaptiveResearchFrontier, AdaptiveTarget,
+    plan_glioma_adaptive_research_frontier,
 };
 pub use campaign::{
-    execute_glioma_replication_campaign, DryRunGliomaReplicationCampaignExecutor,
-    GliomaReplicationAction, GliomaReplicationActionKind, GliomaReplicationCampaign,
-    GliomaReplicationCampaignDisposition, GliomaReplicationCampaignError,
-    GliomaReplicationCampaignExecutor, GliomaReplicationCampaignObservation,
-    GliomaReplicationCampaignRequest, GliomaReplicationCampaignRound,
-    GliomaReplicationCampaignStopReason, GliomaReplicationExecutionFailure,
+    DryRunGliomaReplicationCampaignExecutor, GliomaReplicationAction, GliomaReplicationActionKind,
+    GliomaReplicationCampaign, GliomaReplicationCampaignDisposition,
+    GliomaReplicationCampaignError, GliomaReplicationCampaignExecutor,
+    GliomaReplicationCampaignObservation, GliomaReplicationCampaignRequest,
+    GliomaReplicationCampaignRound, GliomaReplicationCampaignStopReason,
+    GliomaReplicationExecutionFailure, execute_glioma_replication_campaign,
 };
 pub use causal_adjustment::{
-    analyze_stratified_causal_adjustment, CausalStratumSummary, StratifiedCausalActionKind,
-    StratifiedCausalAdjustment, StratifiedCausalDisposition, StratifiedCausalError,
-    StratifiedCausalRequest, StratifiedObservation,
+    CausalStratumSummary, StratifiedCausalActionKind, StratifiedCausalAdjustment,
+    StratifiedCausalDisposition, StratifiedCausalError, StratifiedCausalRequest,
+    StratifiedObservation, analyze_stratified_causal_adjustment,
 };
 pub use causal_contrast::{
-    analyze_glioma_causal_contrast, CausalContrastAnalysis, CausalContrastDisposition,
-    CausalContrastError, CausalContrastRequest, UnitContrast,
+    CausalContrastAnalysis, CausalContrastDisposition, CausalContrastError, CausalContrastRequest,
+    UnitContrast, analyze_glioma_causal_contrast,
 };
 pub use claim_adjudication::{
-    execute_glioma_causal_claim_adjudication, CausalClaimDisposition, ClaimActionKind, ClaimGate,
-    ClaimGateDisposition, ClaimNextAction, GliomaCausalClaimAdjudication,
-    GliomaCausalClaimAdjudicationError, GliomaCausalClaimAdjudicationRequest,
+    CausalClaimDisposition, ClaimActionKind, ClaimGate, ClaimGateDisposition, ClaimNextAction,
+    GliomaCausalClaimAdjudication, GliomaCausalClaimAdjudicationError,
+    GliomaCausalClaimAdjudicationRequest, execute_glioma_causal_claim_adjudication,
 };
 pub use clone_outcomes::{
-    analyze_glioma_clone_panel_outcomes, ClonePanelBranchAnalysis, ClonePanelCandidateAnalysis,
-    ClonePanelCellAnalysis, ClonePanelCellDisposition, ClonePanelMeasurementState,
-    ClonePanelObservation, ClonePanelOutcomeAnalysis, ClonePanelOutcomeDisposition,
-    ClonePanelOutcomeError, ClonePanelOutcomeRequest,
+    ClonePanelBranchAnalysis, ClonePanelCandidateAnalysis, ClonePanelCellAnalysis,
+    ClonePanelCellDisposition, ClonePanelMeasurementState, ClonePanelObservation,
+    ClonePanelOutcomeAnalysis, ClonePanelOutcomeDisposition, ClonePanelOutcomeError,
+    ClonePanelOutcomeRequest, analyze_glioma_clone_panel_outcomes,
 };
 pub use computation_evidence_gate::{
-    execute_glioma_computation_interpretation_evidence_gate, ComputationInterpretationEvidenceGate,
-    ComputationInterpretationEvidenceGateDisposition, ComputationInterpretationEvidenceGateError,
-    ComputationInterpretationEvidenceGateRequest, ComputationInterpretationObservation,
-    ComputationInterpretationSynthesisPolicy,
+    ComputationInterpretationEvidenceGate, ComputationInterpretationEvidenceGateDisposition,
+    ComputationInterpretationEvidenceGateError, ComputationInterpretationEvidenceGateRequest,
+    ComputationInterpretationObservation, ComputationInterpretationSynthesisPolicy,
+    execute_glioma_computation_interpretation_evidence_gate,
 };
 pub use dynamic_policy::{
-    evaluate_glioma_dynamic_policies, DynamicPolicyCandidate, DynamicPolicyContribution,
-    DynamicPolicyDisposition, DynamicPolicyError, DynamicPolicyEvaluation,
-    DynamicPolicyObservation, DynamicPolicyRequest, DynamicPolicyRule, DynamicPolicyScore,
-    DynamicPolicyScoreDisposition, DynamicPolicyTrajectory,
+    DynamicPolicyCandidate, DynamicPolicyContribution, DynamicPolicyDisposition,
+    DynamicPolicyError, DynamicPolicyEvaluation, DynamicPolicyObservation, DynamicPolicyRequest,
+    DynamicPolicyRule, DynamicPolicyScore, DynamicPolicyScoreDisposition, DynamicPolicyTrajectory,
+    evaluate_glioma_dynamic_policies,
+};
+pub use longitudinal_transport::{
+    LongitudinalStudyExclusion, LongitudinalStudyTrend, LongitudinalTimepointEstimate,
+    LongitudinalTransportAnalysis, LongitudinalTransportContribution,
+    LongitudinalTransportDisposition, LongitudinalTransportError, LongitudinalTransportObservation,
+    LongitudinalTransportRequest, analyze_glioma_longitudinal_transport,
 };
 pub use mediation::{
-    analyze_glioma_mediation, MediationAnalysis, MediationDisposition, MediationError,
-    MediationObservation, MediationRequest,
+    MediationAnalysis, MediationDisposition, MediationError, MediationObservation,
+    MediationRequest, analyze_glioma_mediation,
+};
+pub use prospective_contradiction::{
+    CandidateAssessment, CandidateEligibility, ContradictionEvidence, EvidenceAssessment,
+    HypothesisEvidenceSummary, ProspectiveContradictionDisposition, ProspectiveContradictionError,
+    ProspectiveContradictionPlan, ProspectiveContradictionRequest, ResolverCandidate,
+    ResolverPrediction, RivalHypothesis, RivalPair, RivalPairSeparation, SelectedResolver,
+    analyze_glioma_prospective_contradiction,
+};
+pub use replication_concordance::{
+    ExpectedEffectDirection, MultiStudyConcordance, MultiStudyConcordanceDisposition,
+    MultiStudyConcordanceError, MultiStudyConcordanceRequest, MultiStudyEffect,
+    MultiStudyEffectStatus, MultiStudyEffectSummary, MultiStudyExclusion, MultiStudyPair,
+    MultiStudyPairRelation, MultiStudyPairwiseComparison, analyze_glioma_multistudy_concordance,
 };
 
 pub use closure_interpretation::{
-    interpret_glioma_replication_closure, ClosureInterpretationDisposition,
-    ClosureInterpretationError, ClosureInterpretationRequest, ClosureInterpretationRun,
+    ClosureInterpretationDisposition, ClosureInterpretationError, ClosureInterpretationRequest,
+    ClosureInterpretationRun, interpret_glioma_replication_closure,
 };
 pub use meta_analysis::{
-    analyze_replication_meta_analysis, MetaAnalysisDisposition, MetaAnalysisError,
-    MetaAnalysisRequest, MetaStudyContribution, ReplicationMetaAnalysis,
+    MetaAnalysisDisposition, MetaAnalysisError, MetaAnalysisRequest, MetaStudyContribution,
+    ReplicationMetaAnalysis, analyze_replication_meta_analysis,
 };
 pub use operating_cycle::{
-    execute_glioma_interpretation_operating_cycle, GliomaInterpretationOperatingCycle,
-    GliomaInterpretationOperatingCycleError, GliomaInterpretationOperatingCycleRequest,
-    InterpretationOperatingCycleDisposition,
+    GliomaInterpretationOperatingCycle, GliomaInterpretationOperatingCycleError,
+    GliomaInterpretationOperatingCycleRequest, InterpretationOperatingCycleDisposition,
+    execute_glioma_interpretation_operating_cycle,
+};
+pub use outcome_evidence_panel::{
+    OutcomeAvailabilityCount, OutcomeEvidencePanelError, RegisteredOutcomeEvidencePanel,
+    RegisteredOutcomeEvidencePanelRequest, build_glioma_registered_outcome_evidence_panel,
+};
+pub use outcome_missingness_sensitivity::{
+    ObservedDirection, OutcomeAvailability, OutcomeMissingnessSensitivity,
+    OutcomeSensitivityDirection, OutcomeSensitivityDisposition, OutcomeSensitivityError,
+    OutcomeSensitivityRequest, OutcomeSensitivityRow, OutcomeSensitivityStudy,
+    analyze_glioma_outcome_missingness_sensitivity,
+};
+pub use outcome_record::{
+    OutcomeRecordError, RegisteredOutcomeRecord, build_glioma_registered_outcome_record,
+};
+pub use outcome_reporting_audit::{
+    OutcomeAssessment, OutcomeAssessmentStatus, OutcomeReportingAuditError,
+    OutcomeReportingAuditRequest, OutcomeReportingDisposition, RegisteredOutcome,
+    RegisteredOutcomeReportingAudit, RegisteredOutcomeRole, RegisteredOutcomeStudy,
+    RegisteredStudyStatus, RegistrationTiming, ReportedOutcome, ReportedOutcomeStatus,
+    StudyOutcomeReport, StudyReportingAssessment, audit_glioma_registered_outcome_reporting,
 };
 pub use replication_closure_campaign::{
-    execute_glioma_replication_closure_campaign, ReplicationClosureCampaignDisposition,
-    ReplicationClosureCampaignError, ReplicationClosureCampaignRequest,
-    ReplicationClosureCampaignRound, ReplicationClosureCampaignRun,
-    ReplicationClosureCampaignStopReason,
+    ReplicationClosureCampaignDisposition, ReplicationClosureCampaignError,
+    ReplicationClosureCampaignRequest, ReplicationClosureCampaignRound,
+    ReplicationClosureCampaignRun, ReplicationClosureCampaignStopReason,
+    execute_glioma_replication_closure_campaign,
 };
 pub use replication_closure_execution::{
-    execute_glioma_replication_closure, ReplicationClosureExecutionDisposition,
-    ReplicationClosureExecutionError, ReplicationClosureExecutionRequest,
-    ReplicationClosureExecutionRun,
+    ReplicationClosureExecutionDisposition, ReplicationClosureExecutionError,
+    ReplicationClosureExecutionRequest, ReplicationClosureExecutionRun,
+    execute_glioma_replication_closure,
 };
 pub use replication_closure_frontier::{
-    plan_glioma_replication_closure_frontier, ReplicationClosureCandidate,
-    ReplicationClosureDisposition, ReplicationClosureFrontier, ReplicationClosureFrontierError,
-    ReplicationClosureFrontierRequest, ReplicationClosureScore, ReplicationClosureTarget,
+    ReplicationClosureCandidate, ReplicationClosureDisposition, ReplicationClosureFrontier,
+    ReplicationClosureFrontierError, ReplicationClosureFrontierRequest, ReplicationClosureScore,
+    ReplicationClosureTarget, plan_glioma_replication_closure_frontier,
 };
 pub use sensitivity::{
-    analyze_causal_sensitivity, CausalSensitivityAnalysis, SensitivityDirection,
-    SensitivityDisposition, SensitivityError, SensitivityObservation, SensitivityPoint,
-    SensitivityRequest,
+    CausalSensitivityAnalysis, SensitivityDirection, SensitivityDisposition, SensitivityError,
+    SensitivityObservation, SensitivityPoint, SensitivityRequest, analyze_causal_sensitivity,
 };
 pub use state_transition::{
-    analyze_glioma_state_transitions, StateTransitionAnalysis, StateTransitionCell,
-    StateTransitionContrast, StateTransitionDisposition, StateTransitionError,
-    StateTransitionObservation, StateTransitionRequest, TransitionCellDisposition,
-    TransitionContrastDisposition, TransitionDirection,
+    StateTransitionAnalysis, StateTransitionCell, StateTransitionContrast,
+    StateTransitionDisposition, StateTransitionError, StateTransitionObservation,
+    StateTransitionRequest, TransitionCellDisposition, TransitionContrastDisposition,
+    TransitionDirection, analyze_glioma_state_transitions,
 };
 
 pub use synthesis::{
-    synthesize_glioma_interpretation, InterpretationEvidence, InterpretationEvidenceDirection,
-    InterpretationEvidenceFamily, InterpretationFamilySummary, InterpretationSynthesis,
-    InterpretationSynthesisDisposition, InterpretationSynthesisError,
-    InterpretationSynthesisRequest,
+    InterpretationEvidence, InterpretationEvidenceDirection, InterpretationEvidenceFamily,
+    InterpretationFamilySummary, InterpretationSynthesis, InterpretationSynthesisDisposition,
+    InterpretationSynthesisError, InterpretationSynthesisRequest, synthesize_glioma_interpretation,
 };
 
 pub use trajectory::{
-    analyze_glioma_trajectories, TrajectoryAnalysis, TrajectoryArmSummary, TrajectoryDisposition,
-    TrajectoryError, TrajectoryObservation, TrajectoryRequest, UnitTrajectory,
-    UnitTrajectoryDisposition,
+    TrajectoryAnalysis, TrajectoryArmSummary, TrajectoryDisposition, TrajectoryError,
+    TrajectoryObservation, TrajectoryRequest, UnitTrajectory, UnitTrajectoryDisposition,
+    analyze_glioma_trajectories,
 };
 pub use transportability::{
-    analyze_glioma_transportability, TransportStudy, TransportStudyContribution,
-    TransportabilityAnalysis, TransportabilityDisposition, TransportabilityError,
-    TransportabilityRequest,
+    TransportStudy, TransportStudyContribution, TransportabilityAnalysis,
+    TransportabilityDisposition, TransportabilityError, TransportabilityRequest,
+    analyze_glioma_transportability,
 };
 pub use validation_replication_campaign::{
-    execute_glioma_validation_replication_campaign, ValidationReplicationCampaignDisposition,
-    ValidationReplicationCampaignError, ValidationReplicationCampaignRequest,
-    ValidationReplicationCampaignRun,
+    ValidationReplicationCampaignDisposition, ValidationReplicationCampaignError,
+    ValidationReplicationCampaignRequest, ValidationReplicationCampaignRun,
+    execute_glioma_validation_replication_campaign,
 };
 pub use validation_replication_gate::{
-    plan_glioma_validation_replication_gate, ValidationReplicationGate,
-    ValidationReplicationGateDisposition, ValidationReplicationGateError,
-    ValidationReplicationGateRequest,
+    ValidationReplicationGate, ValidationReplicationGateDisposition,
+    ValidationReplicationGateError, ValidationReplicationGateRequest,
+    plan_glioma_validation_replication_gate,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::InterpretationReplication;

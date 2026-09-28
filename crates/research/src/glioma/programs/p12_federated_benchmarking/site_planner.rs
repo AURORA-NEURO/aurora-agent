@@ -8,8 +8,8 @@
 //! than observations. No raw trace, patient data, or clinical decision crosses this boundary.
 
 use super::consensus::{
-    analyze_federated_benchmark, FederatedBenchmarkConsensus, FederatedBenchmarkDisposition,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkConsensus, FederatedBenchmarkDisposition, FederatedBenchmarkRequest,
+    FederatedBenchmarkSite, analyze_federated_benchmark,
 };
 use crate::glioma_engine::LocalArtifactRef;
 use bioprism_ids::ContentHash;
@@ -601,10 +601,11 @@ mod tests {
                 | FederatedBenchmarkPlanDisposition::NoAdmissiblePlan
                 | FederatedBenchmarkPlanDisposition::NeedsMoreSites
         ));
-        assert!(plan
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("scenario")));
+        assert!(
+            plan.uncertainty
+                .iter()
+                .any(|item| item.contains("scenario"))
+        );
         assert!(!plan.next_action_order.is_empty());
     }
 

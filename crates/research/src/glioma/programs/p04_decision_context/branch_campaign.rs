@@ -640,12 +640,12 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma::programs::p04_decision_context::{
-        compile_decision_context, plan_glioma_decision_branches, DecisionBranchPlannerRequest,
-        DecisionContextRequest, DecisionScenario, DecisionScenarioOutcome,
-        DryRunDecisionContextCampaignExecutor,
+        DecisionBranchPlannerRequest, DecisionContextRequest, DecisionScenario,
+        DecisionScenarioOutcome, DryRunDecisionContextCampaignExecutor, compile_decision_context,
+        plan_glioma_decision_branches,
     };
     use crate::glioma_engine::{
         GliomaModality, GliomaModelSystem, GliomaSelectionWeights, LocalArtifactRef,

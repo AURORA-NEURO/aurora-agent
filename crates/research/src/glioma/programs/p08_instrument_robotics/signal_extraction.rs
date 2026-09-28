@@ -586,10 +586,12 @@ mod tests {
             output.disposition,
             SignalExtractionDisposition::DriftBlocked
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry == "drift-gate-blocked:drifting"));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry == "drift-gate-blocked:drifting")
+        );
     }
 
     #[test]

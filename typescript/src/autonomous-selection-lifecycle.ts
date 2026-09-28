@@ -67,6 +67,12 @@ const SECRET_MATERIAL = "never_returned" as const;
 const STORE_RETENTION = "metadata_only_hash_bound" as const;
 const DIGEST = /^[0-9a-f]{64}$/;
 const IDENTIFIER = /^[A-Za-z0-9_.:-]+$/;
+const LIFECYCLE_STATE_KEYS = new Set([
+  "schema", "lifecycle_id", "status", "revision", "generation", "rollback_count", "last_decision",
+  "promotion_digest", "active_promotion_digest", "source_report_digest", "policy_digest", "domain_decision_digest",
+  "last_reason", "created_at", "updated_at", "state_digest", "retention", "authorization", "secret_material",
+]);
+const LIFECYCLE_SNAPSHOT_KEYS = new Set(["schema", "state", "state_digest", "snapshot_digest", "retention", "secret_material"]);
 
 function fail(message: string): never {
   throw new ArgumentError(`autonomous selection lifecycle ${message}`);
@@ -148,6 +154,7 @@ function promotionProjection(report: AutonomousSelectionPromotionReport): { prom
 /** Validate a lifecycle state before it crosses a process or persistence boundary. */
 export function validateAutonomousSelectionLifecycleState(value: unknown): AutonomousSelectionLifecycleState {
   if (!isObject(value)) fail("state must be an object");
+  if (Object.keys(value).some((key) => !LIFECYCLE_STATE_KEYS.has(key))) fail("state contains unsupported fields");
   const state = value as unknown as AutonomousSelectionLifecycleState;
   if (state.schema !== AUTONOMOUS_SELECTION_LIFECYCLE_SCHEMA) fail("state schema is invalid");
   boundedIdentifier("state lifecycle_id", state.lifecycle_id);
@@ -174,6 +181,7 @@ export function validateAutonomousSelectionLifecycleState(value: unknown): Auton
 
 export function validateAutonomousSelectionLifecycleSnapshot(value: unknown): AutonomousSelectionLifecycleSnapshot {
   if (!isObject(value)) fail("snapshot must be an object");
+  if (Object.keys(value).some((key) => !LIFECYCLE_SNAPSHOT_KEYS.has(key))) fail("snapshot contains unsupported fields");
   const snapshot = value as unknown as AutonomousSelectionLifecycleSnapshot;
   if (snapshot.schema !== AUTONOMOUS_SELECTION_LIFECYCLE_STORE_SCHEMA || snapshot.retention !== STORE_RETENTION || snapshot.secret_material !== SECRET_MATERIAL) fail("snapshot retention markers are invalid");
   const state = validateAutonomousSelectionLifecycleState(snapshot.state);
@@ -243,9 +251,10 @@ export class AutonomousSelectionPromotionLifecycle {
   }
 
   rollback(reason = "selection_promotion_rollback"): AutonomousSelectionLifecycleState {
-    if (typeof reason !== "string" || !reason.trim()) fail("rollback reason must be non-empty");
+    const validatedReason = boundedReason(reason);
+    if (validatedReason === null) fail("last_reason is invalid");
     if (!this.isAdmitted()) return this.state;
-    this.commit({ status: "rolled_back", rollback_count: this.stateValue.rollback_count + 1, last_decision: "rollback", active_promotion_digest: null, last_reason: reason });
+    this.commit({ status: "rolled_back", rollback_count: this.stateValue.rollback_count + 1, last_decision: "rollback", active_promotion_digest: null, last_reason: validatedReason });
     return this.state;
   }
 

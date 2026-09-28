@@ -42,7 +42,7 @@ pub use causal_integrity_support::{
     CausalIntegrityArtifact4, CausalIntegrityCard7, CausalIntegrityError, CausalIntegrityRequest4,
     BOUNDARY as CAUSAL_INTEGRITY_BOUNDARY, CONTENT_TYPE as CAUSAL_INTEGRITY_CONTENT_TYPE,
 };
-pub use error::WorldError;
+pub use error::{WorldError, WorldSourceError};
 pub use event::CausalEvent;
 pub use fact::Fact;
 pub use factor::Factor;

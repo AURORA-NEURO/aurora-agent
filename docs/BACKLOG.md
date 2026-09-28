@@ -62,11 +62,37 @@ still have to register that identity with NCBI themselves. The one-lane Python a
 registration helpers bind a reviewed plan to the existing autonomous evidence runtime's
 acquire/project callbacks and validate its transient bundle and receipt without widening the source
 boundary. This remains one biomedical source rather
-than a general retrieval plane. Remaining work toward full autonomous external research is broader
-reviewed source/provider coverage, authenticated shared journal and coordinator implementations,
-status-based reconciliation for uncertain calls, independent source-quality and claim-integrity
-enforcement over retrieved evidence, evaluator/human-review settlement, scheduling, and production
-retention/authorization policy.
+than a general retrieval plane. Goal dispatch reconciliation now requires a deployment-owned
+verifier callback and exact configured verifier identity before journal or ledger mutation; each
+deployment still owns that verifier's trust roots and status authority. The shared worker journal
+and goal ledger now have cross-language HMAC-SHA256 snapshot adapters with key rotation and
+required store CAS. These authenticate snapshots but do not detect rollback to an older valid
+envelope; a trusted monotonic anchor remains deployment-owned. Both goal workers can also await a
+caller-owned `persist_dispatch_intent` barrier after journaling `dispatch_started` and before
+executor entry, so a persistence refusal cannot silently cross the external effect boundary.
+The reviewed ClinicalTrials.gov adapter now adds bounded live registry metadata for the fixed
+glioblastoma and glioma lanes in Python and TypeScript. It binds a fixed field list and transport,
+requires literal dispatch approval, caps pages and bytes, refuses redirects and duplicate JSON
+fields, and keeps trial records and pagination tokens transient. The built-in transport enforces
+its timeout; caller-injected transports own their timeout and network policy. Its single-lane
+evidence-runtime registration validates receipts and source-level content digests before emitting
+digest-only observations. It does not assess eligibility or treatment benefit. The reviewed Europe
+PMC adapter adds a complementary fixed six-lane bibliographic-metadata source in Python and
+TypeScript. It uses the REST `lite` response, bounded cursor pagination, matching cross-SDK
+config/plan/bundle/receipt digests for shared transport fixtures, explicit unknown/partial coverage,
+transient publication values, and source-checked digest-only evidence registration. Its keyword
+lanes are not exhaustive, and it does not retrieve abstracts, full text, or independent quality
+judgments ([API](https://dev.europepmc.org/RestfulWebService)).
+Remaining work toward full autonomous external research is broader reviewed source/provider
+coverage, concrete tenant-authorized shared-store integrations with anti-rollback guarantees,
+deployment-owned independent claim-quality authority over retrieved evidence, human-review
+settlement integrations, production scheduling integrations, and production retention/authorization
+policy.
+The claim-integrity acquisition settlement path now requires a deployment-owned independent
+evidence authority, gives it a read-only digest-bound projection of the exact request, receipt,
+accepted source-quality assessment, claim contracts, and evidence metadata, and records the
+authority's receipt digest in the next claim-integrity generation. Actual authority integration,
+trust roots, source-value access, and durable receipt verification remain deployment-owned.
 
 The authorization rollout now covers the complete execution substrate rather than only provider
 and effect calls. Planning, provider invocation, evidence acquisition, connector dispatch, tool
@@ -860,10 +886,13 @@ attempt. The transaction must durably retain a private receipt containing the ex
 while advancing the public checkpoint's receipt head/count, and transport is permitted only after
 that commit succeeds; raw keys never enter checkpoint/result serialization. TypeScript
 scopes keys and receipts across planning, failovers, transport retries, tool turns, cross-domain
-children, and synthesis. Python currently fails closed on unsupported multi-request aliases except
-for explicitly scoped direct-provider cross-domain fan-out, and requires one model candidate.
-Broader Python tool/mission/planning support remains backlog work until each downstream request is
-covered by the same receipt/reconciliation contract.
+children, and synthesis. Python resumable evidence-backed runs now accept a bounded continuation
+ladder of one initial model plus up to eight failovers; the existing private dispatch fence records
+one durable receipt per actual model transport. Adversarial coverage confirms a rejected fallback
+receipt commit prevents that model from reaching transport. Unsupported multi-request aliases still
+fail closed except for explicitly scoped direct-provider cross-domain fan-out. Broader Python
+tool/mission/planning support remains backlog work until each downstream request is covered by the
+same receipt/reconciliation contract.
 Both implementations now require a caller-supplied `provider_policy` identity with a non-null
 configuration digest, bind all supported provider-shaping inputs, and execute from canonical
 snapshots where values can safely be copied. Opaque callbacks, credential-account selection,
@@ -1264,8 +1293,9 @@ consensus, network-partition tolerance, or tenant fairness.
 optional SDK admission, conformance, provider capability, governance-document, conservative
 impact, and release evidence. Its explicit target matrix makes local delivery, guarded claims,
 foreign-artifact gaps, and missing evidence mechanically visible; it still does not implement the
-foreign full Python SDK surface, gRPC clients, GitHub Actions, CI runners, or authoring UI; the
-Rust HTTP/event gateway and Python HTTP client are now present.
+foreign full Python SDK surface, gRPC clients, hosted consumer workflow execution, or authoring UI;
+the repository includes a composite GitHub Action and local CI exercise alongside the Rust
+HTTP/event gateway and Python HTTP client.
 The registry lifecycle and metrics profile surfaces are now callable too:
 `registry_lifecycle_simulate` replays attested pack publication, promotion, reassessment,
 supersession, withdrawal, lookup, revision history, and index integrity, while
@@ -1516,8 +1546,9 @@ The developer workbench now provides an authoritative Rust contract for the impl
 the remaining authoring-platform idea: sessions carry artifact cards, notebook cells, dependency
 ordering, logical change history, stale-digest findings, evidence-aware dashboard rows, and a
 review-only CI workflow plan. Python and TypeScript expose the same composition surface. This does
-not close the external authoring UI, consumer-repository action, hosted GitHub runner, or full
-Python distribution backlog, so those gaps remain explicit rather than being relabelled complete.
+not close the external authoring UI, hosted consumer-workflow execution, hosted GitHub runner, or
+full Python distribution backlog, so those gaps remain explicit rather than being relabelled
+complete.
 The retained-workbench continuation is now implemented as `developer_workbench_verify`: a caller can
 store the complete report, later re-audit the current session, replay its dashboard and optional CI
 request, and receive content-digest/mismatch witnesses through REST, MCP, CLI, Python, and TypeScript.
@@ -1527,7 +1558,7 @@ The next retention seam is also implemented: `developer_workbench_import/query/g
 bounded, content-addressed registry shared by MCP and REST, with CLI and typed SDK facades plus an
 atomic `--workbench-state` checkpoint. Import, query, restore, and lookup verify report/snapshot
 digests and preserve transport-normalized envelopes; they do not turn local retention into a hosted
-authoring UI, a GitHub-backed repository action, CI execution, or release authority.
+authoring UI, provider-backed CI execution, or release authority.
 The `ci_execution_evidence_audit` route adds the next safe boundary without claiming the external
 runner: it regenerates the canonical plan, requires a matching plan digest and per-check result
 digests, reconciles exact check names and requiredness, and keeps caller/provider provenance,
@@ -1549,10 +1580,15 @@ downloads HTTPS artifact/log responses under per-response and total caps and bin
 digests. Explicit digest scopes and optional attestation subject-digest joins now survive into the
 Rust audit, while archive extraction, log interpretation, signature verification, and release
 authority remain out of scope. Both modes refuse duplicate, oversized, malformed, or
-control-character-bearing inputs. This materially covers the local consumer-repository handoff for
-11.21 and the bounded discovery/byte-hash portion of 11.22, but it does not execute checks, verify
-attestations, upload artifacts, or provide hosted runner/release authority.
-Consumers must still retain the payload and pin a reviewed action revision.
+control-character-bearing inputs. The `.github/actions/autonomous-run` composite action now invokes
+`aurora-agent run` in a consumer repository through a caller-owned MCP server and provider
+environment. It keeps provider-call and mission-dispatch approval independent, requires an exact
+MCP tool allowlist for tool execution, and emits only status, routing mode, run identity, and result
+digest unless the caller explicitly requests a workspace result file. CI exercises that action
+against the credentialless local provider and fixture MCP process. This completes the agent
+execution handoff for 11.21 and adds a local contract check to 11.22; it does not execute arbitrary
+consumer CI checks, verify attestations, upload artifacts, or provide hosted runner/release
+authority. Consumers must pin a reviewed action revision.
 `ci_provider_evidence_audit` now adds the next conformance layer for artifact, log, and attestation
 rows: it preserves the supplied records, checks provider/run/check bindings and subject references,
 computes separate deterministic row-family digests, and fails closed on malformed or unbound rows.
@@ -1711,13 +1747,9 @@ usable across the whole catalogue. This still leaves provider authentication, on
 source-specific conformance, and external execution as separate follow-on contracts.
 
 
-## §11 Developer Platform — 6 uncovered
+## §11 Developer Platform — 2 uncovered
 
-- `11.04` Python Sdk
 - `11.17` Authoring Studio
-- `11.18` Authoring Studio And Notebook Workflow
-- `11.20` Capability Dashboard And Query
-- `11.21` Github Action For Consumer Repositories
 - `11.22` Github Action And Ci Integration
 
 ## §33 Biocapability Atlas And Metrics — 10 uncovered
@@ -2679,6 +2711,27 @@ must be previewed and approved again. Deployment-owned work remains operator aut
 encrypted/shared persistence, distributed leases, and an approval UX that surfaces revocation and
 staleness clearly.
 
+Cross-SDK goal time migration has completed its core objective-state slice. The shared primitive and
+goal record/event/snapshot, schedule, and claim schemas use exact decimal-string epoch nanoseconds
+in 0.2, and the default scheduler aging window is one day in nanoseconds in both SDKs. TypeScript's
+ledger clock promotes its millisecond wall clock to nanoseconds with integer arithmetic. The
+Python and TypeScript SDKs now verify v0.1 snapshot, record, event, and chain digests before an
+explicit-unit snapshot conversion; Python SQLite goal stores provide the same explicit-unit,
+transactional import and persist source-chain provenance across restarts. Preview admission
+approvals now use exact 0.2 timestamps, and old 0.1 decisions must be re-reviewed and re-issued;
+they are never silently extended. Worker journals, dispatch-resolution receipts, and authenticated
+journal envelopes now also use exact 0.2 timestamps. Both SDKs verify and explicitly migrate legacy
+journal chains; authenticated envelopes are verified with the source key and resealed with the
+current key, while old dispatch receipts require fresh external verification. V0.2 replay
+validators require canonical decimal-string timestamps for goal snapshots, schedules, preview
+approvals, worker events and receipts, and control-loop checkpoint deadlines. Runtime clock
+arguments remain ergonomic, while serialized replay state cannot use numeric timestamp spellings.
+Cross-SDK persistence and live-runtime coverage now migrates a legacy goal snapshot, worker journal,
+and control checkpoint into caller-owned stores, runs and settles the goal, restarts from persisted
+state without replaying completed work, and asserts identical goal/journal/checkpoint digests in
+Python and TypeScript. Control-loop checkpoints use schema 0.2 exact timestamp strings for learned
+deadline signals and provide explicit-unit, digest-verified v0.1 migration with durable provenance.
+
 The goal-control learner now uses contextual value estimates. Capability and risk-class metadata
 derive independent content-addressed arms within each domain, while metadata-free goals preserve
 the legacy domain arm. Both SDKs validate contextual arm identity, preserve value-only retention,
@@ -2859,3 +2912,120 @@ closed before denied callbacks. High-level reviewed and Python facade paths forw
 context and the cross-domain runtime tests cover the full built-in portfolio. Deployment-owned
 identity verification, encrypted/shared persistence, leasing, rotation, and approval UX remain
 outside the SDK contract.
+
+The coordinated agent persistence lifecycle now preserves empty-versus-restored state for
+component receipts in both SDKs. A `restored: false` receipt is reported as `empty`; malformed
+restore flags fail the component. This prevents a first-run process from reporting an empty
+checkpoint as recovered state.
+
+The lifecycle also now rejects malformed or foreign capability-journal, decision-cycle, and
+execution persistence coordinators before startup or shutdown. Python now matches TypeScript's
+exact-instance binding check, so the report cannot say a caller-selected coordinator was restored
+when the agent would have invoked a different bound store. Focused Python and TypeScript lifecycle
+suites cover both rejection paths.
+
+The existing `prism-sdk` wheel now has a build-and-install contract in CI. It checks all 1,831
+Python modules, package metadata, the dependency-free runtime declaration, and the `aurora-agent`
+entry point, then installs into a clean virtual environment and invokes its CLI outside the source
+tree. The checkout install command and Python 3.11 minimum are documented; the broader
+multi-distribution SDK topology remains open.
+
+The embedded MCP catalogue now has a regression guard against dispatch drift. Its scanner walks
+the crate's Rust sources, proves it can detect a planted route without matching incidental text,
+and requires exact set equality between advertised tool names and literal server dispatch arms.
+This closes catalogue-to-dispatch coverage for the current static router; tool behavior,
+input semantics, and side-effect-specific execution remain covered by their respective contracts.
+
+All MCP tool schemas and every fixed-property nested object now reject undeclared arguments,
+while intentionally free-form maps and JSON values remain open. Direct `tools/call` dispatch uses
+the same authoritative schema validator as mission preflight and refuses invalid input before
+entering a handler. Regression coverage checks the catalogue digest and schema closure, preserves
+the explicit free-form rubric payloads, and exercises rejected and accepted direct calls; full
+per-tool semantic and side-effect coverage remains ongoing. The `agent_mission` policy schema now
+declares every bounded policy field, including explicit execution, tool allow-list, and output
+budgets, so its closed-object validator admits the supported mission contract while still rejecting
+unknown policy keys.
+
+Autopilot report verification now recomputes `outcome_unknown` unresolved steps from the initial
+dispatch plan and latest attempt classifications, including exact plan order and attempt indexes;
+digest-valid tampering cannot substitute an arbitrary unresolved list. Runtime provider admission
+also checks every declared capability flag, and collected file-read artifacts now carry the digest
+and byte count of recorded content. Missing files, empty files, and malformed performed read
+outcomes remain distinct in collection rather than collapsing into an apparently valid empty read.
+
+MCP's authoritative argument validator now enforces patterned strings, `propertyNames`, and
+`additionalProperties` value schemas even for open-ended maps with no fixed `properties` block.
+The checked-in MCP tool catalogue is scanned in the MCP test suite to ensure every active schema
+keyword and pattern remains implemented or explicitly refused, and direct calls prove malformed
+digests, map keys, and map values stop before handler dispatch.
+
+Autopilot now binds every parsed mission report back to the exact mission dispatched: the report's
+recomputed plan and execution posture must match, and result identities must be unique and agree
+with the dispatched step, tool, and required flag. A missing row remains explicit unknown evidence;
+duplicate, foreign, and misidentified rows are retained as invalid report evidence and stop the
+drive without retry, even when reconciliation is waived. This closes a report-substitution seam in
+the autonomous retry and success boundary.
+
+Aurora's Autopilot now validates each full workflow-reconciliation record against the registry
+contract and recomputes its canonical digest before the digest can support success. The MCP
+projection embeds that canonical record and the registry import receipt; Autopilot checks the
+duplicated summary and receipt fields and binds the exact projection to the mission report.
+Marker-only, structurally invalid, and altered projections fail closed. The drive records digest
+verification in report schema `0.7` and checkpoint schema `0.2`.
+A claimed digest mismatch remains visible on an exhausted report and cannot be upgraded during
+checkpoint rehydration.
+
+Autopilot report schema `0.7` now retains each attempt's reconciliation record. Its verifier runs
+the registry contract and digest checks over that record and cross-checks the recorded status,
+integrity, and verification fields, so a restamped outer report cannot upgrade a false verification
+boolean. Schemas `0.1` through `0.6` remain readable under their historical contracts, and report
+figures recognize the new version.
+
+Autopilot now checks a delivered mission report's succeeded/refused/blocked/cancelled totals against
+its returned rows. The required-failure total cannot omit a visible required refusal or block, and
+the returned-byte total cannot undercount successful or wire-backed results. Required-failure
+totals are exact when every result row is present. Missing rows and unretained optional wires remain
+admissible as unknown/incomplete evidence. Focused adversarial coverage confirms contradictions
+stop the drive as outcome-unknown rather than becoming success or retry evidence.
+
+MCP handoffs now match their closed mission schemas end to end: evaluator claim IDs stay on reviewed
+rows while proposed bindings match mission input exactly, and domain workflow instantiation omits
+absent review objects instead of serializing invalid `null` values. Workflow reconciliation-only
+readiness policy is rejected at mission instantiation rather than silently forwarded as an ignored
+execution field. Mission binding, route review, parallel execution, and workflow reconciliation
+regressions cover these boundaries. Python and TypeScript resumable provider paths also verify that
+every fallback dispatch receipt is durably committed before its transport call; an adversarial
+commit refusal prevents the fallback model from being invoked.
+
+The Python SDK namespace no longer fabricates placeholders for arbitrary missing attribute names after package initialization. Explicitly declared optional generated exports retain their unavailable-feature behavior, the temporary import shim remains limited to bootstrap, and Python's original import function is restored before import prism_sdk returns.
+
+The README and VS Code install guide were updated at that time to report the then-live MCP catalogue size (879 tools) instead of stale release-era counts; current catalogue size is derived from the embedded schema definitions and parity tests.
+
+The clean-wheel CI contract now refuses releases if the installed package exposes the core AutonomousAgent, AutonomousGoalLedger, AutonomousGoalControlLoop, or AutonomousGoalWorker as optional placeholders; it also checks that post-import unknown-name probes stay absent.
+
+The Python autonomy composition now mirrors the focused TypeScript selection boundary: autonomous_text_normalization.py owns shared route-token normalization with matching ASCII token semantics in both SDKs, and autonomous_tool_selection.py owns reviewed stage-to-tool aliases, candidate ranking, risk filtering, value-only tool learning, and settlement. The public autonomy facade keeps its existing exports while the capability mixin imports this policy module directly.
+
+The Python and TypeScript autonomous goal workers now execute independent, dependency-closed goal
+waves concurrently up to the admitted `max_concurrent` ceiling. Prerequisites finish before their
+dependants enter the executor; an unsuccessful prerequisite pauses its dependent without dispatch.
+Worker result rows remain in stable schedule order, while the append-only journal preserves actual
+dispatch timing. Python's caller-owned executor must be concurrency-safe when the caller opts into
+more than one concurrent goal. This is process-local execution parallelism, not a distributed
+worker lease or cross-process exactly-once guarantee.
+
+Resolver and executor callbacks now receive detached immutable goal and schedule-row snapshots in
+both SDKs. The goal identity and admitted dependency set cannot be changed through a retained
+callback reference between preflight and dispatch; readonly TypeScript callback types and paired
+runtime regressions enforce the same contract as Python's frozen records. TypeScript schedule plans
+and claim receipts are frozen recursively and expose readonly result types, matching Python's frozen
+schedule and claim records; replay validation normalizes a private clone and JSON projections detach
+the public worker receipt. Executor parameter trees now receive detached JSON-only snapshots and are
+recursively immutable after their binding digest is recorded, so the callback cannot alter the
+payload under that digest. Schedule replay also rejects unmodeled row and coverage properties in
+both SDKs, preventing a restamped schedule digest from preserving task values in a metadata artifact.
+
+Worker journal replay requires its event envelope fields and rejects explicit nulls for optional
+digest/status values in both SDKs. It also refuses non-string genesis `previous_digest` values, so
+restamped event and snapshot digests cannot normalize malformed input into valid chain metadata.
+Snapshot migration provenance is returned as a detached copy, so editing a caller's snapshot view
+cannot rewrite the journal's in-memory migration state.

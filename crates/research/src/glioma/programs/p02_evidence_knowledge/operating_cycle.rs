@@ -8,23 +8,23 @@
 //! unresolved claim; every omission and negative result remains attached to the next action.
 
 use super::belief_revision::{
-    revise_glioma_beliefs, BeliefConflict, BeliefRevision, BeliefRevisionDisposition,
-    BeliefRevisionError, BeliefRevisionRequest,
+    BeliefConflict, BeliefRevision, BeliefRevisionDisposition, BeliefRevisionError,
+    BeliefRevisionRequest, revise_glioma_beliefs,
 };
 use super::claim_frontier::{
-    prioritize_knowledge_frontier, KnowledgeFrontier, KnowledgeFrontierDisposition,
-    KnowledgeFrontierError, KnowledgeFrontierRequest,
+    KnowledgeFrontier, KnowledgeFrontierDisposition, KnowledgeFrontierError,
+    KnowledgeFrontierRequest, prioritize_knowledge_frontier,
 };
 use super::composition::{
-    compose_knowledge_graph, KnowledgeComposition, KnowledgeCompositionDisposition,
-    KnowledgeCompositionError, KnowledgeCompositionRequest, KnowledgeRelation,
+    KnowledgeComposition, KnowledgeCompositionDisposition, KnowledgeCompositionError,
+    KnowledgeCompositionRequest, KnowledgeRelation, compose_knowledge_graph,
 };
 use super::gap_compiler::{
-    compile_glioma_knowledge_gaps, KnowledgeGapCompilerError, KnowledgeGapCompilerRequest,
-    KnowledgeGapPortfolio, KnowledgeGapPortfolioDisposition,
+    KnowledgeGapCompilerError, KnowledgeGapCompilerRequest, KnowledgeGapPortfolio,
+    KnowledgeGapPortfolioDisposition, compile_glioma_knowledge_gaps,
 };
 use super::knowledge_graph::{
-    compile_typed_knowledge, KnowledgeError, KnowledgeRequest, TypedKnowledge,
+    KnowledgeError, KnowledgeRequest, TypedKnowledge, compile_typed_knowledge,
 };
 use crate::glioma::evidence::EvidenceRecord;
 use bioprism_ids::ContentHash;

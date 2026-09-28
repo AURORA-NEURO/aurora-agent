@@ -40,6 +40,7 @@ pub mod research_contracts;
 pub mod resource_discovery_contract;
 pub mod rpc;
 pub mod server;
+mod tool_definitions;
 
 pub use evolution_assurance::{
     assure_bounded_evolution, AssuranceCheck, AssuranceVerdict, EvolutionAssuranceError,

@@ -47,10 +47,22 @@ if [[ "$want_tests" == 1 ]]; then
   # A blocked test binary reports `error: test failed` and cargo continues, so a naive sum silently
   # loses everything after it. Relink first; see .agents/skills/verify-crate/SKILL.md.
   find crates -name '*.rs' -path '*/tests/*' -exec touch {} +
-  blocked=$(cargo test --workspace --offline --no-fail-fast 2>&1 | grep -c 'never executed' || true)
-  total=$(cargo test --workspace --offline --no-fail-fast 2>&1 \
-    | grep -E '^test result: ok' | awk '{s+=$4} END {print s}')
+  test_log="$(mktemp)"
+  trap 'rm -f "$test_log"' EXIT
+  if cargo test --workspace --offline --no-fail-fast >"$test_log" 2>&1; then
+    cargo_status=0
+  else
+    cargo_status=$?
+  fi
+  cat "$test_log"
+  blocked=$(grep -c 'never executed' "$test_log" || true)
+  total=$(awk '/^test result: ok/ {s+=$4} END {print s+0}' "$test_log")
   echo "tests:  $total"
   echo "blocked binaries: $blocked"
-  [[ "$blocked" == 0 ]] || echo "WARNING: the test count is short by whatever those binaries hold"
+  echo "cargo exit code: $cargo_status"
+  if [[ "$blocked" != 0 ]]; then
+    echo "WARNING: this test count is incomplete because one or more binaries never executed"
+    grep -B2 -A2 'never executed' "$test_log" || true
+  fi
+  exit "$cargo_status"
 fi

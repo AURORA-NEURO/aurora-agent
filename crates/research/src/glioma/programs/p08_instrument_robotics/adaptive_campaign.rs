@@ -8,8 +8,8 @@
 //! campaign executor. It never turns an instrument completion into biological evidence.
 
 use super::campaign::{
-    execute_glioma_instrument_campaign, InstrumentCampaign, InstrumentCampaignDisposition,
-    InstrumentCampaignError, InstrumentCampaignRequest, InstrumentCampaignRunRequest,
+    InstrumentCampaign, InstrumentCampaignDisposition, InstrumentCampaignError,
+    InstrumentCampaignRequest, InstrumentCampaignRunRequest, execute_glioma_instrument_campaign,
 };
 use super::execution::{DryRunInstrumentExecutor, InstrumentExecutionRequest, InstrumentExecutor};
 use bioprism_ids::ContentHash;

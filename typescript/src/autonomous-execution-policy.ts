@@ -202,7 +202,7 @@ function fail(message: string): never { throw new ArgumentError(`autonomous exec
 function clone<T>(value: T): T { return structuredClone(value); }
 function bytes(value: unknown): number { return new TextEncoder().encode(JSON.stringify(value)).byteLength; }
 function boundedText(name: string, value: unknown, maximum = 256): string {
-  if (typeof value !== "string" || !value.trim() || value.length > maximum || value.includes("\u0000") || /[\u0000-\u001F\u007F]/.test(value)) fail(`${name} is outside its bound`);
+  if (typeof value !== "string" || !value.trim() || Array.from(value).length > maximum || value.includes("\u0000") || /[\u0000-\u001F\u007F]/.test(value)) fail(`${name} is outside its bound`);
   return value.trim();
 }
 function identifier(name: string, value: unknown, maximum = 256): string {

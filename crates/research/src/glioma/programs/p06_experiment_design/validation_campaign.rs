@@ -7,24 +7,24 @@
 //! promoted to a biological observation and no stop decision is converted into a clinical action.
 
 use super::mechanism_validation::{
-    plan_glioma_mechanism_validation, MechanismValidationPlan, MechanismValidationPlanRequest,
+    MechanismValidationPlan, MechanismValidationPlanRequest, plan_glioma_mechanism_validation,
 };
 use super::mechanism_validation_protocol::{
-    compile_glioma_mechanism_validation_protocol, MechanismValidationProtocolCompilation,
-    MechanismValidationProtocolCompileRequest,
+    MechanismValidationProtocolCompilation, MechanismValidationProtocolCompileRequest,
+    compile_glioma_mechanism_validation_protocol,
 };
 use super::power_reestimation::{
     PowerArmObservation, PowerReestimationDisposition, PowerReestimationPlan,
 };
 use super::validation_batch_assessment::{
-    assess_glioma_validation_batch, ValidationBatchAssessment, ValidationBatchAssessmentError,
-    ValidationBatchAssessmentRequest,
+    ValidationBatchAssessment, ValidationBatchAssessmentError, ValidationBatchAssessmentRequest,
+    assess_glioma_validation_batch,
 };
 use crate::glioma::programs::p07_protocol_simulation::execution::GliomaProtocolExecutor;
 use crate::glioma::programs::p07_protocol_simulation::mechanism_validation_execution::{
-    execute_glioma_mechanism_validation_protocol, MechanismValidationExecution,
-    MechanismValidationExecutionDisposition, MechanismValidationExecutionError,
-    MechanismValidationExecutionRequest,
+    MechanismValidationExecution, MechanismValidationExecutionDisposition,
+    MechanismValidationExecutionError, MechanismValidationExecutionRequest,
+    execute_glioma_mechanism_validation_protocol,
 };
 use crate::glioma::programs::p07_protocol_simulation::simulator::ProtocolResource;
 use crate::glioma_engine::GliomaModelSystem;
@@ -238,8 +238,7 @@ impl ValidationCampaignRun {
     }
 }
 
-fn finish(
-    request: &ValidationCampaignRequest,
+struct ValidationCampaignOutcome {
     rounds: Vec<ValidationCampaignRound>,
     final_power_plan: Option<PowerReestimationPlan>,
     executed_arm_order: Vec<String>,
@@ -248,22 +247,27 @@ fn finish(
     uncertainty: Vec<String>,
     disposition: ValidationCampaignDisposition,
     stop_reason: ValidationCampaignStopReason,
-    next_action: &str,
+    next_action: &'static str,
+}
+
+fn finish(
+    request: &ValidationCampaignRequest,
+    outcome: ValidationCampaignOutcome,
 ) -> Result<ValidationCampaignRun, ValidationCampaignError> {
     let mut output = ValidationCampaignRun {
         feature_id: FEATURE_ID.into(),
         output_schema: OUTPUT_SCHEMA.into(),
         objective: request.validation.objective.clone(),
         model_system: request.validation.power.model_system,
-        rounds,
-        final_power_plan,
-        executed_arm_order: sorted_unique(executed_arm_order),
-        withheld_arm_order: sorted_unique(withheld_arm_order),
-        negative_evidence: sorted_unique(negative_evidence),
-        uncertainty: sorted_unique(uncertainty),
-        disposition,
-        stop_reason,
-        next_action: next_action.into(),
+        rounds: outcome.rounds,
+        final_power_plan: outcome.final_power_plan,
+        executed_arm_order: sorted_unique(outcome.executed_arm_order),
+        withheld_arm_order: sorted_unique(outcome.withheld_arm_order),
+        negative_evidence: sorted_unique(outcome.negative_evidence),
+        uncertainty: sorted_unique(outcome.uncertainty),
+        disposition: outcome.disposition,
+        stop_reason: outcome.stop_reason,
+        next_action: outcome.next_action.into(),
         boundary: PRECLINICAL_BOUNDARY.into(),
         digest: ContentHash::of_bytes(b"unsealed-glioma-validation-campaign"),
     };
@@ -418,15 +422,17 @@ pub fn execute_glioma_validation_campaign<E: GliomaProtocolExecutor>(
     }
     finish(
         request,
-        rounds,
-        final_power_plan,
-        executed_arm_order,
-        withheld_arm_order,
-        negative_evidence,
-        uncertainty,
-        disposition,
-        stop_reason,
-        next_action,
+        ValidationCampaignOutcome {
+            rounds,
+            final_power_plan,
+            executed_arm_order,
+            withheld_arm_order,
+            negative_evidence,
+            uncertainty,
+            disposition,
+            stop_reason,
+            next_action,
+        },
     )
 }
 
@@ -439,8 +445,8 @@ mod tests {
         MechanismGraphEdge, MechanismGraphNode, MechanismGraphRelation,
     };
     use crate::glioma::programs::p05_mechanism_exploration::robust_portfolio::{
-        plan_glioma_robust_intervention_portfolio, PortfolioDirection, RobustInterventionCandidate,
-        RobustInterventionRequest,
+        PortfolioDirection, RobustInterventionCandidate, RobustInterventionRequest,
+        plan_glioma_robust_intervention_portfolio,
     };
     use crate::glioma::programs::p07_protocol_simulation::execution::DryRunGliomaProtocolExecutor;
     use crate::glioma_engine::LocalArtifactRef;

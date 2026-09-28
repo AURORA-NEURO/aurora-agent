@@ -1,7 +1,12 @@
 use bioprism_autopilot::{
-    plan_next_action, AttemptKind, AttemptRecord, AutonomyGrant, DriveHistory, NextAction,
+    drive_instantiation_bounded, drive_mission, drive_mission_with_checkpoint, plan_next_action,
+    AutonomyGrant, BoundedDriveOptions, DriveHistory, NextAction,
 };
 use bioprism_brain::{AutonomousPlanRequest, PlanEffect, PlanStep};
+use bioprism_devplat::{
+    mission_claim_lineage_with_review, plan_mission, MissionReport, MissionRequest,
+    MissionStepResult, MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION,
+};
 use bioprism_ids::{to_canonical_string, ContentHash};
 use bioprism_research::{run_research, ResearchRequest, WorldFamily};
 use bioprism_research_campaign::{
@@ -224,17 +229,161 @@ fn research_fixture() -> (ResearchRequest, Value) {
     (request, dossier)
 }
 
-fn autopilot_report(input_digest: &str, final_status: &str) -> Value {
-    let mut report = json!({
-        "schema": bioprism_autopilot::AUTOPILOT_REPORT_SCHEMA_VERSION,
-        "base_mission_digest": input_digest,
-        "attempts": [],
-        "final_status": final_status,
-        "limitations": bioprism_autopilot::REQUIRED_LIMITATIONS,
-    });
-    let report_digest = digest(&report);
-    report["report_sha256"] = json!(report_digest);
-    report
+fn campaign_mission() -> Value {
+    json!({
+        "mission_id": "campaign-autopilot",
+        "goal": "run one campaign stage",
+        "steps": [{
+            "id": "run",
+            "domain": "metrics",
+            "capability": "analytics",
+            "objective": "run the stage",
+            "tool": "run_stage",
+            "arguments": {},
+            "depends_on": [],
+            "bindings": [],
+            "required": true,
+        }],
+    })
+}
+
+fn campaign_mission_report(mission: &Value, result_kind: &str) -> Value {
+    let request: MissionRequest =
+        serde_json::from_value(mission.clone()).expect("the dispatched mission parses");
+    let plan = plan_mission(&request).expect("the dispatched mission plans");
+    let step = mission["steps"][0]
+        .as_object()
+        .expect("the mission has a step");
+    let step_id = step["id"].as_str().expect("the step has an id");
+    let tool = step["tool"].as_str().expect("the step has a tool");
+    let (status, wire, error) = match result_kind {
+        "succeeded" => (
+            "succeeded",
+            Some(json!({
+                "jsonrpc": "2.0",
+                "id": step_id,
+                "result": { "content": [{ "type": "text", "text": "{\"ok\":true}" }] },
+            })),
+            None,
+        ),
+        "retryable" => (
+            "refused",
+            Some(json!({
+                "jsonrpc": "2.0",
+                "id": step_id,
+                "result": {
+                    "isError": true,
+                    "structuredContent": { "retryability": "retryable_as_is" },
+                    "content": [{ "type": "text", "text": "temporarily unavailable" }],
+                },
+            })),
+            Some("temporarily unavailable".to_owned()),
+        ),
+        "refused" => (
+            "refused",
+            Some(json!({
+                "jsonrpc": "2.0",
+                "id": step_id,
+                "result": {
+                    "isError": true,
+                    "content": [{ "type": "text", "text": "executor refusal" }],
+                },
+            })),
+            Some("executor refusal".to_owned()),
+        ),
+        other => panic!("unknown campaign result kind {other:?}"),
+    };
+    let arguments_digest = ContentHash::of_value(&json!({}))
+        .expect("the empty arguments object hashes")
+        .to_string();
+    let result_bytes = wire.as_ref().map_or(0, |value| value.to_string().len());
+    let result = MissionStepResult {
+        id: step_id.into(),
+        tool: tool.into(),
+        status: status.into(),
+        required: true,
+        arguments_digest: Some(arguments_digest),
+        bytes: result_bytes,
+        wire,
+        error,
+    };
+    let succeeded = if status == "succeeded" { 1 } else { 0 };
+    let refused = if status == "refused" { 1 } else { 0 };
+    let mission_status = if refused == 0 { "succeeded" } else { "failed" };
+    let claim_lineage = mission_claim_lineage_with_review(
+        &request.claim_requests,
+        std::slice::from_ref(&result),
+        request.evaluator_review.as_ref(),
+    );
+    serde_json::to_value(MissionReport {
+        schema_version: MISSION_SCHEMA_VERSION.into(),
+        plan,
+        execution: "executed".into(),
+        mission_status: mission_status.into(),
+        succeeded,
+        refused,
+        blocked: 0,
+        cancelled: 0,
+        required_failures: refused,
+        returned_bytes: result_bytes,
+        results: vec![result],
+        execution_trace_schema_version: MISSION_TRACE_SCHEMA_VERSION.into(),
+        execution_trace: Vec::new(),
+        claim_requests: request.claim_requests,
+        evaluator_review: request.evaluator_review,
+        claim_lineage,
+        trace_observer: None,
+        guarantees: Vec::new(),
+        limitations: Vec::new(),
+    })
+    .expect("the typed mission report serialises")
+}
+
+fn autopilot_report(final_status: &str) -> Value {
+    let max_attempts = if final_status == "exhausted" { 1 } else { 2 };
+    let retry = final_status == "exhausted" || final_status == "paused";
+    let grant: AutonomyGrant = serde_json::from_value(json!({
+        "allowed_tools": ["run_stage"],
+        "allow_side_effects": false,
+        "max_attempts": max_attempts,
+        "retry": { "retry_retryable_as_is": retry },
+        "require_reconciliation_complete": false,
+        "stop_on_first_success": true,
+    }))
+    .expect("the campaign grant validates");
+    let mission = campaign_mission();
+    match final_status {
+        "paused" => {
+            let instantiation = json!({
+                "ok": true,
+                "workflow": "domain_workflow_instantiate",
+                "mission": mission,
+            });
+            let outcome = drive_instantiation_bounded(
+                &grant,
+                &instantiation,
+                &mut |dispatched: &Value| Ok(campaign_mission_report(dispatched, "retryable")),
+                BoundedDriveOptions::new(1, |_| Ok(())),
+                |_| Ok(()),
+            )
+            .expect("the bounded drive returns its paused report");
+            serde_json::json!(outcome.report)
+        }
+        "succeeded" | "exhausted" | "refused" => {
+            let result_kind = match final_status {
+                "succeeded" => "succeeded",
+                "exhausted" => "retryable",
+                _ => "refused",
+            };
+            let outcome = drive_mission(&grant, mission, &mut |dispatched: &Value| {
+                Ok(campaign_mission_report(dispatched, result_kind))
+            })
+            .expect("the mission drive returns a terminal report");
+            assert_eq!(outcome.report["final_status"], final_status);
+            outcome.report
+        }
+        other => panic!("unknown campaign autopilot status {other:?}"),
+    }
 }
 
 fn one_step_autopilot_history() -> (AutonomyGrant, DriveHistory, String) {
@@ -260,74 +409,19 @@ fn one_step_autopilot_history() -> (AutonomyGrant, DriveHistory, String) {
         "require_reconciliation_complete": false,
     }))
     .expect("test grant validates");
-    let mut history = DriveHistory::new(base_mission).expect("test mission validates");
-    let dispatched = match plan_next_action(&grant, &history).expect("first action plans") {
-        NextAction::DispatchFull { mission, .. } => mission,
-        other => panic!("expected a full dispatch, got {other:?}"),
-    };
-    let report = json!({
-        "schema_version": "bioprism-devplat-mission/0.1",
-        "plan": {
-            "schema_version": "bioprism-devplat-mission/0.1",
-            "mission_id": "campaign-autopilot",
-            "goal": "produce one planner-verified terminal history",
-            "digest": digest(&dispatched),
-            "step_count": 1,
-            "ordered_steps": ["measure"],
-            "waves": [["measure"]],
-            "critical_path_length": 1,
-            "steps": [{
-                "id": "measure",
-                "domain": "metrics",
-                "capability": "analytics",
-                "objective": "measure once",
-                "tool": "measure_once",
-                "depends_on": [],
-                "bindings": [],
-                "required": true,
-                "wave": 0,
-            }],
-            "execution": "authorized",
-            "execution_mode": "serial",
-            "max_parallelism": 1,
-            "guarantees": [],
-            "limitations": [],
+    let mut history = None;
+    let outcome = drive_mission_with_checkpoint(
+        &grant,
+        base_mission,
+        &mut |dispatched: &Value| Ok(campaign_mission_report(dispatched, "succeeded")),
+        |current| {
+            history = Some(current.clone());
+            Ok(())
         },
-        "execution": "executed",
-        "mission_status": "succeeded",
-        "succeeded": 1,
-        "refused": 0,
-        "blocked": 0,
-        "cancelled": 0,
-        "required_failures": 0,
-        "returned_bytes": 0,
-        "results": [{
-            "id": "measure",
-            "tool": "measure_once",
-            "status": "succeeded",
-            "required": true,
-            "arguments_digest": "1".repeat(64),
-            "bytes": 0,
-            "wire": null,
-            "error": null,
-        }],
-        "execution_trace_schema_version": "bioprism-devplat-mission-trace/0.1",
-        "execution_trace": [],
-        "claim_requests": [],
-        "claim_lineage": {},
-        "guarantees": [],
-        "limitations": [],
-    });
-    history.push(
-        AttemptRecord::delivered(
-            AttemptKind::Full,
-            dispatched,
-            report,
-            None,
-            Some("the test grant does not require reconciliation".to_owned()),
-        )
-        .expect("delivered attempt validates"),
-    );
+    )
+    .expect("the successful drive produces a verified terminal history");
+    assert_eq!(outcome.report["final_status"], "succeeded");
+    let history = history.expect("the dispatch checkpoints the private history");
     (grant, history, input_digest)
 }
 
@@ -768,7 +862,11 @@ fn an_effectful_brain_plan_stops_for_review_instead_of_claiming_execution() {
 
 #[test]
 fn an_exhausted_autopilot_report_exhausts_the_campaign_instead_of_completing_it() {
-    let input_digest = "e".repeat(64);
+    let report = autopilot_report("exhausted");
+    let input_digest = report["base_mission_digest"]
+        .as_str()
+        .expect("the report binds its base mission")
+        .to_owned();
     let spec = spec_with(
         "autopilot-exhausted",
         "propagate the native stop state",
@@ -779,7 +877,6 @@ fn an_exhausted_autopilot_report_exhausts_the_campaign_instead_of_completing_it(
             &[],
         )],
     );
-    let report = autopilot_report(&input_digest, "exhausted");
     let receipt = VerifiedCampaignReceipt::from_autopilot_report(
         spec.stage("drive").expect("stage exists"),
         &report,
@@ -796,8 +893,115 @@ fn an_exhausted_autopilot_report_exhausts_the_campaign_instead_of_completing_it(
 }
 
 #[test]
+fn an_autopilot_unknown_outcome_places_the_campaign_behind_its_reconciliation_fence() {
+    let grant: AutonomyGrant = serde_json::from_value(json!({
+        "allowed_tools": ["run_stage"],
+        "allow_side_effects": false,
+        "max_attempts": 2,
+        "retry": {
+            "retry_retryable_as_is": true,
+            "retry_retryable_after_change": false,
+            "retry_unknown": false,
+        },
+        "schedule": { "retry_base_delay": 0, "retry_max_delay": 0 },
+        "require_reconciliation_complete": false,
+        "stop_on_first_success": true,
+    }))
+    .expect("the test autonomy grant validates");
+    let mission = json!({
+        "mission_id": "campaign-unknown-outcome",
+        "goal": "run one campaign stage",
+        "steps": [{
+            "id": "run",
+            "domain": "metrics",
+            "capability": "analytics",
+            "objective": "run the stage",
+            "tool": "run_stage",
+            "arguments": {},
+            "depends_on": [],
+            "bindings": [],
+            "required": true,
+        }],
+    });
+    let mut dispatcher = |_mission: &Value| -> Result<Value, String> {
+        Err("connection lost after dispatch".into())
+    };
+    let report = drive_mission(&grant, mission, &mut dispatcher)
+        .expect("the unknown dispatch outcome is retained")
+        .report;
+    assert_eq!(report["final_status"], "outcome_unknown");
+
+    let input_digest = report["base_mission_digest"]
+        .as_str()
+        .expect("autopilot report records its input identity");
+    let spec = spec_with(
+        "autopilot-unknown-outcome",
+        "preserve an uncertain dispatch until reconciled",
+        vec![stage(
+            "drive",
+            CampaignActionKind::AutopilotDrive,
+            input_digest,
+            &[],
+        )],
+    );
+    let receipt = VerifiedCampaignReceipt::from_autopilot_report(
+        spec.stage("drive").expect("stage exists"),
+        &report,
+    )
+    .expect("the report verifier validates the unknown outcome receipt");
+    assert_eq!(
+        receipt.disposition(),
+        CampaignReceiptDisposition::UnknownCompletion
+    );
+
+    let mut campaign = start_campaign(spec).expect("campaign starts");
+    let authorization = campaign
+        .authorize_next_action(&AcceptingCoordinator)
+        .expect("action authorized");
+    campaign
+        .apply_receipt(authorization, receipt)
+        .expect("uncertain work is recorded without settlement");
+    assert_eq!(campaign.status(), CampaignStatus::ReconciliationRequired);
+}
+
+#[test]
+fn a_paused_autopilot_report_cannot_settle_a_campaign_stage() {
+    let report = autopilot_report("paused");
+    let input_digest = report["base_mission_digest"]
+        .as_str()
+        .expect("the report binds its base mission")
+        .to_owned();
+    let spec = spec_with(
+        "paused-autopilot",
+        "a chunk boundary is not a terminal result",
+        vec![stage(
+            "drive",
+            CampaignActionKind::AutopilotDrive,
+            &input_digest,
+            &[],
+        )],
+    );
+    assert_eq!(
+        bioprism_autopilot::verify_autopilot_report(&report)
+            .expect("paused report is structurally valid")["valid"],
+        json!(true)
+    );
+    assert!(matches!(
+        VerifiedCampaignReceipt::from_autopilot_report(
+            spec.stage("drive").expect("stage exists"),
+            &report,
+        ),
+        Err(CampaignError::InvalidReceipt { .. })
+    ));
+}
+
+#[test]
 fn a_succeeded_autopilot_report_without_an_attempt_cannot_complete_the_campaign() {
-    let input_digest = "7".repeat(64);
+    let mut report = autopilot_report("succeeded");
+    let input_digest = report["base_mission_digest"]
+        .as_str()
+        .expect("the report binds its base mission")
+        .to_owned();
     let spec = spec_with(
         "empty-autopilot-success",
         "success must name work that actually ran",
@@ -808,12 +1012,15 @@ fn a_succeeded_autopilot_report_without_an_attempt_cannot_complete_the_campaign(
             &[],
         )],
     );
-    let report = autopilot_report(&input_digest, "succeeded");
+    report["attempts"] = json!([]);
+    report["totals"]["attempts_used"] = json!(0);
+    report.as_object_mut().unwrap().remove("report_sha256");
+    report["report_sha256"] = json!(digest(&report));
     assert_eq!(
         bioprism_autopilot::verify_autopilot_report(&report)
             .expect("upstream verifier returns a projection")["valid"],
-        json!(true),
-        "the regression fixture must reach the campaign adapter's stronger gate"
+        json!(false),
+        "the native verifier rejects success without a retained attempt"
     );
 
     assert!(matches!(
@@ -827,7 +1034,11 @@ fn a_succeeded_autopilot_report_without_an_attempt_cannot_complete_the_campaign(
 
 #[test]
 fn a_restamped_nonempty_bogus_autopilot_report_cannot_mint_success() {
-    let input_digest = "8".repeat(64);
+    let mut report = autopilot_report("succeeded");
+    let input_digest = report["base_mission_digest"]
+        .as_str()
+        .expect("the report binds its base mission")
+        .to_owned();
     let spec = spec_with(
         "bogus-autopilot-success",
         "nonempty rows are not terminal planner evidence",
@@ -838,8 +1049,8 @@ fn a_restamped_nonempty_bogus_autopilot_report_cannot_mint_success() {
             &[],
         )],
     );
-    let mut report = autopilot_report(&input_digest, "succeeded");
     report["attempts"] = json!([{}]);
+    report["totals"]["attempts_used"] = json!(1);
     report
         .as_object_mut()
         .expect("report is an object")
@@ -848,8 +1059,8 @@ fn a_restamped_nonempty_bogus_autopilot_report_cannot_mint_success() {
     assert_eq!(
         bioprism_autopilot::verify_autopilot_report(&report)
             .expect("upstream verifier returns a projection")["valid"],
-        json!(true),
-        "the adversarial fixture must pass top-level integrity verification"
+        json!(false),
+        "the native verifier rejects a nonempty but malformed attempt row"
     );
 
     assert!(matches!(

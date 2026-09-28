@@ -30,21 +30,24 @@ import {
   AutonomousGoalRecoveryCoordinator,
   type AutonomousGoalRecoveryReport,
 } from "./autonomous-goal-recovery.js";
+import type { AutonomousGoalTimestampInput } from "./autonomous-goal-time.js";
 import type { AutonomousGoalControlLoopCheckpoint } from "./autonomous-goal-control-persistence.js";
 import { InMemoryAutonomousGoalPreviewAdmissionLedger, type AutonomousGoalPreviewAdmissionRecord } from "./autonomous-goal-preview.js";
 import {
   AutonomousGoalWorker,
   type AutonomousGoalExecutionRequest,
+  type AutonomousGoalDispatchIntentPersister,
+  type AutonomousGoalWorkerGoal,
+  type AutonomousGoalWorkerScheduleRow,
 } from "./autonomous-goal-worker.js";
 import type { AutonomousGoalWorkerJournal } from "./autonomous-goal-worker-journal.js";
 import {
+  AUTONOMOUS_GOAL_MAX_GOALS,
   InMemoryAutonomousGoalLedger,
-  type AutonomousGoalRecord,
 } from "./autonomous-goals.js";
-import type { AutonomousGoalScheduleRow } from "./autonomous-goal-scheduler.js";
 import type { JsonObject } from "./types.js";
 import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
-import { digestJsonSync } from "./tooling.js";
+import { digestJsonSync, isUnicodeScalarString } from "./tooling.js";
 import {
   autonomousRunTraceStatus,
   AutonomousRunTraceSession,
@@ -64,16 +67,16 @@ export const AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION = "metadata_only_goal_agent
 export const AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA = "bioprism-autonomous-goal-agent-trace/0.1" as const;
 export const AUTONOMOUS_GOAL_AGENT_TRACE_RETENTION = "metadata_only_goal_control_trace;goal_task_prompts_parameters_credentials_and_results_not_retained" as const;
 
-export type AutonomousGoalAgentTaskResolver = (goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow) => string | Promise<string>;
-export type AutonomousGoalAgentRunOptionsFactory = (goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow) => Record<string, unknown> | Promise<Record<string, unknown>>;
+export type AutonomousGoalAgentTaskResolver = (goal: AutonomousGoalWorkerGoal, row: AutonomousGoalWorkerScheduleRow) => string | Promise<string>;
+export type AutonomousGoalAgentRunOptionsFactory = (goal: AutonomousGoalWorkerGoal, row: AutonomousGoalWorkerScheduleRow) => Record<string, unknown> | Promise<Record<string, unknown>>;
 export type AutonomousGoalAgentActionHandoffRequest = Omit<AutonomousBrainRequest, "task">;
 export interface AutonomousGoalAgentActionHandoffBinding {
   handoff: AutonomousActionDispatchHandoff | JsonObject;
   request?: AutonomousGoalAgentActionHandoffRequest;
 }
 export type AutonomousGoalAgentActionHandoffResolver = (
-  goal: AutonomousGoalRecord,
-  row: AutonomousGoalScheduleRow,
+  goal: AutonomousGoalWorkerGoal,
+  row: AutonomousGoalWorkerScheduleRow,
   task: string,
 ) => AutonomousActionDispatchHandoff | AutonomousGoalAgentActionHandoffBinding | null | undefined | Promise<AutonomousActionDispatchHandoff | AutonomousGoalAgentActionHandoffBinding | null | undefined>;
 
@@ -126,6 +129,7 @@ export interface AutonomousGoalAgentRuntimeOptions {
   evaluator?: AutonomousGoalControlLoopEvaluator;
   learner?: AutonomousGoalControlLoopLearner | AutonomousGoalBanditLearner | null;
   journal?: AutonomousGoalWorkerJournal;
+  persist_dispatch_intent?: AutonomousGoalDispatchIntentPersister;
   recovery?: AutonomousGoalRecoveryCoordinator;
   preview_admission_ledger?: InMemoryAutonomousGoalPreviewAdmissionLedger;
   batch_id_prefix?: string;
@@ -136,17 +140,19 @@ function fail(message: string): never {
 }
 
 function task(value: unknown, goalId: string): string {
-  if (typeof value !== "string" || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > 32_000) fail(`resolved task is invalid for goal ${goalId}`);
+  if (typeof value !== "string" || !isUnicodeScalarString(value) || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > 32_000) fail(`resolved task is invalid for goal ${goalId}`);
   return value;
 }
 
 function runOptions(value: unknown): Record<string, unknown> {
   if (value === undefined || value === null) return {};
   if (!isObject(value)) fail("run_options_factory must return an object");
+  // Python mappings cannot carry symbol keys, and object spread would otherwise preserve them.
+  if (Object.getOwnPropertySymbols(value).length > 0) fail("run options contain unsupported symbol keys");
   const forbidden = Object.keys(value).filter((key) => key === "task" || key === "domain");
   if (forbidden.length > 0) fail(`run options cannot override goal ${forbidden.join(", ")}`);
   if (Object.keys(value).length > 128) fail("run options contain too many fields");
-  if (Object.keys(value).some((key) => !key.trim() || key.includes("\u0000"))) fail("run options contain an invalid key");
+  if (Object.keys(value).some((key) => !isUnicodeScalarString(key) || !key.trim() || key.includes("\u0000"))) fail("run options contain an invalid key");
   // Do not structuredClone this object: credential handles, AbortSignals, effect boundaries,
   // observers, and tool callbacks are intentionally process-local execution values.
   return { ...value };
@@ -178,7 +184,7 @@ function composeGoalSelectionCallbacks(...callbacks: readonly (AutonomousModelSe
   };
 }
 
-function goalTraceDomains(goal: AutonomousGoalRecord, options?: Record<string, unknown>): AutonomousDomainName[] {
+function goalTraceDomains(goal: AutonomousGoalWorkerGoal, options?: Record<string, unknown>): AutonomousDomainName[] {
   const domains: AutonomousDomainName[] = [goal.domain as AutonomousDomainName];
   if (goal.domain === "cross_domain" && Array.isArray(options?.subtasks)) {
     for (const item of options.subtasks) {
@@ -218,7 +224,7 @@ type NormalizedActionHandoffBinding = {
   request: AutonomousGoalAgentActionHandoffRequest;
 };
 
-function actionHandoff(value: unknown, goal: AutonomousGoalRecord): NormalizedActionHandoffBinding | undefined {
+function actionHandoff(value: unknown, goal: AutonomousGoalWorkerGoal): NormalizedActionHandoffBinding | undefined {
   if (value === undefined || value === null) return undefined;
   let handoffSource: unknown = value;
   let request: Record<string, unknown> = {};
@@ -261,6 +267,7 @@ export class AutonomousGoalAgentRuntime {
   readonly loop: AutonomousGoalControlLoop;
   readonly recovery: AutonomousGoalRecoveryCoordinator | undefined;
   readonly batch_id_prefix: string;
+  private execution_active = false;
   private trace_context: {
     session: AutonomousRunTraceSession;
     observer: ProviderInvocationObserver;
@@ -279,7 +286,7 @@ export class AutonomousGoalAgentRuntime {
     if (options.preview_admission_ledger !== undefined && !(options.preview_admission_ledger instanceof InMemoryAutonomousGoalPreviewAdmissionLedger)) fail("preview_admission_ledger must be an InMemoryAutonomousGoalPreviewAdmissionLedger or undefined");
     if (options.action_handoff_resolver !== undefined && options.brain === undefined) fail("action_handoff_resolver requires a brain facade");
     const batchIdPrefix = options.batch_id_prefix ?? "autonomous-goal-agent";
-    if (typeof batchIdPrefix !== "string" || !batchIdPrefix.trim() || batchIdPrefix.includes("\u0000") || new TextEncoder().encode(batchIdPrefix).byteLength > 128) fail("batch_id_prefix is outside its bounded contract");
+    if (typeof batchIdPrefix !== "string" || !isUnicodeScalarString(batchIdPrefix) || !batchIdPrefix.trim() || batchIdPrefix.includes("\u0000") || new TextEncoder().encode(batchIdPrefix).byteLength > 128) fail("batch_id_prefix is outside its bounded contract");
     this.agent = options.agent;
     this.ledger = options.ledger;
     this.task_resolver = options.task_resolver ?? (async () => { throw new ArgumentError("protected task resolver was not initialized"); });
@@ -319,11 +326,12 @@ export class AutonomousGoalAgentRuntime {
       },
       executor: (request) => this.execute(request),
       journal: options.journal,
+      persist_dispatch_intent: options.persist_dispatch_intent,
     });
     this.loop = new AutonomousGoalControlLoop({ worker: this.worker, batch_id_prefix: this.batch_id_prefix, evaluator: options.evaluator, learner: options.learner, preview_admission_ledger: options.preview_admission_ledger });
   }
 
-  private async executionOptions(goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow): Promise<Record<string, unknown>> {
+  private async executionOptions(goal: AutonomousGoalWorkerGoal, row: AutonomousGoalWorkerScheduleRow): Promise<Record<string, unknown>> {
     const value = this.run_options_factory === undefined ? {} : await this.run_options_factory(goal, row);
     const options = runOptions(value);
     // Goal context is durable metadata and must reach the transient model/planner boundary. A
@@ -406,18 +414,56 @@ export class AutonomousGoalAgentRuntime {
     return { schema: AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA, batch_id_prefix: this.batch_id_prefix, domain_count: AUTONOMOUS_DOMAIN_NAMES.length, domains: [...AUTONOMOUS_DOMAIN_NAMES], execution_surface: this.action_handoff_resolver === undefined ? "autonomous_agent_facade" : "autonomous_goal_action_handoff_facade", action_handoff_execution: this.action_handoff_resolver === undefined ? "not_configured" : "verified_handoff_replay_before_run_boundary", task_rehydration: !this.task_rehydration_configured ? "not_configured_preview_only" : (this.protected_rehydration === undefined ? "caller_task_resolver_precedence" : "protected_receipt_adapter_fallback"), recovery_execution: this.recovery === undefined ? "caller_composed" : "ordered_journal_then_control_checkpoint", trace_execution: "metadata_only_goal_control_trace", retention: AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION, secret_material: "never_returned" };
   }
 
-  async restore(options: { now_ns?: number } = {}): Promise<AutonomousGoalRecoveryReport> {
+  async restore(options: { now_ns?: AutonomousGoalTimestampInput } = {}): Promise<AutonomousGoalRecoveryReport> {
     if (this.recovery === undefined) fail("restore requires a recovery coordinator");
-    return this.recovery.restore(options);
+    this.beginExecutionBoundary();
+    try {
+      return await this.recovery.restore(options);
+    } finally {
+      this.execution_active = false;
+    }
   }
 
-  run(options: AutonomousGoalAgentLoopRunOptions = {}): Promise<AutonomousGoalControlLoopResult> {
+  /** Resolve a recovered dispatch through the coordinator's caller-owned status evidence seam. */
+  async reconcileExternalOutcome(
+    resolution: unknown,
+    verifier: Parameters<AutonomousGoalRecoveryCoordinator["reconcileExternalOutcome"]>[1],
+  ): Promise<Awaited<ReturnType<AutonomousGoalRecoveryCoordinator["reconcileExternalOutcome"]>>> {
+    if (this.recovery === undefined) fail("external outcome reconciliation requires a recovery coordinator");
+    this.beginExecutionBoundary();
+    try {
+      return await this.recovery.reconcileExternalOutcome(resolution, verifier);
+    } finally {
+      this.execution_active = false;
+    }
+  }
+
+  private beginExecutionBoundary(): void {
+    if (this.execution_active) fail("another goal runtime operation is already active");
+    this.execution_active = true;
+  }
+
+  private async runUnlocked(options: AutonomousGoalAgentLoopRunOptions): Promise<AutonomousGoalControlLoopResult> {
+    if (!this.task_rehydration_configured) fail("task rehydration is not configured; runtime is preview-only");
     if (this.recovery === undefined) return this.loop.run(options);
-    if (options.expected_preview_digest !== undefined || options.preview_approval !== undefined) fail("preview admission cannot be combined with recovery-owned resume");
+    if (options.expected_preview_digest !== undefined || (options.preview_approval !== undefined && options.preview_approval !== null)) fail("preview admission cannot be combined with recovery-owned resume");
     if (options.checkpoint !== undefined) fail("checkpoint is owned by the recovery coordinator");
+    if (options.resume_snapshot !== undefined && options.resume_snapshot !== null) fail("resume_snapshot is owned by the recovery coordinator");
+    // A null snapshot means "not supplied" in Python and in the loop API. Remove it before
+    // calling the recovery coordinator, whose lower-level contract rejects any supplied key.
+    const recoveryOptions = { ...options };
+    delete recoveryOptions.resume_snapshot;
     return this.recovery.resume(this.loop, {
-      ...options,
+      ...recoveryOptions,
       checkpoint: (snapshot: AutonomousGoalControlLoopCheckpoint) => this.recovery!.checkpoint(snapshot),
+    });
+  }
+
+  /** Admit one loop at a time because this runtime owns shared scheduler, journal, and learner state. */
+  run(options: AutonomousGoalAgentLoopRunOptions = {}): Promise<AutonomousGoalControlLoopResult> {
+    this.beginExecutionBoundary();
+    return this.runUnlocked(options).finally(() => {
+      this.execution_active = false;
     });
   }
 
@@ -436,7 +482,7 @@ export class AutonomousGoalAgentRuntime {
     if (!options.traceStore || typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function") fail("runWithTrace requires a trace store");
     if (options.traceRegistry !== undefined && !(options.traceRegistry instanceof AutonomousRunTraceRegistry)) fail("runWithTrace traceRegistry must be an AutonomousRunTraceRegistry");
     if (this.trace_context !== undefined) fail("runWithTrace cannot be re-entered while another trace is active");
-    const goals = this.ledger.list({ limit: 512 });
+    const goals = this.ledger.list({ limit: AUTONOMOUS_GOAL_MAX_GOALS });
     const unsupported = goals.filter((goal) => !(AUTONOMOUS_DOMAIN_NAMES as readonly string[]).includes(goal.domain));
     if (unsupported.length > 0) fail(`runWithTrace found unsupported goal domains: ${unsupported.map((goal) => goal.domain).join(", ")}`);
     const domains = goals.length
@@ -456,16 +502,18 @@ export class AutonomousGoalAgentRuntime {
     const taskDigest = digestJsonSync({ schema: AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA, run_id: options.runId, goals: goalMetadata });
     const planDigest = digestJsonSync({ schema: AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA, batch_id_prefix: this.batch_id_prefix, goals: goalMetadata });
     const session = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains });
-    await session.started(digestJsonSync({ goal_count: goalMetadata.length, domain_count: domains.length }));
-    await session.record({ phase: "plan_compiled", status: "running", domains, plan_digest: planDigest, detail_digest: digestJsonSync({ goal_count: goalMetadata.length, domain_count: domains.length }) });
-    this.trace_context = {
+    const traceContext = {
       session,
       observer: session.providerObserver(),
       selection_event_callback: session.selectionEventCallback(),
     };
+    this.beginExecutionBoundary();
+    this.trace_context = traceContext;
     try {
+      await session.started(digestJsonSync({ goal_count: goalMetadata.length, domain_count: domains.length }));
+      await session.record({ phase: "plan_compiled", status: "running", domains, plan_digest: planDigest, detail_digest: digestJsonSync({ goal_count: goalMetadata.length, domain_count: domains.length }) });
       const { traceStore: _traceStore, runId: _runId, ...loopOptions } = options;
-      const result = await this.run({ ...loopOptions, run_id: options.runId });
+      const result = await this.runUnlocked({ ...loopOptions, run_id: options.runId });
       await session.record({
         phase: "learning_prepared",
         status: "running",
@@ -495,11 +543,32 @@ export class AutonomousGoalAgentRuntime {
       };
     } catch (error) {
       const failureClass = error instanceof Error ? error.constructor.name : "UnknownError";
-      await session.fail({ failure_class: failureClass, failure_code: "goal_control_loop_error", detail_digest: digestJsonSync({ failure_class: failureClass }) }).catch(() => undefined);
-      if (options.traceRegistry !== undefined) await publishAutonomousRunTraceRegistrySnapshot(options.traceRegistry, options.traceStore, options.runId);
+      const traceCleanupFailures: string[] = [];
+      try {
+        await session.fail({ failure_class: failureClass, failure_code: "goal_control_loop_error", detail_digest: digestJsonSync({ failure_class: failureClass }) });
+      } catch (cleanupError) {
+        traceCleanupFailures.push(`session_fail:${cleanupError instanceof Error ? cleanupError.constructor.name : "UnknownError"}`);
+      }
+      if (options.traceRegistry !== undefined) {
+        try {
+          await publishAutonomousRunTraceRegistrySnapshot(options.traceRegistry, options.traceStore, options.runId);
+        } catch (publicationError) {
+          traceCleanupFailures.push(`trace_registry_publish:${publicationError instanceof Error ? publicationError.constructor.name : "UnknownError"}`);
+        }
+      }
+      if (traceCleanupFailures.length > 0) {
+        if (error instanceof Error && Object.isExtensible(error)) {
+          Object.defineProperty(error, "trace_cleanup_failures", { value: traceCleanupFailures, enumerable: false, configurable: true });
+        } else {
+          const wrapped = new Error("goal control loop failed and trace cleanup was incomplete", { cause: error });
+          Object.defineProperty(wrapped, "trace_cleanup_failures", { value: traceCleanupFailures, enumerable: false });
+          throw wrapped;
+        }
+      }
       throw error;
     } finally {
       this.trace_context = undefined;
+      this.execution_active = false;
     }
   }
 }

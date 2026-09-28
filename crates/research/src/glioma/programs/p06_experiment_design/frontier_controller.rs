@@ -594,7 +594,12 @@ fn score_candidate(
     } else {
         format!(
             "information gain {}, power {}, clone novelty {}, modality novelty {}, fidelity {}, utility {}",
-            information_gain, candidate.power_milli, clone_novelty_milli, modality_novelty_milli, fidelity_milli, utility_milli
+            information_gain,
+            candidate.power_milli,
+            clone_novelty_milli,
+            modality_novelty_milli,
+            fidelity_milli,
+            utility_milli
         )
     };
     Ok(GliomaFrontierScore {

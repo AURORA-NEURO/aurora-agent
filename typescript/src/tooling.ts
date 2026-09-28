@@ -27,6 +27,36 @@ export const MAX_TOOL_CATALOGUE_BYTES = 20_000_000;
 export const MAX_TOOL_ARGUMENT_DEPTH = 100;
 export const MAX_TOOL_NAME_BYTES = 256;
 
+/** Match Python string ordering by Unicode scalar value for portable ordered projections. */
+export function compareUnicodeScalars(left: string, right: string): number {
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftScalar = left.codePointAt(leftIndex)!;
+    const rightScalar = right.codePointAt(rightIndex)!;
+    if (leftScalar !== rightScalar) return leftScalar < rightScalar ? -1 : 1;
+    leftIndex += leftScalar > 0xffff ? 2 : 1;
+    rightIndex += rightScalar > 0xffff ? 2 : 1;
+  }
+  if (leftIndex === left.length && rightIndex === right.length) return 0;
+  return leftIndex === left.length ? -1 : 1;
+}
+
+/** TextEncoder replaces unpaired surrogates; reject them where Python UTF-8 encoding rejects. */
+export function isUnicodeScalarString(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const IGNORED_SCHEMA_KEYWORDS = new Set(["$comment", "$id", "$schema", "default", "description", "examples", "title"]);
 const SUPPORTED_SCHEMA_KEYWORDS = new Set([
   "additionalProperties", "allOf", "anyOf", "const", "enum", "exclusiveMaximum", "exclusiveMinimum",
@@ -338,10 +368,15 @@ function jsonType(value: unknown): string {
   return typeof value;
 }
 
+/** Canonical JSON must order keys and reject surrogate input exactly as the Python UTF-8 path does. */
 export function canonicalJson(value: unknown, depth = 0): string {
   if (depth > MAX_TOOL_ARGUMENT_DEPTH) throw new ArgumentError(`JSON nesting exceeds ${MAX_TOOL_ARGUMENT_DEPTH} levels`);
   if (value === null) return "null";
-  if (typeof value === "string" || typeof value === "boolean") return nativeJsonStringify(value);
+  if (typeof value === "string") {
+    if (!isUnicodeScalarString(value)) throw new ArgumentError("JSON strings must contain valid Unicode scalar values");
+    return nativeJsonStringify(value);
+  }
+  if (typeof value === "boolean") return nativeJsonStringify(value);
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new ArgumentError("JSON contains a non-finite number");
     return nativeJsonStringify(value);
@@ -357,11 +392,12 @@ export function canonicalJson(value: unknown, depth = 0): string {
   if (typeof value === "object" && value !== null) {
     const objectValue = value as Record<string, unknown>;
     const keys = nativeObjectKeys(objectValue);
+    if (keys.some((key) => !isUnicodeScalarString(key))) throw new ArgumentError("JSON object keys must contain valid Unicode scalar values");
     // Keep canonical ordering self-contained instead of consulting mutable Array.prototype.sort.
     for (let index = 1; index < keys.length; index += 1) {
       const selected = keys[index]!;
       let cursor = index - 1;
-      while (cursor >= 0 && keys[cursor]! > selected) {
+      while (cursor >= 0 && compareUnicodeScalars(keys[cursor]!, selected) > 0) {
         keys[cursor + 1] = keys[cursor]!;
         cursor -= 1;
       }
@@ -415,6 +451,31 @@ export function digestJsonSync(value: unknown): string {
 export function digestBytesSync(value: Uint8Array): string {
   if (!(value instanceof NativeUint8Array)) throw new ArgumentError("SHA-256 input must be a byte array");
   return sha256BytesHexSync(value);
+}
+
+/** Compute RFC 2104 HMAC-SHA256 for bounded, caller-owned bytes without Node-specific crypto. */
+export function hmacSha256HexSync(message: Uint8Array, key: Uint8Array): string {
+  if (!(message instanceof NativeUint8Array) || !(key instanceof NativeUint8Array)) throw new ArgumentError("HMAC inputs must be byte arrays");
+  if (key.byteLength < 1 || key.byteLength > 4_096) throw new ArgumentError("HMAC key is outside its 1..4096-byte bound");
+  const keyBytes = key.byteLength > 64 ? hexBytes(digestBytesSync(key)) : key;
+  const keyBlock = new NativeUint8Array(64);
+  keyBlock.set(keyBytes);
+  const inner = new NativeUint8Array(64 + message.byteLength);
+  const outer = new NativeUint8Array(64 + 32);
+  for (let index = 0; index < 64; index += 1) {
+    inner[index] = keyBlock[index]! ^ 0x36;
+    outer[index] = keyBlock[index]! ^ 0x5c;
+  }
+  inner.set(message, 64);
+  outer.set(hexBytes(digestBytesSync(inner)), 64);
+  return digestBytesSync(outer);
+}
+
+function hexBytes(hex: string): Uint8Array {
+  if (!/^(?:[0-9a-f]{2})+$/.test(hex)) throw new ArgumentError("hexadecimal digest is malformed");
+  const bytes = new NativeUint8Array(hex.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  return bytes;
 }
 
 async function sha256Hex(value: string): Promise<string> {

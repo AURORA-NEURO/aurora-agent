@@ -25,8 +25,14 @@ fn offsets_normalise_to_the_same_instant() {
 
 #[test]
 fn fractional_seconds_are_preserved_to_nanoseconds() {
-    assert_eq!(ts("2025-01-01T00:00:00.5Z").as_nanos_utc() % 1_000_000_000, 500_000_000);
-    assert_eq!(ts("2025-01-01T00:00:00.000000001Z").as_nanos_utc() % 1_000_000_000, 1);
+    assert_eq!(
+        ts("2025-01-01T00:00:00.5Z").as_nanos_utc() % 1_000_000_000,
+        500_000_000
+    );
+    assert_eq!(
+        ts("2025-01-01T00:00:00.000000001Z").as_nanos_utc() % 1_000_000_000,
+        1
+    );
     assert!(ts("2025-01-01T00:00:00.5Z") > ts("2025-01-01T00:00:00Z"));
 }
 
@@ -50,9 +56,16 @@ fn malformed_timestamps_are_rejected_not_coerced() {
         "2025-13-01T00:00:00Z",
         "2025-02-30T00:00:00Z",
         "2025-01-01T25:00:00Z",
+        "2025-01-01T-1:00:00Z",
         "2025-01-01",
+        "2025-01-01T00:00:00",
         "not-a-time",
         "2025-01-01T00:00:00Zjunk",
+        "2025-01-01T00:00:00.1234567890Z",
+        "2025-01-01T00:00:00+99:00",
+        "2025-01-01T00:00:00+01:99",
+        "2025-01-01T00:00:00+01",
+        "2025-01-01T00:00:00-00:00",
     ] {
         assert!(Timestamp::parse(text).is_err(), "should reject {text}");
     }
@@ -114,20 +127,32 @@ fn disjoint_sets_and_empty_intervals_report_their_own_reasons() {
     let right = ScopeKey::new().bind("site", ScopeValue::OneOf(b));
     assert!(matches!(
         meet(&left, &right),
-        Meet::Empty { reason: EmptyReason::DisjointSets, .. }
+        Meet::Empty {
+            reason: EmptyReason::DisjointSets,
+            ..
+        }
     ));
 
     let early = ScopeKey::new().bind(
         "valid_time",
-        ScopeValue::Window(Interval { start: None, end: Some(ts("2025-01-01T00:00:00Z")) }),
+        ScopeValue::Window(Interval {
+            start: None,
+            end: Some(ts("2025-01-01T00:00:00Z")),
+        }),
     );
     let late = ScopeKey::new().bind(
         "valid_time",
-        ScopeValue::Window(Interval { start: Some(ts("2025-06-01T00:00:00Z")), end: None }),
+        ScopeValue::Window(Interval {
+            start: Some(ts("2025-06-01T00:00:00Z")),
+            end: None,
+        }),
     );
     assert!(matches!(
         meet(&early, &late),
-        Meet::Empty { reason: EmptyReason::EmptyInterval, .. }
+        Meet::Empty {
+            reason: EmptyReason::EmptyInterval,
+            ..
+        }
     ));
 }
 
@@ -136,7 +161,10 @@ fn kind_mismatch_is_a_conflict_not_an_empty_overlap() {
     let as_string = ScopeKey::new().exact("valid_time", "2025-01-01");
     let as_window = ScopeKey::new().bind(
         "valid_time",
-        ScopeValue::Window(Interval { start: Some(ts("2025-01-01T00:00:00Z")), end: None }),
+        ScopeValue::Window(Interval {
+            start: Some(ts("2025-01-01T00:00:00Z")),
+            end: None,
+        }),
     );
     match meet(&as_string, &as_window) {
         Meet::Conflict { dimension, .. } => assert_eq!(dimension, "valid_time"),
@@ -147,14 +175,19 @@ fn kind_mismatch_is_a_conflict_not_an_empty_overlap() {
 #[test]
 fn meet_is_commutative_on_inhabited_scopes() {
     let left = ScopeKey::new().exact("cohort", "C").exact("site", "S");
-    let right = ScopeKey::new().exact("cohort", "C").exact("subject", "S001");
+    let right = ScopeKey::new()
+        .exact("cohort", "C")
+        .exact("subject", "S001");
     assert_eq!(meet(&left, &right), meet(&right, &left));
 }
 
 #[test]
 fn parses_scope_objects_carried_by_world_facts() {
     let scope = ScopeKey::from_json(&json!({ "cohort": "RG-DEMO-001" })).unwrap();
-    assert_eq!(scope.get("cohort"), Some(&ScopeValue::Exact("RG-DEMO-001".into())));
+    assert_eq!(
+        scope.get("cohort"),
+        Some(&ScopeValue::Exact("RG-DEMO-001".into()))
+    );
 
     let windowed = ScopeKey::from_json(&json!({
         "cohort": "RG-DEMO-001",
@@ -163,7 +196,10 @@ fn parses_scope_objects_carried_by_world_facts() {
     }))
     .unwrap();
     assert_eq!(windowed.len(), 3);
-    assert!(matches!(windowed.get("valid_time"), Some(ScopeValue::Window(_))));
+    assert!(matches!(
+        windowed.get("valid_time"),
+        Some(ScopeValue::Window(_))
+    ));
     assert!(matches!(windowed.get("site"), Some(ScopeValue::OneOf(_))));
 
     assert!(ScopeKey::from_json(&json!(["not", "an", "object"])).is_err());
@@ -180,20 +216,27 @@ fn dimension_classification_flags_unknown_names() {
     assert_eq!(registry.classify("wobble"), ScopeClass::Unclassified);
 
     let scope = ScopeKey::from_json(&json!({ "cohort": "C", "wobble": "w" })).unwrap();
-    assert_eq!(scope.unclassified_dimensions(&registry), vec!["wobble".to_string()]);
+    assert_eq!(
+        scope.unclassified_dimensions(&registry),
+        vec!["wobble".to_string()]
+    );
 }
 
 #[test]
 fn canonical_dimensions_cannot_be_silently_reclassified() {
     let mut registry = DimensionRegistry::default();
     assert!(registry.register("cohort", ScopeClass::Policy).is_err());
-    assert!(registry.register("tumour_grade", ScopeClass::Ontology).is_ok());
+    assert!(registry
+        .register("tumour_grade", ScopeClass::Ontology)
+        .is_ok());
     assert_eq!(registry.classify("tumour_grade"), ScopeClass::Ontology);
 }
 
 #[test]
 fn a_restriction_that_widens_scope_is_caught() {
-    let narrow = ScopeKey::new().exact("cohort", "C").exact("subject", "S001");
+    let narrow = ScopeKey::new()
+        .exact("cohort", "C")
+        .exact("subject", "S001");
     let wide = ScopeKey::new().exact("cohort", "C");
 
     let honest = ScopeMapping {
@@ -221,7 +264,9 @@ fn transport_and_extension_must_declare_what_they_lost() {
     let silent = ScopeMapping {
         from: from.clone(),
         to: to.clone(),
-        kind: MappingKind::Transport { justification: "same block".into() },
+        kind: MappingKind::Transport {
+            justification: "same block".into(),
+        },
         loss: LossLedger::default(),
     };
     assert_eq!(silent.check(), MappingCheck::UndeclaredLoss);
@@ -229,7 +274,9 @@ fn transport_and_extension_must_declare_what_they_lost() {
     let declared = ScopeMapping {
         from,
         to,
-        kind: MappingKind::Transport { justification: "same block".into() },
+        kind: MappingKind::Transport {
+            justification: "same block".into(),
+        },
         loss: LossLedger::default()
             .adding_uncertainty("cross-aliquot batch effect")
             .conditioned_on("research-only"),
@@ -242,7 +289,9 @@ fn aggregation_must_name_its_operator() {
     let mapping = ScopeMapping {
         from: ScopeKey::new().exact("subject", "S001"),
         to: ScopeKey::new().exact("cohort", "C"),
-        kind: MappingKind::Aggregation { operator: AggregationOperator::Mean },
+        kind: MappingKind::Aggregation {
+            operator: AggregationOperator::Mean,
+        },
         loss: LossLedger::default().discarding("per-subject variance"),
     };
     assert_eq!(mapping.check(), MappingCheck::Sound);

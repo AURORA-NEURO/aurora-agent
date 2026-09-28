@@ -592,9 +592,11 @@ mod tests {
             output.disposition,
             MultichannelConcordanceDisposition::Unresolved
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("correlation")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("correlation"))
+        );
     }
 }

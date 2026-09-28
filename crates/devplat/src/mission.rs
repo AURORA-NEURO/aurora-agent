@@ -1391,7 +1391,6 @@ fn validate_evaluator_review(
             })?;
         for (field, expected_value) in [
             ("id", binding.id.as_str()),
-            ("claim_id", claim.id.as_str()),
             ("adapter_id", binding.adapter_id.as_str()),
             ("domain", binding.domain.as_str()),
             ("step_id", binding.step_id.as_str()),

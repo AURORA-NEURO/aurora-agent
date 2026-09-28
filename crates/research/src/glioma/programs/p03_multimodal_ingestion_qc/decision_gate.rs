@@ -581,10 +581,12 @@ mod tests {
             output.disposition,
             MultimodalDecisionGateDisposition::Indeterminate
         );
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|value| value.contains("interval")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|value| value.contains("interval"))
+        );
     }
 
     #[test]
@@ -596,12 +598,16 @@ mod tests {
             output.disposition,
             MultimodalDecisionGateDisposition::Blocked
         );
-        assert!(output
-            .missing_modality_order
-            .contains(&GliomaModality::Imaging));
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|value| value.contains("required-modality-missing")));
+        assert!(
+            output
+                .missing_modality_order
+                .contains(&GliomaModality::Imaging)
+        );
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|value| value.contains("required-modality-missing"))
+        );
     }
 }

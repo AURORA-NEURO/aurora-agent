@@ -229,11 +229,12 @@ Nineteen subjects across the two batteries is not every verifier in the workspac
 implying otherwise. It scans `crates/*/src` for both shapes an entry point takes here — a `pub fn`
 whose name begins with `verify`, and `pub fn digest_is_intact` — and fails unless every site is in
 one of four lists: driven here, driven by the receipt battery, not a document verifier at all, or a
-document verifier no battery reaches. Fifty-seven entries, and **ten of them are in the last list**:
+document verifier no battery reaches. Ninety-two entry points, and **eleven document verifiers are in the last list**:
 the per-slice self-seals in `bioworlds` and `examples` that their catalogue reports never recurse
 into, `ResultBundle::verify` in `bundle`, the factory's two snapshot verifiers, the ledger's
-projection checkpoint, the escrow reveal, the stewardship pre-registration, the registry index, and
-`Credit::verify`.
+projection checkpoint, the escrow reveal, the stewardship pre-registration, the registry index,
+`Credit::verify`, and the campaign reconciliation receipt verifier, which also binds the receipt to
+the caller-owned execution journal.
 
 The scan finds functions by name, which is a real bound and is stated in the test: a verifying
 *constructor* is invisible to it. `RepairPlan::from_json` and `AcceptanceReport::from_json` are two
@@ -477,7 +478,7 @@ numbers above should carry this paragraph with it.
 - **Not a claim about documents other than the nineteen built here.** A dossier from a different
   research request, or a receipt over a different delivery, has different positions. The library
   exists so that adding a subject is cheap; the numbers belong to the subjects that were run.
-- **Not a claim to cover every verifier in the workspace.** Ten document verifiers are reached by
+- **Not a claim to cover every verifier in the workspace.** Eleven document verifiers are reached by
   neither battery, named in `UNCOVERED_DOCUMENT_VERIFIERS` and listed above. The enumeration test
   keeps that list honest as the workspace changes; it does not shrink it.
 - **Not a claim that the recorded gaps are acceptable.** A `KnownGap` entry says a refusal was not

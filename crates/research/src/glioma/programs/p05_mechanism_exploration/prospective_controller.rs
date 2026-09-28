@@ -946,10 +946,11 @@ mod tests {
         }];
         let plan = control_glioma_mechanism_prospective_batch(&request).unwrap();
         assert_eq!(plan.inflight_order, vec!["lane-a::measure"]);
-        assert!(plan
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("contradicted")));
+        assert!(
+            plan.negative_evidence
+                .iter()
+                .any(|item| item.contains("contradicted"))
+        );
         assert!(!plan.drift_alerts.is_empty());
         assert_eq!(plan.next_route, "glioma_mechanism_feedback_replan");
         plan.validate().unwrap();

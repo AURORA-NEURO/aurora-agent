@@ -9,9 +9,9 @@
 use super::assay_adjudication::InstrumentAssayEvidenceAssessment;
 use super::science_loop::InstrumentScienceLoop;
 use crate::glioma::programs::p07_protocol_simulation::{
-    execute_glioma_autonomous_research_mission, GliomaActionExecutor,
-    GliomaAutonomousResearchMission, GliomaMissionDisposition, GliomaMissionError,
-    GliomaMissionGates, GliomaMissionRequest,
+    GliomaActionExecutor, GliomaAutonomousResearchMission, GliomaMissionDisposition,
+    GliomaMissionError, GliomaMissionGates, GliomaMissionRequest,
+    execute_glioma_autonomous_research_mission,
 };
 use crate::glioma_engine::{
     GliomaActionCandidate, GliomaModality, GliomaModelSystem, GliomaSelectionConfig,
@@ -346,26 +346,22 @@ pub fn compile_glioma_instrument_research_frontier(
     let mut unresolved_source = BTreeSet::new();
     let mut negative_evidence = BTreeSet::new();
     let mut uncertainty = BTreeSet::new();
-    for (index, assessment) in request.science_loop.assessments.iter().enumerate() {
-        let run_id = request
-            .science_loop
-            .assessment_run_order
-            .get(index)
-            .cloned()
-            .unwrap_or_else(|| format!("assessment-{index:04}"));
+    for item in &request.science_loop.assessments {
+        let run_id = &item.run_id;
+        let assessment = &item.assessment;
         for action in &assessment.qualified_order {
-            qualified_source.insert(source_id(&run_id, action));
+            qualified_source.insert(source_id(run_id, action));
         }
         for action in &assessment.negative_order {
-            negative_source.insert(source_id(&run_id, action));
+            negative_source.insert(source_id(run_id, action));
         }
         for action in &assessment.unresolved_order {
-            unresolved_source.insert(source_id(&run_id, action));
+            unresolved_source.insert(source_id(run_id, action));
         }
         negative_evidence.extend(assessment.negative_evidence.iter().cloned());
         uncertainty.extend(assessment.uncertainty.iter().cloned());
         for candidate in assessment_records(
-            &run_id,
+            run_id,
             assessment,
             GliomaStageKind::InstrumentPreflight,
             request.model_system,
@@ -555,14 +551,20 @@ mod tests {
             2,
         );
         assert_eq!(candidates.len(), 3);
-        assert!(candidates
-            .iter()
-            .any(|candidate| { candidate.stage_kind == GliomaStageKind::ComputationalExecution }));
-        assert!(candidates
-            .iter()
-            .any(|candidate| candidate.stage_kind == GliomaStageKind::ExperimentDesign));
-        assert!(candidates
-            .iter()
-            .any(|candidate| candidate.stage_kind == GliomaStageKind::ReplicationRobustness));
+        assert!(
+            candidates.iter().any(|candidate| {
+                candidate.stage_kind == GliomaStageKind::ComputationalExecution
+            })
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.stage_kind == GliomaStageKind::ExperimentDesign)
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.stage_kind == GliomaStageKind::ReplicationRobustness)
+        );
     }
 }

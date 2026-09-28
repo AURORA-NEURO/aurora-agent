@@ -445,22 +445,11 @@ pub fn analyze_glioma_multimodal_missingness(
             sample_order.len() as u64,
         );
         let recommended_action = if missing_count > 0 {
-            format!(
-                "acquire {} for {} missing samples",
-                format!("{:?}", modality),
-                missing_count
-            )
+            format!("acquire {modality:?} for {missing_count} missing samples",)
         } else if quality_failed_count > 0 {
-            format!(
-                "repeat QC for {} quality-failed samples",
-                format!("{:?}", modality)
-            )
+            format!("repeat QC for {modality:?} quality-failed samples")
         } else if partial_count > 0 {
-            format!(
-                "complete {} for {} partial samples",
-                format!("{:?}", modality),
-                partial_count
-            )
+            format!("complete {modality:?} for {partial_count} partial samples")
         } else {
             format!("{:?} is complete at the declared quality floor", modality)
         };
@@ -839,9 +828,11 @@ mod tests {
             output.acquisition_order,
             vec![GliomaModality::Genomics, GliomaModality::Imaging]
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("correlated-dropout")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("correlated-dropout"))
+        );
     }
 }

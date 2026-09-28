@@ -8,8 +8,8 @@
 //! completion as biological evidence.
 
 use super::execution::{
-    execute_glioma_instrument_plan, InstrumentExecutionDisposition, InstrumentExecutionRequest,
-    InstrumentExecutionRun, InstrumentExecutor,
+    InstrumentExecutionDisposition, InstrumentExecutionRequest, InstrumentExecutionRun,
+    InstrumentExecutor, execute_glioma_instrument_plan,
 };
 use super::fleet_scheduler::InstrumentFleetSchedule;
 use bioprism_ids::ContentHash;
@@ -674,16 +674,16 @@ pub fn execute_glioma_instrument_fleet<E: InstrumentExecutor>(
 mod tests {
     use super::*;
     use crate::glioma::programs::p08_instrument_robotics::calibration::{
-        analyze_instrument_calibration, CalibrationRequest, CalibrationRun,
+        CalibrationRequest, CalibrationRun, analyze_instrument_calibration,
     };
     use crate::glioma::programs::p08_instrument_robotics::execution::DryRunInstrumentExecutor;
     use crate::glioma::programs::p08_instrument_robotics::fleet_scheduler::{
-        schedule_glioma_instrument_fleet, InstrumentFleetResource, InstrumentFleetScheduleRequest,
-        InstrumentFleetTask,
+        InstrumentFleetResource, InstrumentFleetScheduleRequest, InstrumentFleetTask,
+        schedule_glioma_instrument_fleet,
     };
     use crate::glioma::programs::p08_instrument_robotics::preflight::{
-        preflight_glioma_instrument, InstrumentAction, InstrumentAuthorization,
-        InstrumentInterlockSnapshot, InstrumentOperation, InstrumentPreflightRequest,
+        InstrumentAction, InstrumentAuthorization, InstrumentInterlockSnapshot,
+        InstrumentOperation, InstrumentPreflightRequest, preflight_glioma_instrument,
     };
     use crate::glioma_engine::{GliomaModelSystem, LocalArtifactRef};
 
@@ -707,8 +707,8 @@ mod tests {
         }
     }
 
-    fn calibration(
-    ) -> crate::glioma::programs::p08_instrument_robotics::calibration::InstrumentCalibration {
+    fn calibration()
+    -> crate::glioma::programs::p08_instrument_robotics::calibration::InstrumentCalibration {
         let artifact = hash();
         let runs = (1..=3)
             .map(|index| CalibrationRun {
@@ -899,10 +899,12 @@ mod tests {
         );
         assert_eq!(first.completed_order, vec!["image-a", "image-b"]);
         assert_eq!(first.execution_order, vec!["image-a", "image-b"]);
-        assert!(first
-            .results
-            .iter()
-            .all(|result| result.instrument_id == "scope-a"));
+        assert!(
+            first
+                .results
+                .iter()
+                .all(|result| result.instrument_id == "scope-a")
+        );
         first.validate().unwrap();
     }
 

@@ -569,8 +569,8 @@ pub fn plan_federated_continual_agent(
 mod tests {
     use super::*;
     use crate::glioma::programs::p02_evidence_knowledge::federated_continual::{
-        analyze_federated_continual_knowledge, FederatedContinualKnowledgeRequest,
-        FederatedContinualObservation,
+        FederatedContinualKnowledgeRequest, FederatedContinualObservation,
+        analyze_federated_continual_knowledge,
     };
     use crate::glioma::programs::p02_evidence_knowledge::knowledge_graph::KnowledgeClaimDisposition;
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem};

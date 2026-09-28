@@ -297,16 +297,16 @@ fn build_window(
 ) -> LongHorizonCalibrationWindow {
     let total_count = aggregate.observation_order.len();
     let resolved_count = aggregate.resolved_order.len();
-    let predicted_support_milli = if aggregate.quality_sum == 0 {
-        0
-    } else {
-        (aggregate.predicted_weighted_sum / aggregate.quality_sum).min(1_000) as u16
-    };
-    let observed_support_milli = if aggregate.resolved_quality_sum == 0 {
-        0
-    } else {
-        (aggregate.observed_weighted_sum / aggregate.resolved_quality_sum).min(1_000) as u16
-    };
+    let predicted_support_milli = aggregate
+        .predicted_weighted_sum
+        .checked_div(aggregate.quality_sum)
+        .unwrap_or_default()
+        .min(1_000) as u16;
+    let observed_support_milli = aggregate
+        .observed_weighted_sum
+        .checked_div(aggregate.resolved_quality_sum)
+        .unwrap_or_default()
+        .min(1_000) as u16;
     let expected_calibration_error_milli = if resolved_count == 0 {
         1_000
     } else {
@@ -314,15 +314,16 @@ fn build_window(
             .abs_diff(u64::from(observed_support_milli))
             .min(1_000) as u16
     };
-    let brier_milli = if aggregate.resolved_quality_sum == 0 {
-        1_000
-    } else {
-        (aggregate.brier_weighted_sum / aggregate.resolved_quality_sum).min(1_000) as u16
-    };
+    let brier_milli = aggregate
+        .brier_weighted_sum
+        .checked_div(aggregate.resolved_quality_sum)
+        .unwrap_or(1_000)
+        .min(1_000) as u16;
     let reliability_milli = if total_count == 0 {
         0
     } else {
-        u16::from(1_000_u16.saturating_sub(expected_calibration_error_milli))
+        1_000_u16
+            .saturating_sub(expected_calibration_error_milli)
             .saturating_mul(resolved_count.min(1_000) as u16)
             .saturating_div(total_count.clamp(1, 1_000) as u16)
     };
@@ -497,11 +498,10 @@ impl LongHorizonCalibrationAnalysis {
                     .cloned()
                     .collect::<BTreeSet<_>>();
                 resolved_ids.intersection(&unknown_ids).next().is_some()
-                    || resolved_ids.intersection(&negative_ids).next().is_some()
                     || unknown_ids.intersection(&negative_ids).next().is_some()
                     || !resolved_ids.is_subset(&observation_ids)
                     || !unknown_ids.is_subset(&observation_ids)
-                    || !negative_ids.is_subset(&observation_ids)
+                    || !negative_ids.is_subset(&resolved_ids)
                     || resolved_ids.len() + unknown_ids.len() != observation_ids.len()
                     || window.unknown_count != unknown_ids.len()
             })
@@ -914,10 +914,12 @@ mod tests {
             report.next_route,
             "glioma_federated_evidence_acquisition_policy"
         );
-        assert!(report
-            .uncertainty
-            .iter()
-            .any(|value| value.contains("window-001")));
+        assert!(
+            report
+                .uncertainty
+                .iter()
+                .any(|value| value.contains("window-001"))
+        );
         report.validate().unwrap();
     }
 

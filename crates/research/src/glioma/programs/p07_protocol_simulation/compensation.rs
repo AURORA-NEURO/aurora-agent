@@ -7,7 +7,7 @@
 //! result, or dispatches a replacement task.
 
 use super::execution::{ProtocolExecution, ProtocolTaskDisposition};
-use super::simulator::{simulate_glioma_protocol, ProtocolResourceKind, ProtocolSimulationRequest};
+use super::simulator::{ProtocolResourceKind, ProtocolSimulationRequest, simulate_glioma_protocol};
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -395,9 +395,7 @@ pub fn plan_glioma_protocol_compensation(
     }
     uncertainty.sort();
     uncertainty.dedup();
-    let disposition = if blocked_task_order.is_empty() {
-        ProtocolCompensationDisposition::Qualified
-    } else if unresolved.is_empty() {
+    let disposition = if blocked_task_order.is_empty() || unresolved.is_empty() {
         ProtocolCompensationDisposition::Qualified
     } else if selected.is_empty() && !ranked_by_task.is_empty() {
         ProtocolCompensationDisposition::BudgetBlocked
@@ -434,7 +432,7 @@ pub fn plan_glioma_protocol_compensation(
 mod tests {
     use super::*;
     use crate::glioma::programs::p07_protocol_simulation::execution::{
-        execute_glioma_protocol, DryRunGliomaProtocolExecutor, ProtocolExecutionRequest,
+        DryRunGliomaProtocolExecutor, ProtocolExecutionRequest, execute_glioma_protocol,
     };
     use crate::glioma::programs::p07_protocol_simulation::simulator::{
         ProtocolResource, ProtocolTask,

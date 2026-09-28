@@ -259,7 +259,7 @@ pub fn bridge_glioma_mechanism_fidelity(
     let mut uncertainty = BTreeSet::new();
     for (mechanism_id, observations) in grouped {
         let mut ordered = observations;
-        ordered.sort_by(|left, right| left.model_system.cmp(&right.model_system));
+        ordered.sort_by_key(|left| left.model_system);
         let model_system_order = ordered
             .iter()
             .map(|observation| observation.model_system)
@@ -425,10 +425,12 @@ mod tests {
             MechanismFidelityBridgeDisposition::Partial
         );
         assert_eq!(output.frontier_order[0], "far");
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("far")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("far"))
+        );
         output.validate().unwrap();
     }
 

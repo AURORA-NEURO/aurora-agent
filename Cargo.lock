@@ -649,6 +649,7 @@ dependencies = [
  "bioprism-atlas",
  "bioprism-atlashub",
  "bioprism-atlasx",
+ "bioprism-autopilot",
  "bioprism-backends",
  "bioprism-baseline",
  "bioprism-benchcompiler",
@@ -1004,6 +1005,7 @@ dependencies = [
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",
+ "ed25519-dalek",
  "serde",
  "serde_json",
  "thiserror",
@@ -1015,6 +1017,7 @@ version = "0.1.0"
 dependencies = [
  "bioprism-autopilot",
  "bioprism-brain",
+ "bioprism-devplat",
  "bioprism-ids",
  "bioprism-neurosurgery",
  "bioprism-research",

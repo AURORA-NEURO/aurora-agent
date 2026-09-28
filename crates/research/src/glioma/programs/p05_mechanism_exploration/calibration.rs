@@ -561,10 +561,12 @@ mod tests {
             MechanismCalibrationScoreDisposition::Qualified
         );
         assert_eq!(output.prequential_holdout_round, 1);
-        assert!(output
-            .scores
-            .iter()
-            .all(|score| score.held_out_observation_count == 1));
+        assert!(
+            output
+                .scores
+                .iter()
+                .all(|score| score.held_out_observation_count == 1)
+        );
     }
 
     #[test]

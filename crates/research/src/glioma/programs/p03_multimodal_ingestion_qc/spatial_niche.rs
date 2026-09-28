@@ -634,10 +634,12 @@ mod tests {
         ];
         let output = analyze_glioma_spatial_niches(&request(), &cells).unwrap();
         assert_eq!(output.disposition, SpatialNicheDisposition::Unresolved);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item == "no-cell-meets-neighbour-floor"));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item == "no-cell-meets-neighbour-floor")
+        );
         assert_eq!(output.isolated_cell_order, vec!["a1", "a2"]);
     }
 

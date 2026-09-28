@@ -342,11 +342,7 @@ pub fn assimilate_glioma_mechanism_evidence(
         }
         let earliest_posterior = earliest.unwrap_or_default();
         let latest_posterior = latest.unwrap_or_default();
-        let posterior = if weight_total == 0 {
-            0
-        } else {
-            (weighted_sum / weight_total) as u16
-        };
+        let posterior = weighted_sum.checked_div(weight_total).unwrap_or_default() as u16;
         posterior_weights.insert(mechanism_id.clone(), u128::from(posterior));
         let status = if posterior >= request.supported_floor_milli && supported > contradicted {
             AssimilatedMechanismStatus::Supported
@@ -445,8 +441,8 @@ pub fn assimilate_glioma_mechanism_evidence(
 #[cfg(test)]
 mod tests {
     use super::super::bayesian_update::{
-        update_glioma_mechanism_posterior, BayesianMechanismHypothesis,
-        BayesianMechanismUpdateRequest,
+        BayesianMechanismHypothesis, BayesianMechanismUpdateRequest,
+        update_glioma_mechanism_posterior,
     };
     use super::super::discrimination::{MechanismFeatureObservation, MechanismPrediction};
     use super::*;

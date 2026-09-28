@@ -319,9 +319,9 @@ fn endpoint_consensus(
         FederatedEndpointDisposition::Unresolved
     } else if heterogeneity_milli > request.max_heterogeneity_milli {
         FederatedEndpointDisposition::HeterogeneityBlocked
-    } else if leave_one_out_shift_milli > request.max_leave_one_out_shift_milli {
-        FederatedEndpointDisposition::InfluenceBlocked
-    } else if max_site_influence_milli > request.max_site_influence_milli {
+    } else if leave_one_out_shift_milli > request.max_leave_one_out_shift_milli
+        || max_site_influence_milli > request.max_site_influence_milli
+    {
         FederatedEndpointDisposition::InfluenceBlocked
     } else {
         FederatedEndpointDisposition::Qualified
@@ -486,9 +486,11 @@ mod tests {
             output.disposition,
             FederatedConsensusDisposition::Unresolved
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.contains("heterogeneityblocked")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry.contains("heterogeneityblocked"))
+        );
     }
 }

@@ -15,7 +15,7 @@ import threading
 import time
 from typing import Any, Mapping, Protocol
 
-from .authoring import content_digest
+from .authoring import MAX_SAFE_JSON_INTEGER, content_digest
 from .llm_runtime import ProviderError
 
 
@@ -31,7 +31,7 @@ MAX_PROVIDER_QUOTA_SNAPSHOT_BYTES = 2_000_000
 MAX_PROVIDER_QUOTA_WINDOW_SECONDS = 7 * 24 * 60 * 60
 MAX_PROVIDER_QUOTA_METRIC = 2_000_000_000
 MAX_PROVIDER_QUOTA_COST_UNITS = 1_000_000_000
-MAX_PROVIDER_QUOTA_TIMESTAMP = 2**53 - 1
+MAX_PROVIDER_QUOTA_TIMESTAMP = MAX_SAFE_JSON_INTEGER
 
 
 def _epoch_ms() -> float:

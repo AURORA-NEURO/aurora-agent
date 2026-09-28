@@ -8,8 +8,8 @@
 //! clinical decision.
 
 use super::simulator::{
-    simulate_glioma_protocol, ProtocolDisposition, ProtocolSimulationRequest, ProtocolTask,
-    ScheduleEntry,
+    ProtocolDisposition, ProtocolSimulationRequest, ProtocolTask, ScheduleEntry,
+    simulate_glioma_protocol,
 };
 use crate::glioma_engine::LocalArtifactRef;
 use bioprism_ids::ContentHash;

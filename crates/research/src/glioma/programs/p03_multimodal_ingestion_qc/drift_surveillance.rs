@@ -557,10 +557,12 @@ mod tests {
         }
         let output = surveil_glioma_multimodal_drift(&request(observations)).unwrap();
         assert_eq!(output.disposition, DriftDisposition::Stable);
-        assert!(output
-            .summaries
-            .iter()
-            .all(|summary| { summary.disposition == DriftDisposition::Stable }));
+        assert!(
+            output
+                .summaries
+                .iter()
+                .all(|summary| { summary.disposition == DriftDisposition::Stable })
+        );
         output.validate().unwrap();
     }
 
@@ -581,9 +583,11 @@ mod tests {
                 "Imaging::signal".to_string()
             ]
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("drift-gate-exceeded")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("drift-gate-exceeded"))
+        );
     }
 }

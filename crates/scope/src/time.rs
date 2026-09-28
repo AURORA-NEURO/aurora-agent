@@ -1,11 +1,10 @@
 //! RFC 3339 timestamps.
 //!
-//! Deliberately dependency-free. The temporal cut in the FIBER compiler decides which
-//! evidence is legally accessible at a decision time, so the parse must agree exactly with
-//! the Python reference, which does
-//! `datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)`.
-//! Comparison is on the absolute instant, so an offset-bearing timestamp and its UTC
-//! equivalent compare equal.
+//! Deliberately dependency-free and independent of the host timezone. Timestamps require an
+//! explicit UTC or numeric offset and are normalized to absolute nanosecond instants. The parser
+//! rejects unknown (`-00:00`) offsets, malformed offsets, and precision beyond nanoseconds rather
+//! than guessing or truncating. Comparison is on the absolute instant, so an offset-bearing
+//! timestamp and its UTC equivalent compare equal.
 
 use crate::error::TimeError;
 use serde::{Deserialize, Serialize};
@@ -34,24 +33,58 @@ impl Timestamp {
             return Err(bad());
         }
 
-        let year: i64 = input.get(0..4).ok_or_else(bad)?.parse().map_err(|_| bad())?;
+        let year: i64 = input
+            .get(0..4)
+            .ok_or_else(bad)?
+            .parse()
+            .map_err(|_| bad())?;
+        if [0..4, 5..7, 8..10, 11..13, 14..16, 17..19]
+            .into_iter()
+            .any(|range| {
+                bytes
+                    .get(range)
+                    .is_none_or(|part| !part.iter().all(u8::is_ascii_digit))
+            })
+        {
+            return Err(bad());
+        }
         expect(bytes, 4, b'-', input)?;
-        let month: u32 = input.get(5..7).ok_or_else(bad)?.parse().map_err(|_| bad())?;
+        let month: u32 = input
+            .get(5..7)
+            .ok_or_else(bad)?
+            .parse()
+            .map_err(|_| bad())?;
         expect(bytes, 7, b'-', input)?;
-        let day: u32 = input.get(8..10).ok_or_else(bad)?.parse().map_err(|_| bad())?;
+        let day: u32 = input
+            .get(8..10)
+            .ok_or_else(bad)?
+            .parse()
+            .map_err(|_| bad())?;
         if bytes[10] != b'T' && bytes[10] != b't' && bytes[10] != b' ' {
             return Err(bad());
         }
-        let hour: i64 = input.get(11..13).ok_or_else(bad)?.parse().map_err(|_| bad())?;
+        let hour: i64 = input
+            .get(11..13)
+            .ok_or_else(bad)?
+            .parse()
+            .map_err(|_| bad())?;
         expect(bytes, 13, b':', input)?;
-        let minute: i64 = input.get(14..16).ok_or_else(bad)?.parse().map_err(|_| bad())?;
+        let minute: i64 = input
+            .get(14..16)
+            .ok_or_else(bad)?
+            .parse()
+            .map_err(|_| bad())?;
         expect(bytes, 16, b':', input)?;
-        let second: i64 = input.get(17..19).ok_or_else(bad)?.parse().map_err(|_| bad())?;
+        let second: i64 = input
+            .get(17..19)
+            .ok_or_else(bad)?
+            .parse()
+            .map_err(|_| bad())?;
 
         if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
             return Err(TimeError::OutOfRange(input.to_string()));
         }
-        if hour > 23 || minute > 59 || second > 59 {
+        if !(0..=23).contains(&hour) || !(0..=59).contains(&minute) || !(0..=59).contains(&second) {
             return Err(TimeError::OutOfRange(input.to_string()));
         }
 
@@ -67,34 +100,51 @@ impl Timestamp {
                 return Err(bad());
             }
             let digits = &input[start..cursor];
-            let truncated = &digits[..digits.len().min(9)];
-            let scale = 10i128.pow((9 - truncated.len()) as u32);
-            subsec_nanos = truncated.parse::<i128>().map_err(|_| bad())? * scale;
+            if digits.len() > 9 {
+                return Err(bad());
+            }
+            let scale = 10i128.pow((9 - digits.len()) as u32);
+            subsec_nanos = digits.parse::<i128>().map_err(|_| bad())? * scale;
         }
 
         let offset_seconds: i64 = match bytes.get(cursor) {
-            None => 0,
+            None => return Err(bad()),
             Some(b'Z') | Some(b'z') => {
                 cursor += 1;
                 0
             }
             Some(sign @ (b'+' | b'-')) => {
                 let negative = *sign == b'-';
+                let has_colon = bytes.get(cursor + 3) == Some(&b':');
+                let expected_len = if has_colon { 6 } else { 5 };
+                if bytes.len() - cursor != expected_len {
+                    return Err(bad());
+                }
                 let off_hour: i64 = input
                     .get(cursor + 1..cursor + 3)
                     .ok_or_else(bad)?
                     .parse()
                     .map_err(|_| bad())?;
-                let minute_start = if bytes.get(cursor + 3) == Some(&b':') {
-                    cursor + 4
-                } else {
-                    cursor + 3
-                };
-                let off_minute: i64 = match input.get(minute_start..minute_start + 2) {
-                    Some(text) => text.parse().map_err(|_| bad())?,
-                    None => 0,
-                };
-                cursor = minute_start + if input.len() >= minute_start + 2 { 2 } else { 0 };
+                let minute_start = if has_colon { cursor + 4 } else { cursor + 3 };
+                let off_minute: i64 = input
+                    .get(minute_start..minute_start + 2)
+                    .ok_or_else(bad)?
+                    .parse()
+                    .map_err(|_| bad())?;
+                let offset_digits = [cursor + 1..cursor + 3, minute_start..minute_start + 2];
+                if offset_digits.into_iter().any(|range| {
+                    bytes
+                        .get(range)
+                        .is_none_or(|part| !part.iter().all(u8::is_ascii_digit))
+                }) || off_hour > 23
+                    || !(0..=59).contains(&off_minute)
+                {
+                    return Err(TimeError::OutOfRange(input.to_string()));
+                }
+                if negative && off_hour == 0 && off_minute == 0 {
+                    return Err(bad());
+                }
+                cursor = minute_start + 2;
                 let magnitude = off_hour * 3600 + off_minute * 60;
                 if negative {
                     -magnitude
@@ -213,7 +263,10 @@ pub struct Interval {
 }
 
 impl Interval {
-    pub const UNBOUNDED: Interval = Interval { start: None, end: None };
+    pub const UNBOUNDED: Interval = Interval {
+        start: None,
+        end: None,
+    };
 
     pub fn contains(&self, at: Timestamp) -> bool {
         self.start.is_none_or(|s| at >= s) && self.end.is_none_or(|e| at < e)

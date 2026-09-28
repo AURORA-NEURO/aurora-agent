@@ -692,15 +692,17 @@ mod tests {
         let mut observed = arms();
         observed[1].risk_milli = 900;
         let plan = plan_glioma_power_reestimation(&request(1), &observed).unwrap();
-        assert!(plan
-            .decisions
-            .iter()
-            .any(|decision| decision.decision == PowerDecisionKind::RiskBlocked));
+        assert!(
+            plan.decisions
+                .iter()
+                .any(|decision| decision.decision == PowerDecisionKind::RiskBlocked)
+        );
         assert!(plan.selected_order.is_empty());
-        assert!(plan
-            .uncertainty
-            .iter()
-            .any(|item| item == "risk:perturbation"));
+        assert!(
+            plan.uncertainty
+                .iter()
+                .any(|item| item == "risk:perturbation")
+        );
     }
 
     #[test]

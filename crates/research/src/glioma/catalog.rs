@@ -194,18 +194,138 @@ const FEDERATION: &[GliomaStageKind] = &[GliomaStageKind::FederationBenchmarking
 
 pub fn glioma_program_catalog() -> Vec<GliomaProgramDescriptor> {
     vec![
-        descriptor(GliomaProgramId::EvidenceSurveillance, "Evidence surveillance", "evidence-surveillance", "p01-evidence-surveillance", "evidence curator", "qualified source candidates with stale, unknown, contradictory, and negative states", "QualifiedEvidenceSet", "local workbench, MCP, Rust/Python/TypeScript SDK", EVIDENCE),
-        descriptor(GliomaProgramId::EvidenceKnowledge, "Evidence-to-typed-knowledge", "evidence-knowledge", "p02-evidence-knowledge", "knowledge engineer", "scoped claims and competing explanations bound to source artifacts", "TypedKnowledgeWorld", "knowledge API and research workbench", KNOWLEDGE),
-        descriptor(GliomaProgramId::MultimodalIngestionQc, "Multimodal ingestion and QC", "multimodal-ingestion-qc", "p03-multimodal-ingestion-qc", "data steward", "comparable study-by-modality cells with explicit missingness and semantic defects", "HarmonizedGliomaObject", "local adapter, QC console, SDK", MULTIMODAL),
-        descriptor(GliomaProgramId::DecisionContext, "Question-to-decision context", "decision-context", "p04-decision-context", "principal investigator", "bounded decision context with required inputs and unresolved omissions", "DecisionContext", "research workbench and MCP", DECISION),
-        descriptor(GliomaProgramId::MechanismExploration, "Mechanism exploration", "mechanism-exploration", "p05-mechanism-exploration", "mechanism scientist", "ranked competing mechanism portfolio and discriminating next actions", "MechanismPortfolio", "analysis API and workbench", MECHANISM),
-        descriptor(GliomaProgramId::ExperimentDesign, "Power-aware experiment design", "experiment-design", "p06-experiment-design", "experimentalist", "falsifiable allocation, power, blocking, dose-response fitting, and null-result release plan", "ExecutableExperimentDesign and DoseResponseAnalysis", "design workbench and SDK", EXPERIMENT),
-        descriptor(GliomaProgramId::ProtocolSimulation, "Protocol simulation", "protocol-simulation", "p07-protocol-simulation", "lab operations lead", "resource-feasible protocol branches and compensation plan before physical effects", "ProtocolSimulationReport", "simulation service and operator UI", SIMULATION),
-        descriptor(GliomaProgramId::InstrumentRobotics, "Instrument and robotics preflight", "instrument-robotics", "p08-instrument-robotics", "instrument operator", "signed, interlocked, human-authorized instrument action plan", "InstrumentPreflight", "instrument gateway and operator console", INSTRUMENT),
-        descriptor(GliomaProgramId::ReproducibleComputation, "Reproducible computation", "reproducible-computation", "p09-reproducible-computation", "computational scientist", "checkpointed, replayable multimodal computation with bounded resources plus omission-stress robustness", "ComputationRun and RobustnessSuite", "workflow API, SDK, and CLI", COMPUTATION),
-        descriptor(GliomaProgramId::InterpretationReplication, "Causal interpretation and replication", "interpretation-replication", "p10-interpretation-replication", "methods reviewer", "uncertainty-aware effects, contradiction analysis, replication verdicts, and negative results", "AnalysisReplicationRecord", "analysis workbench and evaluation API", INTERPRETATION),
-        descriptor(GliomaProgramId::ResearchObjectRelease, "Research-object release", "research-object-release", "p11-research-object-release", "reproducibility steward", "portable research object with methods, limitations, replay metadata, and release gates", "SignedResearchObject", "release CLI, API, and registry", RELEASE),
-        descriptor(GliomaProgramId::FederatedBenchmarking, "Federated benchmarking and governance", "federated-benchmarking", "p12-federated-benchmarking", "consortium administrator", "aggregate-only cross-site benchmark with policy, quorum, and localization evidence", "FederationBenchmark", "local control plane and federation API", FEDERATION),
+        descriptor(
+            GliomaProgramId::EvidenceSurveillance,
+            "Evidence surveillance",
+            "evidence-surveillance",
+            "p01-evidence-surveillance",
+            "evidence curator",
+            "qualified source candidates with stale, unknown, contradictory, and negative states",
+            "QualifiedEvidenceSet",
+            "local workbench, MCP, Rust/Python/TypeScript SDK",
+            EVIDENCE,
+        ),
+        descriptor(
+            GliomaProgramId::EvidenceKnowledge,
+            "Evidence-to-typed-knowledge",
+            "evidence-knowledge",
+            "p02-evidence-knowledge",
+            "knowledge engineer",
+            "scoped claims and competing explanations bound to source artifacts",
+            "TypedKnowledgeWorld",
+            "knowledge API and research workbench",
+            KNOWLEDGE,
+        ),
+        descriptor(
+            GliomaProgramId::MultimodalIngestionQc,
+            "Multimodal ingestion and QC",
+            "multimodal-ingestion-qc",
+            "p03-multimodal-ingestion-qc",
+            "data steward",
+            "comparable study-by-modality cells with explicit missingness and semantic defects",
+            "HarmonizedGliomaObject",
+            "local adapter, QC console, SDK",
+            MULTIMODAL,
+        ),
+        descriptor(
+            GliomaProgramId::DecisionContext,
+            "Question-to-decision context",
+            "decision-context",
+            "p04-decision-context",
+            "principal investigator",
+            "bounded decision context with required inputs and unresolved omissions",
+            "DecisionContext",
+            "research workbench and MCP",
+            DECISION,
+        ),
+        descriptor(
+            GliomaProgramId::MechanismExploration,
+            "Mechanism exploration",
+            "mechanism-exploration",
+            "p05-mechanism-exploration",
+            "mechanism scientist",
+            "ranked competing mechanism portfolio and discriminating next actions",
+            "MechanismPortfolio",
+            "analysis API and workbench",
+            MECHANISM,
+        ),
+        descriptor(
+            GliomaProgramId::ExperimentDesign,
+            "Power-aware experiment design",
+            "experiment-design",
+            "p06-experiment-design",
+            "experimentalist",
+            "falsifiable allocation, power, blocking, dose-response fitting, and null-result release plan",
+            "ExecutableExperimentDesign and DoseResponseAnalysis",
+            "design workbench and SDK",
+            EXPERIMENT,
+        ),
+        descriptor(
+            GliomaProgramId::ProtocolSimulation,
+            "Protocol simulation",
+            "protocol-simulation",
+            "p07-protocol-simulation",
+            "lab operations lead",
+            "resource-feasible protocol branches and compensation plan before physical effects",
+            "ProtocolSimulationReport",
+            "simulation service and operator UI",
+            SIMULATION,
+        ),
+        descriptor(
+            GliomaProgramId::InstrumentRobotics,
+            "Instrument and robotics preflight",
+            "instrument-robotics",
+            "p08-instrument-robotics",
+            "instrument operator",
+            "signed, interlocked, human-authorized instrument action plan",
+            "InstrumentPreflight",
+            "instrument gateway and operator console",
+            INSTRUMENT,
+        ),
+        descriptor(
+            GliomaProgramId::ReproducibleComputation,
+            "Reproducible computation",
+            "reproducible-computation",
+            "p09-reproducible-computation",
+            "computational scientist",
+            "checkpointed, replayable multimodal computation with bounded resources plus omission-stress robustness",
+            "ComputationRun and RobustnessSuite",
+            "workflow API, SDK, and CLI",
+            COMPUTATION,
+        ),
+        descriptor(
+            GliomaProgramId::InterpretationReplication,
+            "Causal interpretation and replication",
+            "interpretation-replication",
+            "p10-interpretation-replication",
+            "methods reviewer",
+            "uncertainty-aware effects, contradiction analysis, replication verdicts, and negative results",
+            "AnalysisReplicationRecord",
+            "analysis workbench and evaluation API",
+            INTERPRETATION,
+        ),
+        descriptor(
+            GliomaProgramId::ResearchObjectRelease,
+            "Research-object release",
+            "research-object-release",
+            "p11-research-object-release",
+            "reproducibility steward",
+            "portable research object with methods, limitations, replay metadata, and release gates",
+            "SignedResearchObject",
+            "release CLI, API, and registry",
+            RELEASE,
+        ),
+        descriptor(
+            GliomaProgramId::FederatedBenchmarking,
+            "Federated benchmarking and governance",
+            "federated-benchmarking",
+            "p12-federated-benchmarking",
+            "consortium administrator",
+            "aggregate-only cross-site benchmark with policy, quorum, and localization evidence",
+            "FederationBenchmark",
+            "local control plane and federation API",
+            FEDERATION,
+        ),
     ]
 }
 
@@ -309,11 +429,24 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::multimodal::FEATURE_ID,
         crate::glioma::workflow::FEATURE_ID,
         crate::glioma::release::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::disclosure_register::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::disclosure_panel::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::disclosure_batch::FEATURE_ID,
         crate::glioma::programs::p11_research_object_release::replay::FEATURE_ID,
         crate::glioma::programs::p11_research_object_release::multimodal_bundle::FEATURE_ID,
         crate::glioma::programs::p11_research_object_release::migration::FEATURE_ID,
         crate::glioma::programs::p11_research_object_release::dependency_closure::FEATURE_ID,
         crate::glioma::programs::p11_research_object_release::operating_cycle::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::replay_history::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::local_release_workflow::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::multistudy_release::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::release_batch::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::federated_continual::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::review_workbench::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::portfolio_review_workbench::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::batch_review_workbench::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::signature_protocol::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::trust_policy::FEATURE_ID,
         crate::glioma::replication::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::surveillance::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::evidence_cluster::FEATURE_ID,
@@ -413,7 +546,10 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p04_decision_context::context_replay::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::decision_context_artifact::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::federated_decision_context::FEATURE_ID,
+        crate::glioma::programs::p04_decision_context::federated_continual_promotion::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::multi_study_context_artifact::FEATURE_ID,
+        crate::glioma::programs::p04_decision_context::multi_study_epoch_replay::FEATURE_ID,
+        crate::glioma::programs::p04_decision_context::multi_study_execution_receipt::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::multi_study_workflow::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::branch_evidence::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::admission_gate::FEATURE_ID,
@@ -561,6 +697,12 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p10_interpretation_replication::state_transition::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::trajectory::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::transportability::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::longitudinal_transport::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::prospective_contradiction::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::outcome_reporting_audit::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::outcome_evidence_panel::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::outcome_record::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::replication_concordance::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::campaign::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::synthesis::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::computation_evidence_gate::FEATURE_ID,
@@ -613,12 +755,16 @@ mod tests {
         let first = generate_feature_catalog();
         let second = generate_feature_catalog();
         assert_eq!(first, second);
-        assert!(first
-            .iter()
-            .all(|feature| feature.feature_id.starts_with("GAF-GLIOMA-P")));
-        assert!(first
-            .iter()
-            .all(|feature| !feature.feature_id.contains('.')));
+        assert!(
+            first
+                .iter()
+                .all(|feature| feature.feature_id.starts_with("GAF-GLIOMA-P"))
+        );
+        assert!(
+            first
+                .iter()
+                .all(|feature| !feature.feature_id.contains('.'))
+        );
     }
 
     #[test]

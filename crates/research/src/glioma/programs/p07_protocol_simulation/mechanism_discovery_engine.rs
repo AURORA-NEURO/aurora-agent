@@ -9,24 +9,24 @@
 //! not a receipt stream.
 
 use super::super::p03_multimodal_ingestion_qc::{
-    analyze_glioma_multimodal_graph_fusion, GraphFusionAnalysis, GraphFusionDisposition,
-    GraphFusionVector,
+    GraphFusionAnalysis, GraphFusionDisposition, GraphFusionVector,
+    analyze_glioma_multimodal_graph_fusion,
 };
 use super::super::p05_mechanism_exploration::{
+    CounterfactualModel, MechanismDynamicsDisposition, MechanismDynamicsEdge,
+    MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsPlan,
+    MechanismDynamicsRequest, PathwayActivityAnalysis, PathwayActivityDefinition,
+    PathwayActivityDisposition, PathwayActivityObservation, RobustInterventionCandidate,
+    RobustInterventionPortfolio, RobustInterventionRequest, RobustPortfolioDisposition,
     analyze_glioma_pathway_activity, plan_glioma_robust_intervention_portfolio,
-    simulate_glioma_mechanism_dynamics, CounterfactualModel, MechanismDynamicsDisposition,
-    MechanismDynamicsEdge, MechanismDynamicsIntervention, MechanismDynamicsNode,
-    MechanismDynamicsPlan, MechanismDynamicsRequest, PathwayActivityAnalysis,
-    PathwayActivityDefinition, PathwayActivityDisposition, PathwayActivityObservation,
-    RobustInterventionCandidate, RobustInterventionPortfolio, RobustInterventionRequest,
-    RobustPortfolioDisposition,
+    simulate_glioma_mechanism_dynamics,
 };
 use super::action_execution::GliomaActionExecutor;
 use super::mechanism_campaign::{
+    MechanismCampaignDisposition, MechanismCampaignError, MultimodalMechanismCampaign,
+    MultimodalMechanismCampaignExecution, MultimodalMechanismCampaignRequest,
     execute_glioma_multimodal_mechanism_campaign,
-    execute_glioma_multimodal_mechanism_campaign_with_executor, MechanismCampaignDisposition,
-    MechanismCampaignError, MultimodalMechanismCampaign, MultimodalMechanismCampaignExecution,
-    MultimodalMechanismCampaignRequest,
+    execute_glioma_multimodal_mechanism_campaign_with_executor,
 };
 use crate::glioma_engine::{GliomaActionCandidate, GliomaModelSystem, GliomaSelectionConfig};
 use bioprism_ids::ContentHash;
@@ -950,10 +950,12 @@ mod tests {
             run.stop_reason,
             GliomaMechanismDiscoveryStopReason::Qualified
         );
-        assert!(run.rounds[0]
-            .robust_portfolio
-            .selected_order
-            .contains(&"egfr-invasion".into()));
+        assert!(
+            run.rounds[0]
+                .robust_portfolio
+                .selected_order
+                .contains(&"egfr-invasion".into())
+        );
         run.validate().unwrap();
     }
 

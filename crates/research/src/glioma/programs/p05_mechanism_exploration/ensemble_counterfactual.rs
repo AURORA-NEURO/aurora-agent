@@ -8,8 +8,8 @@
 //! work in a biological system.
 
 use super::counterfactual::{
-    simulate_glioma_counterfactual, CounterfactualDisposition, CounterfactualIntervention,
-    CounterfactualRequest, MechanismCounterfactual,
+    CounterfactualDisposition, CounterfactualIntervention, CounterfactualRequest,
+    MechanismCounterfactual, simulate_glioma_counterfactual,
 };
 use super::graph_propagation::{MechanismGraphEdge, MechanismGraphNode};
 use crate::glioma_engine::GliomaModelSystem;
@@ -591,13 +591,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.disposition, EnsembleDisposition::Partial);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("agreement")));
-        assert!(output
-            .targets
-            .iter()
-            .any(|target| target.direction == EnsembleDirection::Unresolved));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("agreement"))
+        );
+        assert!(
+            output
+                .targets
+                .iter()
+                .any(|target| target.direction == EnsembleDirection::Unresolved)
+        );
     }
 }

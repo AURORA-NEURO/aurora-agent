@@ -188,6 +188,12 @@ impl FederatedDecisionContextReport {
                 .branches
                 .windows(2)
                 .any(|pair| pair[0].branch_id >= pair[1].branch_id)
+            || self
+                .branches
+                .iter()
+                .map(|branch| branch.branch_id.clone())
+                .collect::<Vec<_>>()
+                != self.branch_order
             || self.next_route.trim().is_empty()
             || self.digest.as_str().len() != 64
             || self
@@ -246,6 +252,141 @@ impl FederatedDecisionContextReport {
                 "frontier references an unknown branch".into(),
             ));
         }
+        let mut expected_frontier = self
+            .branches
+            .iter()
+            .filter(|branch| branch.disposition == FederatedBranchDisposition::Qualified)
+            .map(|branch| (branch.branch_id.clone(), branch.robust_score_milli))
+            .collect::<Vec<_>>();
+        expected_frontier
+            .sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        let expected_frontier_order = expected_frontier
+            .iter()
+            .map(|(branch_id, _)| branch_id.clone())
+            .collect::<Vec<_>>();
+        let expected_selected = expected_frontier
+            .first()
+            .map(|(branch_id, _)| branch_id.clone());
+        let mut expected_negative = BTreeSet::new();
+        let mut expected_uncertainty = BTreeSet::new();
+        let mut observations = BTreeSet::new();
+        for branch in &self.branches {
+            let observation_set = branch
+                .observation_order
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let mut outcomes = BTreeSet::new();
+            for (status, identifiers) in [
+                ("negative", &branch.negative_order),
+                ("contradicted", &branch.contradicted_order),
+                ("unknown", &branch.unknown_order),
+                ("failed", &branch.failed_order),
+            ] {
+                for identifier in identifiers {
+                    if !observation_set.contains(identifier) || !outcomes.insert(identifier) {
+                        return Err(FederatedDecisionContextError::InvalidOutput(
+                            "branch outcome identities do not partition the observations".into(),
+                        ));
+                    }
+                    if status == "unknown" {
+                        expected_uncertainty
+                            .insert(format!("{}:{identifier}:unknown", branch.branch_id));
+                    }
+                }
+            }
+            if branch
+                .observation_order
+                .iter()
+                .any(|identifier| !observations.insert(identifier))
+            {
+                return Err(FederatedDecisionContextError::InvalidOutput(
+                    "observation identities must be unique across branch summaries".into(),
+                ));
+            }
+            let expected_support = if branch.observation_order.is_empty() {
+                0
+            } else {
+                ((branch.qualified_count as u64 * 1_000) / branch.observation_order.len() as u64)
+                    .min(1_000) as u16
+            };
+            let expected_robust_score = i64::from(branch.worst_case_value_milli)
+                .saturating_sub(i64::from(branch.uncertainty_milli))
+                .saturating_sub(i64::from(branch.failure_risk_milli))
+                .saturating_sub(i64::from(branch.heterogeneity_milli))
+                .saturating_sub(i64::from(branch.maximum_influence_milli));
+            if branch.eligible_site_order.len() != branch.observation_order.len()
+                || branch
+                    .eligible_site_order
+                    .iter()
+                    .any(|site| !eligible_set.contains(site))
+                || branch.independent_group_count > branch.eligible_site_order.len()
+                || branch.qualified_count + outcomes.len() != branch.observation_order.len()
+                || branch.support_milli != expected_support
+                || branch.robust_score_milli != expected_robust_score
+            {
+                return Err(FederatedDecisionContextError::InvalidOutput(
+                    "branch support, outcomes, sites, or robust score are inconsistent".into(),
+                ));
+            }
+            if !branch.negative_order.is_empty()
+                || !branch.contradicted_order.is_empty()
+                || !branch.failed_order.is_empty()
+            {
+                expected_negative.extend(
+                    branch
+                        .negative_order
+                        .iter()
+                        .map(|identifier| format!("{}:{identifier}:negative", branch.branch_id)),
+                );
+                expected_negative.extend(
+                    branch.contradicted_order.iter().map(|identifier| {
+                        format!("{}:{identifier}:contradicted", branch.branch_id)
+                    }),
+                );
+                expected_negative.extend(
+                    branch
+                        .failed_order
+                        .iter()
+                        .map(|identifier| format!("{}:{identifier}:failed", branch.branch_id)),
+                );
+            }
+            if !branch.unknown_order.is_empty()
+                || branch.disposition != FederatedBranchDisposition::Qualified
+            {
+                expected_uncertainty.insert(format!("{}:branch-gate-unresolved", branch.branch_id));
+            }
+        }
+        let expected_disposition = if expected_selected.is_some() {
+            FederatedDecisionDisposition::Promote
+        } else if self
+            .branches
+            .iter()
+            .all(|branch| branch.disposition == FederatedBranchDisposition::Rejected)
+            && !self.branches.is_empty()
+        {
+            FederatedDecisionDisposition::Reject
+        } else if self
+            .branches
+            .iter()
+            .any(|branch| branch.disposition == FederatedBranchDisposition::Underpowered)
+            || !expected_uncertainty.is_empty()
+        {
+            FederatedDecisionDisposition::Continue
+        } else {
+            FederatedDecisionDisposition::Hold
+        };
+        if expected_frontier_order != self.frontier_order
+            || expected_selected != self.selected_branch_id
+            || expected_disposition != self.disposition
+            || expected_negative.into_iter().collect::<Vec<_>>() != self.negative_evidence_order
+            || expected_uncertainty.into_iter().collect::<Vec<_>>() != self.uncertainty_order
+            || route_for(expected_disposition) != self.next_route
+        {
+            return Err(FederatedDecisionContextError::InvalidOutput(
+                "selected branch, frontier rank, disposition, evidence partitions, or route do not replay".into(),
+            ));
+        }
         let expected = ContentHash::of_value(&digest_input(self))
             .map_err(|error| FederatedDecisionContextError::Digest(error.to_string()))?;
         if expected != self.digest {
@@ -281,8 +422,7 @@ fn weighted_mean(values: &[(i32, u64)]) -> i32 {
 
 fn scaled_deviation(value: i32, mean: i32) -> u16 {
     let scale = i64::from(mean.unsigned_abs().max(1));
-    (i64::from(value.saturating_sub(mean)).unsigned_abs() as u64 * 1_000 / scale as u64).min(1_000)
-        as u16
+    (i64::from(value.saturating_sub(mean)).unsigned_abs() * 1_000 / scale as u64).min(1_000) as u16
 }
 
 fn route_for(disposition: FederatedDecisionDisposition) -> &'static str {
@@ -819,13 +959,17 @@ mod tests {
             report.branches[0].disposition,
             FederatedBranchDisposition::Rejected
         );
-        assert!(report.branches[0]
-            .contradicted_order
-            .contains(&"site-a-branch-1".into()));
-        assert!(report
-            .negative_evidence_order
-            .iter()
-            .any(|value| value.contains("contradicted")));
+        assert!(
+            report.branches[0]
+                .contradicted_order
+                .contains(&"site-a-branch-1".into())
+        );
+        assert!(
+            report
+                .negative_evidence_order
+                .iter()
+                .any(|value| value.contains("contradicted"))
+        );
     }
 
     #[test]
@@ -887,6 +1031,32 @@ mod tests {
         assert!(matches!(
             error,
             FederatedDecisionContextError::InvalidRequest(_)
+        ));
+    }
+
+    #[test]
+    fn digest_valid_frontier_reordering_is_rejected_by_semantic_replay() {
+        let mut high = observation("site-a", "branch-a", FederatedBranchOutcome::Qualified);
+        high.expected_value_milli = 900;
+        high.worst_case_value_milli = 800;
+        let high_other = observation("site-b", "branch-a", FederatedBranchOutcome::Qualified);
+        let mut low = observation("site-a", "branch-b", FederatedBranchOutcome::Qualified);
+        low.expected_value_milli = 500;
+        low.worst_case_value_milli = 300;
+        let mut low_other = observation("site-b", "branch-b", FederatedBranchOutcome::Qualified);
+        low_other.expected_value_milli = 500;
+        low_other.worst_case_value_milli = 300;
+        let mut report = aggregate_glioma_federated_decision_context(&request(vec![
+            site("site-a", "group-a", vec![high, low]),
+            site("site-b", "group-b", vec![high_other, low_other]),
+        ]))
+        .unwrap();
+        report.frontier_order.reverse();
+        report.selected_branch_id = report.frontier_order.first().cloned();
+        report.digest = ContentHash::of_value(&digest_input(&report)).unwrap();
+        assert!(matches!(
+            report.validate(),
+            Err(FederatedDecisionContextError::InvalidOutput(_))
         ));
     }
 }

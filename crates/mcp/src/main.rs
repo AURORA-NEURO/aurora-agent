@@ -5,7 +5,7 @@
 //! The root defaults to the working directory and confines every path the server will read or
 //! write. stdout carries JSON-RPC only; audit records and diagnostics go to stderr.
 
-use bioprism_mcp::{serve, Server};
+use bioprism_mcp::{Server, serve};
 use std::io::{self, BufReader};
 use std::path::PathBuf;
 
@@ -65,7 +65,7 @@ fn main() {
                      hub_card_render, hub_leaderboard_render, bioatlas_publication_audit, telemetry_project,\n\
                      governance_schema_check,\n\
                      developer_platform_status, capability_audit, capability_dashboard, capability_discover, capability_route, agent_mission, developer_workbench, developer_workbench_verify, developer_workbench_import, developer_workbench_query, developer_workbench_get, ci_provider_normalize, ci_provider_evidence_audit, ci_provider_evidence_import, ci_provider_evidence_query, ci_provider_evidence_get, ci_execution_evidence_audit, execution_provenance_audit, developer_delivery_audit, engineering_execution_plan, safety_posture, security_redteam_simulate, security_privacy_audit, sandbox_admission_audit, sandbox_runtime_simulate, security_program_audit, weave_protocol_catalog, world_index,\n\
-                     workspace_capabilities, brain_model_select, brain_model_select_contextual, brain_prompt_assemble, brain_plan, neurosurgery_intake_plan, neurosurgery_catalogue, neurosurgery_evidence_audit, neurosurgery_evidence_graph, neurosurgery_real_data_coverage, neurosurgery_real_data_cohort_landscape, neurosurgery_real_data_reconciliation, neurosurgery_real_data_diff, neurosurgery_real_data_review_queue, neurosurgery_real_data_review_disposition, neurosurgery_real_data_evidence_packet, neurosurgery_real_data_reasoning_context, neurosurgery_real_data_draft_audit, neurosurgery_public_literature_reasoning_context, neurosurgery_research_brief, neurosurgery_research_plan, neurosurgery_plan, neurosurgery_real_data_query, neurosurgery_real_data_trial_landscape, neurosurgery_public_literature_query, neurosurgery_session, neurosurgery_mission, brain_bandit_select, brain_bandit_update, brain_outcome_record, brain_job_submit, brain_job_status, brain_job_events, brain_job_approval, brain_job_claim, brain_job_claim_next, brain_job_renew, brain_job_checkpoint, brain_job_complete, brain_job_fail, brain_job_reconcile, brain_job_cancel, brain_model_health, brain_replay_evaluate, glioma_research_dry_run, glioma_workflow_plan, glioma_protocol_simulate, glioma_protocol_scenario_ensemble, glioma_protocol_branch_optimize, glioma_protocol_autonomous_execute, glioma_protocol_evidence_surface, glioma_protocol_multistudy_fusion, glioma_protocol_transport_gate, glioma_protocol_execute, glioma_protocol_compensation, glioma_action_portfolio_execute, glioma_robustness_suite, glioma_trajectory_analyze, glioma_state_transition_analyze, glioma_causal_contrast, glioma_dose_response, glioma_combination_synergy, glioma_adaptive_dose_surface, glioma_multimodal_concordance, glioma_spatial_registration, glioma_research_select_actions, glioma_scientific_frontier, glioma_program_catalog, glioma_evidence_qualify, glioma_knowledge_compile, glioma_knowledge_compose, glioma_belief_revision, glioma_decision_context, glioma_decision_action_graph, glioma_multimodal_qc, glioma_mechanism_explore, glioma_experiment_design, glioma_analysis_run, glioma_replication_assess, glioma_research_object_prepare, repository_catalog, repository_bundle, repository_impact\n\
+                     workspace_capabilities, brain_model_select, brain_model_select_contextual, brain_prompt_assemble, brain_plan, neurosurgery_intake_plan, neurosurgery_catalogue, neurosurgery_evidence_audit, neurosurgery_evidence_graph, neurosurgery_real_data_coverage, neurosurgery_real_data_cohort_landscape, neurosurgery_real_data_reconciliation, neurosurgery_real_data_diff, neurosurgery_real_data_review_queue, neurosurgery_real_data_review_disposition, neurosurgery_real_data_evidence_packet, neurosurgery_real_data_reasoning_context, neurosurgery_real_data_draft_audit, neurosurgery_public_literature_reasoning_context, neurosurgery_research_brief, neurosurgery_research_plan, neurosurgery_plan, neurosurgery_real_data_query, neurosurgery_real_data_trial_landscape, neurosurgery_public_literature_query, neurosurgery_session, neurosurgery_mission, brain_bandit_select, brain_bandit_update, brain_outcome_record, brain_job_submit, brain_job_status, brain_job_events, brain_job_approval, brain_job_claim, brain_job_claim_next, brain_job_renew, brain_job_checkpoint, brain_job_complete, brain_job_fail, brain_job_reconcile, brain_job_cancel, brain_model_health, brain_replay_evaluate, glioma_research_dry_run, glioma_workflow_plan, glioma_protocol_simulate, glioma_protocol_scenario_ensemble, glioma_protocol_branch_optimize, glioma_protocol_autonomous_execute, glioma_protocol_evidence_surface, glioma_protocol_multistudy_fusion, glioma_protocol_transport_gate, glioma_protocol_execute, glioma_protocol_compensation, glioma_action_portfolio_execute, glioma_robustness_suite, glioma_trajectory_analyze, glioma_state_transition_analyze, glioma_causal_contrast, glioma_dose_response, glioma_combination_synergy, glioma_adaptive_dose_surface, glioma_multimodal_concordance, glioma_spatial_registration, glioma_research_select_actions, glioma_scientific_frontier, glioma_program_catalog, glioma_evidence_qualify, glioma_knowledge_compile, glioma_knowledge_compose, glioma_belief_revision, glioma_decision_context, glioma_decision_action_graph, glioma_multimodal_qc, glioma_mechanism_explore, glioma_experiment_design, glioma_analysis_run, glioma_replication_assess, glioma_research_object_prepare, glioma_release_disclosure_register_build, glioma_release_disclosure_panel_reconcile, glioma_release_disclosure_batch_reconcile, repository_catalog, repository_bundle, repository_impact\n\
                      glioma_multimodal_dropout_stress,\n\
                      glioma_multimodal_missingness,\n\
                      glioma_multimodal_reliability,\n\
@@ -84,6 +84,7 @@ fn main() {
                      glioma_multimodal_quality_remediation,\n\
                     glioma_multimodal_quality_recovery,\n\
                     glioma_decision_admission_gate,\n\
+                    glioma_multi_study_context_epoch_replay,\n\
                     glioma_decision_value_optimizer,\n\
                     glioma_decision_value_calibrator,\n\
                     glioma_adaptive_decision_controller,\n\
@@ -108,7 +109,7 @@ fn main() {
                      glioma_multimodal_operating_cycle,\n\
                      glioma_mechanism_discrimination_campaign_execute,\n\
                      glioma_causal_mediation,\n\
-                     glioma_multimodal_harmonize, glioma_multimodal_latent_factors, glioma_multimodal_graph_fusion, glioma_spatial_niches, glioma_spatial_communication, glioma_spatial_state_propagation, glioma_state_transition_analyze, glioma_transportability_analyze, glioma_protocol_branch_optimize, glioma_protocol_autonomous_execute, glioma_protocol_evidence_surface, glioma_protocol_multistudy_fusion, glioma_protocol_transport_gate, glioma_protocol_execute, glioma_protocol_compensation, glioma_action_portfolio_execute, glioma_causal_sensitivity,\n\
+                     glioma_multimodal_harmonize, glioma_multimodal_latent_factors, glioma_multimodal_graph_fusion, glioma_spatial_niches, glioma_spatial_communication, glioma_spatial_state_propagation, glioma_state_transition_analyze, glioma_transportability_analyze, glioma_longitudinal_transport_analyze, glioma_multistudy_concordance_analyze, glioma_prospective_contradiction_plan, glioma_registered_outcome_reporting_audit, glioma_registered_outcome_record_build, glioma_registered_outcome_evidence_panel, glioma_registered_outcome_sensitivity_analyze, glioma_protocol_branch_optimize, glioma_protocol_autonomous_execute, glioma_protocol_evidence_surface, glioma_protocol_multistudy_fusion, glioma_protocol_transport_gate, glioma_protocol_execute, glioma_protocol_compensation, glioma_action_portfolio_execute, glioma_causal_sensitivity,\n\
                      glioma_multimodal_dropout_stress,\n\
                      glioma_multimodal_missingness,\n\
                      glioma_multimodal_reliability,\n\
@@ -151,6 +152,7 @@ fn main() {
                      glioma_robust_experiment_design,\n\
                      glioma_adaptive_information_campaign,\n\
                      glioma_active_learning,\n\
+                     glioma_posterior_batch,\n\
                      glioma_active_learning_campaign_execute,\n\
                      glioma_robust_active_learning,\n\
                      glioma_robust_active_learning_campaign_execute,\n\
@@ -216,7 +218,21 @@ fn main() {
                      glioma_federated_benchmark_operating_cycle,\n\
                      glioma_federated_adaptive_campaign_execute,\n\
                      glioma_replay_campaign_execute,\n\
+                     glioma_replay_history_reconcile,\n\
+                     glioma_local_release_workflow_execute,\n\
+                     glioma_multistudy_release_reconcile,\n\
+                     glioma_release_batch_execute,\n\
+                     glioma_federated_continual_release_reconcile,\n\
+                     glioma_local_release_review_packet_compile,\n\
+                     glioma_portfolio_review_workbench_reconcile,\n\
+                     glioma_release_batch_review_workbench_reconcile,\n\
+                     glioma_local_release_signature_payload_prepare,\n\
+                     glioma_local_release_signature_verify,\n\
+                     glioma_release_trust_policy_payload_prepare,\n\
+                     glioma_release_trust_policy_evaluate,\n\
                      glioma_research_object_release_gate,\n\
+                     glioma_release_disclosure_register_build,\n\
+                     glioma_release_disclosure_panel_reconcile, glioma_release_disclosure_batch_reconcile,\n\
                      glioma_release_operating_cycle,\n\
                      glioma_contrast_panel_design,\n\
                      Resources: fiber-world, fiber-query, context-certificate schemas and the\n\

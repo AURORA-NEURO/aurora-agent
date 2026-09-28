@@ -53,7 +53,7 @@ use crate::implementation::{
 use crate::suite::Suite;
 use bioprism_fiber::{compile, CompileOutput, FiberError, PolicyViolation, Query};
 use bioprism_section::CertificateProfile;
-use bioprism_world::{World, WorldError};
+use bioprism_world::{World, WorldError, WorldSourceError};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -1135,12 +1135,17 @@ fn fiber_failure(error: FiberError) -> CompileFailure {
         FiberError::InvariantViolation(_) => "invariant_violation",
         FiberError::MissingQueryField(_) => "missing_query_field",
         FiberError::WrongQueryFieldType { .. } => "wrong_query_field_type",
+        FiberError::WrongOracleFieldType { .. } => "wrong_oracle_field_type",
         FiberError::InvalidIdentifier(_) => "invalid_identifier",
         FiberError::InvalidBudget(_) => "invalid_budget",
         FiberError::InvalidDecisionTime(_) => "invalid_decision_time",
+        FiberError::InvalidOracleTimestamp { .. } => "invalid_oracle_timestamp",
+        FiberError::IncomparableOracleTimePrecision { .. } => "incomparable_oracle_time_precision",
         FiberError::BudgetExceeded { .. } => "budget_exceeded",
         FiberError::UnorderableSplitGroups { .. } => "unorderable_split_groups",
         FiberError::World(inner) => return world_failure(inner.clone()),
+        FiberError::WorldSource(WorldSourceError::Unavailable(_)) => "world_source_unavailable",
+        FiberError::WorldSource(WorldSourceError::Corrupt(_)) => "corrupt_world_source",
         FiberError::Policy(inner) => return policy_failure(inner.clone()),
     };
     CompileFailure::new(kind, error.to_string())

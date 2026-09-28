@@ -8,15 +8,15 @@
 
 use super::claim_frontier::KnowledgeFrontier;
 use super::gap_compiler::{
-    compile_glioma_knowledge_gaps, KnowledgeGapCompilerError, KnowledgeGapCompilerRequest,
-    KnowledgeGapPortfolio, KnowledgeGapPortfolioDisposition,
+    KnowledgeGapCompilerError, KnowledgeGapCompilerRequest, KnowledgeGapPortfolio,
+    KnowledgeGapPortfolioDisposition, compile_glioma_knowledge_gaps,
 };
 use super::knowledge_graph::TypedKnowledge;
 use crate::glioma::programs::p01_evidence_surveillance::{
-    execute_glioma_evidence_acquisition_campaign, plan_glioma_evidence_acquisition,
     EvidenceAcquisitionCampaign, EvidenceAcquisitionCampaignDisposition,
     EvidenceAcquisitionCampaignError, EvidenceAcquisitionCampaignRequest,
     EvidenceAcquisitionExecutor, EvidenceAcquisitionPlan, EvidenceAcquisitionRequest,
+    execute_glioma_evidence_acquisition_campaign, plan_glioma_evidence_acquisition,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -243,11 +243,11 @@ mod tests {
         DryRunEvidenceAcquisitionExecutor, EvidenceAcquisitionSourceKind,
     };
     use crate::glioma::programs::p02_evidence_knowledge::claim_frontier::{
-        prioritize_knowledge_frontier, KnowledgeFrontierRequest,
+        KnowledgeFrontierRequest, prioritize_knowledge_frontier,
     };
     use crate::glioma::programs::p02_evidence_knowledge::gap_compiler::KnowledgeGapSourceTemplate;
     use crate::glioma::programs::p02_evidence_knowledge::knowledge_graph::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
 

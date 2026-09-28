@@ -538,9 +538,11 @@ mod tests {
             output.disposition,
             FederatedBenchmarkPowerDisposition::Heterogeneous
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("heterogeneity")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("heterogeneity"))
+        );
     }
 }

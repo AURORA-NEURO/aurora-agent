@@ -479,10 +479,14 @@ pub fn compile_glioma_federated_evidence_operating_cycle(
             let (kind, rationale) = match claim.action {
                 MultiSiteOutcomeAction::PromoteToKnowledge
                     if reconciliation.disposition == MultiSiteOutcomeDisposition::Ready
-                        && request.transport.disposition == FederatedOutcomeTransportDisposition::Ready => (
-                    FederatedCycleActionKind::BridgeQualifiedEvidence,
-                    "reconciled support passed the aggregate gates and can enter typed-knowledge review",
-                ),
+                        && request.transport.disposition
+                            == FederatedOutcomeTransportDisposition::Ready =>
+                {
+                    (
+                        FederatedCycleActionKind::BridgeQualifiedEvidence,
+                        "reconciled support passed the aggregate gates and can enter typed-knowledge review",
+                    )
+                }
                 MultiSiteOutcomeAction::PreserveNegative => (
                     FederatedCycleActionKind::PreserveNegativeResults,
                     "reconciler marked a null or negative result for explicit knowledge preservation",
@@ -742,9 +746,11 @@ mod tests {
             .actions
             .iter()
             .any(|action| action.kind == FederatedCycleActionKind::ReconcileTransportedOutcomes));
-        assert!(output
-            .uncertainty
-            .contains(&"long_horizon_calibration_report_missing".into()));
+        assert!(
+            output
+                .uncertainty
+                .contains(&"long_horizon_calibration_report_missing".into())
+        );
         output.validate().unwrap();
     }
 
@@ -752,10 +758,12 @@ mod tests {
     fn negative_bundle_gets_explicit_preservation_action() {
         let output = compile_glioma_federated_evidence_operating_cycle(&request()).unwrap();
         assert!(output.negative_bundle_order.contains(&"b-02".to_string()));
-        assert!(output
-            .actions
-            .iter()
-            .any(|action| action.kind == FederatedCycleActionKind::PreserveNegativeResults));
+        assert!(
+            output
+                .actions
+                .iter()
+                .any(|action| action.kind == FederatedCycleActionKind::PreserveNegativeResults)
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Federated benchmarking and governance program ownership.
 
-use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
+use crate::glioma::catalog::{GliomaProgramDescriptor, GliomaProgramId, glioma_program_catalog};
 
 pub mod adaptive_campaign;
 pub mod campaign;
@@ -14,69 +14,71 @@ pub mod site_planner;
 pub mod transport_campaign;
 
 pub use adaptive_campaign::{
-    execute_federated_benchmark_adaptive_campaign,
-    execute_federated_benchmark_adaptive_campaign_dry_run, FederatedBenchmarkAdaptiveCampaign,
-    FederatedBenchmarkAdaptiveCampaignError, FederatedBenchmarkAdaptiveCampaignRequest,
-    FederatedBenchmarkAdaptiveDisposition, FederatedBenchmarkAdaptiveStopReason,
+    FederatedBenchmarkAdaptiveCampaign, FederatedBenchmarkAdaptiveCampaignError,
+    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkAdaptiveDisposition,
+    FederatedBenchmarkAdaptiveStopReason, execute_federated_benchmark_adaptive_campaign,
+    execute_federated_benchmark_adaptive_campaign_dry_run,
 };
 pub use campaign::{
-    execute_federated_benchmark_campaign, DryRunFederatedBenchmarkCampaignExecutor,
-    FederatedBenchmarkAction, FederatedBenchmarkActionKind, FederatedBenchmarkCampaign,
+    DryRunFederatedBenchmarkCampaignExecutor, FederatedBenchmarkAction,
+    FederatedBenchmarkActionKind, FederatedBenchmarkCampaign,
     FederatedBenchmarkCampaignDisposition, FederatedBenchmarkCampaignError,
     FederatedBenchmarkCampaignExecutor, FederatedBenchmarkCampaignRequest,
     FederatedBenchmarkCampaignRound, FederatedBenchmarkCampaignStopReason,
-    FederatedBenchmarkExecutionFailure,
+    FederatedBenchmarkExecutionFailure, execute_federated_benchmark_campaign,
 };
 
 pub use consensus::{
-    analyze_federated_benchmark, FederatedBenchmarkConsensus, FederatedBenchmarkContribution,
-    FederatedBenchmarkDisposition, FederatedBenchmarkError, FederatedBenchmarkRequest,
-    FederatedBenchmarkSite, FederatedBenchmarkSiteDisposition,
+    FederatedBenchmarkConsensus, FederatedBenchmarkContribution, FederatedBenchmarkDisposition,
+    FederatedBenchmarkError, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkSiteDisposition, analyze_federated_benchmark,
 };
 pub use federated_interpretation::{
-    interpret_glioma_federated_closure, FederatedInterpretationDisposition,
-    FederatedInterpretationError, FederatedInterpretationRequest, FederatedInterpretationRun,
+    FederatedInterpretationDisposition, FederatedInterpretationError,
+    FederatedInterpretationRequest, FederatedInterpretationRun, interpret_glioma_federated_closure,
 };
 
 pub use mechanism_transport::{
-    analyze_federated_mechanism_transport, FederatedMechanismContribution, FederatedMechanismSite,
-    FederatedMechanismTransportAnalysis, FederatedMechanismTransportDisposition,
-    FederatedMechanismTransportError, FederatedMechanismTransportRequest, FederatedModelCoverage,
+    FederatedMechanismContribution, FederatedMechanismSite, FederatedMechanismTransportAnalysis,
+    FederatedMechanismTransportDisposition, FederatedMechanismTransportError,
+    FederatedMechanismTransportRequest, FederatedModelCoverage,
+    analyze_federated_mechanism_transport,
 };
 pub use power::{
-    analyze_federated_benchmark_power, FederatedBenchmarkPower,
-    FederatedBenchmarkPowerContribution, FederatedBenchmarkPowerDisposition,
-    FederatedBenchmarkPowerError, FederatedBenchmarkPowerRequest,
-    FederatedBenchmarkPowerSiteDisposition,
+    FederatedBenchmarkPower, FederatedBenchmarkPowerContribution,
+    FederatedBenchmarkPowerDisposition, FederatedBenchmarkPowerError,
+    FederatedBenchmarkPowerRequest, FederatedBenchmarkPowerSiteDisposition,
+    analyze_federated_benchmark_power,
 };
 
 pub use transport_campaign::{
-    execute_federated_mechanism_transport_campaign,
-    execute_federated_mechanism_transport_campaign_dry_run,
     DryRunFederatedMechanismTransportExecutor, FederatedMechanismTransportAction,
     FederatedMechanismTransportCampaign, FederatedMechanismTransportCampaignDisposition,
     FederatedMechanismTransportCampaignError, FederatedMechanismTransportCampaignRequest,
     FederatedMechanismTransportCampaignRound, FederatedMechanismTransportCampaignStopReason,
     FederatedMechanismTransportExecutionFailure, FederatedMechanismTransportExecutor,
+    execute_federated_mechanism_transport_campaign,
+    execute_federated_mechanism_transport_campaign_dry_run,
 };
 
 pub use site_planner::{
-    plan_federated_benchmark_sites, FederatedBenchmarkCandidate, FederatedBenchmarkCandidateScore,
+    FederatedBenchmarkCandidate, FederatedBenchmarkCandidateScore,
     FederatedBenchmarkPlanDisposition, FederatedBenchmarkSitePlan,
     FederatedBenchmarkSitePlannerError, FederatedBenchmarkSitePlannerRequest,
+    plan_federated_benchmark_sites,
 };
 
 pub use operating_cycle::{
-    execute_federated_benchmark_operating_cycle,
-    execute_federated_benchmark_operating_cycle_dry_run, FederatedBenchmarkExecutionMode,
-    FederatedBenchmarkOperatingCycle, FederatedBenchmarkOperatingCycleDisposition,
-    FederatedBenchmarkOperatingCycleError, FederatedBenchmarkOperatingCycleRequest,
+    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycle,
+    FederatedBenchmarkOperatingCycleDisposition, FederatedBenchmarkOperatingCycleError,
+    FederatedBenchmarkOperatingCycleRequest, execute_federated_benchmark_operating_cycle,
+    execute_federated_benchmark_operating_cycle_dry_run,
 };
 
 pub use replication_transport::{
-    execute_validation_replication_transport, ReplicationAggregateQuality,
-    ValidationReplicationTransportDisposition, ValidationReplicationTransportError,
-    ValidationReplicationTransportRequest, ValidationReplicationTransportRun,
+    ReplicationAggregateQuality, ValidationReplicationTransportDisposition,
+    ValidationReplicationTransportError, ValidationReplicationTransportRequest,
+    ValidationReplicationTransportRun, execute_validation_replication_transport,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::FederatedBenchmarking;

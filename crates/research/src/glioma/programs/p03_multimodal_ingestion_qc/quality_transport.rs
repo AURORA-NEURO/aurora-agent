@@ -591,10 +591,12 @@ mod tests {
         .expect("blocked transport");
         assert_eq!(output.disposition, QualityTransportDisposition::Blocked);
         assert_eq!(output.blocked_order, vec![GliomaModality::Imaging]);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.contains("insufficient-target-calibration")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry.contains("insufficient-target-calibration"))
+        );
     }
 
     #[test]

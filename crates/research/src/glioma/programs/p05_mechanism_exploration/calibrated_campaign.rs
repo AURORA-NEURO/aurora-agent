@@ -9,9 +9,9 @@
 //! is promoted into a biological conclusion.
 
 use super::adaptive_policy::{
-    plan_glioma_adaptive_mechanism_policy, AdaptiveMechanismCampaignRequest,
-    AdaptiveMechanismObservation, AdaptiveMechanismPolicy, AdaptiveMechanismPolicyError,
-    AdaptiveMechanismPolicyExecutor,
+    AdaptiveMechanismCampaignRequest, AdaptiveMechanismObservation, AdaptiveMechanismPolicy,
+    AdaptiveMechanismPolicyError, AdaptiveMechanismPolicyExecutor,
+    plan_glioma_adaptive_mechanism_policy,
 };
 use super::calibration::{MechanismCalibration, MechanismCalibrationError};
 use crate::glioma_engine::GliomaModelSystem;
@@ -791,7 +791,7 @@ mod tests {
         AdaptiveMechanismPrediction,
     };
     use crate::glioma::programs::p05_mechanism_exploration::calibration::{
-        calibrate_glioma_mechanisms, MechanismCalibrationObservation, MechanismCalibrationRequest,
+        MechanismCalibrationObservation, MechanismCalibrationRequest, calibrate_glioma_mechanisms,
     };
     use crate::glioma_engine::{GliomaModality, LocalArtifactRef};
 
@@ -950,11 +950,13 @@ mod tests {
         assert!(!first.rounds.is_empty());
         assert!(first.calibration_gate_open);
         assert!(!first.completed_action_order.is_empty());
-        assert!(first
-            .rounds
-            .iter()
-            .flat_map(|round| round.action_scores.iter())
-            .any(|score| score.posterior_model_trust_milli > 0));
+        assert!(
+            first
+                .rounds
+                .iter()
+                .flat_map(|round| round.action_scores.iter())
+                .any(|score| score.posterior_model_trust_milli > 0)
+        );
         first.validate().unwrap();
     }
 

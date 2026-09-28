@@ -114,9 +114,7 @@ impl FederatedRetrievalAssuranceReceipt {
 
     pub fn digest(&self) -> Result<ContentHash, RetrievalAssuranceError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| RetrievalAssuranceError::Serialization(error.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|error| RetrievalAssuranceError::Serialization(error.to_string()))
     }
 }

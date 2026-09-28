@@ -172,13 +172,14 @@ the two selections can differ at all.
    Sections 01–19 and 23–29 are 0% build-ready, including `03_CORE_SPECIFICATIONS` (the PRISM
    IRs), `05_EXECUTION_RUNTIME`, all 50 files of `23_AGENT_INTERWEAVE_FABRIC` and all 24 of
    `25_BIOLOGICAL_IR_AND_LANGUAGE`.
-3. **The reference runtime hard-codes a radiogenomic goal string** into every Decision Section,
-   regardless of query.
-4. **The reference oracle compares label timestamps lexicographically as strings**, not as parsed
-   instants. It agrees with instant ordering for the zero-offset `...Z` form used in the packs and
-   silently disagrees under mixed offsets or differing sub-second precision.
-
-Items 3 and 4 are reproduced exactly for byte parity and flagged at their call sites.
+3. **The CPython reference runtime hard-codes a radiogenomic goal string** into every Decision
+   Section, regardless of query. The Rust compiler preserves that substitution only for the two
+   legacy query versions to retain their byte-parity contract; later versions report a missing goal.
+4. **The CPython reference oracle compares label times lexicographically as strings**, not as
+   parsed temporal values. Rust compares day-precision dates as civil dates and timezone-qualified
+   timestamps as absolute instants; it refuses mixed date/instant precision rather than guessing a
+   time or timezone. Mixed-offset timestamp cases intentionally diverge, while the canonical
+   fixture remains unchanged.
 
 ## 6. The structural family sweep (measured 2026-08-23)
 

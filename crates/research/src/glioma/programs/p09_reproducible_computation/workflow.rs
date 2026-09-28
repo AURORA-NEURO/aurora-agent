@@ -695,18 +695,24 @@ mod tests {
         permuted.input_artifact_ids.reverse();
         let second = compile_glioma_computation_workflow(&permuted).unwrap();
         assert_eq!(first, second);
-        assert!(first
-            .requested_terminal_order
-            .iter()
-            .all(|id| first.dependency_order.contains(id)));
-        assert!(first
-            .candidates
-            .iter()
-            .any(|candidate| candidate.task.operation == ComputationOperation::Ingest));
-        assert!(first
-            .candidates
-            .iter()
-            .any(|candidate| candidate.task.operation == ComputationOperation::Integrate));
+        assert!(
+            first
+                .requested_terminal_order
+                .iter()
+                .all(|id| first.dependency_order.contains(id))
+        );
+        assert!(
+            first
+                .candidates
+                .iter()
+                .any(|candidate| candidate.task.operation == ComputationOperation::Ingest)
+        );
+        assert!(
+            first
+                .candidates
+                .iter()
+                .any(|candidate| candidate.task.operation == ComputationOperation::Integrate)
+        );
         assert!(first.within_declared_resources);
     }
 
@@ -717,12 +723,16 @@ mod tests {
         request.duration_ticks = 1;
         let workflow = compile_glioma_computation_workflow(&request).unwrap();
         assert!(!workflow.within_declared_resources);
-        assert!(workflow
-            .uncertainty
-            .contains(&"declared-budget-below-workflow-estimate".to_string()));
-        assert!(workflow
-            .uncertainty
-            .contains(&"declared-duration-below-workflow-estimate".to_string()));
+        assert!(
+            workflow
+                .uncertainty
+                .contains(&"declared-budget-below-workflow-estimate".to_string())
+        );
+        assert!(
+            workflow
+                .uncertainty
+                .contains(&"declared-duration-below-workflow-estimate".to_string())
+        );
     }
 
     #[test]

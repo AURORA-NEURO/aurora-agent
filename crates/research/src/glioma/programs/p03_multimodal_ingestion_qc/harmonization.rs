@@ -673,9 +673,11 @@ mod tests {
         ];
         let output = harmonize_glioma_multimodal_batches(&request, &vectors).unwrap();
         assert_eq!(output.disposition, HarmonizationDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .contains(&"required-modality-coverage-incomplete".to_string()));
+        assert!(
+            output
+                .uncertainty
+                .contains(&"required-modality-coverage-incomplete".to_string())
+        );
     }
 
     #[test]
@@ -690,8 +692,10 @@ mod tests {
         ];
         let output = harmonize_glioma_multimodal_batches(&request, &vectors).unwrap();
         assert_eq!(output.disposition, HarmonizationDisposition::Partial);
-        assert!(output
-            .negative_evidence
-            .contains(&"batch-correction-exceeds-declared-bound".to_string()));
+        assert!(
+            output
+                .negative_evidence
+                .contains(&"batch-correction-exceeds-declared-bound".to_string())
+        );
     }
 }

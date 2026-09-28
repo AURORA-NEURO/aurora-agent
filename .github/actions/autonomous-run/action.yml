@@ -1,0 +1,128 @@
+name: Aurora Autonomous Agent
+description: Run one approval-bounded Aurora autonomous task through a caller-owned MCP workspace
+author: AURORA-NEURO
+inputs:
+  task:
+    description: Task text passed transiently to the autonomous agent
+    required: true
+  mcp-command:
+    description: MCP executable and arguments; parsed and launched without a shell
+    required: true
+  mcp-working-directory:
+    description: Working directory for the MCP process; defaults to GITHUB_WORKSPACE
+    required: false
+    default: ${{ github.workspace }}
+  provider:
+    description: Configured LLM provider identifier
+    required: false
+    default: openai
+  base-url:
+    description: Optional provider base URL for a configured custom provider
+    required: false
+    default: ''
+  models:
+    description: One or more provider model names, one per line
+    required: true
+  credential-env:
+    description: Name of the environment variable containing the provider key; the action never reads or logs its value
+    required: false
+    default: OPENAI_API_KEY
+  domain:
+    description: Optional explicit autonomous domain; empty selects automatic routing
+    required: false
+    default: ''
+  hints:
+    description: Optional caller routing hints, one per line
+    required: false
+    default: ''
+  execution-mode:
+    description: provider, tool_loop, or mission
+    required: false
+    default: provider
+  allow-mcp-tools:
+    description: Exact MCP tool allowlist, one tool name per line; required for tool_loop and mission modes
+    required: false
+    default: ''
+  approve-provider-call:
+    description: Explicitly authorize provider calls for this workflow run
+    required: false
+    default: 'false'
+  approve-mission-dispatch:
+    description: Explicitly authorize effectful mission dispatch; provider approval is also required
+    required: false
+    default: 'false'
+  single-domain:
+    description: Keep automatic routing within one domain
+    required: false
+    default: 'false'
+  max-domains:
+    description: Maximum automatic route fan-out, from 1 to 4
+    required: false
+    default: '3'
+  max-steps:
+    description: Maximum provider/tool-loop steps, from 1 to 128
+    required: false
+    default: '8'
+  mcp-timeout:
+    description: MCP request timeout in seconds, bounded from 1 to 600
+    required: false
+    default: '30'
+  run-id:
+    description: Optional bounded run identity; defaults to GITHUB_RUN_ID
+    required: false
+    default: ''
+  result-file:
+    description: Optional path inside GITHUB_WORKSPACE to persist the full JSON result; this may contain task and model content
+    required: false
+    default: ''
+  python-version:
+    description: Python runtime for the dependency-free SDK
+    required: false
+    default: '3.12'
+outputs:
+  status:
+    description: Bounded result status from the autonomous agent
+    value: ${{ steps.run.outputs.status }}
+  routing-mode:
+    description: automatic or explicit_domain
+    value: ${{ steps.run.outputs.routing_mode }}
+  run-id:
+    description: Caller/GitHub run identity
+    value: ${{ steps.run.outputs.run_id }}
+  result-digest:
+    description: SHA-256 digest over the exact CLI JSON result bytes
+    value: ${{ steps.run.outputs.result_digest }}
+  result-file:
+    description: Optional caller-owned path containing the full JSON result
+    value: ${{ steps.run.outputs.result_file }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      name: Set up Python
+      with:
+        python-version: ${{ inputs.python-version }}
+    - id: run
+      name: Run Aurora autonomous task
+      shell: bash
+      env:
+        INPUT_TASK: ${{ inputs.task }}
+        INPUT_MCP_COMMAND: ${{ inputs['mcp-command'] }}
+        INPUT_MCP_WORKING_DIRECTORY: ${{ inputs['mcp-working-directory'] }}
+        INPUT_PROVIDER: ${{ inputs.provider }}
+        INPUT_BASE_URL: ${{ inputs['base-url'] }}
+        INPUT_MODELS: ${{ inputs.models }}
+        INPUT_CREDENTIAL_ENV: ${{ inputs['credential-env'] }}
+        INPUT_DOMAIN: ${{ inputs.domain }}
+        INPUT_HINTS: ${{ inputs.hints }}
+        INPUT_EXECUTION_MODE: ${{ inputs['execution-mode'] }}
+        INPUT_ALLOW_MCP_TOOLS: ${{ inputs['allow-mcp-tools'] }}
+        INPUT_APPROVE_PROVIDER_CALL: ${{ inputs['approve-provider-call'] }}
+        INPUT_APPROVE_MISSION_DISPATCH: ${{ inputs['approve-mission-dispatch'] }}
+        INPUT_SINGLE_DOMAIN: ${{ inputs['single-domain'] }}
+        INPUT_MAX_DOMAINS: ${{ inputs['max-domains'] }}
+        INPUT_MAX_STEPS: ${{ inputs['max-steps'] }}
+        INPUT_MCP_TIMEOUT: ${{ inputs['mcp-timeout'] }}
+        INPUT_RUN_ID: ${{ inputs['run-id'] }}
+        INPUT_RESULT_FILE: ${{ inputs['result-file'] }}
+      run: python "$GITHUB_ACTION_PATH/../../../tools/autonomous_agent_action.py"

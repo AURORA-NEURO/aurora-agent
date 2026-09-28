@@ -575,10 +575,12 @@ mod tests {
         let result =
             optimize_glioma_decision_value(&request(vec![unavailable])).expect("optimization");
         assert!(result.blocked_order.contains(&"unavailable".into()));
-        assert!(result
-            .negative_evidence_order
-            .iter()
-            .any(|entry| entry.contains("unavailable")));
+        assert!(
+            result
+                .negative_evidence_order
+                .iter()
+                .any(|entry| entry.contains("unavailable"))
+        );
     }
 
     #[test]
@@ -590,9 +592,11 @@ mod tests {
         let result = optimize_glioma_decision_value(&request(vec![prerequisite, dependent]))
             .expect("optimization");
         assert!(result.blocked_order.contains(&"b-dependent".into()));
-        assert!(result
-            .negative_evidence_order
-            .iter()
-            .any(|entry| entry.contains("dependency")));
+        assert!(
+            result
+                .negative_evidence_order
+                .iter()
+                .any(|entry| entry.contains("dependency"))
+        );
     }
 }

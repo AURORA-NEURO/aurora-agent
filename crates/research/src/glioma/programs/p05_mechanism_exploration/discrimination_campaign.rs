@@ -7,9 +7,9 @@
 //! evidence, retries, budget exhaustion, and no-progress states remain first-class output.
 
 use super::discrimination::{
-    discriminate_mechanisms, MechanismDiscrimination, MechanismDiscriminationDisposition,
-    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
-    MechanismHypothesis,
+    MechanismDiscrimination, MechanismDiscriminationDisposition, MechanismDiscriminationRequest,
+    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
+    discriminate_mechanisms,
 };
 use crate::glioma_engine::LocalArtifactRef;
 use bioprism_ids::ContentHash;
@@ -688,11 +688,13 @@ mod tests {
             output.disposition,
             MechanismDiscriminationCampaignDisposition::Unresolved
         );
-        assert!(output
-            .final_discrimination
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("no-local")));
+        assert!(
+            output
+                .final_discrimination
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("no-local"))
+        );
         output.validate().unwrap();
     }
 

@@ -585,9 +585,11 @@ mod tests {
             StratifiedCausalActionKind::AddMissingStratumCoverage
         );
         assert!(output.excluded_stratum_order.contains(&"high".to_string()));
-        assert!(output
-            .uncertainty
-            .contains(&"eligible-stratum-floor-not-met".to_string()));
+        assert!(
+            output
+                .uncertainty
+                .contains(&"eligible-stratum-floor-not-met".to_string())
+        );
     }
 
     #[test]

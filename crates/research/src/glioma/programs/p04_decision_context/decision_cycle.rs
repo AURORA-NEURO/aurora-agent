@@ -6,23 +6,23 @@
 //! observation, or widen authority beyond the caller-owned executor.
 
 use super::action_graph::{
-    compile_decision_action_graph, DecisionActionGraph, DecisionActionGraphError,
-    DecisionActionGraphRequest,
+    DecisionActionGraph, DecisionActionGraphError, DecisionActionGraphRequest,
+    compile_decision_action_graph,
 };
 use super::branch_planner::{
-    plan_glioma_decision_branches, DecisionBranchPlan, DecisionBranchPlannerError,
-    DecisionBranchPlannerRequest,
+    DecisionBranchPlan, DecisionBranchPlannerError, DecisionBranchPlannerRequest,
+    plan_glioma_decision_branches,
 };
 use super::campaign::{
-    execute_glioma_decision_context_campaign, DecisionContextCampaign,
-    DecisionContextCampaignError, DecisionContextCampaignExecutor, DecisionContextCampaignRequest,
+    DecisionContextCampaign, DecisionContextCampaignError, DecisionContextCampaignExecutor,
+    DecisionContextCampaignRequest, execute_glioma_decision_context_campaign,
 };
 use super::context_compiler::{
-    compile_decision_context, DecisionContext, DecisionContextError, DecisionContextRequest,
+    DecisionContext, DecisionContextError, DecisionContextRequest, compile_decision_context,
 };
 use crate::glioma::programs::p02_evidence_knowledge::{
-    compile_typed_knowledge, KnowledgeComposition, KnowledgeCompositionError, KnowledgeRequest,
-    TypedKnowledge,
+    KnowledgeComposition, KnowledgeCompositionError, KnowledgeRequest, TypedKnowledge,
+    compile_typed_knowledge,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -343,7 +343,7 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::{
-        compose_knowledge_graph, KnowledgeCompositionRequest, KnowledgeRelation,
+        KnowledgeCompositionRequest, KnowledgeRelation, compose_knowledge_graph,
     };
     use crate::glioma::programs::p04_decision_context::{
         DecisionActionGraphRequest, DecisionBranchPlannerRequest, DecisionContextRequest,

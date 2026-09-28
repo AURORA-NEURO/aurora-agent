@@ -13,9 +13,9 @@ use super::execution::{
 };
 use super::planning::{ComputationCandidate, ComputationPortfolioRequest};
 use super::portfolio_execution::{
-    execute_glioma_computation_portfolio, ComputationPortfolioExecution,
-    ComputationPortfolioExecutionDisposition, ComputationPortfolioExecutionError,
-    ComputationPortfolioExecutionRequest,
+    ComputationPortfolioExecution, ComputationPortfolioExecutionDisposition,
+    ComputationPortfolioExecutionError, ComputationPortfolioExecutionRequest,
+    execute_glioma_computation_portfolio,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_ids::ContentHash;

@@ -154,11 +154,10 @@ fn digest_input(output: &ComputationReproducibility) -> serde_json::Value {
 }
 
 fn relative_drift(low: u64, high: u64) -> u64 {
-    if high == 0 {
-        0
-    } else {
-        high.saturating_sub(low).saturating_mul(1_000) / high
-    }
+    high.saturating_sub(low)
+        .saturating_mul(1_000)
+        .checked_div(high)
+        .unwrap_or_default()
 }
 
 impl ComputationTaskReproducibilitySummary {
@@ -176,7 +175,7 @@ impl ComputationTaskReproducibilitySummary {
                     _ => {
                         return Err(ComputationReproducibilityError::InvalidOutput(
                             "effect bounds must be both present or both absent".into(),
-                        ))
+                        ));
                     }
                 }
             || !canonical(&self.negative_evidence)
@@ -584,9 +583,11 @@ mod tests {
             output.disposition,
             ComputationReproducibilityDisposition::Unresolved
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("digest")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("digest"))
+        );
     }
 }

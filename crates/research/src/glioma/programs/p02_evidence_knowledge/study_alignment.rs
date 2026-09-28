@@ -310,11 +310,10 @@ fn weighted_mean(values: impl Iterator<Item = (u16, u16)>) -> u16 {
         numerator += u64::from(value) * u64::from(weight.max(1));
         denominator += u64::from(weight.max(1));
     }
-    if denominator == 0 {
-        0
-    } else {
-        (numerator / denominator).min(1_000) as u16
-    }
+    numerator
+        .checked_div(denominator)
+        .unwrap_or_default()
+        .min(1_000) as u16
 }
 
 fn absolute_deviation(values: &[u16], mean: u16) -> u16 {
@@ -837,9 +836,11 @@ mod tests {
         ]))
         .expect("alignment");
         assert_eq!(output.disposition, MultiStudyKnowledgeDisposition::Partial);
-        assert!(output
-            .heterogeneous_claim_order
-            .contains(&"egfr-invasion-organoid".into()));
+        assert!(
+            output
+                .heterogeneous_claim_order
+                .contains(&"egfr-invasion-organoid".into())
+        );
         assert!(!output.negative_evidence.is_empty());
     }
 

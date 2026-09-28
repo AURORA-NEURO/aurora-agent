@@ -1357,10 +1357,12 @@ mod tests {
         let second = plan_glioma_adaptive_mechanism_policy(&request.policy).unwrap();
         assert_eq!(first.digest, second.digest);
         assert_eq!(first.selected_action_order.first(), Some(&"assay-a".into()));
-        assert!(first
-            .scores
-            .iter()
-            .any(|score| score.information_gain_milli > 0));
+        assert!(
+            first
+                .scores
+                .iter()
+                .any(|score| score.information_gain_milli > 0)
+        );
         first.validate().unwrap();
     }
 
@@ -1370,10 +1372,12 @@ mod tests {
         let campaign =
             execute_glioma_adaptive_mechanism_campaign(&request(), &mut executor).unwrap();
         assert!(!campaign.rounds.is_empty());
-        assert!(campaign
-            .observations
-            .iter()
-            .all(|observation| observation.artifact.local_only));
+        assert!(
+            campaign
+                .observations
+                .iter()
+                .all(|observation| observation.artifact.local_only)
+        );
         assert!(campaign.completed_action_order.contains(&"assay-a".into()));
         campaign.validate().unwrap();
     }

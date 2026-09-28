@@ -258,7 +258,7 @@ fn state_signal(state: EvidenceState, effect_milli: i32) -> i32 {
 
 fn observation_weight(observation: &MultiSiteOutcomeObservation) -> u128 {
     let uncertainty = u128::from(observation.uncertainty_milli.max(1));
-    u128::from(observation.sample_count.min(10_000).max(1))
+    u128::from(observation.sample_count.clamp(1, 10_000))
         .saturating_mul(u128::from(observation.quality_milli.max(1)))
         .saturating_mul(u128::from(observation.reproducibility_milli.max(1)))
         .saturating_mul(1_000)
@@ -349,17 +349,14 @@ fn site_aggregates(observations: &[MultiSiteOutcomeObservation]) -> Vec<SiteAggr
                 .map(|observation| observation_weight(observation))
                 .sum::<u128>();
             let fraction = |state: EvidenceState| {
-                if total_state_weight == 0 {
-                    0
-                } else {
-                    (observations
-                        .iter()
-                        .filter(|observation| observation.state == state)
-                        .map(|observation| observation_weight(observation))
-                        .sum::<u128>()
-                        .saturating_mul(1_000)
-                        / total_state_weight) as u16
-                }
+                observations
+                    .iter()
+                    .filter(|observation| observation.state == state)
+                    .map(|observation| observation_weight(observation))
+                    .sum::<u128>()
+                    .saturating_mul(1_000)
+                    .checked_div(total_state_weight)
+                    .unwrap_or_default() as u16
             };
             SiteAggregate {
                 site_id,

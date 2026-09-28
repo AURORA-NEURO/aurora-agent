@@ -529,7 +529,7 @@ typing the explicit non-durability of webhook subscriptions and pending deliveri
 
 These helpers type the contract's top-level shape while leaving nested domain records as JSON
 objects where the Rust crate is authoritative. That keeps the client useful across all domain
-families without maintaining a fragile partial clone of the 200-tool catalogue. `capabilityDiscover`
+families without maintaining a fragile partial clone of the MCP tool catalogue. `capabilityDiscover`
 searches the explicit cross-domain catalogue and returns typed `CapabilityDiscoverResult` matches
 with domains, crates, CLI/Python artifacts, ranked fields, and optional authoritative schemas;
 `capabilityAudit` returns typed `CapabilityAuditResult` parity counts, schema-quality totals,
@@ -1594,6 +1594,43 @@ Completion refuses unresolved required criteria, and `AutonomousGoalPersistenceC
 content-addressed snapshots to an application-owned durable adapter. The ledger never retains goal
 text, prompts, provider responses, tool arguments, or credentials.
 
+Goal timestamps in snapshot schema 0.2 are exact decimal strings containing epoch nanoseconds.
+`migrateLegacyAutonomousGoalSnapshot(snapshot, "milliseconds" | "nanoseconds")` imports a 0.1
+snapshot only after verifying its original snapshot digest, record digests, and complete event
+chain. It converts timestamps with integer arithmetic, re-hashes the new event chain, and includes
+the old snapshot digest and chain head in persisted migration provenance. Choose the unit written
+by the original producer; the SDK never infers it. Restoring and snapshotting the migrated ledger
+preserves this provenance.
+
+Preview-admission records and snapshots also use exact nanosecond strings in schema 0.2. Persisted
+0.1 approvals are rejected with a re-review requirement, since converting an old decision must not
+extend its authority. Pass `issued_at_ns`, `expires_at_ns`, and verification `now_ns` in the shared
+nanosecond contract; the goal control loop converts its live millisecond clock exactly before
+checking expiry.
+
+Worker-journal events, snapshots, authenticated envelopes, and dispatch-resolution receipts use
+exact decimal-string nanoseconds in schema 0.2. The journal's default clock converts `Date.now()` to
+nanoseconds with integer arithmetic; custom `clock` and `created_ns` inputs may be safe integers,
+decimal strings, or `bigint`, and the wire form is always a string. Use
+`migrateLegacyAutonomousGoalWorkerJournalSnapshot(snapshot, "milliseconds" | "nanoseconds")` to
+verify a 0.1 snapshot and its complete event chain before conversion. For authenticated shared-store
+data, `migrateLegacyAuthenticatedAutonomousGoalWorkerJournalEnvelope(envelope, { source_timestamp_unit,
+keys, active_key_id })` verifies the old HMAC and reseals the migrated snapshot with the selected key.
+Write its returned envelope using the store's CAS with the old snapshot digest as the expected
+version. A 0.1 dispatch-resolution receipt cannot be converted safely; obtain a fresh externally
+verified receipt under schema 0.2. Control-loop checkpoints now use schema 0.2 as well, and learned
+signal `deadline_ns` values are decimal strings. Convert a legacy checkpoint with
+`migrateLegacyAutonomousGoalControlLoopSnapshot(snapshot, "milliseconds" | "nanoseconds")`; the
+migrator verifies the original snapshot digest, converts deadlines with the caller's explicit unit,
+and preserves migration provenance across subsequent checkpoint generations.
+
+Every persisted schema 0.2 replay artifact requires canonical decimal-string timestamps, including
+schedules, nested preview schedules, journal events, and dispatch receipts. Runtime arguments may
+use a safe integer nanosecond value or `bigint`, but validators reject numeric timestamp spellings
+inside persisted artifacts. The cross-SDK recovery scenario migrates goal, journal, and checkpoint
+state, persists a completed cycle, restarts, and verifies identical ledger, journal, and checkpoint
+digests without re-executing the goal.
+
 `AutonomousAgent.runGoalStep(...)` connects that ledger to the normal autonomous execution path. It
 identity-checks or creates the objective, advances one bounded attempt, invokes the routed
 planning/model/provider runtime, and maps `approval_required`, reconciliation, partial, blocked,
@@ -2203,6 +2240,31 @@ If only the bridge-selected requirements are newly evaluated, the result can be
 requirements still lack accepted evaluator decisions. This explicit state prevents partial
 acquisition from being mistaken for a fully settled workflow.
 
+After a reviewed execution, call `settleClaimIntegrityAcquisition()` with the original assessment,
+bridge, binding, execution result, claim contracts, full existing evidence set, and
+`acquiredEvidence` links of `{ receiptDigest, assessmentDigest, evidence }`, plus a deployment-owned
+`evidenceAuthority` implementing `AutonomousClaimIntegrityEvidenceAuthority`. The authority receives
+an immutable digest-bound projection of the selected candidate, exact acquisition request and
+receipt, accepted source-quality assessment, claim contracts, and proposed evidence metadata; it
+must independently verify claim-level quality against an existing authority receipt and return that
+receipt's digest. The verifier should be read-only; it must not issue or mutate authority receipts
+during settlement. Settlement verifies that the exact bound request produced each linked receipt,
+that the receipt has the linked accepted
+runtime assessment and matching source/evidence digest, and that the evidence references only
+claims authorized by the selected candidate's integrity actions. A resumable result is accepted
+only after it carries a completed execution result. Failed, omitted, or unevaluated requests cannot
+promote claims. The method returns the next digest-fenced assessment and attaches source receipt,
+evaluator, evidence-authority identity/version and review/receipt digests, binding, and bridge
+digests to each new evidence contract. Caller-supplied stance,
+support, reliability, modality, and reproducibility remain explicit judgments; the settlement
+checks their acquisition provenance without certifying factual truth or deriving confidence from
+transport status or evaluator score. Supply the complete previous evidence set because the
+metadata-only assessment does not retain the original evidence contracts.
+Review schema `/0.2` encodes bounded scores and weights as integer units of `1e-8`, and uses a
+type-tagged portable encoding for metadata fingerprints. Metadata is capped at 16 KiB of canonical
+JSON; unsafe integer and invalid Unicode values are refused so Python and TypeScript can verify the
+same review digest. The shared cap is exported as `AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES`.
+
 ### Post-run reliance and cross-domain response gates
 
 The facade's final post-run boundary is `projectOutcomeIntegrityRun()` followed by
@@ -2256,7 +2318,9 @@ as `unconfigured`; strict mode raises `AutonomousAgentPersistenceLifecycleError`
 report attached, and no report includes tasks, prompts, provider responses, credentials, tool
 arguments, evidence contents, or raw exception messages. The facade does not add cross-store
 atomicity: CAS, crash recovery between component writes, and coordination with deployment-owned
-identity or approval state remain explicit application responsibilities.
+identity or approval state remain explicit application responsibilities. Restore receipts that
+explicitly report `restored: false` are classified as `empty`, so first-run state is not presented
+as a recovered snapshot.
 
 ### Protected model discovery and all-domain inventory
 
@@ -2272,3 +2336,68 @@ request-scoped workflow. Inventory snapshots retain only model metadata, provide
 domain coverage, and digests; provider credentials, raw catalogues, prompts, and responses are
 never serialized. Inventory registration is not execution approval: selection, evaluator
 evidence, launch admission, and provider invocation remain separate gates.
+
+## Reviewed ClinicalTrials.gov metadata retrieval
+
+`ReviewedClinicalTrialsRetrievalAdapter` provides the TypeScript live-read boundary for ClinicalTrials.gov
+metadata. Constructing the config and calling `prepare()` are network-free. The config accepts only
+the fixed `glioblastoma` and `glioma` condition lanes, a bounded page size/page count, the reviewed
+field allow-list, and an explicit transport identity. The built-in transport is pinned to the HTTPS
+`/api/v2/studies` endpoint, refuses redirects, sends no credentials, rejects duplicate JSON keys,
+and applies the configured timeout plus per-page, aggregate response, tree, record, and bundle
+bounds. A caller-injected transport must enforce its own timeout and network policy under its
+declared transport identity.
+
+```ts
+const adapter = new ReviewedClinicalTrialsRetrievalAdapter(
+  new ReviewedClinicalTrialsRetrievalConfig({
+    conditionLanes: ["glioblastoma"],
+    pageSize: 25,
+    maxPages: 2,
+  }),
+);
+const plan = adapter.prepare();
+const result = await adapter.execute(plan, { approveSourceDispatch: true });
+const transientBundle = result.bundle;
+const metadataOnlyReceipt = result.receipt;
+```
+
+Execution requires the literal approval flag. `result.toJSON()` includes the receipt and retention
+label; study rows are available only from the caller-owned transient result or
+`toTransientJSON()`. The single-lane
+`createReviewedClinicalTrialsAutonomousEvidenceRegistration()` helper binds an exact plan to the
+generic evidence acquire/project callbacks and verifies the bundle, per-source digests, counts,
+plan binding, and receipt before projecting digest-only observations. Registry metadata does not
+establish eligibility, treatment benefit, or clinical applicability. Eligibility text, results,
+documents, contact data, participant data, and arbitrary caller-defined condition queries are out
+of scope.
+
+## Reviewed Europe PMC publication-metadata retrieval
+
+`ReviewedEuropePmcRetrievalAdapter` reads the fixed Europe PMC search endpoint in `json` / `lite`
+mode. `prepare()` is network-free and binds one or more lanes from the fixed glioma, cranial-base,
+craniosynostosis, encephalocele, spina-bifida, and Chiari catalogue. Approved execution requires
+`approveSourceDispatch: true`, uses bounded cursor pagination, refuses redirects, caps response,
+aggregate, tree, and bundle sizes, and rejects duplicate JSON fields and malformed publication
+identifiers. The built-in transport applies its configured timeout; an injected transport receives
+an abort signal but remains responsible for enforcing its declared network and redirect policy.
+
+```ts
+const adapter = new ReviewedEuropePmcRetrievalAdapter(
+  new ReviewedEuropePmcRetrievalConfig({ lanes: ["glioma"], pageSize: 25, maxPages: 2 }),
+);
+const plan = adapter.prepare();
+const result = await adapter.execute(plan, { approveSourceDispatch: true });
+const transientPublications = result.bundle.publications;
+const metadataOnlyReceipt = result.receipt;
+```
+
+`result.toJSON()` retains only the receipt and retention label; publication metadata is exposed
+only through the caller-owned transient result. Changing page totals remain unknown, while capped
+or demonstrably omitted results remain partial. The one-lane
+`createReviewedEuropePmcAutonomousEvidenceRegistration()` helper validates the transient
+publication rows, per-source digest, lane binding, counts, completeness, and receipt before it
+projects digest-only provenance observations. This source supplies bibliographic metadata, not
+abstracts, full text, exhaustive coverage, or independent study-quality judgments. See the
+[Europe PMC REST API](https://dev.europepmc.org/RestfulWebService) and its
+[web-service reference](https://dev.europepmc.org/docs/EBI_Europe_PMC_Web_Service_Reference.pdf).

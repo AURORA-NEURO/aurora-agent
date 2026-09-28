@@ -569,8 +569,8 @@ pub fn execute_glioma_multimodal_quality_schedule<E: QualityScheduleExecutor>(
 mod tests {
     use super::*;
     use crate::glioma::programs::p03_multimodal_ingestion_qc::quality_scheduler::{
-        plan_glioma_multimodal_quality_schedule, QualityAcquisitionCandidate,
-        QualityScheduleRequest,
+        QualityAcquisitionCandidate, QualityScheduleRequest,
+        plan_glioma_multimodal_quality_schedule,
     };
     use crate::glioma_engine::GliomaModelSystem;
 
@@ -685,9 +685,11 @@ mod tests {
             output.stop_reason,
             QualityExecutionStopReason::RequiredFailure
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.contains("executor-failed")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry.contains("executor-failed"))
+        );
     }
 }

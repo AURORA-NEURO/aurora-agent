@@ -7,14 +7,14 @@
 //! synthetic action artifacts are not biological observations.
 
 use super::adaptive_execution::{
-    execute_glioma_adaptive_frontier, AdaptiveFrontierExecution,
-    AdaptiveFrontierExecutionDisposition, AdaptiveFrontierExecutionError,
-    AdaptiveFrontierExecutionRequest,
+    AdaptiveFrontierExecution, AdaptiveFrontierExecutionDisposition,
+    AdaptiveFrontierExecutionError, AdaptiveFrontierExecutionRequest,
+    execute_glioma_adaptive_frontier,
 };
 use super::adaptive_frontier::AdaptiveFrontierRequest;
 use super::synthesis::{
-    synthesize_glioma_interpretation, InterpretationSynthesis, InterpretationSynthesisDisposition,
-    InterpretationSynthesisError, InterpretationSynthesisRequest,
+    InterpretationSynthesis, InterpretationSynthesisDisposition, InterpretationSynthesisError,
+    InterpretationSynthesisRequest, synthesize_glioma_interpretation,
 };
 use crate::glioma::programs::p07_protocol_simulation::{
     DryRunGliomaActionExecutor, GliomaActionExecutor,
@@ -655,10 +655,12 @@ mod tests {
             first.rounds[0].execution.as_ref().unwrap().disposition,
             AdaptiveFrontierExecutionDisposition::Executed
         );
-        assert!(first
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("synthetic-dry-run")));
+        assert!(
+            first
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("synthetic-dry-run"))
+        );
     }
 
     #[test]

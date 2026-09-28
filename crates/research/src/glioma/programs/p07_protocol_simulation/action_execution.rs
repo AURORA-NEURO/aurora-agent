@@ -7,8 +7,8 @@
 //! never opens a device connection, moves raw data, or makes a clinical decision.
 
 use crate::glioma_engine::{
-    select_glioma_actions, GliomaActionCandidate, GliomaActionSelection, GliomaModality,
-    GliomaModelSystem, GliomaSelectionConfig, LocalArtifactRef,
+    GliomaActionCandidate, GliomaActionSelection, GliomaModality, GliomaModelSystem,
+    GliomaSelectionConfig, LocalArtifactRef, select_glioma_actions,
 };
 use bioprism_foundation::AutonomyTier;
 use bioprism_ids::ContentHash;

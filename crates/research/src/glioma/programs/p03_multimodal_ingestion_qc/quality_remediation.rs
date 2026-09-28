@@ -482,10 +482,11 @@ mod tests {
         request.max_budget_units = 1;
         let plan = plan_glioma_multimodal_quality_remediation(&request).expect("plan");
         assert_eq!(plan.disposition, QualityRemediationDisposition::Unresolved);
-        assert!(plan
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.starts_with("resource-bound:")));
+        assert!(
+            plan.negative_evidence
+                .iter()
+                .any(|entry| entry.starts_with("resource-bound:"))
+        );
     }
 
     #[test]
@@ -498,9 +499,10 @@ mod tests {
         request.require_approval_for_external = true;
         let plan = plan_glioma_multimodal_quality_remediation(&request).expect("plan");
         assert_eq!(plan.disposition, QualityRemediationDisposition::Blocked);
-        assert!(plan
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.starts_with("approval-required:")));
+        assert!(
+            plan.negative_evidence
+                .iter()
+                .any(|entry| entry.starts_with("approval-required:"))
+        );
     }
 }

@@ -863,10 +863,12 @@ mod tests {
         ];
         let output = analyze_glioma_clonal_evolution(&request(), &profiles).unwrap();
         assert_eq!(output.disposition, ClonalEvolutionDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("no-parent-child-edge")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("no-parent-child-edge"))
+        );
     }
 
     #[test]
@@ -895,10 +897,12 @@ mod tests {
             ),
         ];
         let output = analyze_glioma_clonal_evolution(&request(), &profiles).unwrap();
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("parent-marker-unmeasured")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("parent-marker-unmeasured"))
+        );
     }
 
     #[test]

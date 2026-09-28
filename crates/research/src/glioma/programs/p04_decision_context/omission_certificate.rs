@@ -503,11 +503,10 @@ pub fn certify_decision_omissions(
         .collect::<Vec<_>>();
     next_action_order.truncate(request.max_next_actions);
     let total = entries.len() as u32;
-    let completeness_milli = if total == 0 {
-        0
-    } else {
-        ((closed_order.len() as u32 * 1_000) / total).min(1_000) as u16
-    };
+    let completeness_milli = ((closed_order.len() as u32 * 1_000)
+        .checked_div(total)
+        .unwrap_or_default())
+    .min(1_000) as u16;
     let disposition =
         if blocked_order.is_empty() && omission_order.is_empty() && unmeasured_order.is_empty() {
             DecisionOmissionDisposition::Qualified
@@ -716,14 +715,18 @@ mod tests {
             &graph,
         )
         .unwrap();
-        assert!(certificate
-            .entries
-            .iter()
-            .any(|entry| entry.state == DecisionCoverageState::Blocked));
-        assert!(certificate
-            .entries
-            .iter()
-            .any(|entry| entry.state == DecisionCoverageState::Unmeasured));
+        assert!(
+            certificate
+                .entries
+                .iter()
+                .any(|entry| entry.state == DecisionCoverageState::Blocked)
+        );
+        assert!(
+            certificate
+                .entries
+                .iter()
+                .any(|entry| entry.state == DecisionCoverageState::Unmeasured)
+        );
         assert_eq!(
             certificate.disposition,
             DecisionOmissionDisposition::Blocked

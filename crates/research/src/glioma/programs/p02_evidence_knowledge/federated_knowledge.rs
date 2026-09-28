@@ -194,15 +194,15 @@ fn pooled_claim(sites: &[&FederatedKnowledgeSiteClaim]) -> PooledClaim {
     }
     let (dominant_disposition, dominant_mass) = disposition_mass
         .iter()
-        .max_by(|left, right| left.1 .1.cmp(&right.1 .1).then_with(|| right.0.cmp(left.0)))
+        .max_by(|left, right| left.1.1.cmp(&right.1.1).then_with(|| right.0.cmp(left.0)))
         .map(|(_, (disposition, mass))| (*disposition, *mass))
         .unwrap_or((KnowledgeClaimDisposition::Unresolved, 0));
     let total_mass = sites.iter().map(|site| weight(site)).sum::<u128>();
-    let consensus_milli = if total_mass == 0 {
-        0
-    } else {
-        (dominant_mass.saturating_mul(1_000) / total_mass).min(1_000) as u16
-    };
+    let consensus_milli = dominant_mass
+        .saturating_mul(1_000)
+        .checked_div(total_mass)
+        .unwrap_or_default()
+        .min(1_000) as u16;
     let max_deviation = sites
         .iter()
         .map(|site| site.confidence_milli.abs_diff(confidence_milli))
@@ -446,7 +446,9 @@ pub fn analyze_federated_knowledge(
                 FederatedKnowledgeKind::ConsensusNegative => {
                     "independent compilers agree on a negative disposition; preserve the null/negative result for replanning"
                 }
-                FederatedKnowledgeKind::SiteSpecific | FederatedKnowledgeKind::Unresolved => unreachable!(),
+                FederatedKnowledgeKind::SiteSpecific | FederatedKnowledgeKind::Unresolved => {
+                    unreachable!()
+                }
             };
             actions.push(FederatedKnowledgeAction {
                 action_id: format!("federated-knowledge:{claim_id}"),

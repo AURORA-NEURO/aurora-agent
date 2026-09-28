@@ -371,8 +371,8 @@ pub fn compile_federated_glioma_execution_handoff(
 #[cfg(test)]
 mod tests {
     use super::super::federated_acquisition_policy::{
-        plan_federated_glioma_evidence_acquisition, FederatedAcquisitionKind,
-        FederatedAcquisitionPolicyRequest, FederatedAcquisitionSite, FederatedEvidenceNeed,
+        FederatedAcquisitionKind, FederatedAcquisitionPolicyRequest, FederatedAcquisitionSite,
+        FederatedEvidenceNeed, plan_federated_glioma_evidence_acquisition,
     };
     use super::*;
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem};

@@ -6,7 +6,7 @@
 //! object that the existing release gate and institution-owned signer can review.
 
 use crate::glioma::release::{
-    build_research_object_manifest, ReleaseStatus, ResearchObjectManifest, ResearchObjectRequest,
+    ReleaseStatus, ResearchObjectManifest, ResearchObjectRequest, build_research_object_manifest,
 };
 use crate::glioma_engine::{GliomaModality, LocalArtifactRef};
 use bioprism_ids::ContentHash;
@@ -454,9 +454,11 @@ mod tests {
             MultimodalResearchObjectDisposition::Blocked
         );
         assert!(!output.missing_required_modalities.is_empty());
-        assert!(output
-            .blocked_order
-            .iter()
-            .any(|item| item.starts_with("semantic-loss:")));
+        assert!(
+            output
+                .blocked_order
+                .iter()
+                .any(|item| item.starts_with("semantic-loss:"))
+        );
     }
 }

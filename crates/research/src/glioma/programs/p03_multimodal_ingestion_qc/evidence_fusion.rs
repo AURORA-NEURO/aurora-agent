@@ -537,9 +537,11 @@ mod tests {
             output.contradictory_modality_order,
             vec![GliomaModality::Genomics, GliomaModality::Imaging]
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("contradict")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("contradict"))
+        );
     }
 }

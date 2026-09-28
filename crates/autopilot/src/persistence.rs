@@ -14,7 +14,8 @@ use bioprism_ids::{to_canonical_string, ContentHash};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
-pub const AUTOPILOT_CHECKPOINT_SCHEMA: &str = "bioprism-autopilot-checkpoint/0.1";
+pub const AUTOPILOT_CHECKPOINT_SCHEMA: &str = "bioprism-autopilot-checkpoint/0.2";
+const PREVIOUS_AUTOPILOT_CHECKPOINT_SCHEMA: &str = "bioprism-autopilot-checkpoint/0.1";
 pub const AUTOPILOT_CHECKPOINT_RETENTION: &str = "metadata_only_autopilot;missions_arguments_provider_output_credentials_and_evidence_not_retained";
 pub const AUTOPILOT_CHECKPOINT_MAX_ATTEMPTS: usize = 16;
 pub const AUTOPILOT_CHECKPOINT_MAX_BYTES: usize = 2_000_000;
@@ -49,6 +50,14 @@ const ATTEMPT_KEYS: &[&str] = &[
     "dispatch_error_digest",
 ];
 const RECONCILIATION_KEYS: &[&str] = &[
+    "present",
+    "digest",
+    "digest_verified",
+    "completion_status",
+    "integrity_valid",
+    "scope",
+];
+const PREVIOUS_RECONCILIATION_KEYS: &[&str] = &[
     "present",
     "digest",
     "completion_status",
@@ -143,9 +152,10 @@ fn status_counts(value: &Value) -> Result<BTreeMap<String, usize>, AutopilotErro
 
 fn reconciliation_projection(attempt: &AttemptRecord) -> Value {
     match attempt.reconciliation_summary() {
-        Some((status, integrity_valid, digest)) => json!({
+        Some((status, integrity_valid, digest, digest_verified)) => json!({
             "present": true,
             "digest": digest,
+            "digest_verified": digest_verified,
             "completion_status": status,
             "integrity_valid": integrity_valid,
             "scope": attempt.kind().reconciliation_scope(),
@@ -153,6 +163,7 @@ fn reconciliation_projection(attempt: &AttemptRecord) -> Value {
         None => json!({
             "present": false,
             "digest": Value::Null,
+            "digest_verified": false,
             "completion_status": Value::Null,
             "integrity_valid": false,
             "scope": Value::Null,
@@ -278,16 +289,33 @@ pub fn seal_autopilot_checkpoint(
     validate_autopilot_checkpoint(&snapshot)
 }
 
-fn validate_reconciliation(value: &Value) -> Result<(), AutopilotError> {
+fn validate_reconciliation(value: &Value, schema: &str) -> Result<(), AutopilotError> {
     let object = value
         .as_object()
         .ok_or_else(|| invalid("attempt reconciliation must be an object"))?;
-    exact_keys(object, RECONCILIATION_KEYS, "reconciliation")?;
+    let digest_verified_is_retained = schema == AUTOPILOT_CHECKPOINT_SCHEMA;
+    exact_keys(
+        object,
+        if digest_verified_is_retained {
+            RECONCILIATION_KEYS
+        } else {
+            PREVIOUS_RECONCILIATION_KEYS
+        },
+        "reconciliation",
+    )?;
     let present = object
         .get("present")
         .and_then(Value::as_bool)
         .ok_or_else(|| invalid("reconciliation.present must be boolean"))?;
     let digest = optional_digest(object, "digest")?;
+    let digest_verified = if digest_verified_is_retained {
+        object
+            .get("digest_verified")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| invalid("reconciliation.digest_verified must be boolean"))?
+    } else {
+        false
+    };
     let status = match object.get("completion_status") {
         Some(Value::Null) | None => None,
         Some(value) => Some(bounded_text(value, "completion_status", 64)?),
@@ -303,7 +331,14 @@ fn validate_reconciliation(value: &Value) -> Result<(), AutopilotError> {
     if present != (status.is_some() && scope.is_some()) {
         return Err(invalid("reconciliation presence does not match its fields"));
     }
-    if !present && (digest.is_some() || status.is_some() || scope.is_some() || integrity) {
+    if digest_verified && digest.is_none() {
+        return Err(invalid(
+            "reconciliation digest cannot be verified when no digest is retained",
+        ));
+    }
+    if !present
+        && (digest.is_some() || digest_verified || status.is_some() || scope.is_some() || integrity)
+    {
         return Err(invalid(
             "absent reconciliation cannot carry completion, digest, scope, or integrity",
         ));
@@ -311,7 +346,11 @@ fn validate_reconciliation(value: &Value) -> Result<(), AutopilotError> {
     Ok(())
 }
 
-fn validate_attempt(value: &Value, expected_index: usize) -> Result<(), AutopilotError> {
+fn validate_attempt(
+    value: &Value,
+    expected_index: usize,
+    schema: &str,
+) -> Result<(), AutopilotError> {
     let object = value
         .as_object()
         .ok_or_else(|| invalid("checkpoint attempt must be an object"))?;
@@ -354,7 +393,7 @@ fn validate_attempt(value: &Value, expected_index: usize) -> Result<(), Autopilo
         ));
     }
     require_digest(object, "result_metadata_digest")?;
-    validate_reconciliation(object.get("reconciliation").unwrap())?;
+    validate_reconciliation(object.get("reconciliation").unwrap(), schema)?;
     optional_digest(object, "dispatch_error_digest")?;
     Ok(())
 }
@@ -367,7 +406,12 @@ pub fn validate_autopilot_checkpoint(value: &Value) -> Result<Value, AutopilotEr
     let mut checkpoint_keys = CHECKPOINT_KEYS.to_vec();
     checkpoint_keys.push("snapshot_digest");
     exact_keys(object, &checkpoint_keys, "checkpoint")?;
-    if object.get("schema").and_then(Value::as_str) != Some(AUTOPILOT_CHECKPOINT_SCHEMA)
+    let schema = object.get("schema").and_then(Value::as_str).unwrap_or("");
+    if ![
+        AUTOPILOT_CHECKPOINT_SCHEMA,
+        PREVIOUS_AUTOPILOT_CHECKPOINT_SCHEMA,
+    ]
+    .contains(&schema)
         || object.get("retention").and_then(Value::as_str) != Some(AUTOPILOT_CHECKPOINT_RETENTION)
         || object.get("secret_material").and_then(Value::as_str) != Some("never_returned")
     {
@@ -396,7 +440,7 @@ pub fn validate_autopilot_checkpoint(value: &Value) -> Result<Value, AutopilotEr
         return Err(invalid("attempts exceed the checkpoint bound"));
     }
     for (index, attempt) in attempts.iter().enumerate() {
-        validate_attempt(attempt, index + 1)?;
+        validate_attempt(attempt, index + 1, schema)?;
     }
     let attempts_used = object
         .get("attempts_used")
@@ -459,6 +503,26 @@ pub fn restore_drive_history(
 ) -> Result<DriveHistory, AutopilotError> {
     let checkpoint = validate_autopilot_checkpoint(checkpoint)?;
     let object = checkpoint.as_object().expect("validated checkpoint object");
+    let legacy_schema =
+        object.get("schema").and_then(Value::as_str) == Some(PREVIOUS_AUTOPILOT_CHECKPOINT_SCHEMA);
+    if legacy_schema
+        && grant.require_reconciliation_complete()
+        && object
+            .get("attempts")
+            .and_then(Value::as_array)
+            .is_some_and(|attempts| {
+                attempts.iter().any(|attempt| {
+                    attempt
+                        .pointer("/reconciliation/present")
+                        .and_then(Value::as_bool)
+                        == Some(true)
+                })
+            })
+    {
+        return Err(invalid(
+            "checkpoint schema 0.1 does not retain reconciliation digest verification posture and cannot resume this reconciliation-required history",
+        ));
+    }
     if require_digest(object, "grant_digest")? != grant.digest()? {
         return Err(invalid(
             "checkpoint grant digest does not match the supplied grant",
@@ -487,6 +551,12 @@ pub fn restore_drive_history(
     }
     for (row, attempt) in rows.iter().zip(history.attempts()) {
         let mut actual = attempt_checkpoint_projection(attempt)?;
+        if legacy_schema {
+            actual["reconciliation"]
+                .as_object_mut()
+                .expect("projection has a reconciliation object")
+                .remove("digest_verified");
+        }
         let index = row
             .get("attempt_index")
             .cloned()

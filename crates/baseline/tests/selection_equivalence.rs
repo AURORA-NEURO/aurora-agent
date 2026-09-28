@@ -122,7 +122,8 @@ impl Hatches {
 /// would put the world outside the algebra rather than inside it at a different value.
 fn hatches(world: &World, query: &Query) -> Hatches {
     let compiled = bioprism_fiber::compile(world, query).expect("this world compiles");
-    let slice = backward_slice(world, query.targets.iter().map(|target| target.as_str()));
+    let slice = backward_slice(world, query.targets.iter().map(|target| target.as_str()))
+        .expect("eager world source is available");
 
     let closure = closure_of(world, query);
     let kept_by_fiber: BTreeSet<String> = slice
@@ -134,7 +135,11 @@ fn hatches(world: &World, query: &Query) -> Hatches {
     let shadowed: BTreeSet<String> = slice
         .needed_variables
         .iter()
-        .flat_map(|variable| world.shadowed_provider_ids(variable))
+        .flat_map(|variable| {
+            world
+                .shadowed_provider_ids(variable)
+                .expect("eager world source is available")
+        })
         .filter(|id| !kept_by_fiber.contains(id) && !closure.contains(id))
         .collect();
 

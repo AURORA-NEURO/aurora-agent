@@ -7,8 +7,8 @@
 //! preserves underpowered, negative, risk-blocked, budget, retry, and executor-failure states.
 
 use super::adaptive_allocation::{
-    allocate_glioma_assays, AdaptiveAllocation, AdaptiveAllocationDisposition,
-    AdaptiveAllocationRequest, AdaptiveArmObservation,
+    AdaptiveAllocation, AdaptiveAllocationDisposition, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, allocate_glioma_assays,
 };
 use crate::glioma_engine::LocalArtifactRef;
 use bioprism_ids::ContentHash;
@@ -661,10 +661,12 @@ mod tests {
         assert!(!first.rounds.is_empty());
         assert!(!first.batches.is_empty());
         assert_eq!(first.rounds.len(), first.batches.len());
-        assert!(first
-            .final_arms
-            .iter()
-            .any(|arm| arm.successes + arm.failures > 2));
+        assert!(
+            first
+                .final_arms
+                .iter()
+                .any(|arm| arm.successes + arm.failures > 2)
+        );
         first.validate().unwrap();
     }
 

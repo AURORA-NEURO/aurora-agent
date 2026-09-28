@@ -339,11 +339,10 @@ fn robust_mean(values: impl Iterator<Item = (u16, u16)>) -> u16 {
         numerator += u64::from(value) * u64::from(weight.max(1));
         denominator += u64::from(weight.max(1));
     }
-    if denominator == 0 {
-        0
-    } else {
-        (numerator / denominator).min(1_000) as u16
-    }
+    numerator
+        .checked_div(denominator)
+        .unwrap_or_default()
+        .min(1_000) as u16
 }
 
 fn epoch_disposition(

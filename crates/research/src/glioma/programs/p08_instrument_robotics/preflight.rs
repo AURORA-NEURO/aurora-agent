@@ -709,7 +709,7 @@ pub fn preflight_glioma_instrument(
 mod tests {
     use super::*;
     use crate::glioma::programs::p08_instrument_robotics::calibration::{
-        analyze_instrument_calibration, CalibrationPoint, CalibrationRequest, CalibrationRun,
+        CalibrationPoint, CalibrationRequest, CalibrationRun, analyze_instrument_calibration,
     };
     use crate::glioma_engine::LocalArtifactRef;
 
@@ -873,14 +873,16 @@ mod tests {
         assert_eq!(plan.disposition, InstrumentPreflightDisposition::Blocked);
         assert!(!plan.dispatch_permitted);
         assert_eq!(plan.blocked_order, vec!["acquire", "wash"]);
-        assert!(plan
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("emergency-stop")));
-        assert!(plan
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("volume")));
+        assert!(
+            plan.negative_evidence
+                .iter()
+                .any(|item| item.contains("emergency-stop"))
+        );
+        assert!(
+            plan.negative_evidence
+                .iter()
+                .any(|item| item.contains("volume"))
+        );
     }
 
     #[test]
@@ -892,10 +894,11 @@ mod tests {
         let plan = preflight_glioma_instrument(&request).unwrap();
         assert_eq!(plan.disposition, InstrumentPreflightDisposition::Unresolved);
         assert!(!plan.dispatch_permitted);
-        assert!(plan
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("temperature-window-unmeasured")));
+        assert!(
+            plan.uncertainty
+                .iter()
+                .any(|item| item.contains("temperature-window-unmeasured"))
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! failed task outputs. It does not infer a clinical conclusion and does not impute measurements.
 
 use super::execution::{ProtocolExecution, ProtocolTaskDisposition};
-use super::simulator::{simulate_glioma_protocol, ProtocolSimulationRequest};
+use super::simulator::{ProtocolSimulationRequest, simulate_glioma_protocol};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -371,12 +371,10 @@ pub fn compile_glioma_protocol_evidence_surface(
                 ProtocolTaskDisposition::Failed | ProtocolTaskDisposition::Skipped
             )
         });
-        let has_partial_execution = execution_dispositions
-            .iter()
-            .any(|disposition| *disposition == ProtocolTaskDisposition::Partial);
-        let has_negative_execution = execution_dispositions
-            .iter()
-            .any(|disposition| *disposition == ProtocolTaskDisposition::Negative);
+        let has_partial_execution =
+            execution_dispositions.contains(&ProtocolTaskDisposition::Partial);
+        let has_negative_execution =
+            execution_dispositions.contains(&ProtocolTaskDisposition::Negative);
         let (disposition, next_action) = if has_positive && has_negative {
             contradictory.push(endpoint_id.clone());
             (
@@ -387,7 +385,9 @@ pub fn compile_glioma_protocol_evidence_surface(
             unresolved.push(endpoint_id.clone());
             (
                 ProtocolEvidenceDisposition::Unresolved,
-                format!("restore a completed local task result before interpreting endpoint {endpoint_id}"),
+                format!(
+                    "restore a completed local task result before interpreting endpoint {endpoint_id}"
+                ),
             )
         } else if has_partial_execution
             || replicate_count < request.min_replicates
@@ -403,13 +403,17 @@ pub fn compile_glioma_protocol_evidence_surface(
             negative.push(endpoint_id.clone());
             (
                 ProtocolEvidenceDisposition::Negative,
-                format!("publish the null or negative endpoint {endpoint_id} and test a competing explanation"),
+                format!(
+                    "publish the null or negative endpoint {endpoint_id} and test a competing explanation"
+                ),
             )
         } else {
             qualified.push(endpoint_id.clone());
             (
                 ProtocolEvidenceDisposition::Qualified,
-                format!("handoff endpoint {endpoint_id} to downstream mechanism or interpretation analysis"),
+                format!(
+                    "handoff endpoint {endpoint_id} to downstream mechanism or interpretation analysis"
+                ),
             )
         };
         let replicate_factor = (u32::from(replicate_count).saturating_mul(1_000)
@@ -518,7 +522,7 @@ pub fn compile_glioma_protocol_evidence_surface(
 mod tests {
     use super::*;
     use crate::glioma::programs::p07_protocol_simulation::execution::{
-        execute_glioma_protocol, DryRunGliomaProtocolExecutor, ProtocolExecutionRequest,
+        DryRunGliomaProtocolExecutor, ProtocolExecutionRequest, execute_glioma_protocol,
     };
     use crate::glioma::programs::p07_protocol_simulation::simulator::{
         ProtocolResource, ProtocolResourceKind, ProtocolTask,
@@ -636,9 +640,11 @@ mod tests {
             ProtocolEvidenceSurfaceDisposition::Partial
         );
         assert_eq!(surface.partial_endpoint_order, vec!["invasion"]);
-        assert!(surface
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("replicate")));
+        assert!(
+            surface
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("replicate"))
+        );
     }
 }

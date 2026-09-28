@@ -187,9 +187,14 @@ fn report_for(mission: &Value, results: Vec<MissionStepResult>, status: Option<&
     let refused = results.iter().filter(|r| r.status == "refused").count();
     let blocked_count = results.iter().filter(|r| r.status == "blocked").count();
     let cancelled_count = results.iter().filter(|r| r.status == "cancelled").count();
+    let returned_bytes = results
+        .iter()
+        .filter(|result| result.status == "succeeded" || result.wire.is_some())
+        .map(|result| result.bytes)
+        .sum();
     let required_failures = results
         .iter()
-        .filter(|r| r.required && r.status != "succeeded")
+        .filter(|r| r.required && matches!(r.status.as_str(), "refused" | "blocked"))
         .count();
     let mission_status = status.unwrap_or(if required_failures > 0 {
         "failed"
@@ -198,6 +203,11 @@ fn report_for(mission: &Value, results: Vec<MissionStepResult>, status: Option<&
     } else {
         "succeeded"
     });
+    let claim_lineage = bioprism_devplat::mission_claim_lineage_with_review(
+        &request.claim_requests,
+        &results,
+        request.evaluator_review.as_ref(),
+    );
     let report = MissionReport {
         schema_version: MISSION_SCHEMA_VERSION.into(),
         plan,
@@ -208,13 +218,13 @@ fn report_for(mission: &Value, results: Vec<MissionStepResult>, status: Option<&
         blocked: blocked_count,
         cancelled: cancelled_count,
         required_failures,
-        returned_bytes: 0,
+        returned_bytes,
         results,
         execution_trace_schema_version: MISSION_TRACE_SCHEMA_VERSION.into(),
         execution_trace: Vec::new(),
-        claim_requests: Vec::new(),
-        evaluator_review: None,
-        claim_lineage: json!({}),
+        claim_requests: request.claim_requests.clone(),
+        evaluator_review: request.evaluator_review.clone(),
+        claim_lineage,
         trace_observer: None,
         guarantees: Vec::new(),
         limitations: Vec::new(),
@@ -223,12 +233,30 @@ fn report_for(mission: &Value, results: Vec<MissionStepResult>, status: Option<&
 }
 
 fn complete_reconciliation() -> Value {
-    json!({
+    let mut record = json!({
         "present": true,
-        "reconciliation_digest": "a".repeat(64),
-        "completion": { "status": "complete" },
-        "integrity": { "valid": true },
-    })
+        "ok": true,
+        "workflow": "domain_workflow_reconcile",
+        "schema": bioprism_devplat::DOMAIN_WORKFLOW_RECONCILE_SCHEMA_VERSION,
+        "execution": "not_started",
+        "source": "mission_report",
+        "workflow_id": "workflow-a",
+        "mission_id": "mission-a",
+        "workflow_digest": "a".repeat(64),
+        "catalog_digest": "b".repeat(64),
+        "domain_contract_digest": "c".repeat(64),
+        "mission_plan_digest": "d".repeat(64),
+        "completion": {
+            "status": "complete",
+            "ready": true,
+            "review_required": true,
+            "claims_posture": "review_required_before_claims",
+        },
+        "evidence": { "evidence_valid": true },
+        "integrity": { "valid": true, "finding_count": 0, "findings": [] },
+    });
+    record["reconciliation_digest"] = json!(ContentHash::of_value(&record).unwrap().to_string());
+    record
 }
 
 /// A dispatcher that records every mission handed to it, so a test can prove a refusal happened
@@ -341,12 +369,13 @@ mod authority_through_the_repair_path {
             Some(complete_reconciliation()),
         );
 
-        let error = plan_next_action(&grant, &history)
-            .expect_err("a confirmation inlined from a tool payload must not be dispatched");
-        assert!(
-            matches!(error, AutopilotError::GrantDoesNotAuthorise { .. }),
-            "{error:?}"
-        );
+        match plan_next_action(&grant, &history).expect("a refused repair is a terminal action") {
+            NextAction::StopRepairRefused { refusal } => {
+                assert_eq!(refusal["error_class"], "grant_does_not_authorise");
+                assert!(refusal["detail"].as_str().unwrap().contains("side effects"));
+            }
+            other => panic!("a hidden confirmation must refuse the repair, got {other:?}"),
+        }
     }
 
     #[test]
@@ -365,12 +394,13 @@ mod authority_through_the_repair_path {
             Some(complete_reconciliation()),
         );
 
-        let error = plan_next_action(&grant, &history)
-            .expect_err("nesting the flag inside arrays must not evade the side-effect posture");
-        assert!(
-            matches!(error, AutopilotError::GrantDoesNotAuthorise { .. }),
-            "{error:?}"
-        );
+        match plan_next_action(&grant, &history).expect("a refused repair is a terminal action") {
+            NextAction::StopRepairRefused { refusal } => {
+                assert_eq!(refusal["error_class"], "grant_does_not_authorise");
+                assert!(refusal["detail"].as_str().unwrap().contains("side effects"));
+            }
+            other => panic!("a nested confirmation must refuse the repair, got {other:?}"),
+        }
     }
 
     #[test]
@@ -897,7 +927,7 @@ mod budgets_across_a_repair {
     }
 
     #[test]
-    fn a_repair_that_would_widen_a_parallel_wave_is_refused_rather_than_dispatched_unreserved() {
+    fn a_repair_that_would_widen_a_parallel_wave_is_reported_and_never_dispatched_unreserved() {
         let grant = grant(&["tool_u", "tool_s", "tool_v"]);
         let mission = budgeted_mission("parallel_waves", 6_000_000, 10_000_000);
         let base: MissionRequest = serde_json::from_value(mission.clone()).unwrap();
@@ -909,23 +939,25 @@ mod budgets_across_a_repair {
         );
 
         let history = history_with_a_widening_repair(&grant, mission);
-        let error = plan_next_action(&grant, &history)
-            .expect_err("dropping the dependency on a succeeded step widens the repair's wave");
-        assert!(
-            matches!(error, AutopilotError::InvalidMission { ref reason } if reason.contains("worst-case wave")),
-            "the repair must be re-checked against the same reservation rule as the base: {error:?}"
-        );
+        match plan_next_action(&grant, &history).expect("a repair refusal is a planned stop") {
+            NextAction::StopRepairRefused { refusal } => {
+                assert_eq!(refusal["reason"], "repair_plan_refused");
+                assert_eq!(refusal["error_class"], "mission_contract");
+                assert!(refusal["detail"]
+                    .as_str()
+                    .unwrap()
+                    .contains("worst-case wave"));
+                assert_eq!(refusal["attempts_used"], 1);
+                assert_eq!(refusal["unresolved_steps"].as_array().unwrap().len(), 2);
+            }
+            other => panic!("an over-budget repair must stop with refusal evidence, got {other:?}"),
+        }
     }
 
-    /// Characterises an unfixed consequence rather than a guarantee. A repair the planner refuses
-    /// mid-drive leaves `plan_next_action` returning an error, and the drive loop propagates it
-    /// instead of stopping with an accounting, so `build_autopilot_report` never runs and the
-    /// receipts of every attempt already made are dropped. The authority decision is right — the
-    /// unreserved repair is not dispatched — but a drive that spent a dispatch should still be
-    /// able to say what it spent it on. Closing that needs a stop variant the planner does not
-    /// have, so this test pins the current behaviour and will fail the moment it is fixed.
+    /// A deterministic repair refusal happens after attempt 1 already has a report, so the drive
+    /// must seal that evidence into its final report without dispatching the unreserved repair.
     #[test]
-    fn a_planner_refusal_mid_drive_discards_the_receipts_of_the_attempts_already_made() {
+    fn a_repair_planning_refusal_keeps_prior_receipts_and_never_dispatches_repair() {
         let grant = grant(&["tool_u", "tool_s", "tool_v"]);
         let mission = budgeted_mission("parallel_waves", 6_000_000, 10_000_000);
         let planned = {
@@ -942,16 +974,37 @@ mod budgets_across_a_repair {
             None,
         );
         let mut dispatcher = RecordingDispatcher::new(vec![report]);
-        let error = drive_mission(&grant, mission, &mut dispatcher)
-            .expect_err("the widened repair is refused rather than dispatched");
-        assert!(
-            matches!(error, AutopilotError::InvalidMission { ref reason } if reason.contains("worst-case wave")),
-            "{error:?}"
-        );
+        let outcome = drive_mission(&grant, mission, &mut dispatcher)
+            .expect("the repair refusal becomes a reportable stop");
+        assert_eq!(outcome.final_status, FinalStatus::Refused);
         assert_eq!(
             dispatcher.calls(),
             1,
-            "one attempt ran, so one attempt's receipts existed and are now unreachable"
+            "an invalid repair must never cross the dispatch boundary"
+        );
+        assert_eq!(outcome.report["attempts"].as_array().unwrap().len(), 1);
+        assert_eq!(outcome.report["attempts"][0]["attempt_index"], 1);
+        assert_eq!(
+            outcome.report["repair_refusal"]["reason"],
+            "repair_plan_refused"
+        );
+        assert_eq!(
+            outcome.report["repair_refusal"]["error_class"],
+            "mission_contract"
+        );
+        assert!(outcome.report["repair_refusal"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("worst-case wave"));
+        assert_eq!(outcome.report["repair_refusal"]["attempts_used"], 1);
+        assert_eq!(
+            outcome.report["schema"],
+            bioprism_autopilot::AUTOPILOT_REPORT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            verify_autopilot_report(&outcome.report).unwrap()["valid"],
+            true,
+            "the final receipt must remain digest-verifiable"
         );
     }
 
@@ -1211,6 +1264,161 @@ mod exhaustion_and_refusal {
     }
 }
 
+mod mission_report_binding {
+    use super::*;
+
+    fn no_reconciliation_grant() -> AutonomyGrant {
+        grant_of(json!({
+            "allowed_tools": ["tool_a"],
+            "max_attempts": 3,
+            "require_reconciliation_complete": false,
+            "retry": { "retry_unknown": true },
+        }))
+    }
+
+    fn run_with_report(forge: impl FnOnce(&Value) -> Value) -> (DriveOutcome, usize) {
+        let grant = no_reconciliation_grant();
+        let mission = mission_of(vec![step("one", "tool_a", &[])], None);
+        let mut calls = 0;
+        let mut forge = Some(forge);
+        let outcome = {
+            let mut dispatcher = |dispatched: &Value| {
+                calls += 1;
+                let report = report_for(
+                    dispatched,
+                    vec![succeeded("one", "tool_a", json!({ "result": "ok" }))],
+                    Some("succeeded"),
+                );
+                Ok(forge.take().expect("only the first dispatch is allowed")(
+                    &report,
+                ))
+            };
+            drive_mission(&grant, mission, &mut dispatcher)
+                .expect("an invalid delivered report is retained as an unknown outcome")
+        };
+        (outcome, calls)
+    }
+
+    #[test]
+    fn waiving_reconciliation_does_not_accept_a_report_for_another_plan() {
+        let (outcome, calls) = run_with_report(|report| {
+            let mut report = report.clone();
+            report["plan"]["mission_id"] = json!("different-mission");
+            report
+        });
+
+        assert_eq!(outcome.final_status, FinalStatus::OutcomeUnknown);
+        assert_eq!(
+            calls, 1,
+            "an invalid receipt is never retried, even with unknown retry authority"
+        );
+        assert_eq!(outcome.report["final_status"], "outcome_unknown");
+        assert!(outcome.report["attempts"][0]["report_validation_error"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("exact dispatched mission plan")));
+        assert!(outcome.report["attempts"][0]["report_digest"].is_string());
+    }
+
+    #[test]
+    fn a_duplicate_conflicting_step_result_cannot_become_success_evidence() {
+        let (outcome, calls) = run_with_report(|report| {
+            let mut report = report.clone();
+            let mut conflicting = report["results"][0].clone();
+            conflicting["status"] = json!("refused");
+            conflicting["error"] = json!("contradictory second row");
+            report["results"]
+                .as_array_mut()
+                .expect("fixture contains result rows")
+                .push(conflicting);
+            report
+        });
+
+        assert_eq!(outcome.final_status, FinalStatus::OutcomeUnknown);
+        assert_eq!(calls, 1);
+        assert!(outcome.report["attempts"][0]["report_validation_error"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("duplicate result rows")));
+    }
+
+    #[test]
+    fn contradictory_aggregate_counts_cannot_become_success_evidence() {
+        for (field, value) in [
+            ("succeeded", json!(0)),
+            ("refused", json!(1)),
+            ("returned_bytes", json!(0)),
+        ] {
+            let (outcome, calls) = run_with_report(|report| {
+                let mut report = report.clone();
+                report[field] = value;
+                report
+            });
+
+            assert_eq!(outcome.final_status, FinalStatus::OutcomeUnknown, "{field}");
+            assert_eq!(calls, 1, "{field}");
+            assert!(outcome.report["attempts"][0]["report_validation_error"]
+                .as_str()
+                .is_some_and(|detail| {
+                    detail.contains("reports")
+                        && (detail.contains(field)
+                            || (field == "returned_bytes" && detail.contains("returned bytes")))
+                }));
+        }
+    }
+
+    #[test]
+    fn required_failure_totals_cannot_omit_visible_required_failures() {
+        let grant = no_reconciliation_grant();
+        let mission = mission_of(vec![step("one", "tool_a", &[])], None);
+        let mut history = DriveHistory::new(mission).unwrap();
+        let dispatched = first_full_mission(&grant, &history);
+        let mut report = report_for(
+            &dispatched,
+            vec![failed_with("one", "tool_a", "retryable_as_is")],
+            Some("failed"),
+        );
+        report["required_failures"] = json!(0);
+
+        let attempt =
+            AttemptRecord::delivered(AttemptKind::Full, dispatched, report, None, None).unwrap();
+        assert!(attempt
+            .report_validation_error()
+            .is_some_and(|detail| detail.contains("required failures") && detail.contains("1")));
+        history.push(attempt);
+        assert!(matches!(
+            plan_next_action(&grant, &history).unwrap(),
+            NextAction::StopOutcomeUnknown { .. }
+        ));
+    }
+
+    #[test]
+    fn missing_result_rows_remain_unknown_evidence_instead_of_invalid_receipts() {
+        let mission = mission_of(vec![step("one", "tool_a", &[])], None);
+        let grant = no_reconciliation_grant();
+        let mut history = DriveHistory::new(mission).unwrap();
+        let dispatched = first_full_mission(&grant, &history);
+        let mut report = report_for(
+            &dispatched,
+            vec![succeeded("one", "tool_a", json!({ "result": "ok" }))],
+            Some("succeeded"),
+        );
+        report["results"] = json!([]);
+        report["succeeded"] = json!(0);
+        history.push(
+            AttemptRecord::delivered(AttemptKind::Full, dispatched, report, None, None).unwrap(),
+        );
+
+        assert!(history
+            .latest()
+            .unwrap()
+            .report_validation_error()
+            .is_none());
+        assert!(matches!(
+            plan_next_action(&grant, &history).unwrap(),
+            NextAction::DispatchRepair { .. }
+        ));
+    }
+}
+
 mod receipt_fidelity {
     use super::*;
 
@@ -1262,7 +1470,13 @@ mod receipt_fidelity {
             &grant,
             history,
             &FinalDisposition::Exhausted {
-                accounting: json!({ "reason": "test" }),
+                accounting: json!({
+                    "reason": "test_exhaustion",
+                    "detail": "the fixture stopped with unresolved steps",
+                    "attempts_used": history.dispatches_used(),
+                    "max_attempts": grant.max_attempts(),
+                    "unresolved_steps": [],
+                }),
             },
         )
         .unwrap()
@@ -1353,15 +1567,14 @@ mod receipt_fidelity {
         assert_eq!(claimed, recomputed);
     }
 
-    /// Characterises an unfixed gap rather than a guarantee: the digest an attempt row publishes
-    /// for its reconciliation is copied out of the record and never checked against it, so a
-    /// record naming the wrong digest is republished unchallenged and the report still verifies.
-    /// Closing it needs a field the attempt row does not have — the recomputed value or a match
-    /// flag — which is a wire-shape change, so this test pins the current behaviour and will fail
-    /// the moment it is fixed.
+    /// A bad reconciliation digest stays visible as an invalid claim and cannot authorize success.
     #[test]
-    fn an_attempts_reconciliation_digest_is_republished_verbatim_and_never_recomputed() {
-        let grant = grant(&["tool_a", "tool_b"]);
+    fn a_mismatched_reconciliation_digest_is_reported_and_cannot_authorize_success() {
+        let grant = grant_of(json!({
+            "allowed_tools": ["tool_a", "tool_b"],
+            "max_attempts": 4,
+            "require_reconciliation_complete": true,
+        }));
         let mut history = DriveHistory::new(two_step_mission()).unwrap();
         let dispatched = first_full_mission(&grant, &history);
         let mut record = json!({
@@ -1394,21 +1607,238 @@ mod receipt_fidelity {
             .remove("reconciliation_digest");
         let recomputed = ContentHash::of_value(&without_digest).unwrap().to_string();
         assert_eq!(recomputed, honest);
+        assert_eq!(claimed, "f".repeat(64));
+        assert_ne!(claimed, recomputed, "fixture must carry a false claim");
         assert_eq!(
-            claimed,
-            "f".repeat(64),
-            "the attempt row copies whatever digest the record claims"
+            report["attempts"][0]["reconciliation_digest_verified"],
+            false
         );
-        assert_ne!(
-            claimed, recomputed,
-            "the fixture must actually plant a wrong digest, or this characterisation is vacuous"
+        assert_eq!(verify_autopilot_report(&report).unwrap()["valid"], true);
+
+        assert!(matches!(
+            plan_next_action(&grant, &history).unwrap(),
+            NextAction::StopExhausted { .. }
+        ));
+
+        let forged_success = build_autopilot_report(
+            &grant,
+            &history,
+            &FinalDisposition::Succeeded {
+                evidence: json!({
+                    "mission_status": "succeeded",
+                    "steps": [
+                        { "step_id": "a", "attempt_index": 1, "status": "succeeded", "result_digest": null, "arguments_digest": "1".repeat(64) },
+                        { "step_id": "b", "attempt_index": 1, "status": "succeeded", "result_digest": null, "arguments_digest": "1".repeat(64) },
+                    ],
+                    "reconciliation": {
+                        "required": true,
+                        "attempt_index": 1,
+                        "status": "complete",
+                        "integrity_valid": true,
+                        "digest": "f".repeat(64),
+                        "digest_verified": false,
+                        "scope": "full_plan",
+                    },
+                }),
+            },
+        )
+        .unwrap();
+        let verification = verify_autopilot_report(&forged_success).unwrap();
+        assert_eq!(verification["current_schema_shape_valid"], false);
+        assert_eq!(verification["valid"], false);
+    }
+
+    #[test]
+    fn an_mcp_reconciliation_projection_requires_its_canonical_record_and_bound_import_receipt() {
+        let grant = grant_of(json!({
+            "allowed_tools": ["tool_a", "tool_b"],
+            "max_attempts": 1,
+            "require_reconciliation_complete": true,
+        }));
+        let base = two_step_mission();
+        let mut history = DriveHistory::new(base.clone()).unwrap();
+        let dispatched = first_full_mission(&grant, &history);
+
+        let mut canonical_record = json!({
+            "ok": true,
+            "workflow": "domain_workflow_reconcile",
+            "schema": bioprism_devplat::DOMAIN_WORKFLOW_RECONCILE_SCHEMA_VERSION,
+            "execution": "not_started",
+            "source": "mission_report",
+            "workflow_id": "workflow-a",
+            "mission_id": "mission-a",
+            "workflow_digest": "a".repeat(64),
+            "catalog_digest": "b".repeat(64),
+            "domain_contract_digest": "c".repeat(64),
+            "mission_plan_digest": "d".repeat(64),
+            "completion": {
+                "status": "complete",
+                "ready": true,
+                "review_required": true,
+                "claims_posture": "review_required_before_claims",
+            },
+            "evidence": { "evidence_valid": true },
+            "integrity": { "valid": true, "finding_count": 0, "findings": [] },
+        });
+        let digest = ContentHash::of_value(&canonical_record)
+            .unwrap()
+            .to_string();
+        canonical_record["reconciliation_digest"] = json!(digest);
+        let registry_import = bioprism_devplat::DomainWorkflowReconciliationRegistry::new()
+            .import(&canonical_record)
+            .expect("canonical reconciliation meets the registry contract");
+        let projection = json!({
+            "present": true,
+            "automatic": true,
+            "reconciliation_digest": digest,
+            "canonical_record": canonical_record,
+            "workflow_id": "workflow-a",
+            "mission_id": "mission-a",
+            "completion": canonical_record["completion"].clone(),
+            "integrity": canonical_record["integrity"].clone(),
+            "registry_import": registry_import,
+        });
+        let mut mission_report = report_for(
+            &dispatched,
+            vec![
+                succeeded("a", "tool_a", json!({})),
+                succeeded("b", "tool_b", json!({})),
+            ],
+            Some("succeeded"),
         );
-        assert_eq!(
-            verify_autopilot_report(&report).unwrap()["valid"],
-            true,
-            "report verification covers the report's own digest and says nothing about whether a \
-             reconciliation digest matches the record it names"
+        mission_report["workflow_reconciliation"] = projection.clone();
+        history.push(
+            AttemptRecord::delivered(
+                AttemptKind::Full,
+                dispatched.clone(),
+                mission_report,
+                Some(projection.clone()),
+                None,
+            )
+            .unwrap(),
         );
+
+        let next = plan_next_action(&grant, &history).unwrap();
+        assert!(matches!(next, NextAction::StopSuccess { .. }), "{next:?}");
+
+        let mut tampered = projection.clone();
+        tampered["canonical_record"]["integrity"]["valid"] = json!(false);
+        let mut tampered_report = report_for(
+            &dispatched,
+            vec![
+                succeeded("a", "tool_a", json!({})),
+                succeeded("b", "tool_b", json!({})),
+            ],
+            Some("succeeded"),
+        );
+        tampered_report["workflow_reconciliation"] = tampered.clone();
+        let mut tampered_history = DriveHistory::new(base.clone()).unwrap();
+        tampered_history.push(
+            AttemptRecord::delivered(
+                AttemptKind::Full,
+                dispatched.clone(),
+                tampered_report,
+                Some(tampered),
+                None,
+            )
+            .unwrap(),
+        );
+        assert!(matches!(
+            plan_next_action(&grant, &tampered_history).unwrap(),
+            NextAction::StopExhausted { .. }
+        ));
+
+        let mut incomplete_record = json!({
+            "workflow_id": "workflow-a",
+            "mission_id": "mission-a",
+            "completion": { "status": "complete" },
+            "integrity": { "valid": true },
+        });
+        let incomplete_digest = ContentHash::of_value(&incomplete_record)
+            .unwrap()
+            .to_string();
+        incomplete_record["reconciliation_digest"] = json!(incomplete_digest);
+        let incomplete_projection = json!({
+            "present": true,
+            "automatic": true,
+            "reconciliation_digest": incomplete_digest,
+            "canonical_record": incomplete_record,
+            "workflow_id": "workflow-a",
+            "mission_id": "mission-a",
+            "completion": { "status": "complete" },
+            "integrity": { "valid": true },
+            "registry_import": {
+                "ok": true,
+                "schema": bioprism_devplat::DOMAIN_WORKFLOW_RECONCILIATION_IMPORT_SCHEMA_VERSION,
+                "workflow": "domain_workflow_reconciliation_import",
+                "execution": "not_started",
+                "reconciliation_digest": incomplete_digest,
+            },
+        });
+        let mut incomplete_report = report_for(
+            &dispatched,
+            vec![
+                succeeded("a", "tool_a", json!({})),
+                succeeded("b", "tool_b", json!({})),
+            ],
+            Some("succeeded"),
+        );
+        incomplete_report["workflow_reconciliation"] = incomplete_projection.clone();
+        let mut incomplete_history = DriveHistory::new(base.clone()).unwrap();
+        incomplete_history.push(
+            AttemptRecord::delivered(
+                AttemptKind::Full,
+                dispatched.clone(),
+                incomplete_report,
+                Some(incomplete_projection),
+                None,
+            )
+            .unwrap(),
+        );
+        assert!(matches!(
+            plan_next_action(&grant, &incomplete_history).unwrap(),
+            NextAction::StopExhausted { .. }
+        ));
+
+        let marker_only = json!({
+            "present": true,
+            "automatic": true,
+            "reconciliation_digest": "e".repeat(64),
+            "reconciliation_digest_verification": "registry_import_verified",
+            "completion": { "status": "complete" },
+            "integrity": { "valid": true },
+            "registry_import": {
+                "ok": true,
+                "schema": bioprism_devplat::DOMAIN_WORKFLOW_RECONCILIATION_IMPORT_SCHEMA_VERSION,
+                "workflow": "domain_workflow_reconciliation_import",
+                "execution": "not_started",
+                "reconciliation_digest": "e".repeat(64),
+            },
+        });
+        let mut marker_report = report_for(
+            &dispatched,
+            vec![
+                succeeded("a", "tool_a", json!({})),
+                succeeded("b", "tool_b", json!({})),
+            ],
+            Some("succeeded"),
+        );
+        marker_report["workflow_reconciliation"] = marker_only.clone();
+        let mut marker_history = DriveHistory::new(base).unwrap();
+        marker_history.push(
+            AttemptRecord::delivered(
+                AttemptKind::Full,
+                dispatched,
+                marker_report,
+                Some(marker_only),
+                None,
+            )
+            .unwrap(),
+        );
+        assert!(matches!(
+            plan_next_action(&grant, &marker_history).unwrap(),
+            NextAction::StopExhausted { .. }
+        ));
     }
 
     #[test]

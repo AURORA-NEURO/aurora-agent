@@ -565,10 +565,12 @@ mod tests {
             output.actions[1].decision,
             InstrumentRecoveryDecision::VerifyArtifact
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item == "a2:negative-evidence-preserved"));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item == "a2:negative-evidence-preserved")
+        );
         output.validate().unwrap();
     }
 

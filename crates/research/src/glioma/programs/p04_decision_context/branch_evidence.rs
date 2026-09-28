@@ -410,14 +410,14 @@ pub fn assimilate_glioma_decision_branch_evidence(
 #[cfg(test)]
 mod tests {
     use super::super::branch_planner::{
-        plan_glioma_decision_branches, DecisionBranchPlannerRequest, DecisionScenario,
-        DecisionScenarioOutcome,
+        DecisionBranchPlannerRequest, DecisionScenario, DecisionScenarioOutcome,
+        plan_glioma_decision_branches,
     };
-    use super::super::context_compiler::{compile_decision_context, DecisionContextRequest};
+    use super::super::context_compiler::{DecisionContextRequest, compile_decision_context};
     use super::*;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma_engine::{
         GliomaActionCandidate, GliomaModality, GliomaModelSystem, GliomaStageKind, LocalArtifactRef,

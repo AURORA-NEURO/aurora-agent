@@ -606,16 +606,13 @@ fn build_panel(
             .map(|candidate| candidate.record.evidence.reproducibility_milli),
     );
     let freshness_milli = mean(representatives.iter().map(|candidate| {
-        if request.maximum_age_epochs == 0 {
-            0
-        } else {
-            (request
-                .maximum_age_epochs
-                .saturating_sub(candidate.age_epochs)
-                .min(request.maximum_age_epochs)
-                * 1_000
-                / request.maximum_age_epochs) as u16
-        }
+        ((request
+            .maximum_age_epochs
+            .saturating_sub(candidate.age_epochs)
+            .min(request.maximum_age_epochs)
+            * 1_000)
+            .checked_div(request.maximum_age_epochs)
+            .unwrap_or_default()) as u16
     }));
     let relevance_milli = mean(
         representatives
@@ -1060,9 +1057,6 @@ pub fn query_glioma_multimodal_researcher_workbench(
         .into_iter()
         .filter(|term| !matched_scope_terms.contains(term))
         .collect::<Vec<_>>();
-    let mut negative_order = negative_order;
-    let mut contradicted_order = contradicted_order;
-    let mut uncertain_order = uncertain_order;
     negative_order.sort();
     negative_order.dedup();
     contradicted_order.sort();
@@ -1387,10 +1381,11 @@ mod tests {
         let plan = query_glioma_multimodal_researcher_workbench(&request).unwrap();
         assert!(plan.panels.is_empty());
         assert_eq!(plan.disposition, MultimodalWorkbenchDisposition::NoPanels);
-        assert!(plan
-            .omissions
-            .iter()
-            .all(|omission| omission.reason == "insufficient-cross-study-coverage"));
+        assert!(
+            plan.omissions
+                .iter()
+                .all(|omission| omission.reason == "insufficient-cross-study-coverage")
+        );
         assert_eq!(plan.next_route, "glioma_multimodal_evidence_gap_router");
         plan.validate().unwrap();
     }
@@ -1401,16 +1396,18 @@ mod tests {
         request.include_negative = false;
         request.include_contradicted = false;
         let plan = query_glioma_multimodal_researcher_workbench(&request).unwrap();
-        assert!(plan
-            .omissions
-            .iter()
-            .any(|omission| omission.evidence_id == "evidence-b"
-                && omission.reason == "contradiction-excluded"));
-        assert!(plan
-            .omissions
-            .iter()
-            .any(|omission| omission.evidence_id == "evidence-c"
-                && omission.reason == "negative-excluded"));
+        assert!(
+            plan.omissions
+                .iter()
+                .any(|omission| omission.evidence_id == "evidence-b"
+                    && omission.reason == "contradiction-excluded")
+        );
+        assert!(
+            plan.omissions
+                .iter()
+                .any(|omission| omission.evidence_id == "evidence-c"
+                    && omission.reason == "negative-excluded")
+        );
         plan.validate().unwrap();
     }
 

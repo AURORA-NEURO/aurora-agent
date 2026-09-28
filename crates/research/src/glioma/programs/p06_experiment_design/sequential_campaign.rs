@@ -7,8 +7,8 @@
 //! default executor is deterministic and simulation-only.
 
 use super::sequential_design::{
-    plan_glioma_sequential_design, SequentialArmObservation, SequentialDesignDisposition,
-    SequentialDesignPlan, SequentialDesignRequest,
+    SequentialArmObservation, SequentialDesignDisposition, SequentialDesignPlan,
+    SequentialDesignRequest, plan_glioma_sequential_design,
 };
 use crate::glioma_engine::LocalArtifactRef;
 use bioprism_ids::ContentHash;
@@ -642,10 +642,12 @@ mod tests {
         assert_eq!(first, second);
         assert!(!first.rounds.is_empty());
         assert!(!first.batches.is_empty());
-        assert!(first
-            .final_arms
-            .iter()
-            .any(|arm| arm.successes + arm.failures > 2));
+        assert!(
+            first
+                .final_arms
+                .iter()
+                .any(|arm| arm.successes + arm.failures > 2)
+        );
         first.validate().unwrap();
     }
 

@@ -79,7 +79,7 @@ On VS Code **1.101 or later** the extension registers an MCP server definition p
 (contribution point `mcpServerDefinitionProviders`, API
 `vscode.lm.registerMcpServerDefinitionProvider`), publishing an "AURORA Agent" stdio server that
 runs `bioprism-mcp --root <root>`. MCP-aware AI in VS Code — including Copilot agent mode — can
-then call the platform's 259 tools (path-confined to the root). The API is stable in 1.101, which
+then call the platform's 883 tools (path-confined to the root). The API is stable in 1.101, which
 is why `engines.vscode` is `^1.101.0`; a runtime capability check still guards registration so the
 extension degrades gracefully in builds that lack the API.
 

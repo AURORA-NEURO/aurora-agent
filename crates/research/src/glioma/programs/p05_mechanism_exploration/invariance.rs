@@ -161,11 +161,11 @@ fn weighted_majority_consistency(values: impl Iterator<Item = (i64, u16)>) -> u6
             negative = negative.saturating_add(u64::from(weight));
         }
     }
-    if total == 0 {
-        0
-    } else {
-        positive.max(negative).saturating_mul(SCORE_SCALE) / total
-    }
+    positive
+        .max(negative)
+        .saturating_mul(SCORE_SCALE)
+        .checked_div(total)
+        .unwrap_or_default()
 }
 
 fn digest_input(output: &MechanismInvariance) -> serde_json::Value {
@@ -839,9 +839,11 @@ mod tests {
         let output = analyze_glioma_mechanism_invariance(&input).expect("frontier");
         assert_eq!(output.risk_blocked_order, vec!["sig-stable"]);
         assert_eq!(output.unresolved_pair_order, vec!["m-a__m-b"]);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry == "unresolved-pair:m-a__m-b"));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry == "unresolved-pair:m-a__m-b")
+        );
     }
 }

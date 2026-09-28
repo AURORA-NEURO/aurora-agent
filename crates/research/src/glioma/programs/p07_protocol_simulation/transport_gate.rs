@@ -432,7 +432,7 @@ mod tests {
         ProtocolEvidenceSurfaceDisposition,
     };
     use crate::glioma::programs::p07_protocol_simulation::multistudy_fusion::{
-        fuse_glioma_protocol_evidence, ProtocolEvidenceFusionRequest, ProtocolEvidenceStudySurface,
+        ProtocolEvidenceFusionRequest, ProtocolEvidenceStudySurface, fuse_glioma_protocol_evidence,
     };
 
     fn surface(
@@ -550,9 +550,11 @@ mod tests {
         .unwrap();
         assert_eq!(gate.disposition, ProtocolTransportGateDisposition::Negative);
         assert_eq!(gate.negative_endpoint_order, vec!["invasion"]);
-        assert!(gate.endpoints.iter().any(|endpoint| endpoint
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("target-model-unobserved"))));
+        assert!(gate.endpoints.iter().any(|endpoint| {
+            endpoint
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("target-model-unobserved"))
+        }));
     }
 }

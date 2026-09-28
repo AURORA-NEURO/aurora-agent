@@ -14,7 +14,7 @@ use super::claim_frontier::{
     FrontierActionKind, KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeFrontierScore,
 };
 use super::knowledge_graph::{
-    compile_typed_knowledge, KnowledgeClaim, KnowledgeRequest, TypedKnowledge,
+    KnowledgeClaim, KnowledgeRequest, TypedKnowledge, compile_typed_knowledge,
 };
 use super::selection_cycle::KnowledgeActionSelectionCycle;
 use crate::glioma::evidence::{EvidenceRecord, EvidenceState};
@@ -629,7 +629,7 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::action_compiler::{
-        digest_input as plan_digest_input, KnowledgeActionPlanDisposition,
+        KnowledgeActionPlanDisposition, digest_input as plan_digest_input,
     };
     use crate::glioma::programs::p02_evidence_knowledge::claim_frontier::KnowledgeFrontierWeights;
     use crate::glioma::programs::p02_evidence_knowledge::selection_cycle::KnowledgeActionSelectionCycleRequest;

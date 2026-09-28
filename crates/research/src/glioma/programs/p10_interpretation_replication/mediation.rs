@@ -254,11 +254,7 @@ fn estimate(rows: &[Row<'_>], control_arm: &str, treatment_arm: &str) -> Option<
 
 fn signal_to_noise(effect: i64, noise: u64) -> u64 {
     if noise == 0 {
-        if effect == 0 {
-            0
-        } else {
-            u64::MAX
-        }
+        if effect == 0 { 0 } else { u64::MAX }
     } else {
         (u128::from(effect.unsigned_abs())
             .saturating_mul(1_000)
@@ -635,9 +631,11 @@ mod tests {
         ];
         let output = analyze_glioma_mediation(&request, &observations).unwrap();
         assert_eq!(output.disposition, MediationDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .contains(&"unit-floor-not-met-for-mediation".into()));
+        assert!(
+            output
+                .uncertainty
+                .contains(&"unit-floor-not-met-for-mediation".into())
+        );
     }
 
     #[test]

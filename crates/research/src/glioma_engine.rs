@@ -20,9 +20,9 @@
 
 use bioprism_foundation::{
     ApprovalRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
-    EvidenceState, ExecutionEvent, ExecutionRun, ExecutionStatus, ResearchSurface,
-    ResearchWorkflowSpec, SemanticLoss, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
-    RESEARCH_CONTRACT_SCHEMA_VERSION,
+    EvidenceState, ExecutionEvent, ExecutionRun, ExecutionStatus, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION, ResearchSurface, ResearchWorkflowSpec, SemanticLoss,
+    TypedPort, TypedResearchArtifact,
 };
 use bioprism_ids::{ContentHash, RunId};
 use bioprism_onco::{BoundaryRequest, ConsentBasis, OutputUse, RequestContext, ResearchBoundary};
@@ -92,6 +92,7 @@ pub enum GliomaModelSystem {
 
 /// A local, value-only input reference.  Payload bytes remain in the institution's store.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalArtifactRef {
     pub artifact_id: String,
     pub content_hash: ContentHash,
@@ -2048,8 +2049,13 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
                 required: false,
             },
             TypedPort {
+                name: "glioma_posterior_batch".into(),
+                schema: "GliomaPosteriorDisagreementBatch1@2".into(),
+                required: false,
+            },
+            TypedPort {
                 name: "glioma_active_learning_campaign".into(),
-                schema: "GliomaActiveLearningCampaign1@1".into(),
+                schema: "GliomaActiveLearningCampaign1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -2059,7 +2065,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             },
             TypedPort {
                 name: "glioma_robust_active_learning_campaign".into(),
-                schema: "GliomaRobustActiveLearningCampaign1@1".into(),
+                schema: "GliomaRobustActiveLearningCampaign1@2".into(),
                 required: false,
             },
             TypedPort {
@@ -2244,10 +2250,11 @@ mod tests {
         let plan = compile_glioma_research(&request).unwrap();
         assert_eq!(plan.disposition, GliomaPlanDisposition::NeedsInputs);
         assert!(!plan.missing_input_order.is_empty());
-        assert!(plan
-            .omission_order
-            .iter()
-            .any(|item| item.contains("required-input-missing")));
+        assert!(
+            plan.omission_order
+                .iter()
+                .any(|item| item.contains("required-input-missing"))
+        );
     }
 
     #[test]
@@ -2256,9 +2263,10 @@ mod tests {
         request.aggregate_only = false;
         let plan = compile_glioma_research(&request).unwrap();
         assert_eq!(plan.disposition, GliomaPlanDisposition::Admitted);
-        assert!(plan
-            .disabled_order
-            .contains(&"federation-benchmarking".into()));
+        assert!(
+            plan.disabled_order
+                .contains(&"federation-benchmarking".into())
+        );
     }
 
     #[test]
@@ -2268,10 +2276,11 @@ mod tests {
         request.allow_federation = true;
         let plan = compile_glioma_research(&request).unwrap();
         assert_eq!(plan.disposition, GliomaPlanDisposition::Blocked);
-        assert!(plan
-            .omission_order
-            .iter()
-            .any(|item| item.contains("federation-requires-aggregate-only-export")));
+        assert!(
+            plan.omission_order
+                .iter()
+                .any(|item| item.contains("federation-requires-aggregate-only-export"))
+        );
         assert_eq!(
             plan.stages
                 .iter()
@@ -2339,11 +2348,13 @@ mod tests {
         .unwrap();
         assert_eq!(receipt.run.retry_count, 1);
         assert_eq!(receipt.completed_order.len(), 12);
-        assert!(receipt
-            .run
-            .events
-            .iter()
-            .any(|event| event.event_type == "stage_retry"));
+        assert!(
+            receipt
+                .run
+                .events
+                .iter()
+                .any(|event| event.event_type == "stage_retry")
+        );
     }
 
     #[test]
@@ -2390,11 +2401,13 @@ mod tests {
         assert_eq!(first_selection, second_selection);
         assert_eq!(first_selection.selected_order, vec!["action-a", "action-b"]);
         assert_eq!(first_selection.blocked_order, vec!["action-instrument"]);
-        assert!(first_selection
-            .decisions
-            .iter()
-            .any(|decision| decision.action_id == "action-instrument"
-                && decision.reason.as_deref() == Some("instrument-execution-disabled")));
+        assert!(
+            first_selection
+                .decisions
+                .iter()
+                .any(|decision| decision.action_id == "action-instrument"
+                    && decision.reason.as_deref() == Some("instrument-execution-disabled"))
+        );
         first_selection.validate().unwrap();
     }
 

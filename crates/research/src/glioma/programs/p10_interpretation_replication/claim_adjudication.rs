@@ -8,21 +8,21 @@
 //! separate; it never turns a preclinical result into a patient-facing or clinical decision.
 
 use super::causal_contrast::{
-    analyze_glioma_causal_contrast, CausalContrastAnalysis, CausalContrastDisposition,
-    CausalContrastError, CausalContrastRequest,
+    CausalContrastAnalysis, CausalContrastDisposition, CausalContrastError, CausalContrastRequest,
+    analyze_glioma_causal_contrast,
 };
 use super::meta_analysis::{
-    analyze_replication_meta_analysis, MetaAnalysisDisposition, MetaAnalysisError,
-    MetaAnalysisRequest, ReplicationMetaAnalysis,
+    MetaAnalysisDisposition, MetaAnalysisError, MetaAnalysisRequest, ReplicationMetaAnalysis,
+    analyze_replication_meta_analysis,
 };
 use super::sensitivity::{
-    analyze_causal_sensitivity, CausalSensitivityAnalysis, SensitivityDisposition,
-    SensitivityError, SensitivityRequest,
+    CausalSensitivityAnalysis, SensitivityDisposition, SensitivityError, SensitivityRequest,
+    analyze_causal_sensitivity,
 };
 use super::trajectory::TrajectoryObservation;
 use crate::glioma::replication::{
-    assess_replication, ReplicationAssessment, ReplicationDisposition, ReplicationError,
-    ReplicationRequest, ReplicationStudy,
+    ReplicationAssessment, ReplicationDisposition, ReplicationError, ReplicationRequest,
+    ReplicationStudy, assess_replication,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_ids::ContentHash;
@@ -781,10 +781,12 @@ mod tests {
         let output = execute_glioma_causal_claim_adjudication(&request()).unwrap();
         assert_eq!(output.disposition, CausalClaimDisposition::Qualified);
         assert_eq!(output.gates.len(), 4);
-        assert!(output
-            .actions
-            .iter()
-            .any(|action| action.kind == ClaimActionKind::ReleasePreclinicalClaim));
+        assert!(
+            output
+                .actions
+                .iter()
+                .any(|action| action.kind == ClaimActionKind::ReleasePreclinicalClaim)
+        );
         output.validate().unwrap();
     }
 
@@ -796,9 +798,11 @@ mod tests {
             .retain(|observation| observation.observation_id != "t2-post");
         let output = execute_glioma_causal_claim_adjudication(&request).unwrap();
         assert_ne!(output.disposition, CausalClaimDisposition::Qualified);
-        assert!(output
-            .actions
-            .iter()
-            .any(|action| action.kind == ClaimActionKind::CollectTimepoints));
+        assert!(
+            output
+                .actions
+                .iter()
+                .any(|action| action.kind == ClaimActionKind::CollectTimepoints)
+        );
     }
 }

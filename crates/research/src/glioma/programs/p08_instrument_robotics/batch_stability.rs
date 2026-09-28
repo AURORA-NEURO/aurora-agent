@@ -419,7 +419,7 @@ pub fn analyze_glioma_instrument_batch_stability(
 mod tests {
     use super::*;
     use crate::glioma::programs::p08_instrument_robotics::signal_extraction::{
-        extract_glioma_instrument_signal, InstrumentSignalPoint, SignalExtractionRequest,
+        InstrumentSignalPoint, SignalExtractionRequest, extract_glioma_instrument_signal,
     };
     use crate::glioma_engine::GliomaModelSystem;
 
@@ -520,9 +520,11 @@ mod tests {
             output.disposition,
             BatchStabilityDisposition::NoStableChannels
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.contains("driftblocked")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry.contains("driftblocked"))
+        );
     }
 }

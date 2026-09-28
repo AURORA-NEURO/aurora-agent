@@ -1041,10 +1041,11 @@ mod tests {
         let plan = plan_glioma_multi_fidelity_optimization(&request(), &candidates, &[]).unwrap();
         assert!(plan.blocked_order.contains(&"valid-a".into()));
         assert_eq!(plan.selected_order, vec!["screen-a"]);
-        assert!(plan
-            .uncertainty
-            .iter()
-            .any(|reason| reason.contains("await-lower-fidelity")));
+        assert!(
+            plan.uncertainty
+                .iter()
+                .any(|reason| reason.contains("await-lower-fidelity"))
+        );
     }
 
     #[test]
@@ -1079,9 +1080,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(first, second);
-        assert!(first
-            .negative_evidence
-            .iter()
-            .any(|reason| reason.contains("no-observed-support")));
+        assert!(
+            first
+                .negative_evidence
+                .iter()
+                .any(|reason| reason.contains("no-observed-support"))
+        );
     }
 }

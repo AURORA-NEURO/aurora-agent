@@ -7,8 +7,8 @@
 //! biological evidence.
 
 use super::simulator::{
-    simulate_glioma_protocol, ProtocolDisposition, ProtocolSimulation, ProtocolSimulationRequest,
-    ProtocolTask,
+    ProtocolDisposition, ProtocolSimulation, ProtocolSimulationRequest, ProtocolTask,
+    simulate_glioma_protocol,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -718,7 +718,7 @@ mod tests {
             plan.selected_candidate_order,
             vec!["fast-moderate-information"]
         );
-        assert_eq!(plan.selected_branch_id.starts_with("branch-"), true);
+        assert!(plan.selected_branch_id.starts_with("branch-"));
         plan.validate().unwrap();
     }
 

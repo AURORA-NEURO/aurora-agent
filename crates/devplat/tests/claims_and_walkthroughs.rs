@@ -23,16 +23,142 @@ fn name(value: &str) -> ApiName {
 }
 
 #[test]
-fn only_a_rust_crate_surface_is_in_this_repository() {
-    for kind in SurfaceKind::ALL {
-        let expected = if kind == SurfaceKind::RustCrate {
-            Locale::InRepository
-        } else {
-            Locale::OutsideRepository
-        };
-        assert_eq!(kind.locale(), expected, "{kind} is in the wrong locale");
-        assert_eq!(kind.is_falsifiable_here(), kind == SurfaceKind::RustCrate);
+fn locale_belongs_to_the_artifact_address_not_its_language() {
+    let rust = devplat();
+    let action = Surface::in_repository(
+        SurfaceKind::GitHubAction,
+        ".github/actions/autonomous-run/action.yml",
+    )
+    .expect("a checked-in action file is a local surface");
+    let hosted = Surface::foreign(SurfaceKind::GitHubAction, "hosted consumer workflow")
+        .expect("a hosted workflow is external");
+
+    assert_eq!(rust.locale(), Locale::InRepository);
+    assert!(rust.is_falsifiable_here());
+    assert_eq!(action.locale(), Locale::InRepository);
+    assert!(action.is_falsifiable_here());
+    assert_eq!(hosted.locale(), Locale::OutsideRepository);
+    assert!(!hosted.is_falsifiable_here());
+}
+
+#[test]
+fn local_non_rust_surfaces_require_normalized_relative_paths() {
+    for path in [
+        "../outside/action.yml",
+        "/absolute/action.yml",
+        "a\\b",
+        "C:/a.yml",
+        "a//b",
+    ] {
+        assert!(
+            Surface::in_repository(SurfaceKind::GitHubAction, path).is_err(),
+            "accepted unsafe local artifact path `{path}`"
+        );
     }
+    assert!(Surface::in_repository(SurfaceKind::RustCrate, "bioprism-devplat").is_err());
+}
+
+#[test]
+fn surface_wire_preserves_locality_and_reads_legacy_foreign_addresses() {
+    let local = Surface::in_repository(
+        SurfaceKind::GitHubAction,
+        ".github/actions/autonomous-run/action.yml",
+    )
+    .expect("checked-in action");
+    let value = serde_json::to_value(&local).expect("serialize surface");
+    assert_eq!(value["locale"], "in_repository");
+    let round_trip: Surface = serde_json::from_value(value).expect("locality survives the wire");
+    assert_eq!(round_trip, local);
+
+    let legacy: Surface = serde_json::from_value(serde_json::json!({
+        "kind": "git_hub_action",
+        "artifact": "aurora-neuro/prism-action@v1"
+    }))
+    .expect("older wire records default to the kind's former locale");
+    assert_eq!(legacy.locale(), Locale::OutsideRepository);
+
+    assert!(serde_json::from_value::<Surface>(serde_json::json!({
+        "kind": "rust_crate",
+        "artifact": "bioprism-devplat",
+        "locale": "outside_repository"
+    }))
+    .is_err());
+}
+
+#[test]
+fn an_in_tree_action_claim_is_falsifiable_and_rechecked_against_its_file() {
+    let surface = Surface::in_repository(
+        SurfaceKind::GitHubAction,
+        ".github/actions/autonomous-run/action.yml",
+    )
+    .expect("checked-in composite action");
+    let claim = ApiClaim::about(name("using"), surface)
+        .resolved_in(".github/actions/autonomous-run/action.yml")
+        .seal()
+        .expect("local action claims can carry local evidence");
+    let walkthrough = Walkthrough::draft(
+        WalkthroughId::parse("local-autonomous-action").expect("valid id"),
+        "Check the action entrypoint contract.",
+        claim.surface().clone(),
+    )
+    .step(Step::naming("Read the action metadata.", claim))
+    .seal()
+    .expect("one checkable step");
+    let workspace = Workspace::here().expect("the workspace opens");
+
+    assert!(matches!(
+        walkthrough.standing(),
+        Standing::CheckableHere { claims: 1 }
+    ));
+    assert!(matches!(
+        recheck(&walkthrough, &workspace).as_slice(),
+        [(api, Evidence::ResolvedInTree { .. })] if api == "using"
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn rechecking_refuses_evidence_that_escapes_through_a_symlink() {
+    use std::os::unix::fs::symlink;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is after the epoch")
+        .as_nanos();
+    let temporary = std::env::temp_dir().join(format!(
+        "bioprism-devplat-symlink-{}-{nonce}",
+        std::process::id()
+    ));
+    let root = temporary.join("workspace");
+    std::fs::create_dir_all(&root).expect("create temporary workspace");
+    std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n")
+        .expect("write temporary workspace manifest");
+    let outside = temporary.join("outside.rs");
+    std::fs::write(&outside, "fn call() {}\n").expect("write external evidence fixture");
+    symlink(&outside, root.join("link.rs")).expect("create symlink outside the workspace");
+
+    let workspace = Workspace::open(&root).expect("open temporary workspace");
+    let surface =
+        Surface::in_repository(SurfaceKind::GitHubAction, "link.rs").expect("local action surface");
+    let claim = ApiClaim::about(name("call"), surface)
+        .resolved_in("link.rs")
+        .seal()
+        .expect("relative evidence path");
+    let walkthrough = Walkthrough::draft(
+        WalkthroughId::parse("symlink-evidence").expect("valid id"),
+        "Check a claimed local symbol.",
+        claim.surface().clone(),
+    )
+    .step(Step::naming("Read the symbol.", claim))
+    .seal()
+    .expect("one checkable step");
+
+    assert!(matches!(
+        recheck(&walkthrough, &workspace).as_slice(),
+        [(_, Evidence::AbsentFromTree)]
+    ));
+    std::fs::remove_dir_all(&temporary).expect("remove temporary workspace");
 }
 
 #[test]
@@ -82,11 +208,27 @@ fn an_unverifiable_claim_without_a_reason_is_refused() {
 }
 
 #[test]
-fn a_resolved_claim_must_name_the_file_it_was_resolved_against() {
+fn a_resolved_claim_must_name_a_safe_repository_relative_file() {
     assert!(ApiClaim::about(name("bioprism_devplat::render"), devplat())
         .resolved_in("")
         .seal()
         .is_err());
+    for file in [
+        "../outside.rs",
+        "/outside.rs",
+        "C:/outside.rs",
+        "crates\\devplat\\src\\lib.rs",
+        "crates//devplat/src/lib.rs",
+        "./crates/devplat/src/lib.rs",
+    ] {
+        assert!(
+            ApiClaim::about(name("bioprism_devplat::render"), devplat())
+                .resolved_in(file)
+                .seal()
+                .is_err(),
+            "accepted evidence path `{file}` outside the normalized workspace-relative form"
+        );
+    }
 }
 
 #[test]
@@ -310,8 +452,8 @@ fn the_report_digest_is_a_function_of_the_catalogue_alone() {
     let second = DevPlatReport::of(&standard_walkthroughs().expect("seals")).expect("builds");
     assert_eq!(first.digest, second.digest);
     assert_eq!(first.modules_classified(), 20);
-    assert_eq!(first.implemented.len(), 4);
-    assert_eq!(first.not_implemented.len(), 16);
+    assert_eq!(first.implemented.len(), 5);
+    assert_eq!(first.not_implemented.len(), 15);
 }
 
 #[test]

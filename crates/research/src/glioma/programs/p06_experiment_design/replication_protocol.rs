@@ -7,8 +7,8 @@
 
 use super::replication_continuation::{ReplicationContinuationAction, ReplicationContinuationPlan};
 use crate::glioma::programs::p07_protocol_simulation::{
-    simulate_glioma_protocol, ProtocolDisposition, ProtocolResource, ProtocolResourceKind,
-    ProtocolSimulation, ProtocolSimulationError, ProtocolSimulationRequest, ProtocolTask,
+    ProtocolDisposition, ProtocolResource, ProtocolResourceKind, ProtocolSimulation,
+    ProtocolSimulationError, ProtocolSimulationRequest, ProtocolTask, simulate_glioma_protocol,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_foundation::PRECLINICAL_BOUNDARY;
@@ -441,8 +441,8 @@ pub fn compile_glioma_replication_protocol(
 mod tests {
     use super::*;
     use crate::glioma::programs::p06_experiment_design::{
-        plan_glioma_replication_continuation, ReplicationContinuationObservation,
-        ReplicationPlanRequest,
+        ReplicationContinuationObservation, ReplicationPlanRequest,
+        plan_glioma_replication_continuation,
     };
     use crate::glioma_engine::LocalArtifactRef;
 

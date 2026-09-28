@@ -479,10 +479,12 @@ mod tests {
         ]))
         .expect("governor");
         assert_eq!(result.stop_reason, DecisionLoopStopReason::NoProgress);
-        assert!(result
-            .uncertainty_order
-            .iter()
-            .any(|item| item.contains("round-2")));
+        assert!(
+            result
+                .uncertainty_order
+                .iter()
+                .any(|item| item.contains("round-2"))
+        );
     }
 
     #[test]
@@ -490,13 +492,17 @@ mod tests {
         let result = govern_glioma_decision_loop(&request(vec![round(1, 800, 400, 0, 1, 1, true)]))
             .expect("governor");
         assert_eq!(result.stop_reason, DecisionLoopStopReason::ReviewRequired);
-        assert!(result
-            .negative_evidence_order
-            .iter()
-            .any(|item| item.contains("contradictions")));
-        assert!(result
-            .negative_evidence_order
-            .iter()
-            .any(|item| item.contains("negative-results")));
+        assert!(
+            result
+                .negative_evidence_order
+                .iter()
+                .any(|item| item.contains("contradictions"))
+        );
+        assert!(
+            result
+                .negative_evidence_order
+                .iter()
+                .any(|item| item.contains("negative-results"))
+        );
     }
 }

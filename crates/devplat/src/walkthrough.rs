@@ -529,10 +529,11 @@ pub fn standard_walkthroughs() -> Result<Vec<Walkthrough>, WalkthroughError> {
 /// Re-check a walkthrough's in-tree claims against a working tree.
 ///
 /// Reuses `bioprism-cookbook`'s [`Workspace`](bioprism_cookbook::Workspace) rather than walking the
-/// tree again. In-tree claims are re-derived from the file text: if the named symbol's last
-/// segment is no longer present, the claim comes back [`Evidence::AbsentFromTree`] and the
-/// document is refuted. Out-of-tree claims are returned unchanged, because there is nothing to
-/// look at and inventing a check for them would be the exact confusion this crate names.
+/// tree again. In-tree claims are re-derived from canonical file paths under that workspace root:
+/// if the named symbol's last segment is no longer present, or its path escapes the checkout, the
+/// claim comes back [`Evidence::AbsentFromTree`] and the document is refuted. Out-of-tree claims
+/// are returned unchanged, because there is nothing to look at and inventing a check for them
+/// would be the exact confusion this crate names.
 pub fn recheck(
     walkthrough: &Walkthrough,
     workspace: &bioprism_cookbook::Workspace,
@@ -545,7 +546,7 @@ pub fn recheck(
             match claim.evidence() {
                 Evidence::ResolvedInTree { file } => {
                     let needle = api.rsplit("::").next().unwrap_or(&api).to_string();
-                    match workspace.read(file) {
+                    match read_workspace_file(workspace, file) {
                         Ok(text) if text.contains(&needle) => (
                             api,
                             Evidence::ResolvedInTree {
@@ -559,4 +560,19 @@ pub fn recheck(
             }
         })
         .collect()
+}
+
+fn read_workspace_file(
+    workspace: &bioprism_cookbook::Workspace,
+    relative: &str,
+) -> std::io::Result<String> {
+    let root = std::fs::canonicalize(workspace.root())?;
+    let path = std::fs::canonicalize(root.join(relative))?;
+    if !path.starts_with(&root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "walkthrough evidence path resolves outside the workspace",
+        ));
+    }
+    std::fs::read_to_string(path)
 }

@@ -9,16 +9,16 @@
 
 use super::spatial_niche::SpatialCell;
 use super::spatial_propagation::{
-    analyze_glioma_spatial_state_propagation, SpatialPropagationAnalysis,
-    SpatialPropagationDisposition,
+    SpatialPropagationAnalysis, SpatialPropagationDisposition,
+    analyze_glioma_spatial_state_propagation,
 };
 use super::spatial_registration::{
-    register_glioma_spatial_samples, RegisteredSpatialCell, SpatialRegistrationAnalysis,
-    SpatialRegistrationCell, SpatialRegistrationDisposition,
+    RegisteredSpatialCell, SpatialRegistrationAnalysis, SpatialRegistrationCell,
+    SpatialRegistrationDisposition, register_glioma_spatial_samples,
 };
 use super::temporal_fusion::{
-    analyze_glioma_temporal_multimodal_fusion, TemporalFusionAnalysis, TemporalFusionDisposition,
-    TemporalFusionRequest, TemporalObservation,
+    TemporalFusionAnalysis, TemporalFusionDisposition, TemporalFusionRequest, TemporalObservation,
+    analyze_glioma_temporal_multimodal_fusion,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_ids::ContentHash;
@@ -759,9 +759,11 @@ mod tests {
             .expect("alignment");
         assert_eq!(output.disposition, TemporalSpatialDisposition::Qualified);
         assert_eq!(output.aligned_states[0].state_gap_milli, Some(0));
-        assert!(output
-            .priority_action_order
-            .contains(&TemporalSpatialAction::PublishAlignedStateMap));
+        assert!(
+            output
+                .priority_action_order
+                .contains(&TemporalSpatialAction::PublishAlignedStateMap)
+        );
     }
 
     #[test]
@@ -811,12 +813,16 @@ mod tests {
             output.aligned_states[0].disposition,
             TemporalSpatialDisposition::Unresolved
         );
-        assert!(output
-            .priority_action_order
-            .contains(&TemporalSpatialAction::AcquireTemporalState));
-        assert!(output
-            .missing_sample_timepoint_order
-            .iter()
-            .any(|value| value.contains("temporal-state")));
+        assert!(
+            output
+                .priority_action_order
+                .contains(&TemporalSpatialAction::AcquireTemporalState)
+        );
+        assert!(
+            output
+                .missing_sample_timepoint_order
+                .iter()
+                .any(|value| value.contains("temporal-state"))
+        );
     }
 }

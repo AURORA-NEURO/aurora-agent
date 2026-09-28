@@ -144,9 +144,7 @@ impl ResearchContextReceipt {
     }
 
     pub fn digest(&self) -> Result<ContentHash, ResearchContextError> {
-        let value = serde_json::to_value(self)
-            .map_err(|error| ResearchContextError::Serialization(error.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|error| ResearchContextError::Serialization(error.to_string()))
     }
 }

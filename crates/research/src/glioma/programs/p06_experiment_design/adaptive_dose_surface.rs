@@ -635,10 +635,11 @@ mod tests {
             AdaptiveDoseSurfaceDisposition::NeedsObservations
         );
         assert!(plan.selected_order.is_empty());
-        assert!(plan
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("no-safe-neighborhood")));
+        assert!(
+            plan.uncertainty
+                .iter()
+                .any(|item| item.contains("no-safe-neighborhood"))
+        );
     }
 
     #[test]

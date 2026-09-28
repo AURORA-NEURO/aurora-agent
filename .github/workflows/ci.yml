@@ -29,6 +29,8 @@ jobs:
         run: cargo fetch --locked --config net.offline=false
       - name: validate glioma folder organization
         run: python tools/validate_glioma_organization.py
+      - name: validate documentation map and local links
+        run: python tools/validate_docs_index.py
       # The repository predates this workflow and contains unrelated stable-rustfmt drift.
       # Keep the gate actionable by checking every Rust file changed by this revision while
       # the existing baseline is migrated deliberately rather than hiding the result.
@@ -100,9 +102,13 @@ jobs:
       - name: compile SDK and tests
         working-directory: python
         run: python -m compileall -q prism_sdk tests
+      - name: build and smoke-test the installed Python distribution
+        run: python python/tools/verify_distribution.py
       - name: run stdio client contract tests
         working-directory: python
         run: python -W error::ResourceWarning -m pytest -q
+      - name: test consumer autonomous GitHub Action
+        run: python -m pytest -q tools/test_autonomous_agent_action.py
       - name: enforce autonomous selection promotion gate
         working-directory: python
         run: python -m pytest -q tests/test_autonomous_selection_promotion.py tests/test_autonomous_selection_lifecycle.py
@@ -221,6 +227,38 @@ jobs:
           assert int(os.environ["AURORA_DISCOVERED_DOWNLOADED_BYTE_COUNT"]) == 0
           assert "token" not in json.dumps(collection).lower()
           print(f"verified discovered {payload_path} and {collection_path} ({len(payload['jobs'])} jobs)")
+          PY
+
+      - name: exercise consumer autonomous agent action
+        id: aurora-autonomous-run
+        uses: ./.github/actions/autonomous-run
+        with:
+          task: Review this deterministic GitHub Actions fixture task.
+          mcp-command: python -u python/tests/autonomous_brain_mcp_server.py
+          mcp-working-directory: ${{ github.workspace }}
+          provider: local
+          models: local-model
+          domain: coding
+          approve-provider-call: 'true'
+          run-id: ci-autonomous-run
+      - name: verify consumer action emits only a useful result projection
+        env:
+          AURORA_ACTION_STATUS: ${{ steps.aurora-autonomous-run.outputs.status }}
+          AURORA_ACTION_ROUTING: ${{ steps.aurora-autonomous-run.outputs['routing-mode'] }}
+          AURORA_ACTION_RUN_ID: ${{ steps.aurora-autonomous-run.outputs['run-id'] }}
+          AURORA_ACTION_DIGEST: ${{ steps.aurora-autonomous-run.outputs['result-digest'] }}
+          AURORA_ACTION_FILE: ${{ steps.aurora-autonomous-run.outputs['result-file'] }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+
+          assert os.environ["AURORA_ACTION_STATUS"] == "completed_provider_call"
+          assert os.environ["AURORA_ACTION_ROUTING"] == "explicit_domain"
+          assert os.environ["AURORA_ACTION_RUN_ID"] == "ci-autonomous-run"
+          assert re.fullmatch(r"[0-9a-f]{64}", os.environ["AURORA_ACTION_DIGEST"])
+          assert os.environ["AURORA_ACTION_FILE"] == ""
+          print("verified the caller-facing autonomous status and digest outputs")
           PY
 
   typescript-sdk:

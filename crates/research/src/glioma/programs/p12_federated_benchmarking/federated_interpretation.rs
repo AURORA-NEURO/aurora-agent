@@ -7,8 +7,8 @@
 //! partial or negative rather than becoming a stronger claim.
 
 use super::consensus::{
-    analyze_federated_benchmark, FederatedBenchmarkConsensus, FederatedBenchmarkDisposition,
-    FederatedBenchmarkError, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkConsensus, FederatedBenchmarkDisposition, FederatedBenchmarkError,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, analyze_federated_benchmark,
 };
 use crate::glioma::programs::p10_interpretation_replication::{
     ClosureInterpretationDisposition, ClosureInterpretationRun,

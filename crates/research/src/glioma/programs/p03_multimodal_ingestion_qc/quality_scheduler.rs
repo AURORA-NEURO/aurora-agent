@@ -9,6 +9,7 @@
 use crate::glioma_engine::{GliomaModality, GliomaModelSystem};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 use std::collections::BTreeSet;
 use thiserror::Error;
 
@@ -330,8 +331,7 @@ pub fn plan_glioma_multimodal_quality_schedule(
         risk_reduction: 0,
         required_count: 0,
     }];
-    for index in 0..candidates.len() {
-        let candidate = &candidates[index];
+    for (index, candidate) in candidates.iter().enumerate() {
         let mut next = Vec::with_capacity(beam.len() * 2);
         for state in &beam {
             next.push(state.clone());
@@ -356,7 +356,7 @@ pub fn plan_glioma_multimodal_quality_schedule(
                 let _ = urgency;
             }
         }
-        next.sort_by(|left, right| state_rank(right).cmp(&state_rank(left)));
+        next.sort_by_key(|state| Reverse(state_rank(state)));
         next.dedup_by(|left, right| left.selected == right.selected);
         next.truncate(BEAM_WIDTH);
         beam = next;
@@ -368,7 +368,7 @@ pub fn plan_glioma_multimodal_quality_schedule(
         .map(|candidate| candidate.modality)
         .collect::<Vec<_>>();
     let mut final_states = beam;
-    final_states.sort_by(|left, right| state_rank(right).cmp(&state_rank(left)));
+    final_states.sort_by_key(|state| Reverse(state_rank(state)));
     let chosen = final_states.first().cloned().unwrap_or(BeamState {
         selected: Vec::new(),
         cost: 0,
@@ -596,10 +596,12 @@ mod tests {
             output.uncovered_required_order,
             vec![GliomaModality::Genomics]
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.contains("required-modality-uncovered")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry.contains("required-modality-uncovered"))
+        );
     }
 
     #[test]

@@ -348,9 +348,8 @@ fn priority_score(
         + u32::from(candidate.expected_transport_gain_milli) * 15
         + u32::from(candidate.reproducibility_milli) * 10)
         / 100;
-    let penalty = (u32::from(candidate.risk_milli) * 20
-        + u32::try_from(candidate.cost_units.min(1_000)).unwrap_or(1_000) * 5)
-        / 100;
+    let penalty =
+        (u32::from(candidate.risk_milli) * 20 + candidate.cost_units.min(1_000) * 5) / 100;
     let score = raw.saturating_sub(penalty).min(1_000) as u16;
     (
         score,
@@ -556,17 +555,17 @@ pub fn plan_glioma_mechanism_multi_fidelity_control(
 #[cfg(test)]
 mod tests {
     use super::super::bayesian_update::{
-        update_glioma_mechanism_posterior, BayesianMechanismHypothesis,
-        BayesianMechanismUpdateRequest,
+        BayesianMechanismHypothesis, BayesianMechanismUpdateRequest,
+        update_glioma_mechanism_posterior,
     };
     use super::super::discrimination::{MechanismFeatureObservation, MechanismPrediction};
     use super::super::evidence_assimilation::{
-        assimilate_glioma_mechanism_evidence, MechanismEvidenceAssimilationRequest,
-        MechanismEvidenceSnapshot,
+        MechanismEvidenceAssimilationRequest, MechanismEvidenceSnapshot,
+        assimilate_glioma_mechanism_evidence,
     };
     use super::super::fidelity_bridge::{
-        bridge_glioma_mechanism_fidelity, MechanismFidelityBridgeRequest,
-        MechanismFidelityObservation,
+        MechanismFidelityBridgeRequest, MechanismFidelityObservation,
+        bridge_glioma_mechanism_fidelity,
     };
     use super::*;
     use crate::glioma_engine::LocalArtifactRef;
@@ -723,10 +722,11 @@ mod tests {
         assert_eq!(plan.selected_action_order, vec!["near-escalation"]);
         assert_eq!(plan.blocked_action_order, vec!["far-escalation"]);
         assert_eq!(plan.total_cost_units, 3);
-        assert!(plan
-            .decisions
-            .iter()
-            .any(|decision| decision.mechanism_id == "far" && decision.transport_milli < 700));
+        assert!(
+            plan.decisions
+                .iter()
+                .any(|decision| decision.mechanism_id == "far" && decision.transport_milli < 700)
+        );
         plan.validate().unwrap();
     }
 

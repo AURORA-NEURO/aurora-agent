@@ -9,8 +9,8 @@
 //! negative result.  No assay, instrument, federation, or clinical action is dispatched here.
 
 use super::power_reestimation::{
-    plan_glioma_power_reestimation, PowerArmObservation, PowerDecisionKind, PowerReestimationError,
-    PowerReestimationPlan, PowerReestimationRequest,
+    PowerArmObservation, PowerDecisionKind, PowerReestimationError, PowerReestimationPlan,
+    PowerReestimationRequest, plan_glioma_power_reestimation,
 };
 use crate::glioma::programs::p05_mechanism_exploration::robust_portfolio::{
     RobustInterventionPortfolio, RobustPortfolioDisposition,
@@ -645,8 +645,8 @@ mod tests {
         MechanismGraphEdge, MechanismGraphNode, MechanismGraphRelation,
     };
     use crate::glioma::programs::p05_mechanism_exploration::robust_portfolio::{
-        plan_glioma_robust_intervention_portfolio, PortfolioDirection, RobustInterventionCandidate,
-        RobustInterventionRequest,
+        PortfolioDirection, RobustInterventionCandidate, RobustInterventionRequest,
+        plan_glioma_robust_intervention_portfolio,
     };
 
     fn hash(label: &str) -> ContentHash {
@@ -818,10 +818,12 @@ mod tests {
         assert_eq!(first, second);
         assert!(first.power_plan.is_some());
         assert_eq!(first.disposition, MechanismValidationDisposition::Qualified);
-        assert!(first
-            .actions
-            .iter()
-            .any(|action| action.kind == ValidationActionKind::StopForEfficacy));
+        assert!(
+            first
+                .actions
+                .iter()
+                .any(|action| action.kind == ValidationActionKind::StopForEfficacy)
+        );
         first.validate().unwrap();
     }
 
@@ -830,14 +832,18 @@ mod tests {
         let output = plan_glioma_mechanism_validation(&request(false)).unwrap();
         assert!(output.power_plan.is_none());
         assert_eq!(output.disposition, MechanismValidationDisposition::Blocked);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item == "missing-local-observation:control"));
-        assert!(output
-            .actions
-            .iter()
-            .any(|action| action.kind == ValidationActionKind::ResolveMissingObservation));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item == "missing-local-observation:control")
+        );
+        assert!(
+            output
+                .actions
+                .iter()
+                .any(|action| action.kind == ValidationActionKind::ResolveMissingObservation)
+        );
         output.validate().unwrap();
     }
 }

@@ -12,9 +12,12 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P04-F02";
-pub const OUTPUT_SCHEMA: &str = "GliomaDecisionContextReplay1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaDecisionContextReplay1@2";
 pub const MAX_EPOCHS: usize = 64;
 pub const MAX_OUTCOMES_PER_EPOCH: usize = 2_048;
+pub const MAX_TOTAL_ACTION_ROWS: usize = 65_536;
+pub const MAX_REQUEST_BYTES: usize = 8_000_000;
+pub const MAX_REPORT_BYTES: usize = 16_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,6 +77,7 @@ pub struct DecisionContextReplay {
     pub feature_id: String,
     pub output_schema: String,
     pub objective: String,
+    pub request: DecisionContextReplayRequest,
     pub epoch_order: Vec<String>,
     pub context_digest_order: Vec<ContentHash>,
     pub transition_order: Vec<String>,
@@ -114,6 +118,7 @@ fn digest_input(output: &DecisionContextReplay) -> serde_json::Value {
         "feature_id": output.feature_id,
         "output_schema": output.output_schema,
         "objective": output.objective,
+        "request": output.request,
         "epoch_order": output.epoch_order,
         "context_digest_order": output.context_digest_order,
         "transition_order": output.transition_order,
@@ -133,6 +138,7 @@ impl DecisionContextReplay {
         if self.feature_id != FEATURE_ID
             || self.output_schema != OUTPUT_SCHEMA
             || self.objective.trim().is_empty()
+            || self.objective != self.request.objective
             || self.epoch_order.len() < 2
             || !unique_nonempty(&self.epoch_order)
             || self.context_digest_order.len() != self.epoch_order.len()
@@ -170,6 +176,22 @@ impl DecisionContextReplay {
         if expected != self.digest {
             return Err(DecisionContextReplayError::Digest(
                 "decision-context replay digest does not match canonical content".into(),
+            ));
+        }
+        validate_request(&self.request).map_err(|error| {
+            DecisionContextReplayError::InvalidOutput(format!(
+                "retained replay request failed validation: {error}"
+            ))
+        })?;
+        let replayed = calculate(&self.request).map_err(|error| {
+            DecisionContextReplayError::InvalidOutput(format!(
+                "retained replay request cannot be replayed: {error}"
+            ))
+        })?;
+        if replayed != *self {
+            return Err(DecisionContextReplayError::InvalidOutput(
+                "replay report does not match deterministic replay of its retained epoch ledger"
+                    .into(),
             ));
         }
         Ok(())
@@ -212,19 +234,33 @@ fn validate_request(
     request: &DecisionContextReplayRequest,
 ) -> Result<(), DecisionContextReplayError> {
     if request.objective.trim().is_empty()
+        || request.objective.len() > 4_096
         || request.epoch_order.len() < 2
         || request.epoch_order.len() > MAX_EPOCHS
         || request.max_epochs == 0
         || request.max_epochs > MAX_EPOCHS
         || request.epoch_order.len() > request.max_epochs
+        || request.min_promotion_delta_milli > 1_000
     {
         return Err(DecisionContextReplayError::InvalidRequest(
             "objective, at least two epochs, and bounded epoch limits are required".into(),
         ));
     }
+    let request_bytes = serde_json::to_vec(request)
+        .map_err(|error| DecisionContextReplayError::InvalidRequest(error.to_string()))?
+        .len();
+    if request_bytes > MAX_REQUEST_BYTES {
+        return Err(DecisionContextReplayError::InvalidRequest(format!(
+            "request is {request_bytes} bytes, above the {MAX_REQUEST_BYTES}-byte limit"
+        )));
+    }
     let mut epoch_ids = BTreeSet::new();
+    let mut action_rows = 0usize;
     for epoch in &request.epoch_order {
-        if epoch.epoch_id.trim().is_empty() || !epoch_ids.insert(epoch.epoch_id.clone()) {
+        if epoch.epoch_id.trim().is_empty()
+            || epoch.epoch_id.len() > 128
+            || !epoch_ids.insert(epoch.epoch_id.clone())
+        {
             return Err(DecisionContextReplayError::InvalidRequest(
                 "epoch ids must be non-empty and unique".into(),
             ));
@@ -246,9 +282,16 @@ fn validate_request(
             )));
         }
         let action_ids = action_ids(&epoch.context);
+        action_rows = action_rows.saturating_add(action_ids.len());
+        if action_rows > MAX_TOTAL_ACTION_ROWS {
+            return Err(DecisionContextReplayError::InvalidRequest(
+                "aggregate context action rows exceed the replay bound".into(),
+            ));
+        }
         let mut outcome_ids = BTreeSet::new();
         for outcome in &epoch.outcome_order {
             if outcome.action_id.trim().is_empty()
+                || outcome.action_id.len() > 512
                 || !outcome_ids.insert(outcome.action_id.clone())
                 || !action_ids.contains(&outcome.action_id)
                 || outcome.result_digest.as_str().len() != 64
@@ -263,8 +306,7 @@ fn validate_request(
     Ok(())
 }
 
-/// Replay decision-context snapshots and local action outcomes across study epochs.
-pub fn replay_glioma_decision_context(
+fn calculate(
     request: &DecisionContextReplayRequest,
 ) -> Result<DecisionContextReplay, DecisionContextReplayError> {
     validate_request(request)?;
@@ -379,6 +421,7 @@ pub fn replay_glioma_decision_context(
         feature_id: FEATURE_ID.into(),
         output_schema: OUTPUT_SCHEMA.into(),
         objective: request.objective.clone(),
+        request: request.clone(),
         epoch_order,
         context_digest_order,
         transition_order,
@@ -394,6 +437,23 @@ pub fn replay_glioma_decision_context(
     };
     output.digest = ContentHash::of_value(&digest_input(&output))
         .map_err(|error| DecisionContextReplayError::Digest(error.to_string()))?;
+    let report_bytes = serde_json::to_vec(&output)
+        .map_err(|error| DecisionContextReplayError::Digest(error.to_string()))?
+        .len();
+    if report_bytes > MAX_REPORT_BYTES {
+        return Err(DecisionContextReplayError::InvalidRequest(format!(
+            "report is {report_bytes} bytes, above the {MAX_REPORT_BYTES}-byte limit"
+        )));
+    }
+    Ok(output)
+}
+
+/// Replay decision-context snapshots and local action outcomes across study epochs.
+pub fn replay_glioma_decision_context(
+    request: &DecisionContextReplayRequest,
+) -> Result<DecisionContextReplay, DecisionContextReplayError> {
+    validate_request(request)?;
+    let output = calculate(request)?;
     output.validate()?;
     Ok(output)
 }
@@ -403,10 +463,10 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma::programs::p04_decision_context::context_compiler::{
-        compile_decision_context, DecisionContextRequest,
+        DecisionContextRequest, compile_decision_context,
     };
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
     use std::collections::BTreeSet;
@@ -517,5 +577,42 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.disposition, DecisionContextReplayDisposition::Blocked);
         assert_eq!(first.unresolved_action_order.len(), 1);
+    }
+
+    #[test]
+    fn replay_rejects_semantic_tampering_after_digest_resealing() {
+        let context = context("PDGF signaling changes invasion");
+        let request = DecisionContextReplayRequest {
+            objective: "replay glioma decision context".into(),
+            epoch_order: vec![epoch("epoch-1", context.clone()), epoch("epoch-2", context)],
+            min_promotion_delta_milli: 100,
+            max_epochs: 8,
+            preserve_negative_results: true,
+        };
+        let mut report = replay_glioma_decision_context(&request).unwrap();
+        report.stable_action_order.clear();
+        report.digest = ContentHash::of_value(&digest_input(&report)).unwrap();
+
+        assert!(matches!(
+            report.validate(),
+            Err(DecisionContextReplayError::InvalidOutput(_))
+        ));
+    }
+
+    #[test]
+    fn replay_rejects_promotion_thresholds_outside_the_score_scale() {
+        let context = context("TERT activation changes growth");
+        let request = DecisionContextReplayRequest {
+            objective: "replay glioma decision context".into(),
+            epoch_order: vec![epoch("epoch-1", context.clone()), epoch("epoch-2", context)],
+            min_promotion_delta_milli: 1_001,
+            max_epochs: 8,
+            preserve_negative_results: true,
+        };
+
+        assert!(matches!(
+            replay_glioma_decision_context(&request),
+            Err(DecisionContextReplayError::InvalidRequest(_))
+        ));
     }
 }

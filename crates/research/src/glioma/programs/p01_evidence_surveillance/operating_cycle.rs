@@ -6,14 +6,14 @@
 //! frontier. Synthetic acquisition is explicitly unknown and negative; it never becomes support.
 
 use super::acquisition::{
-    plan_glioma_evidence_acquisition, EvidenceAcquisitionCandidate, EvidenceAcquisitionError,
-    EvidenceAcquisitionPlan, EvidenceAcquisitionRequest,
+    EvidenceAcquisitionCandidate, EvidenceAcquisitionError, EvidenceAcquisitionPlan,
+    EvidenceAcquisitionRequest, plan_glioma_evidence_acquisition,
 };
 use super::acquisition_campaign::{
-    execute_glioma_evidence_acquisition_campaign, DryRunEvidenceAcquisitionExecutor,
-    EvidenceAcquisitionCampaign, EvidenceAcquisitionCampaignDisposition,
-    EvidenceAcquisitionCampaignError, EvidenceAcquisitionCampaignRequest,
-    EvidenceAcquisitionExecutor,
+    DryRunEvidenceAcquisitionExecutor, EvidenceAcquisitionCampaign,
+    EvidenceAcquisitionCampaignDisposition, EvidenceAcquisitionCampaignError,
+    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionExecutor,
+    execute_glioma_evidence_acquisition_campaign,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};

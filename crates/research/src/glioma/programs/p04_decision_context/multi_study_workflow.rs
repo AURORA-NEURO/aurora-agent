@@ -2,13 +2,16 @@
 //!
 //! P04-F06 aligns independent study contexts into a typed frontier. This feature turns that
 //! frontier into an executable *plan* for the institution-local research engine: it closes action
-//! dependencies, allocates qualified actions across independent study groups, reserves bounded
-//! compute/material/instrument budgets, assigns deterministic waves, and routes higher-risk work
-//! through approval or signed-preflight gates. It never executes an assay or instrument and it
-//! cannot convert a planning candidate into a clinical decision.
+//! dependencies, allocates qualified actions across independent study groups, carries completed
+//! local outcomes forward as satisfied study-specific prerequisites, reserves bounded budgets,
+//! assigns deterministic waves, and routes higher-risk work through approval or signed-preflight
+//! gates. It never executes an assay or instrument or converts a planning candidate into a clinical
+//! decision.
 
+use super::context_replay::DecisionContextActionOutcomeStatus;
 use super::multi_study_context_artifact::{
-    MultiStudyActionDisposition, MultiStudyDecisionContextArtifact,
+    MAX_ACTIONS, MultiStudyActionDisposition, MultiStudyActionOutcome,
+    MultiStudyDecisionContextArtifact,
 };
 use bioprism_foundation::{AutonomyTier, Effect, PRECLINICAL_BOUNDARY};
 use bioprism_ids::ContentHash;
@@ -17,15 +20,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P04-F07";
-pub const OUTPUT_SCHEMA: &str = "GliomaMultiStudyWorkflowPlan1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaMultiStudyWorkflowPlan1@2";
 pub const MAX_STUDY_BUDGETS: usize = 256;
 pub const MAX_WAVES: usize = 256;
 pub const MAX_TASKS: usize = 4_096;
+pub const MAX_COMPLETED_OUTCOME_ROWS: usize = 32_768;
+pub const MAX_REPORT_BYTES: usize = 16_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MultiStudyWorkflowDisposition {
     Ready,
+    Completed,
     Partial,
     Blocked,
     Unresolved,
@@ -75,6 +81,8 @@ pub struct MultiStudyWorkflowTask {
     pub autonomy_tier: AutonomyTier,
     pub effects: BTreeSet<Effect>,
     pub depends_on: Vec<String>,
+    /// Prerequisite action IDs already completed at this study and satisfied without a new task.
+    pub completed_dependency_order: Vec<String>,
     pub route: String,
     pub disposition: MultiStudyTaskDisposition,
 }
@@ -92,6 +100,10 @@ pub struct MultiStudyWorkflowPlan {
     pub task_order: Vec<String>,
     pub wave_order: Vec<Vec<String>>,
     pub scheduled_action_order: Vec<String>,
+    /// Actions whose independent-group execution quorum is already complete locally.
+    pub completed_action_order: Vec<String>,
+    /// Exact local completion receipts used to satisfy those action assignments.
+    pub completed_outcome_order: Vec<MultiStudyActionOutcome>,
     pub approval_action_order: Vec<String>,
     pub deferred_action_order: Vec<String>,
     pub blocked_action_order: Vec<String>,
@@ -142,6 +154,8 @@ fn digest_input(output: &MultiStudyWorkflowPlan) -> serde_json::Value {
         "task_order": output.task_order,
         "wave_order": output.wave_order,
         "scheduled_action_order": output.scheduled_action_order,
+        "completed_action_order": output.completed_action_order,
+        "completed_outcome_order": output.completed_outcome_order,
         "approval_action_order": output.approval_action_order,
         "deferred_action_order": output.deferred_action_order,
         "blocked_action_order": output.blocked_action_order,
@@ -171,6 +185,26 @@ impl MultiStudyWorkflowPlan {
             || self.tasks.len() > MAX_TASKS
             || self.task_order.len() != self.tasks.len()
             || !ranked_unique(&self.scheduled_action_order)
+            || !canonical(&self.completed_action_order)
+            || self.completed_action_order.len() > MAX_ACTIONS
+            || self
+                .completed_action_order
+                .iter()
+                .any(|action| action.trim().is_empty())
+            || !canonical(
+                &self
+                    .completed_outcome_order
+                    .iter()
+                    .map(|outcome| (outcome.action_id.clone(), outcome.study_id.clone()))
+                    .collect::<Vec<_>>(),
+            )
+            || self.completed_outcome_order.len() > MAX_COMPLETED_OUTCOME_ROWS
+            || self.completed_outcome_order.iter().any(|outcome| {
+                outcome.action_id.trim().is_empty()
+                    || outcome.study_id.trim().is_empty()
+                    || outcome.status != DecisionContextActionOutcomeStatus::Completed
+                    || outcome.result_digest.as_str().len() != 64
+            })
             || !ranked_unique(&self.approval_action_order)
             || !ranked_unique(&self.deferred_action_order)
             || !ranked_unique(&self.blocked_action_order)
@@ -193,6 +227,30 @@ impl MultiStudyWorkflowPlan {
         if !eligible_set.is_subset(&study_set) {
             return Err(MultiStudyWorkflowError::InvalidOutput(
                 "eligible studies must be declared in study_order".into(),
+            ));
+        }
+        if self.completed_outcome_order.iter().any(|outcome| {
+            !eligible_set.contains(&outcome.study_id) || !study_set.contains(&outcome.study_id)
+        }) || self.completed_action_order.iter().any(|action| {
+            self.scheduled_action_order.contains(action)
+                || !self
+                    .completed_outcome_order
+                    .iter()
+                    .any(|outcome| outcome.action_id == *action)
+        }) {
+            return Err(MultiStudyWorkflowError::InvalidOutput(
+                "completed outcome receipts must be eligible, unique, and separate from scheduled actions".into(),
+            ));
+        }
+        if self.disposition == MultiStudyWorkflowDisposition::Completed
+            && (!self.tasks.is_empty()
+                || self.completed_action_order.is_empty()
+                || !self.approval_action_order.is_empty()
+                || !self.deferred_action_order.is_empty()
+                || !self.blocked_action_order.is_empty())
+        {
+            return Err(MultiStudyWorkflowError::InvalidOutput(
+                "completed plans cannot contain pending tasks or unresolved action states".into(),
             ));
         }
         let task_ids = self
@@ -218,6 +276,22 @@ impl MultiStudyWorkflowPlan {
                     || task.wave > self.wave_order.len().max(1)
                     || task.cost_units == 0
                     || task.depends_on.windows(2).any(|pair| pair[0] >= pair[1])
+                    || task
+                        .completed_dependency_order
+                        .windows(2)
+                        .any(|pair| pair[0] >= pair[1])
+                    || task
+                        .completed_dependency_order
+                        .iter()
+                        .any(|dependency| dependency.trim().is_empty())
+                    || self.completed_outcome_order.iter().any(|outcome| {
+                        outcome.action_id == task.action_id && outcome.study_id == task.study_id
+                    })
+                    || task.completed_dependency_order.iter().any(|dependency| {
+                        !self.completed_outcome_order.iter().any(|outcome| {
+                            outcome.action_id == *dependency && outcome.study_id == task.study_id
+                        })
+                    })
                     || task.depends_on.iter().any(|dependency| {
                         !task_ids.contains(dependency) || dependency == &task.task_id
                     })
@@ -249,6 +323,14 @@ impl MultiStudyWorkflowPlan {
                 "multi-study workflow digest does not match canonical content".into(),
             ));
         }
+        let report_bytes = serde_json::to_vec(self)
+            .map_err(|error| MultiStudyWorkflowError::Digest(error.to_string()))?
+            .len();
+        if report_bytes > MAX_REPORT_BYTES {
+            return Err(MultiStudyWorkflowError::InvalidOutput(format!(
+                "report is {report_bytes} bytes, above the {MAX_REPORT_BYTES}-byte limit"
+            )));
+        }
         Ok(())
     }
 }
@@ -263,7 +345,7 @@ fn collect_dependency_closure(
         Some(1) => {
             return Err(MultiStudyWorkflowError::InvalidArtifact(format!(
                 "action dependency cycle includes {action_id}"
-            )))
+            )));
         }
         Some(2) => return Ok(()),
         _ => {}
@@ -387,11 +469,8 @@ pub fn plan_glioma_multi_study_workflow(
         .collect::<BTreeSet<_>>();
     if budgets.iter().any(|budget| {
         !artifact_studies.contains(&budget.study_id)
-            || request
-                .artifact
-                .study_group
-                .get(&budget.study_id)
-                .map_or(true, |group| group != &budget.independent_group)
+            || (request.artifact.study_group.get(&budget.study_id)
+                != Some(&budget.independent_group))
     }) {
         return Err(MultiStudyWorkflowError::InvalidRequest(
             "study budgets cannot introduce unknown studies or relabel independent groups".into(),
@@ -419,6 +498,46 @@ pub fn plan_glioma_multi_study_workflow(
             eligible_studies.push(study_id.clone());
         }
     }
+    let eligible_study_set = eligible_studies.iter().cloned().collect::<BTreeSet<_>>();
+    let completed_outcome_order = request
+        .artifact
+        .outcome_order
+        .iter()
+        .filter(|outcome| {
+            outcome.status == DecisionContextActionOutcomeStatus::Completed
+                && eligible_study_set.contains(&outcome.study_id)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let completed_assignments = completed_outcome_order
+        .iter()
+        .map(|outcome| (outcome.action_id.clone(), outcome.study_id.clone()))
+        .collect::<BTreeSet<_>>();
+    let required_groups = request
+        .minimum_independent_groups
+        .max(usize::from(request.require_replication) * 2);
+    let mut completed_action_order = request
+        .artifact
+        .actions
+        .iter()
+        .filter(|action| {
+            action.disposition == MultiStudyActionDisposition::Qualified
+                && action
+                    .study_order
+                    .iter()
+                    .filter(|study_id| {
+                        eligible_study_set.contains(*study_id)
+                            && completed_assignments
+                                .contains(&(action.action.action_id.clone(), (**study_id).clone()))
+                    })
+                    .filter_map(|study_id| budget_map.get(study_id))
+                    .map(|budget| budget.independent_group.as_str())
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    >= required_groups
+        })
+        .map(|action| action.action.action_id.clone())
+        .collect::<BTreeSet<_>>();
     let action_map = request
         .artifact
         .actions
@@ -532,6 +651,9 @@ pub fn plan_glioma_multi_study_workflow(
     let mut reserved_budget = 0u64;
     for action_id in topological {
         let action = action_map[&action_id];
+        if completed_action_order.contains(&action_id) {
+            continue;
+        }
         let dependencies_blocked = action.action.depends_on.iter().any(|dependency| {
             blocked_actions.contains(dependency) || deferred_actions.contains(dependency)
         });
@@ -548,8 +670,13 @@ pub fn plan_glioma_multi_study_workflow(
             .iter()
             .filter(|study_id| eligible_studies.binary_search(study_id).is_ok())
             .filter(|study_id| {
+                !completed_assignments.contains(&(action_id.clone(), (**study_id).clone()))
+            })
+            .filter(|study_id| {
                 action.action.depends_on.iter().all(|dependency| {
-                    action_task_ids.contains_key(&(dependency.clone(), (*study_id).clone()))
+                    action_task_ids.contains_key(&((*dependency).clone(), (**study_id).clone()))
+                        || completed_assignments
+                            .contains(&((*dependency).clone(), (**study_id).clone()))
                 })
             })
             .cloned()
@@ -592,8 +719,17 @@ pub fn plan_glioma_multi_study_workflow(
             .checked_div(action_cost)
             .unwrap_or(0) as usize;
         let capacity = global_task_capacity.min(global_budget_capacity);
+        let completed_groups = action
+            .study_order
+            .iter()
+            .filter(|study_id| {
+                completed_assignments.contains(&(action_id.clone(), (**study_id).clone()))
+            })
+            .filter_map(|study_id| budget_map.get(study_id))
+            .map(|budget| budget.independent_group.clone())
+            .collect::<BTreeSet<_>>();
         let mut selected_studies = Vec::new();
-        let mut selected_groups = BTreeSet::new();
+        let mut selected_groups = completed_groups.clone();
         for study_id in &candidate_studies {
             let group = &budget_map[study_id].independent_group;
             if selected_studies.len() < capacity && selected_groups.insert(group.clone()) {
@@ -625,10 +761,10 @@ pub fn plan_glioma_multi_study_workflow(
                     .get(study_id)
                     .map(|budget| budget.independent_group.clone())
             })
+            .collect::<BTreeSet<_>>()
+            .union(&completed_groups)
+            .cloned()
             .collect::<BTreeSet<_>>();
-        let required_groups = request
-            .minimum_independent_groups
-            .max(usize::from(request.require_replication) * 2);
         let selected_groups = selected_studies
             .iter()
             .filter_map(|study_id| {
@@ -636,6 +772,9 @@ pub fn plan_glioma_multi_study_workflow(
                     .get(study_id)
                     .map(|budget| budget.independent_group.clone())
             })
+            .collect::<BTreeSet<_>>()
+            .union(&completed_groups)
+            .cloned()
             .collect::<BTreeSet<_>>();
         if selected_groups.len() < required_groups {
             if autonomy_denied && candidate_groups.len() < required_groups {
@@ -655,6 +794,10 @@ pub fn plan_glioma_multi_study_workflow(
                     },
                 );
             }
+            continue;
+        }
+        if selected_studies.is_empty() {
+            completed_action_order.insert(action_id.clone());
             continue;
         }
         let dependency_wave = action
@@ -701,11 +844,21 @@ pub fn plan_glioma_multi_study_workflow(
                 .iter()
                 .filter_map(|dependency| {
                     action_task_ids
-                        .get(&(dependency.clone(), study_id.clone()))
+                        .get(&((*dependency).clone(), study_id.clone()))
                         .cloned()
                 })
                 .collect::<Vec<_>>();
             dependencies.sort();
+            let mut completed_dependencies = action
+                .action
+                .depends_on
+                .iter()
+                .filter(|dependency| {
+                    completed_assignments.contains(&((**dependency).clone(), study_id.clone()))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            completed_dependencies.sort();
             tasks.push(MultiStudyWorkflowTask {
                 task_id: task_id.clone(),
                 action_id: action_id.clone(),
@@ -716,6 +869,7 @@ pub fn plan_glioma_multi_study_workflow(
                 autonomy_tier: action.action.autonomy_tier,
                 effects: action.action.effects.clone(),
                 depends_on: dependencies,
+                completed_dependency_order: completed_dependencies,
                 route: route.clone(),
                 disposition,
             });
@@ -754,12 +908,22 @@ pub fn plan_glioma_multi_study_workflow(
     }
     let mut scheduled_action_order = scheduled_actions.into_iter().collect::<Vec<_>>();
     scheduled_action_order.sort();
+    let completed_action_order = completed_action_order.into_iter().collect::<Vec<_>>();
     let approval_action_order = approval_actions.into_iter().collect::<Vec<_>>();
     let deferred_action_order = deferred_actions.into_iter().collect::<Vec<_>>();
     let blocked_action_order = blocked_actions.into_iter().collect::<Vec<_>>();
     let disposition = if tasks.is_empty() {
         if !blocked_action_order.is_empty() {
             MultiStudyWorkflowDisposition::Blocked
+        } else if !request.artifact.frontier_order.is_empty()
+            && request
+                .artifact
+                .frontier_order
+                .iter()
+                .all(|action_id| completed_action_order.binary_search(action_id).is_ok())
+            && deferred_action_order.is_empty()
+        {
+            MultiStudyWorkflowDisposition::Completed
         } else {
             MultiStudyWorkflowDisposition::Unresolved
         }
@@ -795,6 +959,8 @@ pub fn plan_glioma_multi_study_workflow(
         task_order,
         wave_order,
         scheduled_action_order,
+        completed_action_order,
+        completed_outcome_order,
         approval_action_order,
         deferred_action_order,
         blocked_action_order,
@@ -815,12 +981,12 @@ pub fn plan_glioma_multi_study_workflow(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use crate::glioma::programs::p04_decision_context::DecisionContextArtifactCompatibility;
     use crate::glioma::programs::p04_decision_context::multi_study_context_artifact::{
         MultiStudyContextDisposition, MultiStudyDecisionAction,
     };
-    use crate::glioma::programs::p04_decision_context::DecisionContextArtifactCompatibility;
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, GliomaStageKind};
     use bioprism_foundation::{AutonomyTier, Effect};
     use std::collections::BTreeSet;
@@ -878,7 +1044,10 @@ mod tests {
                 support_milli: 1_000,
                 disagreement_milli: 0,
                 disposition: MultiStudyActionDisposition::Qualified,
+                completed_study_order: Vec::new(),
                 negative_study_order: Vec::new(),
+                failed_study_order: Vec::new(),
+                blocked_study_order: Vec::new(),
                 unknown_study_order: Vec::new(),
             },
             MultiStudyDecisionAction {
@@ -888,7 +1057,10 @@ mod tests {
                 support_milli: 1_000,
                 disagreement_milli: 0,
                 disposition: MultiStudyActionDisposition::Qualified,
+                completed_study_order: Vec::new(),
                 negative_study_order: Vec::new(),
+                failed_study_order: Vec::new(),
+                blocked_study_order: Vec::new(),
                 unknown_study_order: Vec::new(),
             },
         ];
@@ -909,6 +1081,7 @@ mod tests {
             action_order: vec!["action-a".into(), "action-b".into()],
             frontier_order: vec!["action-b".into()],
             actions,
+            outcome_order: Vec::new(),
             omissions: BTreeMap::new(),
             negative_evidence_order: vec!["study-a:negative".into()],
             uncertainty_order: vec!["study-b:unknown".into()],
@@ -930,6 +1103,7 @@ mod tests {
             "action_order": output.action_order,
             "frontier_order": output.frontier_order,
             "actions": output.actions,
+            "outcome_order": output.outcome_order,
             "omissions": output.omissions,
             "negative_evidence_order": output.negative_evidence_order,
             "uncertainty_order": output.uncertainty_order,
@@ -940,7 +1114,7 @@ mod tests {
         output
     }
 
-    fn reseal(artifact: &mut MultiStudyDecisionContextArtifact) {
+    pub(crate) fn reseal(artifact: &mut MultiStudyDecisionContextArtifact) {
         let input = serde_json::json!({
             "feature_id": artifact.feature_id,
             "output_schema": artifact.output_schema,
@@ -955,6 +1129,7 @@ mod tests {
             "action_order": artifact.action_order,
             "frontier_order": artifact.frontier_order,
             "actions": artifact.actions,
+            "outcome_order": artifact.outcome_order,
             "omissions": artifact.omissions,
             "negative_evidence_order": artifact.negative_evidence_order,
             "uncertainty_order": artifact.uncertainty_order,
@@ -964,7 +1139,7 @@ mod tests {
         artifact.digest = ContentHash::of_value(&input).unwrap();
     }
 
-    fn request() -> MultiStudyWorkflowRequest {
+    pub(crate) fn request() -> MultiStudyWorkflowRequest {
         MultiStudyWorkflowRequest {
             objective: "mechanism validation".into(),
             epoch: 3,
@@ -1001,19 +1176,99 @@ mod tests {
         }
     }
 
+    fn mark_completed(artifact: &mut MultiStudyDecisionContextArtifact, action_id: &str) {
+        let outcomes = artifact
+            .study_order
+            .iter()
+            .map(|study_id| MultiStudyActionOutcome {
+                action_id: action_id.into(),
+                study_id: study_id.clone(),
+                status: DecisionContextActionOutcomeStatus::Completed,
+                result_digest: hash(&format!("{action_id}:{study_id}:result")),
+            })
+            .collect::<Vec<_>>();
+        artifact.outcome_order.extend(outcomes);
+        artifact.outcome_order.sort_by(|left, right| {
+            left.action_id
+                .cmp(&right.action_id)
+                .then_with(|| left.study_id.cmp(&right.study_id))
+        });
+        let action = artifact
+            .actions
+            .iter_mut()
+            .find(|action| action.action.action_id == action_id)
+            .expect("fixture action exists");
+        action.completed_study_order = action.study_order.clone();
+        reseal(artifact);
+    }
+
     #[test]
     fn schedules_dependency_safe_replicated_waves() {
         let plan = plan_glioma_multi_study_workflow(&request()).unwrap();
         assert_eq!(plan.disposition, MultiStudyWorkflowDisposition::Ready);
         assert_eq!(plan.tasks.len(), 4);
         assert_eq!(plan.wave_order.len(), 2);
-        assert!(plan.wave_order[0]
-            .iter()
-            .all(|task| task.contains("action-a")));
-        assert!(plan.wave_order[1]
-            .iter()
-            .all(|task| task.contains("action-b")));
+        assert!(
+            plan.wave_order[0]
+                .iter()
+                .all(|task| task.contains("action-a"))
+        );
+        assert!(
+            plan.wave_order[1]
+                .iter()
+                .all(|task| task.contains("action-b"))
+        );
         assert_eq!(plan.negative_evidence_order, vec!["study-a:negative"]);
+        plan.validate().unwrap();
+    }
+
+    #[test]
+    fn completed_prerequisite_is_receipted_and_not_scheduled_again() {
+        let mut request = request();
+        mark_completed(&mut request.artifact, "action-a");
+
+        let plan = plan_glioma_multi_study_workflow(&request).unwrap();
+
+        assert_eq!(plan.completed_action_order, vec!["action-a"]);
+        assert_eq!(plan.completed_outcome_order.len(), 2);
+        assert_eq!(plan.tasks.len(), 2);
+        assert!(plan.tasks.iter().all(|task| {
+            task.action_id == "action-b"
+                && task.depends_on.is_empty()
+                && task.completed_dependency_order == vec!["action-a"]
+        }));
+        plan.validate().unwrap();
+    }
+
+    #[test]
+    fn completed_frontier_returns_completed_without_duplicate_tasks() {
+        let mut request = request();
+        mark_completed(&mut request.artifact, "action-a");
+        mark_completed(&mut request.artifact, "action-b");
+
+        let plan = plan_glioma_multi_study_workflow(&request).unwrap();
+
+        assert_eq!(plan.disposition, MultiStudyWorkflowDisposition::Completed);
+        assert_eq!(plan.completed_action_order, vec!["action-a", "action-b"]);
+        assert!(plan.tasks.is_empty());
+        assert_eq!(plan.completed_outcome_order.len(), 4);
+        plan.validate().unwrap();
+    }
+
+    #[test]
+    fn conflicted_action_is_not_reported_as_completed_from_local_receipts() {
+        let mut request = request();
+        mark_completed(&mut request.artifact, "action-a");
+        request.artifact.actions[0].disposition = MultiStudyActionDisposition::Conflicted;
+        request.minimum_independent_groups = 1;
+        request.require_replication = false;
+        reseal(&mut request.artifact);
+
+        let plan = plan_glioma_multi_study_workflow(&request).unwrap();
+
+        assert!(plan.completed_action_order.is_empty());
+        assert_eq!(plan.blocked_action_order, vec!["action-b"]);
+        assert_eq!(plan.disposition, MultiStudyWorkflowDisposition::Blocked);
         plan.validate().unwrap();
     }
 
@@ -1030,10 +1285,11 @@ mod tests {
         let plan = plan_glioma_multi_study_workflow(&request).unwrap();
         assert_eq!(plan.disposition, MultiStudyWorkflowDisposition::Partial);
         assert_eq!(plan.approval_action_order, vec!["action-a", "action-b"]);
-        assert!(plan
-            .tasks
-            .iter()
-            .all(|task| task.disposition == MultiStudyTaskDisposition::ApprovalRequired));
+        assert!(
+            plan.tasks
+                .iter()
+                .all(|task| task.disposition == MultiStudyTaskDisposition::ApprovalRequired)
+        );
         assert_eq!(plan.next_route, "researcher_approval_gate");
     }
 
@@ -1046,10 +1302,11 @@ mod tests {
         let plan = plan_glioma_multi_study_workflow(&request).unwrap();
         assert!(plan.tasks.is_empty());
         assert_eq!(plan.disposition, MultiStudyWorkflowDisposition::Blocked);
-        assert!(plan
-            .omissions
-            .values()
-            .any(|reason| reason == "independent_group_quorum_unavailable"));
+        assert!(
+            plan.omissions
+                .values()
+                .any(|reason| reason == "independent_group_quorum_unavailable")
+        );
     }
 
     #[test]
@@ -1069,10 +1326,11 @@ mod tests {
         assert!(plan.tasks.is_empty());
         assert!(plan.scheduled_action_order.is_empty());
         assert_eq!(plan.budget_reserved_units, 0);
-        assert!(plan
-            .omissions
-            .values()
-            .any(|reason| reason == "resource_or_task_capacity_prevents_quorum"));
+        assert!(
+            plan.omissions
+                .values()
+                .any(|reason| reason == "resource_or_task_capacity_prevents_quorum")
+        );
     }
 
     #[test]

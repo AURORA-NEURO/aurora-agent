@@ -636,18 +636,24 @@ mod tests {
     #[test]
     fn qualified() {
         assert_eq!(
-            assure_devplat_multimodal_limitation_closure(&q(vec![lim("lim:1", EvidenceState::Supported)]))
-                .unwrap()
-                .disposition,
+            assure_devplat_multimodal_limitation_closure(&q(vec![lim(
+                "lim:1",
+                EvidenceState::Supported
+            )]))
+            .unwrap()
+            .disposition,
             LimitationClosureDisposition::Qualified
         )
     }
     #[test]
     fn unknown() {
         assert_eq!(
-            assure_devplat_multimodal_limitation_closure(&q(vec![lim("lim:1", EvidenceState::Unknown)]))
-                .unwrap()
-                .disposition,
+            assure_devplat_multimodal_limitation_closure(&q(vec![lim(
+                "lim:1",
+                EvidenceState::Unknown
+            )]))
+            .unwrap()
+            .disposition,
             LimitationClosureDisposition::Unresolved
         )
     }
@@ -666,9 +672,12 @@ mod tests {
     #[test]
     fn missing() {
         assert_eq!(
-            assure_devplat_multimodal_limitation_closure(&q(vec![lim("other", EvidenceState::Supported)]))
-                .unwrap()
-                .disposition,
+            assure_devplat_multimodal_limitation_closure(&q(vec![lim(
+                "other",
+                EvidenceState::Supported
+            )]))
+            .unwrap()
+            .disposition,
             LimitationClosureDisposition::Blocked
         )
     }
@@ -685,6 +694,8 @@ mod tests {
     }
     #[test]
     fn manifest() {
-        devplat_multimodal_limitation_closure_manifest().validate().unwrap()
+        devplat_multimodal_limitation_closure_manifest()
+            .validate()
+            .unwrap()
     }
 }

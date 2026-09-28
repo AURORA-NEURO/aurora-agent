@@ -85,7 +85,7 @@ prints a warning naming the shortfall, which is why the README's test count is g
 typed.
 
 **Do not trust the sum alone.** Check the per-binary `Running ...` lines against the crate list —
-`ls crates | wc -l` is 77 — rather than accepting a total that has no way to tell you what is missing
+`ls crates | wc -l` is 88 — rather than accepting a total that has no way to tell you what is missing
 from it. A crate whose binaries are all absent from the output looks identical to a crate with no
 tests.
 

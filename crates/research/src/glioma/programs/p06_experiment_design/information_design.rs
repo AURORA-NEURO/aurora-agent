@@ -684,9 +684,11 @@ mod tests {
             output.disposition,
             InformationDesignDisposition::NoInformativeActions
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("risk-ceiling")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("risk-ceiling"))
+        );
     }
 }

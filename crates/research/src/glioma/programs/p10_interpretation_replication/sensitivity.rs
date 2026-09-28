@@ -520,10 +520,12 @@ mod tests {
         ];
         let output = analyze_causal_sensitivity(&request(), &observations).unwrap();
         assert_eq!(output.disposition, SensitivityDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|reason| reason == "minimum-units-per-arm-not-met"));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|reason| reason == "minimum-units-per-arm-not-met")
+        );
     }
 
     #[test]

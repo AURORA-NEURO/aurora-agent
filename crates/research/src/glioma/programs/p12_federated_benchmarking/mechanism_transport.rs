@@ -631,10 +631,12 @@ mod tests {
             FederatedMechanismTransportDisposition::Qualified
         );
         assert_eq!(output.included_order.len(), 2);
-        assert!(output
-            .model_coverage
-            .iter()
-            .any(|item| item.model_system == GliomaModelSystem::Organoid));
+        assert!(
+            output
+                .model_coverage
+                .iter()
+                .any(|item| item.model_system == GliomaModelSystem::Organoid)
+        );
         output.validate().unwrap();
     }
 
@@ -662,14 +664,18 @@ mod tests {
             output.disposition,
             FederatedMechanismTransportDisposition::Heterogeneous
         );
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item == "cross-site-effect-direction-conflict"));
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item == "transportability-heterogeneity-exceeds-gate"));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item == "cross-site-effect-direction-conflict")
+        );
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item == "transportability-heterogeneity-exceeds-gate")
+        );
     }
 
     #[test]
@@ -694,10 +700,12 @@ mod tests {
             FederatedMechanismTransportDisposition::Unresolved
         );
         assert_eq!(output.excluded_order, vec!["weak"]);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item == "underpowered-site:weak"));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item == "underpowered-site:weak")
+        );
     }
 
     #[test]

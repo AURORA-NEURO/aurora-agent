@@ -9,8 +9,8 @@
 
 use super::action_execution::GliomaActionExecutor;
 use super::director::{
-    execute_glioma_research_director, GliomaResearchDirectorError, GliomaResearchDirectorRequest,
-    GliomaResearchDirectorRun,
+    GliomaResearchDirectorError, GliomaResearchDirectorRequest, GliomaResearchDirectorRun,
+    execute_glioma_research_director,
 };
 use crate::glioma::programs::p01_evidence_surveillance::{
     EvidenceTriangulation, EvidenceTriangulationDisposition,
@@ -292,8 +292,8 @@ pub fn execute_glioma_evidence_gated_research<E: GliomaActionExecutor>(
 mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceSourceKind, EvidenceState};
-    use crate::glioma::programs::p01_evidence_surveillance::triangulate_glioma_evidence;
     use crate::glioma::programs::p01_evidence_surveillance::EvidenceTriangulationRequest;
+    use crate::glioma::programs::p01_evidence_surveillance::triangulate_glioma_evidence;
     use crate::glioma_engine::{
         GliomaModality, GliomaModelSystem, GliomaResearchIntent, GliomaSelectionWeights,
         LocalArtifactRef,

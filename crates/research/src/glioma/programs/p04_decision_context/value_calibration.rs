@@ -7,7 +7,7 @@
 //! Calibrated scores are still planning values; they are not biological evidence or clinical
 //! conclusions.
 
-use super::value_optimizer::{weighted_utility, DecisionValueCandidate, DecisionValueWeights};
+use super::value_optimizer::{DecisionValueCandidate, DecisionValueWeights, weighted_utility};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -582,10 +582,12 @@ mod tests {
             result.disposition,
             DecisionValueCalibrationCampaignDisposition::PriorOnly
         );
-        assert!(result
-            .uncertainty_order
-            .iter()
-            .any(|item| item.contains("prior-only")));
+        assert!(
+            result
+                .uncertainty_order
+                .iter()
+                .any(|item| item.contains("prior-only"))
+        );
     }
 
     #[test]
@@ -603,13 +605,17 @@ mod tests {
             result.disposition,
             DecisionValueCalibrationCampaignDisposition::Conflicted
         );
-        assert!(result
-            .negative_evidence_order
-            .iter()
-            .any(|item| item.contains("failed:a-imaging:run-002")));
-        assert!(result
-            .uncertainty_order
-            .iter()
-            .any(|item| item.contains("conflicted-calibration")));
+        assert!(
+            result
+                .negative_evidence_order
+                .iter()
+                .any(|item| item.contains("failed:a-imaging:run-002"))
+        );
+        assert!(
+            result
+                .uncertainty_order
+                .iter()
+                .any(|item| item.contains("conflicted-calibration"))
+        );
     }
 }

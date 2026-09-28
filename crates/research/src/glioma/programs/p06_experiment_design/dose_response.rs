@@ -441,10 +441,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.disposition, DoseResponseDisposition::Negative);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("violations")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("violations"))
+        );
         assert_eq!(output.curve[2].fitted_mean_milli, 225);
     }
 
@@ -458,10 +460,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.disposition, DoseResponseDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("replicate-floor")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("replicate-floor"))
+        );
     }
 
     #[test]

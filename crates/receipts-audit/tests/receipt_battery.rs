@@ -280,7 +280,7 @@ fn the_whole_battery_finds_no_hole_outside_the_gaps_this_repository_has_named() 
     }
     assert_eq!(
         (total_cases, total_positions, total_pinned),
-        (18_318, 2_275, 375),
+        (19_188, 2_336, 375),
         "the battery's coverage is a pinned claim; bounds were:\n{}",
         bounds.join("\n")
     );
@@ -359,8 +359,8 @@ fn every_single_byte_digest_mutation_is_caught_at_every_offset_of_every_digest_f
     }
     assert_eq!(
         (fields, offsets, sealing_offsets),
-        (51, 3_264, 320),
-        "51 digest fields across six documents, each checked at all 64 offsets; the 320 offsets of \
+        (58, 3_712, 320),
+        "58 digest fields across six documents, each checked at all 64 offsets; the 320 offsets of \
          the five sealing digests must each be reported as a mismatch and nothing else"
     );
 }
@@ -377,8 +377,8 @@ fn a_truncated_extended_or_recased_digest_is_caught_at_every_digest_field() {
         cases_run += family.executed();
     }
     assert_eq!(
-        cases_run, 357,
-        "51 digest fields, seven shape mutations each"
+        cases_run, 406,
+        "58 digest fields, seven shape mutations each"
     );
 }
 
@@ -468,7 +468,7 @@ fn object_key_reordering_never_changes_a_verdict_at_any_position() {
         family.assert_no_unexplained_hole();
         cases_run += family.executed();
     }
-    assert_eq!(cases_run, 472, "reordering cases across six documents");
+    assert_eq!(cases_run, 486, "reordering cases across six documents");
 }
 
 #[test]
@@ -485,7 +485,7 @@ fn array_reordering_always_changes_a_verdict_at_any_position() {
         cases_run += family.executed();
     }
     assert_eq!(
-        cases_run, 163,
+        cases_run, 166,
         "array reordering cases across six documents — JSON arrays are ordered and a digest that \
          ignores their order is not naming the document"
     );
@@ -697,7 +697,7 @@ fn every_body_edit_forbids_the_two_answers_that_would_blame_the_digest() {
         }
     }
     assert_eq!(
-        body_edits, 17_308,
+        body_edits, 18_165,
         "body edits across the five sealed documents, none of which may be blamed on the digest"
     );
 }
@@ -716,7 +716,7 @@ fn deleting_any_field_at_any_visited_position_is_rejected_and_never_silently_acc
         family.assert_no_unexplained_hole();
         cases_run += family.executed();
     }
-    assert_eq!(cases_run, 2_269, "deletion cases across six documents");
+    assert_eq!(cases_run, 2_330, "deletion cases across six documents");
 }
 
 // -- numbers, strings, and structure ----------------------------------------------------------
@@ -741,7 +741,7 @@ fn a_numeric_near_equal_substitution_lands_on_one_stable_verdict_and_never_betwe
         cases_run += family.executed();
     }
     assert_eq!(
-        cases_run, 223,
+        cases_run, 229,
         "numeric cases across six documents — an integer and its equal-valued float are different \
          canonical bytes, so a verifier that accepted both would make its digest depend on how a \
          caller's parser typed a literal"
@@ -801,7 +801,7 @@ fn a_numeric_boundary_substitution_is_refused_at_every_numeric_position() {
     }
     assert_eq!(
         (caught_by_the_digest_alone, caught_by_a_check_of_its_own),
-        (1_891, 49),
+        (1_929, 49),
         "the digest is carrying almost all of this. Only the delivery receipt, whose verifier \
          recomputes the whole projection from the delivery audit and compares it field by field, \
          notices an implausible number on its own; the four self-sealing documents apply no range \
@@ -810,7 +810,7 @@ fn a_numeric_boundary_substitution_is_refused_at_every_numeric_position() {
     );
     assert_eq!(
         (cases_run, inexact_integers, numeric_positions),
-        (1_940, 205, 205),
+        (1_978, 209, 209),
         "boundary cases across the five documents that carry a number at all — the delivery audit \
          is booleans, strings, and nulls, so it has no numeric position to substitute at — one of \
          them at every numeric position the first integer no f64 holds exactly"
@@ -844,7 +844,7 @@ fn a_non_finite_number_can_only_reach_a_verifier_as_a_string_and_is_refused_as_o
         family.assert_no_unexplained_hole();
         checked += family.executed();
     }
-    assert_eq!(checked, 615, "three spellings at every numeric position");
+    assert_eq!(checked, 627, "three spellings at every numeric position");
 }
 
 #[test]
@@ -861,7 +861,7 @@ fn replacing_any_visited_value_with_an_empty_string_or_null_is_rejected() {
         family.assert_no_unexplained_hole();
         cases_run += family.executed();
     }
-    assert_eq!(cases_run, 4_520, "empty-or-null cases across six documents");
+    assert_eq!(cases_run, 4_641, "empty-or-null cases across six documents");
 }
 
 #[test]
@@ -875,7 +875,7 @@ fn a_string_replaced_by_a_confusable_form_is_rejected_at_every_visited_position(
         family.assert_no_unexplained_hole();
         cases_run += family.executed();
     }
-    assert_eq!(cases_run, 3_665, "confusable cases across six documents");
+    assert_eq!(cases_run, 3_764, "confusable cases across six documents");
 }
 
 #[test]
@@ -890,7 +890,7 @@ fn a_swapped_pair_of_same_typed_siblings_is_rejected_at_every_visited_container(
         cases_run += family.executed();
     }
     assert_eq!(
-        cases_run, 315,
+        cases_run, 322,
         "sibling swaps across six documents — no key was added or removed, only the binding \
          between a name and a value"
     );
@@ -922,7 +922,7 @@ fn an_unexpected_key_at_any_level_is_rejected_except_where_a_recorded_gap_says_o
     }
     assert_eq!(
         (cases_run, excused),
-        (754, 0),
+        (770, 0),
         "unexpected-key cases across six documents; every added key is now checked"
     );
 }
@@ -937,7 +937,7 @@ fn an_object_written_with_a_duplicate_key_resolves_to_a_document_that_is_rejecte
         family.assert_no_unexplained_hole();
         cases_run += family.executed();
     }
-    assert_eq!(cases_run, 376, "duplicate-key cases across six documents");
+    assert_eq!(cases_run, 384, "duplicate-key cases across six documents");
 }
 
 // -- cross-document confusion and idempotence -------------------------------------------------

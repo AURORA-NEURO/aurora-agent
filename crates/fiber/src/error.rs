@@ -1,5 +1,5 @@
 use crate::policy::PolicyViolation;
-use bioprism_world::WorldError;
+use bioprism_world::{WorldError, WorldSourceError};
 use thiserror::Error;
 
 /// Typed compiler failures.
@@ -63,6 +63,12 @@ pub enum FiberError {
         expected: &'static str,
     },
 
+    #[error("oracle field {field:?} has the wrong type: expected {expected}")]
+    WrongOracleFieldType {
+        field: &'static str,
+        expected: &'static str,
+    },
+
     #[error("invalid query identifier: {0}")]
     InvalidIdentifier(String),
 
@@ -71,6 +77,19 @@ pub enum FiberError {
 
     #[error("invalid decision_time: {0}")]
     InvalidDecisionTime(String),
+
+    /// A temporal value used by the split-integrity oracle was neither an ISO date nor an instant.
+    #[error(
+        "invalid {field}: expected an ISO date or timezone-qualified timestamp, got {value:?}"
+    )]
+    InvalidOracleTimestamp { field: &'static str, value: String },
+
+    /// A civil date and a timezone-qualified instant have no declared common temporal precision.
+    #[error("oracle cannot compare values with mixed day and instant precision: decision time {decision_time:?}, label time {label_source_time:?}")]
+    IncomparableOracleTimePrecision {
+        decision_time: String,
+        label_source_time: String,
+    },
 
     /// The protected closure plus the dependency slice already exceed the caller's budget.
     ///
@@ -98,4 +117,7 @@ pub enum FiberError {
 
     #[error(transparent)]
     World(#[from] WorldError),
+
+    #[error(transparent)]
+    WorldSource(#[from] WorldSourceError),
 }

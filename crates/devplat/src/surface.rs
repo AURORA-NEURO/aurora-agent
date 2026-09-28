@@ -2,14 +2,14 @@
 //!
 //! The remainder of the developer-platform section is not one kind of thing. Some of it is a
 //! Python package, some a TypeScript package, some a workflow file in a consumer's repository,
-//! some an HTTP service, some a user interface. A crate in this workspace can resolve exactly one
-//! of those against the working tree — a Rust crate — and pretending otherwise is how
-//! documentation for a thing that does not exist passes a green test suite.
+//! some an HTTP service, some a user interface. Locality belongs to the named artifact, not its
+//! language: a Python package, TypeScript client, or composite action can live in this checkout,
+//! while a hosted consumer workflow remains outside it.
 //!
 //! So the first type here is not a document type. It is [`Surface`]: the artifact a name belongs
-//! to, and the [`Locale`] that follows from its kind. [`Locale`] is derived, never supplied, which
-//! is the whole point — an author cannot declare a Python module to be in this repository, so
-//! [`crate::claim::ApiClaim`] cannot be handed evidence that it was resolved here.
+//! to, and the [`Locale`] of that artifact. Locale is fixed by a checked constructor and serialized
+//! with the address, so [`crate::claim::ApiClaim`] cannot be handed in-tree evidence about a
+//! declared foreign surface.
 //!
 //! # What this is not
 //!
@@ -27,10 +27,9 @@ const MAX_ARTIFACT_BYTES: usize = 4_096;
 
 /// Whether a surface is something this checkout contains.
 ///
-/// Two values, and no third for "partly". A surface either has bytes in this working tree that a
-/// test can read, or it does not; "the schema is generated from ours" is a relationship between
-/// two surfaces, not a third locale, and modelling it as one would let a generated TypeScript
-/// client be reported as verified here.
+/// Two values, and no third for "partly". A surface either names an artifact in this working tree
+/// that a test can read, or it does not. Generated-client provenance is a relationship between
+/// surfaces, not a locale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Locale {
@@ -63,13 +62,13 @@ impl fmt::Display for Locale {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceKind {
-    /// A crate of this workspace. The only kind whose locale is [`Locale::InRepository`].
+    /// A crate of this workspace, addressed by its package name.
     RustCrate,
     /// An importable Python distribution: `prism_sdk`, `prism_compiler`.
     PythonPackage,
     /// An npm package consumed from a browser or Node process.
     TypeScriptPackage,
-    /// A workflow or action file evaluated by a CI provider in somebody else's repository.
+    /// A workflow or composite-action definition evaluated by a CI provider.
     GitHubAction,
     /// A request/response surface reached over the network.
     HttpApi,
@@ -125,17 +124,12 @@ impl SurfaceKind {
         }
     }
 
-    /// Derived, not declared. Only a Rust crate is in this repository.
-    pub fn locale(self) -> Locale {
+    /// Compatibility default for old serialized surfaces that did not record their locale.
+    fn legacy_locale(self) -> Locale {
         match self {
             SurfaceKind::RustCrate => Locale::InRepository,
             _ => Locale::OutsideRepository,
         }
-    }
-
-    /// Whether a test in this workspace could, in principle, read the artifact and disagree.
-    pub fn is_falsifiable_here(self) -> bool {
-        self.locale() == Locale::InRepository
     }
 }
 
@@ -147,27 +141,48 @@ impl fmt::Display for SurfaceKind {
 
 /// A named artifact of a given kind: the package, file or process a name lives in.
 ///
-/// Fields are private and construction goes through [`Surface::rust`] or [`Surface::foreign`], so
-/// a `Surface` whose kind is [`SurfaceKind::RustCrate`] always names a crate that
-/// [`CrateName`] accepts, and no `Surface` has an empty artifact.
+/// Fields are private and construction goes through [`Surface::rust`],
+/// [`Surface::in_repository`] or [`Surface::foreign`], so local non-Rust surfaces use a safe
+/// repository-relative path, a Rust surface names a crate that [`CrateName`] accepts, and no
+/// `Surface` has an empty artifact.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "SurfaceWire")]
 pub struct Surface {
     kind: SurfaceKind,
     artifact: String,
+    locale: Locale,
 }
 
 #[derive(Deserialize)]
 struct SurfaceWire {
     kind: SurfaceKind,
     artifact: String,
+    #[serde(default)]
+    locale: Option<Locale>,
 }
 
 impl TryFrom<SurfaceWire> for Surface {
     type Error = SurfaceError;
 
     fn try_from(wire: SurfaceWire) -> Result<Self, Self::Error> {
-        Surface::foreign(wire.kind, wire.artifact)
+        let locale = wire.locale.unwrap_or_else(|| wire.kind.legacy_locale());
+        if wire.kind == SurfaceKind::RustCrate && locale != Locale::InRepository {
+            return Err(SurfaceError::InvalidArtifact {
+                kind: SurfaceKind::RustCrate.as_str(),
+            });
+        }
+        match locale {
+            Locale::InRepository if wire.kind == SurfaceKind::RustCrate => {
+                let name = CrateName::parse(wire.artifact.clone()).map_err(|_| {
+                    SurfaceError::NotAWorkspaceCrate {
+                        artifact: wire.artifact.clone(),
+                    }
+                })?;
+                Surface::rust(&name)
+            }
+            Locale::InRepository => Surface::in_repository(wire.kind, wire.artifact),
+            Locale::OutsideRepository => Surface::foreign(wire.kind, wire.artifact),
+        }
     }
 }
 
@@ -185,28 +200,41 @@ impl Surface {
         Ok(Surface {
             kind: SurfaceKind::RustCrate,
             artifact,
+            locale: Locale::InRepository,
+        })
+    }
+
+    /// A non-Rust artifact held in this checkout, addressed by a normalized relative path.
+    ///
+    /// This records the artifact boundary; it does not claim the file currently exists. Claims
+    /// carry the specific file they were checked against, and [`crate::walkthrough::recheck`]
+    /// checks that evidence against the working tree.
+    pub fn in_repository(
+        kind: SurfaceKind,
+        artifact: impl Into<String>,
+    ) -> Result<Self, SurfaceError> {
+        let artifact = validate_artifact(kind, artifact.into())?;
+        if kind == SurfaceKind::RustCrate {
+            return Err(SurfaceError::InvalidArtifact {
+                kind: SurfaceKind::RustCrate.as_str(),
+            });
+        }
+        if !is_normalized_repository_path(&artifact) {
+            return Err(SurfaceError::InvalidRepositoryPath { artifact });
+        }
+        Ok(Surface {
+            kind,
+            artifact,
+            locale: Locale::InRepository,
         })
     }
 
     /// Any surface outside this repository.
     ///
-    /// Refuses [`SurfaceKind::RustCrate`] by routing it through the same validation as
-    /// [`Surface::rust`], so there is exactly one way to obtain an in-repository surface.
+    /// Refuses [`SurfaceKind::RustCrate`] except for a valid workspace package, which routes
+    /// through [`Surface::rust`] so there is exactly one way to construct that surface.
     pub fn foreign(kind: SurfaceKind, artifact: impl Into<String>) -> Result<Self, SurfaceError> {
-        let artifact: String = artifact.into();
-        if artifact.trim().is_empty() {
-            return Err(SurfaceError::UnnamedArtifact {
-                kind: kind.as_str(),
-            });
-        }
-        if artifact != artifact.trim()
-            || artifact.len() > MAX_ARTIFACT_BYTES
-            || artifact.chars().any(char::is_control)
-        {
-            return Err(SurfaceError::InvalidArtifact {
-                kind: kind.as_str(),
-            });
-        }
+        let artifact = validate_artifact(kind, artifact.into())?;
         if kind == SurfaceKind::RustCrate {
             return Surface::rust(&CrateName::parse(artifact).map_err(|_| {
                 SurfaceError::UnnamedArtifact {
@@ -214,7 +242,11 @@ impl Surface {
                 }
             })?);
         }
-        Ok(Surface { kind, artifact })
+        Ok(Surface {
+            kind,
+            artifact,
+            locale: Locale::OutsideRepository,
+        })
     }
 
     pub fn kind(&self) -> SurfaceKind {
@@ -225,19 +257,45 @@ impl Surface {
         &self.artifact
     }
 
-    /// Derived from the kind. There is no setter.
     pub fn locale(&self) -> Locale {
-        self.kind.locale()
+        self.locale
     }
 
     pub fn is_falsifiable_here(&self) -> bool {
-        self.kind.is_falsifiable_here()
+        self.locale == Locale::InRepository
     }
 
     /// A one-line address for a report.
     pub fn describe(&self) -> String {
         format!("{} `{}`", self.kind.as_str(), self.artifact)
     }
+}
+
+fn validate_artifact(kind: SurfaceKind, artifact: String) -> Result<String, SurfaceError> {
+    if artifact.trim().is_empty() {
+        return Err(SurfaceError::UnnamedArtifact {
+            kind: kind.as_str(),
+        });
+    }
+    if artifact != artifact.trim()
+        || artifact.len() > MAX_ARTIFACT_BYTES
+        || artifact.chars().any(char::is_control)
+    {
+        return Err(SurfaceError::InvalidArtifact {
+            kind: kind.as_str(),
+        });
+    }
+    Ok(artifact)
+}
+
+pub(crate) fn is_normalized_repository_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains('\\')
+        && !path.contains(':')
+        && !path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
 }
 
 impl fmt::Display for Surface {
@@ -256,40 +314,36 @@ impl fmt::Display for Surface {
 pub struct ForeignSubject {
     /// The blueprint module's title, as the blueprint spells it.
     pub title: &'static str,
-    /// Where its artifact lives.
+    /// The external scope that remains unresolved.
     pub surface: Surface,
-    /// What a Rust crate would have to become in order to hold it. Concrete, not "out of scope".
+    /// Why the in-tree implementation does not close that full scope. Concrete, not "out of scope".
     pub why_not_here: &'static str,
 }
 
-/// The developer-platform subjects that are code-bearing but not Rust and not in this repository.
+/// The developer-platform subjects whose complete blueprint artifact is not in this repository.
 ///
-/// Three of them. This is the largest single group in [`crate::classify::classification`] and the
-/// reason this crate exists in the shape it does: a section can be two-thirds unimplemented in a
-/// Rust workspace without a single line of it being vague.
+/// Two of them. This group is part of [`crate::classify::classification`]: three-quarters of the
+/// twenty modules are not implemented by this crate, and the evidence distinguishes process,
+/// external artifacts and capabilities already held elsewhere.
 pub fn foreign_subjects() -> Vec<ForeignSubject> {
-    let entries: [(&'static str, SurfaceKind, &'static str, &'static str); 3] = [
+    let entries: [(&'static str, SurfaceKind, &'static str, &'static str); 2] = [
         (
             "Python SDK",
             SurfaceKind::PythonPackage,
-            "prism_sdk",
-            "the module specifies nine importable distributions, Python 3.12 typing, async-first \
-             methods with sync facades, and entry-point discovery. None of that has a Rust \
-             rendering; a Rust type mirroring it would be a translation nobody imports.",
-        ),
-        (
-            "GitHub Action for Consumer Repositories",
-            SurfaceKind::GitHubAction,
-            "prism-action",
-            "a composite action evaluated by a CI provider in a repository that is not this one. \
-             Its correctness is a property of somebody else's workflow file.",
+            "full nine-distribution Python SDK",
+            "the full blueprint specifies nine importable distributions, Python 3.12 typing, \
+             async-first methods with sync facades, and entry-point discovery. The in-tree \
+             dependency-free `python/prism_sdk` integration client covers the HTTP boundary, but \
+             it does not supply that complete multi-distribution SDK surface.",
         ),
         (
             "GitHub Action and CI Integration",
             SurfaceKind::GitHubAction,
-            ".github/workflows/prism.yml",
-            "the module's own example is nine lines of workflow YAML. The gate policy it states \
-             is checkable, but the artifact that carries it is a CI configuration, not a crate.",
+            "hosted consumer workflow execution",
+            "the repository now contains a reusable composite action and exercises it locally in \
+             CI. The blueprint's consumer-owned gating policy, hosted runner behavior, and \
+             published action revision still depend on a workflow and provider outside this \
+             checkout.",
         ),
     ];
     entries

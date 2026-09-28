@@ -7,7 +7,7 @@
 //! a scientific conclusion.
 
 use super::context_compiler::{DecisionContext, DecisionContextDisposition};
-use crate::glioma_engine::{select_glioma_actions, GliomaActionSelection, GliomaSelectionConfig};
+use crate::glioma_engine::{GliomaActionSelection, GliomaSelectionConfig, select_glioma_actions};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -308,10 +308,10 @@ mod tests {
     use crate::glioma::evidence::EvidenceState;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind};
     use crate::glioma::programs::p02_evidence_knowledge::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma::programs::p04_decision_context::{
-        compile_decision_context, DecisionContextRequest,
+        DecisionContextRequest, compile_decision_context,
     };
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
     use bioprism_ids::ContentHash;

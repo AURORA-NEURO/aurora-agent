@@ -9,16 +9,16 @@
 //! result when an executor returns no observation.
 
 use super::meta_analysis::{
-    analyze_replication_meta_analysis, MetaAnalysisDisposition, MetaAnalysisError,
-    MetaAnalysisRequest, ReplicationMetaAnalysis,
+    MetaAnalysisDisposition, MetaAnalysisError, MetaAnalysisRequest, ReplicationMetaAnalysis,
+    analyze_replication_meta_analysis,
 };
 use super::transportability::{
-    analyze_glioma_transportability, TransportStudy, TransportabilityAnalysis,
-    TransportabilityDisposition, TransportabilityError, TransportabilityRequest,
+    TransportStudy, TransportabilityAnalysis, TransportabilityDisposition, TransportabilityError,
+    TransportabilityRequest, analyze_glioma_transportability,
 };
 use crate::glioma::replication::{
-    assess_replication, ReplicationAssessment, ReplicationDisposition, ReplicationError,
-    ReplicationRequest, ReplicationStudy,
+    ReplicationAssessment, ReplicationDisposition, ReplicationError, ReplicationRequest,
+    ReplicationStudy, assess_replication,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_ids::ContentHash;
@@ -1127,10 +1127,12 @@ mod tests {
             GliomaReplicationActionKind::ReplicateStudy
         );
         assert!(output.studies.iter().all(|study| study.study_id == "s1"));
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|value| value.contains("minimum")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|value| value.contains("minimum"))
+        );
         output.validate().unwrap();
     }
 

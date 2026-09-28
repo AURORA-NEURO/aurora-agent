@@ -280,9 +280,7 @@ pub fn schedule_glioma_frontier_campaign(
         FrontierCampaignDisposition::ReviewBlocked
     } else if rounds.is_empty() && deferred.is_empty() {
         FrontierCampaignDisposition::Empty
-    } else if rounds.is_empty() {
-        FrontierCampaignDisposition::BudgetLimited
-    } else if !deferred.is_empty() {
+    } else if rounds.is_empty() || !deferred.is_empty() {
         FrontierCampaignDisposition::BudgetLimited
     } else {
         FrontierCampaignDisposition::Ready

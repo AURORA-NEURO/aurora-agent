@@ -117,13 +117,16 @@ COMMANDS
                     items are recorded as derived and the two never merge. Nothing is edited,
                     built or run: the plan is a declaration of what would count as evidence.
   project verify    --root <dir> --plan <path> [--issues <path>] [--decision-time <rfc3339>]
+                    [--succession <path>]
                     Re-scan the tree and report which of the plan's declared criteria held,
                     each with its own three-valued status and the obstruction that stopped it.
-                    Never reports that the issue is fixed. Exit 1 when the outcome is not_met
-                    or falsified, 8 when a criterion or falsifier could not be evaluated, and 9
-                    when the plan is bound to a different world — a stale plan evaluates
-                    nothing, so it is not a failed verification. Obligations are reported on
-                    their own admissibility axis and never move the exit code.
+                    Never reports that the issue is fixed. --succession loads a strict JSON
+                    declaration with declared_by and statement; it is the caller's assertion,
+                    recorded verbatim and never verified. Without it, a different world is stale;
+                    a stale plan evaluates nothing. Exit 1 when the outcome is not_met or falsified, 8
+                    when a criterion or falsifier could not be evaluated, and 9 for stale.
+                    Obligations are reported on their own admissibility axis and never move the
+                    exit code.
 
   evidence verify   --bundle <path>
                     Verify a portable mission evidence bundle's schema, retention claims and
@@ -224,13 +227,28 @@ COMMANDS
                     object, directly usable as --grant). Authority for autonomous dispatch
                     comes only from an explicit grant document; there is no default grant, and
                     nothing is written.
-  autopilot run     --instantiation <path> --grant <path> [--report-out <path>] [--dry-run]
+  autopilot run     --instantiation <path> --grant <path> [--report-out <path>]
+                    [--recovery-dir <dir>] [--dry-run]
                     Drive an instantiated workflow's mission under an explicit autonomy grant:
                     dispatch, classify each failure by its 40.36 retry class, repair what the
                     grant authorises, and chain every mission report and reconciliation digest
                     into one autopilot report. --dry-run plans attempt 1 only, no-dispatch:
                     nothing runs and nothing is written. Exit 1 reports a completed drive whose
-                    final status is exhausted or refused rather than succeeded.
+                    final status is exhausted, outcome_unknown, or refused rather than succeeded.
+                    --recovery-dir stores digest-only checkpoints separately from private
+                    rehydration records and writes an in-flight marker before dispatch.
+  autopilot resume  --instantiation <path> --grant <path> --recovery-dir <dir>
+                    [--report-out <path>]
+                    Verify the recovery chain and rehydrated attempt records before continuing.
+                    An unmatched in-flight marker is refused because its side effects are unknown.
+  autopilot goal-step --request <path> --recovery-dir <dir> [--report-out <path>]
+                     Apply one caller-supplied mission, evaluator, or stop decision. The request
+                     has goal_id, grant, decision, and a budget only for a new goal. The recovery
+                     directory retains safe-stop checkpoints and private mission reports.
+                     An interrupted dispatch is refused as unknown and is never replayed.
+  autopilot goal-verify [--report <path>] [--checkpoint <path>]
+                     Verify a retained goal-control report, checkpoint, or their exact binding.
+                     At least one artifact path is required; verification dispatches nothing.
   autopilot verify  --report <path>
                     Recompute an autopilot report's digest and require its stated limitations.
                     Exit 1 if the report does not verify.
@@ -379,6 +397,7 @@ pub enum Command {
         plan: PathBuf,
         issues: Option<PathBuf>,
         decision_time: Option<String>,
+        succession: Option<PathBuf>,
     },
     EvidenceBundleVerify {
         bundle: PathBuf,
@@ -555,7 +574,23 @@ pub enum Command {
         instantiation: PathBuf,
         grant: PathBuf,
         report_out: Option<PathBuf>,
+        recovery_dir: Option<PathBuf>,
         dry_run: bool,
+    },
+    AutopilotResume {
+        instantiation: PathBuf,
+        grant: PathBuf,
+        recovery_dir: PathBuf,
+        report_out: Option<PathBuf>,
+    },
+    AutopilotGoalStep {
+        request: PathBuf,
+        recovery_dir: PathBuf,
+        report_out: Option<PathBuf>,
+    },
+    AutopilotGoalVerify {
+        report: Option<PathBuf>,
+        checkpoint: Option<PathBuf>,
     },
     AutopilotVerify {
         report: PathBuf,
@@ -809,6 +844,7 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             plan: options.take_path("--plan")?,
             issues: options.take_optional_path("--issues"),
             decision_time: take_decision_time(&mut options)?,
+            succession: options.take_optional_path("--succession"),
         },
         // `--domain` is refused here rather than silently accepted-and-ignored. The comparison
         // harness (`bioprism_baseline::compare`) judges every strategy's selection against the
@@ -1082,8 +1118,30 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             instantiation: options.take_path("--instantiation")?,
             grant: options.take_path("--grant")?,
             report_out: options.take_optional_path("--report-out"),
+            recovery_dir: options.take_optional_path("--recovery-dir"),
             dry_run: options.take_switch("--dry-run"),
         },
+        ("autopilot", "resume") => Command::AutopilotResume {
+            instantiation: options.take_path("--instantiation")?,
+            grant: options.take_path("--grant")?,
+            recovery_dir: options.take_path("--recovery-dir")?,
+            report_out: options.take_optional_path("--report-out"),
+        },
+        ("autopilot", "goal-step") => Command::AutopilotGoalStep {
+            request: options.take_path("--request")?,
+            recovery_dir: options.take_path("--recovery-dir")?,
+            report_out: options.take_optional_path("--report-out"),
+        },
+        ("autopilot", "goal-verify") => {
+            let report = options.take_optional_path("--report");
+            let checkpoint = options.take_optional_path("--checkpoint");
+            if report.is_none() && checkpoint.is_none() {
+                return Err(usage(
+                    "autopilot goal-verify requires --report or --checkpoint",
+                ));
+            }
+            Command::AutopilotGoalVerify { report, checkpoint }
+        }
         ("autopilot", "verify") => Command::AutopilotVerify {
             report: options.take_path("--report")?,
         },
@@ -1372,7 +1430,13 @@ mod tests {
         let text = super::help();
         assert!(text.contains("project plan      --root <dir>"));
         assert!(text.contains("project verify    --root <dir>"));
-        for flag in ["--issue ", "--criteria", "--out ", "--plan "] {
+        for flag in [
+            "--issue ",
+            "--criteria",
+            "--out ",
+            "--plan ",
+            "--succession",
+        ] {
             assert!(
                 text.contains(flag),
                 "a flag the repair parser accepts must be documented: {flag:?}"
@@ -1504,6 +1568,39 @@ mod tests {
                     plan: PathBuf::from("plan.json"),
                     issues: Some(PathBuf::from("issues.json")),
                     decision_time: None,
+                    succession: None,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn project_verify_parses_an_optional_succession_declaration() {
+        let parsed = parse(
+            [
+                "project",
+                "verify",
+                "--root",
+                "tree",
+                "--plan",
+                "plan.json",
+                "--succession",
+                "succession.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse project verify with succession");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ProjectVerify {
+                    root: PathBuf::from("tree"),
+                    plan: PathBuf::from("plan.json"),
+                    issues: None,
+                    decision_time: None,
+                    succession: Some(PathBuf::from("succession.json")),
                 },
             })
         );
@@ -2134,7 +2231,7 @@ mod tests {
     }
 
     #[test]
-    fn autopilot_run_parses_instantiation_grant_report_out_and_dry_run() {
+    fn autopilot_run_parses_recovery_directory_and_dry_run() {
         let parsed = parse(
             [
                 "--json",
@@ -2146,6 +2243,8 @@ mod tests {
                 "grant.json",
                 "--report-out",
                 "autopilot-report.json",
+                "--recovery-dir",
+                "autopilot-state",
                 "--dry-run",
             ]
             .into_iter()
@@ -2160,7 +2259,41 @@ mod tests {
                     instantiation: PathBuf::from("instantiation.json"),
                     grant: PathBuf::from("grant.json"),
                     report_out: Some(PathBuf::from("autopilot-report.json")),
+                    recovery_dir: Some(PathBuf::from("autopilot-state")),
                     dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn autopilot_resume_requires_the_same_instantiation_grant_and_recovery_directory() {
+        let parsed = parse(
+            [
+                "autopilot",
+                "resume",
+                "--instantiation",
+                "instantiation.json",
+                "--grant",
+                "grant.json",
+                "--recovery-dir",
+                "autopilot-state",
+                "--report-out",
+                "resumed-report.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse autopilot resume");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::AutopilotResume {
+                    instantiation: PathBuf::from("instantiation.json"),
+                    grant: PathBuf::from("grant.json"),
+                    recovery_dir: PathBuf::from("autopilot-state"),
+                    report_out: Some(PathBuf::from("resumed-report.json")),
                 },
             })
         );
@@ -2221,13 +2354,75 @@ mod tests {
         let text = super::help();
         assert!(text.contains("autopilot grant-template"));
         assert!(text.contains(
-            "autopilot run     --instantiation <path> --grant <path> [--report-out <path>] [--dry-run]"
+            "autopilot run     --instantiation <path> --grant <path> [--report-out <path>]"
         ));
+        assert!(text.contains(
+            "autopilot resume  --instantiation <path> --grant <path> --recovery-dir <dir>"
+        ));
+        assert!(text.contains(
+            "autopilot goal-step --request <path> --recovery-dir <dir> [--report-out <path>]"
+        ));
+        assert!(text.contains("autopilot goal-verify [--report <path>] [--checkpoint <path>]"));
         assert!(text.contains("autopilot verify  --report <path>"));
         assert!(
             text.contains("only from an explicit grant document"),
             "help must say where autonomous authority comes from"
         );
+    }
+
+    #[test]
+    fn autopilot_goal_step_and_verify_parse_their_required_and_optional_artifacts() {
+        let step = parse(
+            [
+                "autopilot",
+                "goal-step",
+                "--request",
+                "goal-request.json",
+                "--recovery-dir",
+                "goal-state",
+                "--report-out",
+                "goal-report.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse autopilot goal-step");
+        assert_eq!(
+            step,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::AutopilotGoalStep {
+                    request: PathBuf::from("goal-request.json"),
+                    recovery_dir: PathBuf::from("goal-state"),
+                    report_out: Some(PathBuf::from("goal-report.json")),
+                },
+            })
+        );
+
+        let verify = parse(
+            [
+                "autopilot",
+                "goal-verify",
+                "--checkpoint",
+                "checkpoint.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse autopilot goal-verify");
+        assert_eq!(
+            verify,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::AutopilotGoalVerify {
+                    report: None,
+                    checkpoint: Some(PathBuf::from("checkpoint.json")),
+                },
+            })
+        );
+
+        parse(["autopilot", "goal-verify"].into_iter().map(String::from))
+            .expect_err("goal verification needs at least one artifact");
     }
 
     #[test]

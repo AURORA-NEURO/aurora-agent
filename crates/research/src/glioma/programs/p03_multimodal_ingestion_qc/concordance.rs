@@ -477,10 +477,12 @@ mod tests {
         .unwrap();
         assert_eq!(output.disposition, ConcordanceDisposition::Partial);
         assert_eq!(output.pairs[0].correlation_milli, -1_000);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("contradictory")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("contradictory"))
+        );
     }
 
     #[test]

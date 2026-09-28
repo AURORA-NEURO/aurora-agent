@@ -531,11 +531,7 @@ pub fn synthesize_glioma_interpretation(
         .max()
         .unwrap_or_default();
     let stability = if aggregate_effect == 0 {
-        if leave_one_out_shift == 0 {
-            1_000
-        } else {
-            0
-        }
+        if leave_one_out_shift == 0 { 1_000 } else { 0 }
     } else {
         1_000_u64.saturating_sub(
             leave_one_out_shift.saturating_mul(1_000) / aggregate_effect.unsigned_abs().max(1),
@@ -744,9 +740,11 @@ mod tests {
             InterpretationSynthesisDisposition::Partial
         );
         assert!(output.contradiction_milli > 0);
-        assert!(output
-            .uncertainty
-            .contains(&"cross-family-disagreement-or-leave-one-out-instability".to_string()));
+        assert!(
+            output
+                .uncertainty
+                .contains(&"cross-family-disagreement-or-leave-one-out-instability".to_string())
+        );
     }
 
     #[test]
@@ -761,9 +759,11 @@ mod tests {
             output.disposition,
             InterpretationSynthesisDisposition::Partial
         );
-        assert!(output
-            .uncertainty
-            .contains(&"replication-family-required-but-missing".to_string()));
+        assert!(
+            output
+                .uncertainty
+                .contains(&"replication-family-required-but-missing".to_string())
+        );
     }
 
     #[test]
@@ -779,9 +779,11 @@ mod tests {
             output.families[2].direction,
             InterpretationEvidenceDirection::Unresolved
         );
-        assert!(output
-            .uncertainty
-            .contains(&"replication-family-required-but-missing".to_string()));
+        assert!(
+            output
+                .uncertainty
+                .contains(&"replication-family-required-but-missing".to_string())
+        );
         assert!(output.negative_evidence.is_empty());
     }
 

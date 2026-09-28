@@ -324,7 +324,12 @@ impl ContextStrategy for ScreenedDependencyWalk {
         }
 
         if self.passes.applies_cut() {
-            let cut = temporal_cut(world, query.decision_time);
+            let cut = match temporal_cut(world, query.decision_time) {
+                Ok(cut) => cut,
+                Err(error) => {
+                    return refused(format!("temporal cut could not read source: {error}"))
+                }
+            };
             let inaccessible: Vec<String> = selected
                 .iter()
                 .filter(|id| {

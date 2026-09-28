@@ -978,10 +978,12 @@ mod tests {
             report.disposition,
             EvidenceVerificationDisposition::Insufficient
         );
-        assert!(report
-            .findings
-            .iter()
-            .any(|finding| finding.code == "contradiction-unresolved"));
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.code == "contradiction-unresolved")
+        );
         assert_eq!(report.next_route, "glioma_multimodal_evidence_gap_router");
         report.validate().unwrap();
     }
@@ -1002,13 +1004,17 @@ mod tests {
             report.disposition,
             EvidenceVerificationDisposition::Verified
         );
-        assert!(report
-            .contradicted_order
-            .contains(&"evidence-unrelated".to_string()));
-        assert!(!report
-            .findings
-            .iter()
-            .any(|finding| finding.code == "contradiction-unresolved"));
+        assert!(
+            report
+                .contradicted_order
+                .contains(&"evidence-unrelated".to_string())
+        );
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|finding| finding.code == "contradiction-unresolved")
+        );
         report.validate().unwrap();
     }
 
@@ -1021,10 +1027,12 @@ mod tests {
             report.disposition,
             EvidenceVerificationDisposition::Insufficient
         );
-        assert!(report
-            .findings
-            .iter()
-            .any(|finding| finding.code == "modality-coverage-debt"));
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.code == "modality-coverage-debt")
+        );
         report.validate().unwrap();
     }
 

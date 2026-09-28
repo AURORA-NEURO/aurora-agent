@@ -388,20 +388,16 @@ pub fn calibrate_glioma_multimodal_reliability(
             qualities.sort_unstable();
             qualities[qualities.len() / 2]
         };
-        let spread_penalty = if request.max_within_sample_mad_milli == 0 {
-            u64::from(median_within_sample_mad_milli > 0) * 1_000
-        } else {
-            (median_within_sample_mad_milli.saturating_mul(700)
-                / request.max_within_sample_mad_milli)
-                .min(700)
-        };
-        let instability_penalty = if request.max_leave_one_out_shift_milli == 0 {
-            u64::from(max_leave_one_out_shift_milli > 0) * 200
-        } else {
-            (max_leave_one_out_shift_milli.saturating_mul(200)
-                / request.max_leave_one_out_shift_milli)
-                .min(200)
-        };
+        let spread_penalty = median_within_sample_mad_milli
+            .saturating_mul(700)
+            .checked_div(request.max_within_sample_mad_milli)
+            .map(|penalty| penalty.min(700))
+            .unwrap_or_else(|| u64::from(median_within_sample_mad_milli > 0) * 1_000);
+        let instability_penalty = max_leave_one_out_shift_milli
+            .saturating_mul(200)
+            .checked_div(request.max_leave_one_out_shift_milli)
+            .map(|penalty| penalty.min(200))
+            .unwrap_or_else(|| u64::from(max_leave_one_out_shift_milli > 0) * 200);
         let quality_penalty = u64::from(1_000_u16.saturating_sub(median_quality_milli)).min(100);
         let debt_penalty = fraction_milli(
             u64::from(replicate_debt),
@@ -573,10 +569,12 @@ mod tests {
         }
         let output = calibrate_glioma_multimodal_reliability(&request(observations)).unwrap();
         assert_eq!(output.disposition, ReliabilityDisposition::Ready);
-        assert!(output
-            .modality_summaries
-            .iter()
-            .all(|summary| summary.reliability_milli >= 700));
+        assert!(
+            output
+                .modality_summaries
+                .iter()
+                .all(|summary| summary.reliability_milli >= 700)
+        );
         output.validate().unwrap();
     }
 
@@ -618,9 +616,11 @@ mod tests {
             output.acquisition_order,
             vec![GliomaModality::Imaging, GliomaModality::Genomics]
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("reliability-below-gate")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("reliability-below-gate"))
+        );
     }
 }

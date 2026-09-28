@@ -452,8 +452,7 @@ pub fn plan_glioma_replication(
                 .iter()
                 .filter(|candidate| candidate.0 != *site_id)
                 .map(|(_, site_effect, site_variance, _, _, _)| {
-                    (i128::from(*site_effect) * i128::from(1_000_000_u64 / site_variance.max(&1)))
-                        as i128
+                    i128::from(*site_effect) * i128::from(1_000_000_u64 / site_variance.max(&1))
                 })
                 .sum::<i128>();
             let remainder_weight = sites
@@ -515,9 +514,7 @@ pub fn plan_glioma_replication(
             request.power_target_milli
         ));
     }
-    let disposition = if sites.is_empty() {
-        ReplicationPlanDisposition::Unresolved
-    } else if sites.len() < request.min_sites {
+    let disposition = if sites.is_empty() || sites.len() < request.min_sites {
         ReplicationPlanDisposition::Unresolved
     } else if total_cost >= request.budget_units && selected.len() < request.min_sites {
         ReplicationPlanDisposition::BudgetBlocked
@@ -662,10 +659,12 @@ mod tests {
         )
         .unwrap();
         assert!(result.risk_blocked_site_order.contains(&"site-b".into()));
-        assert!(result
-            .plans
-            .iter()
-            .any(|plan| plan.action == ReplicationSiteAction::RiskBlocked));
+        assert!(
+            result
+                .plans
+                .iter()
+                .any(|plan| plan.action == ReplicationSiteAction::RiskBlocked)
+        );
     }
 
     #[test]

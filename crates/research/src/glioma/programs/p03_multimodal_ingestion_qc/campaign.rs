@@ -6,8 +6,8 @@
 //! conclusion.
 
 use crate::glioma::multimodal::{
-    harmonize_multimodal_inputs, MultimodalDisposition, MultimodalObservation, MultimodalQcReport,
-    MultimodalRequest,
+    MultimodalDisposition, MultimodalObservation, MultimodalQcReport, MultimodalRequest,
+    harmonize_multimodal_inputs,
 };
 use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
 use bioprism_ids::ContentHash;

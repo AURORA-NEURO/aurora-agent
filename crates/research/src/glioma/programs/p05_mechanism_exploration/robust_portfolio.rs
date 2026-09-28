@@ -9,8 +9,8 @@
 
 use super::counterfactual::{CounterfactualDisposition, CounterfactualIntervention};
 use super::ensemble_counterfactual::{
-    simulate_glioma_counterfactual_ensemble, CounterfactualEnsembleRequest, CounterfactualModel,
-    EnsembleDirection,
+    CounterfactualEnsembleRequest, CounterfactualModel, EnsembleDirection,
+    simulate_glioma_counterfactual_ensemble,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_ids::ContentHash;
@@ -731,10 +731,12 @@ mod tests {
         let output =
             plan_glioma_robust_intervention_portfolio(&request(), &models, &candidates).unwrap();
         assert_eq!(output.selected_order, vec!["safe"]);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("risk-ceiling-blocked")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("risk-ceiling-blocked"))
+        );
         output.validate().unwrap();
     }
 }

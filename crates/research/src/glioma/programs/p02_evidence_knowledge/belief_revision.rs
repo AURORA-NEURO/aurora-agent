@@ -736,9 +736,11 @@ mod tests {
         let second = revise_glioma_beliefs(&request(), &knowledge(), &reversed).unwrap();
         assert_eq!(first, second);
         let no_conflicts = revise_glioma_beliefs(&request(), &knowledge(), &[]).unwrap();
-        assert!(no_conflicts
-            .uncertainty
-            .contains(&"no-explicit-conflict-edges-supplied".to_string()));
+        assert!(
+            no_conflicts
+                .uncertainty
+                .contains(&"no-explicit-conflict-edges-supplied".to_string())
+        );
     }
 
     #[test]
@@ -760,12 +762,16 @@ mod tests {
         }))
         .unwrap();
         let output = revise_glioma_beliefs(&request(), &knowledge, &[]).unwrap();
-        assert!(output
-            .unresolved_claim_order
-            .contains(&"claim-a".to_string()));
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item == "claim-a:contested-claim-held"));
+        assert!(
+            output
+                .unresolved_claim_order
+                .contains(&"claim-a".to_string())
+        );
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item == "claim-a:contested-claim-held")
+        );
     }
 }

@@ -8,9 +8,9 @@
 //! condition, but it is never inserted into the observation set as if it were measured.
 
 use super::multi_fidelity::{
-    plan_glioma_multi_fidelity_optimization, FidelityCandidate, FidelityObservation,
-    MultiFidelityDisposition, MultiFidelityOptimizationError, MultiFidelityOptimizationPlan,
-    MultiFidelityOptimizationRequest,
+    FidelityCandidate, FidelityObservation, MultiFidelityDisposition,
+    MultiFidelityOptimizationError, MultiFidelityOptimizationPlan,
+    MultiFidelityOptimizationRequest, plan_glioma_multi_fidelity_optimization,
 };
 use crate::glioma_engine::LocalArtifactRef;
 use bioprism_ids::ContentHash;
@@ -698,15 +698,17 @@ mod tests {
             observation.artifact.local_only && !observation.artifact.contains_human_data
         }));
         assert!(campaign.completed_order.contains(&"screening".into()));
-        assert!(campaign
-            .rounds
-            .iter()
-            .all(|round| round.plan.observed_order.iter().all(|id| {
-                campaign
-                    .observations
-                    .iter()
-                    .any(|observation| &observation.candidate_id == id)
-            })));
+        assert!(
+            campaign
+                .rounds
+                .iter()
+                .all(|round| round.plan.observed_order.iter().all(|id| {
+                    campaign
+                        .observations
+                        .iter()
+                        .any(|observation| &observation.candidate_id == id)
+                }))
+        );
         campaign.validate().unwrap();
     }
 

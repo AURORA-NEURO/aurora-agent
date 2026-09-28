@@ -7,12 +7,12 @@
 //! retries a revoked approval, or exports raw experimental payloads.
 
 use super::quality_execution::{
-    execute_glioma_multimodal_quality_schedule, QualityExecutionApproval, QualityExecutionError,
-    QualityExecutionMode, QualityExecutionRequest, QualityExecutionResult, QualityScheduleExecutor,
+    QualityExecutionApproval, QualityExecutionError, QualityExecutionMode, QualityExecutionRequest,
+    QualityExecutionResult, QualityScheduleExecutor, execute_glioma_multimodal_quality_schedule,
 };
 use super::quality_scheduler::{
-    plan_glioma_multimodal_quality_schedule, QualityAcquisitionCandidate, QualityScheduleError,
-    QualitySchedulePlan, QualityScheduleRequest,
+    QualityAcquisitionCandidate, QualityScheduleError, QualitySchedulePlan, QualityScheduleRequest,
+    plan_glioma_multimodal_quality_schedule,
 };
 use crate::glioma_engine::{GliomaModality, GliomaModelSystem};
 use bioprism_ids::ContentHash;
@@ -577,9 +577,11 @@ mod tests {
             output.disposition,
             QualityAdaptiveCampaignDisposition::Blocked
         );
-        assert!(!output
-            .satisfied_required_order
-            .contains(&GliomaModality::Genomics));
+        assert!(
+            !output
+                .satisfied_required_order
+                .contains(&GliomaModality::Genomics)
+        );
         assert_eq!(output.rounds.len(), 3);
         output.validate().expect("digest and invariants");
     }
@@ -629,9 +631,11 @@ mod tests {
             output.disposition,
             QualityAdaptiveCampaignDisposition::Completed
         );
-        assert!(output
-            .satisfied_required_order
-            .contains(&GliomaModality::Genomics));
+        assert!(
+            output
+                .satisfied_required_order
+                .contains(&GliomaModality::Genomics)
+        );
         assert!(output.rounds.len() >= 2);
     }
 

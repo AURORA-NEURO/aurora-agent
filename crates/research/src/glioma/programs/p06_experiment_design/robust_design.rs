@@ -727,9 +727,11 @@ mod tests {
         request.max_total_replicates = 4;
         let output = design_glioma_robust_experiment(&request).unwrap();
         assert!(output.unresolved_order.contains(&"weak".into()));
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("weak")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("weak"))
+        );
     }
 }

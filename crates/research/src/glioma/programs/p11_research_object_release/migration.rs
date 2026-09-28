@@ -161,11 +161,61 @@ impl ResearchObjectMigrationPlan {
                 .iter()
                 .chain(self.metadata_rewrite_order.iter())
                 .chain(self.recompute_order.iter())
-                .chain(self.blocked_order.iter())
                 .any(|id| !ids.contains(id))
         {
             return Err(ResearchObjectMigrationError::InvalidOutput(
-                "migration partitions contain unknown or duplicate artifacts".into(),
+                "migration artifact partitions contain unknown artifacts".into(),
+            ));
+        }
+        let preserve = self.preserve_order.iter().cloned().collect::<BTreeSet<_>>();
+        let rewrite = self
+            .metadata_rewrite_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let recompute = self
+            .recompute_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if preserve.len() != self.preserve_order.len()
+            || rewrite.len() != self.metadata_rewrite_order.len()
+            || recompute.len() != self.recompute_order.len()
+            || !preserve.is_disjoint(&rewrite)
+            || !preserve.is_disjoint(&recompute)
+            || !rewrite.is_disjoint(&recompute)
+            || self.decisions.iter().any(|decision| match decision.action {
+                ResearchObjectMigrationAction::Preserve => {
+                    !preserve.contains(&decision.artifact_id)
+                }
+                ResearchObjectMigrationAction::RewriteMetadata => {
+                    !rewrite.contains(&decision.artifact_id)
+                }
+                ResearchObjectMigrationAction::RecomputeArtifact => {
+                    !recompute.contains(&decision.artifact_id)
+                }
+                ResearchObjectMigrationAction::Block => {
+                    preserve.contains(&decision.artifact_id)
+                        || rewrite.contains(&decision.artifact_id)
+                        || recompute.contains(&decision.artifact_id)
+                }
+            })
+            || self
+                .blocked_order
+                .iter()
+                .any(|reason| reason.trim().is_empty())
+            || self
+                .omission_order
+                .iter()
+                .any(|reason| reason.trim().is_empty())
+            || (self.disposition == ResearchObjectMigrationDisposition::Blocked
+                && self.blocked_order.is_empty())
+            || (self.disposition != ResearchObjectMigrationDisposition::Blocked
+                && !self.blocked_order.is_empty())
+        {
+            return Err(ResearchObjectMigrationError::InvalidOutput(
+                "migration action partitions, blocker reasons, or disposition do not reconcile"
+                    .into(),
             ));
         }
         let expected = ContentHash::of_value(&digest_input(self))
@@ -327,8 +377,8 @@ pub fn plan_glioma_research_object_migration(
 mod tests {
     use super::*;
     use crate::glioma::programs::p11_research_object_release::multimodal_bundle::{
-        compile_glioma_multimodal_research_object, MultimodalResearchObjectInput,
-        MultimodalResearchObjectRequest,
+        MultimodalResearchObjectInput, MultimodalResearchObjectRequest,
+        compile_glioma_multimodal_research_object,
     };
     use crate::glioma::release::ResearchObjectRequest;
     use crate::glioma_engine::{GliomaModality, LocalArtifactRef};
@@ -408,10 +458,11 @@ mod tests {
             ResearchObjectMigrationDisposition::MigrationRequired
         );
         assert_eq!(plan.metadata_rewrite_order.len(), 2);
-        assert!(plan
-            .decisions
-            .iter()
-            .all(|decision| decision.preserves_content_hash));
+        assert!(
+            plan.decisions
+                .iter()
+                .all(|decision| decision.preserves_content_hash)
+        );
         plan.validate().unwrap();
     }
 

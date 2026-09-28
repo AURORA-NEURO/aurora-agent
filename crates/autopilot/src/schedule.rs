@@ -29,7 +29,6 @@ pub struct RetryScheduleDocument {
     pub retry_max_delay: u64,
 }
 
-
 /// Validated immutable retry timing policy carried by an [`AutonomyGrant`](crate::AutonomyGrant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetrySchedule {

@@ -665,11 +665,13 @@ mod tests {
         )
         .unwrap();
         assert!(output.success_stop_order.contains(&"strong".to_string()));
-        assert!(output
-            .decisions
-            .iter()
-            .any(|decision| decision.arm_id == "strong"
-                && decision.decision == SequentialDecisionKind::SuccessStop));
+        assert!(
+            output
+                .decisions
+                .iter()
+                .any(|decision| decision.arm_id == "strong"
+                    && decision.decision == SequentialDecisionKind::SuccessStop)
+        );
         output.validate().unwrap();
     }
 
@@ -681,10 +683,12 @@ mod tests {
         )
         .unwrap();
         assert!(output.futility_stop_order.contains(&"weak".to_string()));
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("weak")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("weak"))
+        );
     }
 
     #[test]
@@ -708,10 +712,12 @@ mod tests {
         .unwrap();
         assert_eq!(output.selected_order, vec!["candidate"]);
         assert_eq!(output.disposition, SequentialDesignDisposition::Continue);
-        assert!(!output
-            .decisions
-            .iter()
-            .any(|decision| decision.arm_id == "control" && decision.planned_replicates > 0));
+        assert!(
+            !output
+                .decisions
+                .iter()
+                .any(|decision| decision.arm_id == "control" && decision.planned_replicates > 0)
+        );
     }
 
     #[test]

@@ -882,10 +882,12 @@ mod tests {
             output.disposition,
             DynamicPolicyDisposition::PositivityBlocked
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("positivity")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("positivity"))
+        );
     }
 
     #[test]
@@ -906,9 +908,11 @@ mod tests {
         .unwrap();
         let score = &output.scores[0];
         assert!(score.max_importance_weight_milli <= 1_000);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("leave-one-out")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("leave-one-out"))
+        );
     }
 }

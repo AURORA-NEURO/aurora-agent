@@ -649,9 +649,10 @@ mod tests {
             .iter()
             .filter(|bin| bin.source_family == "assay")
             .collect::<Vec<_>>();
-        assert!(bins
-            .windows(2)
-            .all(|pair| pair[0].calibrated_support_milli <= pair[1].calibrated_support_milli));
+        assert!(
+            bins.windows(2)
+                .all(|pair| pair[0].calibrated_support_milli <= pair[1].calibrated_support_milli)
+        );
         assert_eq!(output.negative_evidence_order, vec!["high"]);
         output.validate().unwrap();
     }

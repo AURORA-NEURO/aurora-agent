@@ -442,7 +442,9 @@ pub fn rank_glioma_evidence_novelty(
         review_order,
         unresolved_evidence_order: unresolved.into_iter().collect(),
         domain_gap_order: domain_gaps.into_iter().collect(),
-        negative_evidence: vec!["novelty-ranking-is-not-evidence-validity-or-causal-support".into()],
+        negative_evidence: vec![
+            "novelty-ranking-is-not-evidence-validity-or-causal-support".into(),
+        ],
         uncertainty: uncertainty.into_iter().collect(),
         disposition,
         next_step: next_step.into(),

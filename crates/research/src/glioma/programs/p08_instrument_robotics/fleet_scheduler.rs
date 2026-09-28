@@ -862,10 +862,12 @@ mod tests {
             output.blocked_order.contains(&"image".into())
                 || output.blocked_order.contains(&"sequence".into())
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("calibration") || item.contains("risk")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("calibration") || item.contains("risk"))
+        );
     }
 
     #[test]
@@ -874,11 +876,13 @@ mod tests {
         request.resources = vec![resource("scope-a", 4, 4), resource("scope-b", 4, 4)];
         let output = schedule_glioma_instrument_fleet(&request).unwrap();
         assert!(output.blocked_order.contains(&"integrate".into()));
-        assert!(output
-            .blocked_tasks
-            .iter()
-            .any(|blocked| blocked.task_id == "integrate"
-                && blocked.reasons.contains(&"dependency-blocked".into())));
+        assert!(
+            output
+                .blocked_tasks
+                .iter()
+                .any(|blocked| blocked.task_id == "integrate"
+                    && blocked.reasons.contains(&"dependency-blocked".into()))
+        );
     }
 
     #[test]

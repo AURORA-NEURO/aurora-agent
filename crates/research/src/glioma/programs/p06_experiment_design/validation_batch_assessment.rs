@@ -8,8 +8,8 @@
 //! states. It never treats a task artifact as a biological measurement.
 
 use super::power_reestimation::{
-    plan_glioma_power_reestimation, PowerArmObservation, PowerReestimationDisposition,
-    PowerReestimationPlan, PowerReestimationRequest,
+    PowerArmObservation, PowerReestimationDisposition, PowerReestimationPlan,
+    PowerReestimationRequest, plan_glioma_power_reestimation,
 };
 use crate::glioma::programs::p07_protocol_simulation::mechanism_validation_execution::MechanismValidationExecution;
 use crate::glioma_engine::{GliomaModelSystem, LocalArtifactRef};
@@ -157,32 +157,36 @@ fn validate_observation_set(
     Ok(())
 }
 
-fn merged_artifact(
-    arm_id: &str,
-    label: &str,
-    left: &PowerArmObservation,
-    right: Option<&PowerArmObservation>,
+struct MergedArtifactInput<'a> {
+    arm_id: &'a str,
+    label: &'a str,
+    left: &'a PowerArmObservation,
+    right: Option<&'a PowerArmObservation>,
     mean_response_milli: i32,
     variance_milli2: u64,
     observations: u32,
     risk_milli: u16,
     cost_units: u32,
+}
+
+fn merged_artifact(
+    input: MergedArtifactInput<'_>,
 ) -> Result<LocalArtifactRef, ValidationBatchAssessmentError> {
     let content_hash = ContentHash::of_value(&serde_json::json!({
         "kind": "glioma-validation-pooled-arm-summary",
-        "arm_id": arm_id,
-        "label": label,
-        "left_artifact": left.artifact,
-        "right_artifact": right.map(|observation| &observation.artifact),
-        "mean_response_milli": mean_response_milli,
-        "variance_milli2": variance_milli2,
-        "observations": observations,
-        "risk_milli": risk_milli,
-        "cost_units": cost_units,
+        "arm_id": input.arm_id,
+        "label": input.label,
+        "left_artifact": input.left.artifact,
+        "right_artifact": input.right.map(|observation| &observation.artifact),
+        "mean_response_milli": input.mean_response_milli,
+        "variance_milli2": input.variance_milli2,
+        "observations": input.observations,
+        "risk_milli": input.risk_milli,
+        "cost_units": input.cost_units,
     }))
     .map_err(|error| ValidationBatchAssessmentError::Digest(error.to_string()))?;
     Ok(LocalArtifactRef {
-        artifact_id: format!("validation-pooled:{arm_id}"),
+        artifact_id: format!("validation-pooled:{}", input.arm_id),
         content_hash,
         content_type: "application/vnd.aurora.glioma-power-pooled+json".into(),
         local_only: true,
@@ -196,17 +200,17 @@ fn pool_pair(
     right: Option<&PowerArmObservation>,
 ) -> Result<PowerArmObservation, ValidationBatchAssessmentError> {
     let Some(right) = right else {
-        let artifact = merged_artifact(
-            &left.arm_id,
-            &left.label,
+        let artifact = merged_artifact(MergedArtifactInput {
+            arm_id: &left.arm_id,
+            label: &left.label,
             left,
-            None,
-            left.mean_response_milli,
-            left.variance_milli2,
-            left.observations,
-            left.risk_milli,
-            left.cost_units,
-        )?;
+            right: None,
+            mean_response_milli: left.mean_response_milli,
+            variance_milli2: left.variance_milli2,
+            observations: left.observations,
+            risk_milli: left.risk_milli,
+            cost_units: left.cost_units,
+        })?;
         return Ok(PowerArmObservation {
             artifact,
             ..left.clone()
@@ -266,17 +270,17 @@ fn pool_pair(
                 left.arm_id
             ))
         })?;
-    let artifact = merged_artifact(
-        &left.arm_id,
-        &left.label,
+    let artifact = merged_artifact(MergedArtifactInput {
+        arm_id: &left.arm_id,
+        label: &left.label,
         left,
-        Some(right),
-        mean_i32,
-        variance_u64,
-        total_n,
-        left.risk_milli.max(right.risk_milli),
+        right: Some(right),
+        mean_response_milli: mean_i32,
+        variance_milli2: variance_u64,
+        observations: total_n,
+        risk_milli: left.risk_milli.max(right.risk_milli),
         cost_units,
-    )?;
+    })?;
     Ok(PowerArmObservation {
         arm_id: left.arm_id.clone(),
         label: left.label.clone(),
@@ -516,11 +520,11 @@ mod tests {
     };
     use crate::glioma::programs::p07_protocol_simulation::execution::DryRunGliomaProtocolExecutor;
     use crate::glioma::programs::p07_protocol_simulation::mechanism_validation_execution::{
-        execute_glioma_mechanism_validation_protocol, MechanismValidationExecutionRequest,
+        MechanismValidationExecutionRequest, execute_glioma_mechanism_validation_protocol,
     };
     use crate::glioma::programs::p07_protocol_simulation::simulator::{
-        simulate_glioma_protocol, ProtocolResource, ProtocolResourceKind,
-        ProtocolSimulationRequest, ProtocolTask,
+        ProtocolResource, ProtocolResourceKind, ProtocolSimulationRequest, ProtocolTask,
+        simulate_glioma_protocol,
     };
 
     fn hash(label: &str) -> ContentHash {

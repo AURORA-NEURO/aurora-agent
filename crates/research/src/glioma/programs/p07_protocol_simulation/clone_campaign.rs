@@ -8,21 +8,21 @@
 //! observations are never biological evidence.
 
 use super::clone_continuation::{
-    plan_glioma_clone_continuation, CloneContinuationCandidate, CloneContinuationError,
-    CloneContinuationPlan, CloneContinuationRequest,
+    CloneContinuationCandidate, CloneContinuationError, CloneContinuationPlan,
+    CloneContinuationRequest, plan_glioma_clone_continuation,
 };
 use crate::glioma::programs::p05_mechanism_exploration::{
-    analyze_glioma_clonal_evolution, ClonalEvolutionError, ClonalEvolutionGraph,
-    ClonalEvolutionRequest, CloneProfile,
+    ClonalEvolutionError, ClonalEvolutionGraph, ClonalEvolutionRequest, CloneProfile,
+    analyze_glioma_clonal_evolution,
 };
 use crate::glioma::programs::p06_experiment_design::{
-    plan_glioma_clone_perturbation_panel, ClonePerturbationCandidate, ClonePerturbationPanel,
-    ClonePerturbationPanelError, ClonePerturbationPanelRequest,
+    ClonePerturbationCandidate, ClonePerturbationPanel, ClonePerturbationPanelError,
+    ClonePerturbationPanelRequest, plan_glioma_clone_perturbation_panel,
 };
 use crate::glioma::programs::p10_interpretation_replication::{
-    analyze_glioma_clone_panel_outcomes, ClonePanelMeasurementState, ClonePanelObservation,
-    ClonePanelOutcomeAnalysis, ClonePanelOutcomeDisposition, ClonePanelOutcomeError,
-    ClonePanelOutcomeRequest,
+    ClonePanelMeasurementState, ClonePanelObservation, ClonePanelOutcomeAnalysis,
+    ClonePanelOutcomeDisposition, ClonePanelOutcomeError, ClonePanelOutcomeRequest,
+    analyze_glioma_clone_panel_outcomes,
 };
 use crate::glioma_engine::{GliomaModelSystem, LocalArtifactRef};
 use bioprism_ids::ContentHash;

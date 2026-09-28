@@ -1,6 +1,6 @@
 //! Reproducible computation program ownership.
 
-use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
+use crate::glioma::catalog::{GliomaProgramDescriptor, GliomaProgramId, glioma_program_catalog};
 
 pub mod campaign;
 pub mod execution;
@@ -17,89 +17,88 @@ pub mod robustness_guided;
 pub mod workflow;
 
 pub use robustness::{
-    assess_glioma_robustness, RobustnessCase, RobustnessCaseKind, RobustnessDisposition,
-    RobustnessError, RobustnessRequest, RobustnessSuite,
+    RobustnessCase, RobustnessCaseKind, RobustnessDisposition, RobustnessError, RobustnessRequest,
+    RobustnessSuite, assess_glioma_robustness,
 };
 
 pub use robustness_guided::{
-    dry_run_robustness_guided_computation_executor, execute_glioma_robustness_guided_computation,
     RobustnessGuidedCandidate, RobustnessGuidedCandidateScore, RobustnessGuidedComputation,
     RobustnessGuidedComputationDisposition, RobustnessGuidedComputationError,
-    RobustnessGuidedComputationRequest,
+    RobustnessGuidedComputationRequest, dry_run_robustness_guided_computation_executor,
+    execute_glioma_robustness_guided_computation,
 };
 
 pub use recovery_campaign::{
-    execute_glioma_computation_recovery, ComputationRecoveryCampaign,
-    ComputationRecoveryDisposition, ComputationRecoveryError, ComputationRecoveryRequest,
-    ComputationRecoveryStopReason,
+    ComputationRecoveryCampaign, ComputationRecoveryDisposition, ComputationRecoveryError,
+    ComputationRecoveryRequest, ComputationRecoveryStopReason, execute_glioma_computation_recovery,
 };
 
 pub use reproducibility::{
-    analyze_glioma_computation_reproducibility, ComputationReproducibility,
-    ComputationReproducibilityDisposition, ComputationReproducibilityError,
-    ComputationReproducibilityRequest, ComputationReproducibilityRun,
-    ComputationReproducibilityTaskObservation, ComputationRunOutcome,
-    ComputationTaskReproducibilityDisposition, ComputationTaskReproducibilitySummary,
+    ComputationReproducibility, ComputationReproducibilityDisposition,
+    ComputationReproducibilityError, ComputationReproducibilityRequest,
+    ComputationReproducibilityRun, ComputationReproducibilityTaskObservation,
+    ComputationRunOutcome, ComputationTaskReproducibilityDisposition,
+    ComputationTaskReproducibilitySummary, analyze_glioma_computation_reproducibility,
 };
 
 pub use execution::{
-    execute_glioma_computation, ComputationCacheEntry, ComputationExecution,
-    ComputationExecutionDisposition, ComputationExecutionError, ComputationExecutionFailure,
-    ComputationExecutionRequest, ComputationExecutionStopReason, ComputationOperation,
-    ComputationTask, ComputationTaskDisposition, ComputationTaskResult,
-    DryRunGliomaComputationExecutor, GliomaComputationExecutor,
+    ComputationCacheEntry, ComputationExecution, ComputationExecutionDisposition,
+    ComputationExecutionError, ComputationExecutionFailure, ComputationExecutionRequest,
+    ComputationExecutionStopReason, ComputationOperation, ComputationTask,
+    ComputationTaskDisposition, ComputationTaskResult, DryRunGliomaComputationExecutor,
+    GliomaComputationExecutor, execute_glioma_computation,
 };
 
 pub use interpretation_frontier::{
-    compile_glioma_computation_interpretation_frontier,
-    execute_glioma_computation_interpretation_frontier, ComputationInterpretationFrontier,
-    ComputationInterpretationFrontierDisposition, ComputationInterpretationFrontierError,
-    ComputationInterpretationFrontierRequest, ComputationInterpretationFrontierRun,
+    ComputationInterpretationFrontier, ComputationInterpretationFrontierDisposition,
+    ComputationInterpretationFrontierError, ComputationInterpretationFrontierRequest,
+    ComputationInterpretationFrontierRun, compile_glioma_computation_interpretation_frontier,
+    execute_glioma_computation_interpretation_frontier,
 };
 
 pub use lineage::{
-    join_glioma_computation_lineage, ComputationLineage, ComputationLineageDisposition,
-    ComputationLineageError, ComputationLineageNode, ComputationLineageNodeStatus,
-    ComputationLineageRequest,
+    ComputationLineage, ComputationLineageDisposition, ComputationLineageError,
+    ComputationLineageNode, ComputationLineageNodeStatus, ComputationLineageRequest,
+    join_glioma_computation_lineage,
 };
 
 pub use campaign::{
-    execute_glioma_computation_campaign, GliomaComputationCampaign,
-    GliomaComputationCampaignDisposition, GliomaComputationCampaignError,
-    GliomaComputationCampaignRequest, GliomaComputationCampaignRound,
-    GliomaComputationCampaignStopReason, GliomaComputationPlanner, GliomaComputationPlannerContext,
-    GliomaComputationPlannerFailure, StaticGliomaComputationPlanner,
+    GliomaComputationCampaign, GliomaComputationCampaignDisposition,
+    GliomaComputationCampaignError, GliomaComputationCampaignRequest,
+    GliomaComputationCampaignRound, GliomaComputationCampaignStopReason, GliomaComputationPlanner,
+    GliomaComputationPlannerContext, GliomaComputationPlannerFailure,
+    StaticGliomaComputationPlanner, execute_glioma_computation_campaign,
 };
 
 pub use planning::{
-    plan_glioma_computation_portfolio, ComputationCandidate, ComputationCandidateDisposition,
-    ComputationCandidateScore, ComputationPortfolioDisposition, ComputationPortfolioError,
-    ComputationPortfolioPlan, ComputationPortfolioRequest,
+    ComputationCandidate, ComputationCandidateDisposition, ComputationCandidateScore,
+    ComputationPortfolioDisposition, ComputationPortfolioError, ComputationPortfolioPlan,
+    ComputationPortfolioRequest, plan_glioma_computation_portfolio,
 };
 
 pub use portfolio_execution::{
-    execute_glioma_computation_portfolio, ComputationPortfolioExecution,
-    ComputationPortfolioExecutionDisposition, ComputationPortfolioExecutionError,
-    ComputationPortfolioExecutionRequest,
+    ComputationPortfolioExecution, ComputationPortfolioExecutionDisposition,
+    ComputationPortfolioExecutionError, ComputationPortfolioExecutionRequest,
+    execute_glioma_computation_portfolio,
 };
 
 pub use placement::{
-    schedule_glioma_computation_placement, ComputationPlacementAssignment,
-    ComputationPlacementBlockedTask, ComputationPlacementDisposition, ComputationPlacementError,
-    ComputationPlacementRequest, ComputationPlacementSchedule, ComputationWorkerProfile,
-    ComputationWorkerUtilization,
+    ComputationPlacementAssignment, ComputationPlacementBlockedTask,
+    ComputationPlacementDisposition, ComputationPlacementError, ComputationPlacementRequest,
+    ComputationPlacementSchedule, ComputationWorkerProfile, ComputationWorkerUtilization,
+    schedule_glioma_computation_placement,
 };
 
 pub use workflow::{
-    compile_glioma_computation_workflow, GliomaComputationWorkflow, GliomaComputationWorkflowError,
-    GliomaComputationWorkflowRequest,
+    GliomaComputationWorkflow, GliomaComputationWorkflowError, GliomaComputationWorkflowRequest,
+    compile_glioma_computation_workflow,
 };
 
 pub use operating_cycle::{
-    execute_glioma_computation_operating_cycle, execute_glioma_computation_operating_cycle_dry_run,
     ComputationExecutionMode, GliomaComputationOperatingCycle,
     GliomaComputationOperatingCycleDisposition, GliomaComputationOperatingCycleError,
-    GliomaComputationOperatingCycleRequest,
+    GliomaComputationOperatingCycleRequest, execute_glioma_computation_operating_cycle,
+    execute_glioma_computation_operating_cycle_dry_run,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ReproducibleComputation;

@@ -6,20 +6,20 @@
 //! is strong enough to execute a next batch and preserves every gap when it is not.
 
 use super::super::p03_multimodal_ingestion_qc::{
-    analyze_glioma_multimodal_graph_fusion, GraphFusionAnalysis, GraphFusionDisposition,
-    GraphFusionRequest, GraphFusionVector,
+    GraphFusionAnalysis, GraphFusionDisposition, GraphFusionRequest, GraphFusionVector,
+    analyze_glioma_multimodal_graph_fusion,
 };
 use super::super::p05_mechanism_exploration::{
-    analyze_glioma_pathway_activity, PathwayActivityAnalysis, PathwayActivityDefinition,
-    PathwayActivityDisposition, PathwayActivityObservation, PathwayActivityRequest,
+    PathwayActivityAnalysis, PathwayActivityDefinition, PathwayActivityDisposition,
+    PathwayActivityObservation, PathwayActivityRequest, analyze_glioma_pathway_activity,
 };
 use super::action_execution::{
-    execute_glioma_action_portfolio, ActionPortfolioExecution, ActionPortfolioExecutionDisposition,
-    ActionPortfolioExecutionRequest, GliomaActionExecutor,
+    ActionPortfolioExecution, ActionPortfolioExecutionDisposition, ActionPortfolioExecutionRequest,
+    GliomaActionExecutor, execute_glioma_action_portfolio,
 };
 use crate::glioma_engine::{
-    select_glioma_actions, GliomaActionCandidate, GliomaActionSelection, GliomaEngineError,
-    GliomaModelSystem, GliomaSelectionConfig,
+    GliomaActionCandidate, GliomaActionSelection, GliomaEngineError, GliomaModelSystem,
+    GliomaSelectionConfig, select_glioma_actions,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};

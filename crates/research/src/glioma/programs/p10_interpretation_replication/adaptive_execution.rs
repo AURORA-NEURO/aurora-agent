@@ -8,13 +8,13 @@
 //! blocked outcomes available for the next synthesis round.
 
 use super::adaptive_frontier::{
-    plan_glioma_adaptive_research_frontier, AdaptiveFrontierDisposition, AdaptiveFrontierError,
-    AdaptiveFrontierRequest, AdaptiveResearchFrontier,
+    AdaptiveFrontierDisposition, AdaptiveFrontierError, AdaptiveFrontierRequest,
+    AdaptiveResearchFrontier, plan_glioma_adaptive_research_frontier,
 };
 use crate::glioma::programs::p07_protocol_simulation::{
-    execute_glioma_action_portfolio, ActionExecutionDisposition, ActionPortfolioExecution,
-    ActionPortfolioExecutionError, ActionPortfolioExecutionRequest, DryRunGliomaActionExecutor,
-    GliomaActionExecutor,
+    ActionExecutionDisposition, ActionPortfolioExecution, ActionPortfolioExecutionError,
+    ActionPortfolioExecutionRequest, DryRunGliomaActionExecutor, GliomaActionExecutor,
+    execute_glioma_action_portfolio,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -317,9 +317,9 @@ pub fn dry_run_glioma_adaptive_frontier_executor() -> DryRunGliomaActionExecutor
 mod tests {
     use super::*;
     use crate::glioma::programs::p10_interpretation_replication::{
-        synthesize_glioma_interpretation, InterpretationEvidence, InterpretationEvidenceDirection,
-        InterpretationEvidenceFamily, InterpretationSynthesisDisposition,
-        InterpretationSynthesisRequest,
+        InterpretationEvidence, InterpretationEvidenceDirection, InterpretationEvidenceFamily,
+        InterpretationSynthesisDisposition, InterpretationSynthesisRequest,
+        synthesize_glioma_interpretation,
     };
     use crate::glioma_engine::{GliomaModelSystem, GliomaSelectionWeights, LocalArtifactRef};
     use std::collections::BTreeSet;
@@ -415,10 +415,12 @@ mod tests {
         );
         assert!(output.execution.is_some());
         assert_eq!(output.dispatched_order, output.frontier.next_action_order);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("synthetic-dry-run")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("synthetic-dry-run"))
+        );
     }
 
     #[test]
@@ -434,10 +436,12 @@ mod tests {
             AdaptiveFrontierExecutionDisposition::Held
         );
         assert!(output.execution.is_none());
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("unresolved-synthesis-hold")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("unresolved-synthesis-hold"))
+        );
     }
 
     #[test]

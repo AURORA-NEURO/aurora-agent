@@ -7,8 +7,8 @@
 //! or makes a clinical decision.
 
 use super::replication_plan::{
-    plan_glioma_replication, ReplicationObservation, ReplicationPlan, ReplicationPlanDisposition,
-    ReplicationPlanError, ReplicationPlanRequest, ReplicationSiteAction,
+    ReplicationObservation, ReplicationPlan, ReplicationPlanDisposition, ReplicationPlanError,
+    ReplicationPlanRequest, ReplicationSiteAction, plan_glioma_replication,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_foundation::PRECLINICAL_BOUNDARY;
@@ -628,10 +628,11 @@ mod tests {
             ReplicationContinuationAction::ContinueReplication
         );
         assert_eq!(left.next_round, 2);
-        assert!(left
-            .actions
-            .iter()
-            .any(|action| action.planned_new_replicates > 0));
+        assert!(
+            left.actions
+                .iter()
+                .any(|action| action.planned_new_replicates > 0)
+        );
         left.validate().unwrap();
     }
 
@@ -648,9 +649,11 @@ mod tests {
             output.next_action,
             ReplicationContinuationAction::HoldForQuality
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("quality")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("quality"))
+        );
     }
 }

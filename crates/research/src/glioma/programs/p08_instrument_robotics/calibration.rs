@@ -413,10 +413,12 @@ mod tests {
         let runs = vec![run("r1", 1, 500), run("r2", 2, 510), run("r3", 3, 550)];
         let output = analyze_instrument_calibration(&request(), &runs).unwrap();
         assert_eq!(output.disposition, CalibrationDisposition::Drifting);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("drift-exceeds")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("drift-exceeds"))
+        );
     }
 
     #[test]
@@ -429,9 +431,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.disposition, CalibrationDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("minimum-calibration")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("minimum-calibration"))
+        );
     }
 }

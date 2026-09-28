@@ -1100,13 +1100,36 @@ pub fn instantiate_domain_workflow(
         "execute": false,
         "stop_on_error": true,
         "allow_side_effects": false,
-        "require_readiness": false,
         "max_steps": MAX_DOMAIN_WORKFLOW_STEPS,
         "allowed_tools": [],
     });
     let policy_object = policy
         .as_object_mut()
         .ok_or_else(|| DomainWorkflowError::InvalidRequest("policy must be an object".into()))?;
+    if policy_object.contains_key("require_readiness") {
+        return Err(DomainWorkflowError::InvalidRequest(
+            "policy.require_readiness belongs to domain_workflow_reconcile and cannot be placed on an executable mission".into(),
+        ));
+    }
+    const MISSION_POLICY_FIELDS: &[&str] = &[
+        "execute",
+        "stop_on_error",
+        "allow_side_effects",
+        "max_steps",
+        "max_step_output_bytes",
+        "max_total_output_bytes",
+        "execution_mode",
+        "max_parallelism",
+        "allowed_tools",
+    ];
+    if let Some(field) = policy_object
+        .keys()
+        .find(|field| !MISSION_POLICY_FIELDS.contains(&field.as_str()))
+    {
+        return Err(DomainWorkflowError::InvalidRequest(format!(
+            "unknown mission policy field `{field}`"
+        )));
+    }
     let Some(default_policy) = default_policy.as_object() else {
         return Err(DomainWorkflowError::InvalidRequest(
             "internal default policy is not an object".into(),
@@ -1131,7 +1154,6 @@ pub fn instantiate_domain_workflow(
     let execute = policy_bool("execute")?;
     let _ = policy_bool("stop_on_error")?;
     let _ = policy_bool("allow_side_effects")?;
-    let _ = policy_bool("require_readiness")?;
     let allowed_tools = match policy.get("allowed_tools") {
         Some(value) => Some(value.as_array().ok_or_else(|| {
             DomainWorkflowError::InvalidRequest("policy.allowed_tools must be an array".into())
@@ -1170,9 +1192,17 @@ pub fn instantiate_domain_workflow(
         "steps": steps,
         "policy": policy,
         "claim_requests": object.get("claim_requests").cloned().unwrap_or_else(|| json!([])),
-        "evaluator_review": object.get("evaluator_review").cloned().unwrap_or(Value::Null),
-        "route_review": object.get("route_review").cloned().unwrap_or(Value::Null),
     });
+    for field in ["evaluator_review", "route_review"] {
+        if let Some(value) = object.get(field) {
+            if !value.is_object() {
+                return Err(DomainWorkflowError::InvalidRequest(format!(
+                    "{field} must be an object when supplied"
+                )));
+            }
+            mission[field] = value.clone();
+        }
+    }
     let selected_tools = selected_tools.into_iter().collect::<Vec<_>>();
     let evidence_plan = steps
         .iter()
@@ -2893,7 +2923,9 @@ mod tests {
         assert_eq!(report["selection"]["all_selected_tools_available"], true);
         assert_eq!(report["mission"]["policy"]["stop_on_error"], true);
         assert_eq!(report["mission"]["policy"]["allow_side_effects"], false);
-        assert_eq!(report["mission"]["policy"]["require_readiness"], false);
+        assert!(report["mission"]["policy"]
+            .get("require_readiness")
+            .is_none());
         assert_eq!(report["mission"]["policy"]["max_steps"], 4);
         assert_eq!(report["evidence_plan"]["steps"][0]["step_id"], "boundary");
         assert_eq!(
@@ -3414,6 +3446,23 @@ mod tests {
         assert!(matches!(
             instantiate_domain_workflow(&catalogue, &tools, &request),
             Err(DomainWorkflowError::PolicyToolOutsideWorkflow { .. })
+        ));
+    }
+
+    #[test]
+    fn instantiation_refuses_reconciliation_only_readiness_policy_on_a_mission() {
+        let (catalogue, tools) = inputs();
+        let request = json!({
+            "workflow_id":"oncology_workflows",
+            "mission_id":"m-readiness-policy",
+            "goal":"review",
+            "steps":[{"id":"boundary","tool":"onco_boundary_check"}],
+            "policy":{"require_readiness": false}
+        });
+        assert!(matches!(
+            instantiate_domain_workflow(&catalogue, &tools, &request),
+            Err(DomainWorkflowError::InvalidRequest(message))
+                if message.contains("belongs to domain_workflow_reconcile")
         ));
     }
 

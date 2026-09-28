@@ -360,7 +360,7 @@ pub fn verify_glioma_multimodal_quality_recovery(
                     && cd >= request.min_improvement_milli as i16
                     && ad >= request.min_improvement_milli as i16
                     && dd >= 0;
-                let confidence = u16::from(br.min(pr));
+                let confidence = br.min(pr);
                 if floors_met && improvement_met {
                     evidence.insert("post-remediation-floors-met".into());
                     evidence.insert("all-required-improvements-met".into());
@@ -590,10 +590,12 @@ mod tests {
             result.disposition,
             QualityRecoveryCampaignDisposition::Blocked
         );
-        assert!(result
-            .uncertainty
-            .iter()
-            .any(|entry| entry.contains("blocked-modality")));
+        assert!(
+            result
+                .uncertainty
+                .iter()
+                .any(|entry| entry.contains("blocked-modality"))
+        );
     }
 
     #[test]

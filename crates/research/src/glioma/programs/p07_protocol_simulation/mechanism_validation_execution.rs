@@ -11,9 +11,9 @@ use super::super::p06_experiment_design::mechanism_validation_protocol::{
     MechanismValidationProtocolCompilation, MechanismValidationProtocolDisposition,
 };
 use super::execution::{
-    execute_glioma_protocol, GliomaProtocolExecutor, ProtocolExecution,
-    ProtocolExecutionDisposition, ProtocolExecutionError, ProtocolExecutionRequest,
-    ProtocolExecutionStopReason, MAX_RETRIES,
+    GliomaProtocolExecutor, MAX_RETRIES, ProtocolExecution, ProtocolExecutionDisposition,
+    ProtocolExecutionError, ProtocolExecutionRequest, ProtocolExecutionStopReason,
+    execute_glioma_protocol,
 };
 use crate::glioma::workflow::FEATURE_ID;
 use crate::glioma_engine::GliomaModelSystem;
@@ -281,8 +281,8 @@ pub fn execute_glioma_mechanism_validation_protocol<E: GliomaProtocolExecutor>(
 mod tests {
     use super::super::execution::DryRunGliomaProtocolExecutor;
     use super::super::simulator::{
-        simulate_glioma_protocol, ProtocolResource, ProtocolResourceKind,
-        ProtocolSimulationRequest, ProtocolTask,
+        ProtocolResource, ProtocolResourceKind, ProtocolSimulationRequest, ProtocolTask,
+        simulate_glioma_protocol,
     };
     use super::*;
 
@@ -417,9 +417,11 @@ mod tests {
             MechanismValidationExecutionDisposition::Completed
         );
         assert_eq!(output.execution.as_ref().unwrap().completed_order.len(), 1);
-        assert!(output.execution.as_ref().unwrap().task_results[0]
-            .artifact
-            .is_some());
+        assert!(
+            output.execution.as_ref().unwrap().task_results[0]
+                .artifact
+                .is_some()
+        );
         output.validate().unwrap();
     }
 }

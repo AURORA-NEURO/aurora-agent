@@ -1,5 +1,4 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
-import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
 import { AutonomousAuthorizationGate, AutonomousAuthorizationLedger } from "./autonomous-authorization.js";
 import {
   ProviderSetup,
@@ -294,6 +293,113 @@ import {
   type AutonomousWorkflowCycleOptions,
   type AutonomousWorkflowCycleResult as AutonomousWorkflowCycleRunResult,
 } from "./autonomous-workflow-cycle.js";
+import {
+  AUTONOMOUS_BRAIN_TRACE_REGISTRY_CONTROLLER_SCHEMA,
+  AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_SCHEMA,
+  AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA,
+  AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA,
+  AutonomousBrainTraceRegistryController,
+  AutonomousBrainRunAnalyticsController,
+  AutonomousBrainRunObservabilityController,
+} from "./autonomous-brain-observability.js";
+import type {
+  AutonomousBrainTraceRegistryControllerStatus,
+  AutonomousBrainTraceRegistryControllerOptions,
+  AutonomousBrainTraceRegistryControllerProjection,
+  AutonomousBrainTraceRegistryPublicationRun,
+  AutonomousBrainTraceRegistryImportRun,
+  AutonomousBrainTraceRegistryCompactRun,
+  AutonomousBrainRunAnalyticsControllerStatus,
+  AutonomousBrainRunAnalyticsControllerOptions,
+  AutonomousBrainRunAnalyticsControllerProjection,
+  AutonomousBrainRunAnalyticsIngestRun,
+  AutonomousBrainRunAnalyticsAnalysisRun,
+  AutonomousBrainRunAnalyticsIntegrity,
+  AutonomousBrainRunObservabilityControllerStatus,
+  AutonomousBrainRunObservabilityControllerOptions,
+  AutonomousBrainRunObservabilityAlertSink,
+  AutonomousBrainRunObservabilityAlert,
+  AutonomousBrainRunObservabilityAlertDelivery,
+  AutonomousBrainRunObservabilityControllerProjection,
+  AutonomousBrainRunObservabilityRestoreRun,
+  AutonomousBrainRunObservabilityFlushRun,
+  AutonomousBrainRunObservabilityError,
+  AutonomousBrainRunObservabilityRun,
+} from "./autonomous-brain-observability.js";
+import { boundedIdentifier, boundedText, digest, errorProjection } from "./autonomous-brain-facade-utils.js";
+import { registerAutonomousBrainFacade } from "./autonomous-brain-facade-brand.js";
+import {
+  AUTONOMOUS_BRAIN_BATCH_SCHEMA,
+  AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA,
+  AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA,
+  MAX_AUTONOMOUS_BRAIN_BATCH,
+  MAX_AUTONOMOUS_BRAIN_PARALLELISM,
+  MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES,
+  automaticCycleBatchDigest,
+  automaticCycleBatchItemDigest,
+  batchDigest,
+  batchItemDigest,
+  batchStatus,
+  brainBatchRequestDigest,
+  brainBatchTaskDigest,
+  checkpointText,
+  makeBrainBatchCheckpoint,
+  validateBrainBatchCheckpoint,
+} from "./autonomous-brain-batch-support.js";
+import type { AutonomousBrainBatchCheckpointJSON, AutonomousBrainBatchMode } from "./autonomous-brain-batch-support.js";
+export {
+  AUTONOMOUS_BRAIN_BATCH_SCHEMA,
+  AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA,
+  AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA,
+  MAX_AUTONOMOUS_BRAIN_BATCH,
+  MAX_AUTONOMOUS_BRAIN_PARALLELISM,
+  MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES,
+} from "./autonomous-brain-batch-support.js";
+export type { AutonomousBrainBatchCheckpointJSON, AutonomousBrainBatchMode } from "./autonomous-brain-batch-support.js";
+import type { AutonomousBrainBatchRehydrationContext } from "./autonomous-brain-batch-rehydration.js";
+export {
+  AutonomousBrainBatchProtectedRehydrator,
+  AutonomousBrainAutoBatchProtectedRehydrator,
+  AutonomousBrainAutoCycleBatchProtectedRehydrator,
+  AutonomousBrainAutoReplanBatchProtectedRehydrator,
+} from "./autonomous-brain-batch-rehydration.js";
+export type { AutonomousBrainBatchRehydrationContext } from "./autonomous-brain-batch-rehydration.js";
+export { AutonomousBrainBatchJobController, InMemoryAutonomousBrainBatchCheckpointStore } from "./autonomous-brain-batch-controller.js";
+export type { AutonomousBrainBatchJobControllerOptions } from "./autonomous-brain-batch-controller.js";
+export {
+  AUTONOMOUS_BRAIN_TRACE_REGISTRY_CONTROLLER_SCHEMA,
+  AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_SCHEMA,
+  AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA,
+  AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA,
+  AutonomousBrainTraceRegistryController,
+  AutonomousBrainRunAnalyticsController,
+  AutonomousBrainRunObservabilityController,
+} from "./autonomous-brain-observability.js";
+export type {
+  AutonomousBrainTraceRegistryControllerStatus,
+  AutonomousBrainTraceRegistryControllerOptions,
+  AutonomousBrainTraceRegistryControllerProjection,
+  AutonomousBrainTraceRegistryPublicationRun,
+  AutonomousBrainTraceRegistryImportRun,
+  AutonomousBrainTraceRegistryCompactRun,
+  AutonomousBrainRunAnalyticsControllerStatus,
+  AutonomousBrainRunAnalyticsControllerOptions,
+  AutonomousBrainRunAnalyticsControllerProjection,
+  AutonomousBrainRunAnalyticsIngestRun,
+  AutonomousBrainRunAnalyticsAnalysisRun,
+  AutonomousBrainRunAnalyticsIntegrity,
+  AutonomousBrainRunObservabilityControllerStatus,
+  AutonomousBrainRunObservabilityControllerOptions,
+  AutonomousBrainRunObservabilityAlertSink,
+  AutonomousBrainRunObservabilityAlert,
+  AutonomousBrainRunObservabilityAlertDelivery,
+  AutonomousBrainRunObservabilityControllerProjection,
+  AutonomousBrainRunObservabilityRestoreRun,
+  AutonomousBrainRunObservabilityFlushRun,
+  AutonomousBrainRunObservabilityError,
+  AutonomousBrainRunObservabilityRun,
+} from "./autonomous-brain-observability.js";
+
 
 /**
  * The application-facing composition boundary for the autonomous brain.
@@ -307,28 +413,18 @@ import {
  * in a plan or batch digest.
  */
 export const AUTONOMOUS_BRAIN_FACADE_SCHEMA = "bioprism-typescript-autonomous-brain-facade/0.1" as const;
-export const AUTONOMOUS_BRAIN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-batch/0.1" as const;
-export const AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-brain-batch-checkpoint/0.1" as const;
-export const AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-batch-controller/0.1" as const;
 export const AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-cycle-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-adaptive-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-cycle-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_REPLAN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-replan-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_TRACED_AUTO_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-traced-auto-cycle-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_TRACED_AUTO_REPLAN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-traced-auto-replan-batch/0.1" as const;
-export const AUTONOMOUS_BRAIN_TRACE_REGISTRY_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-trace-registry-controller/0.1" as const;
-export const AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-run-analytics-controller/0.1" as const;
-export const AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-run-observability-controller/0.1" as const;
-export const AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA = "bioprism-typescript-autonomous-brain-run-observability-alert/0.1" as const;
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
 export const AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomous-brain-execution-policy/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-brain-auto-execution/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-traced-auto-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_TRACED_MISSION_REPLAN_SCHEMA = "bioprism-typescript-autonomous-brain-traced-mission-replan/0.1" as const;
-export const MAX_AUTONOMOUS_BRAIN_BATCH = 64;
-export const MAX_AUTONOMOUS_BRAIN_PARALLELISM = 8;
-export const MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES = 128_000;
 export const MAX_AUTONOMOUS_BRAIN_CONTEXT_CHUNKS = 128;
 export const MAX_AUTONOMOUS_BRAIN_OBSERVATION_BYTES = 1_000_000;
 
@@ -1131,203 +1227,6 @@ export interface AutonomousBrainAutoReplanBatchControllerTraceRun {
 export type AutonomousBrainAutoCycleBatchControllerTraceRunOptions = Omit<AutonomousBrainAutoCycleBatchResumableTraceOptions, "checkpoint" | "checkpointSink">;
 export type AutonomousBrainAutoReplanBatchControllerTraceRunOptions = Omit<AutonomousBrainAutoReplanBatchResumableTraceOptions, "checkpoint" | "checkpointSink">;
 
-export type AutonomousBrainTraceRegistryControllerStatus =
-  | "empty"
-  | "restored"
-  | "flushed"
-  | "published"
-  | "compacted"
-  | "publication_failed"
-  | "persistence_failed";
-
-/** Construction controls for the facade-bound, metadata-only trace registry controller. */
-export interface AutonomousBrainTraceRegistryControllerOptions {
-  registry: AutonomousRunTraceRegistry;
-  persistence: JsonAutonomousRunTraceRegistryPersistence;
-}
-
-/** Operator-safe projection of the trace registry controller state. */
-export interface AutonomousBrainTraceRegistryControllerProjection extends JsonObject {
-  schema: typeof AUTONOMOUS_BRAIN_TRACE_REGISTRY_CONTROLLER_SCHEMA;
-  status: AutonomousBrainTraceRegistryControllerStatus;
-  snapshot_generation: number | null;
-  snapshot_digest: string | null;
-  runs: number;
-  events: number;
-  retained_event_count: number;
-  policy: AutonomousRunTraceRegistrySnapshot["policy"] | null;
-  persisted: boolean;
-  retention: AutonomousRunTraceRegistrySnapshot["retention"];
-  authority: AutonomousRunTraceRegistrySnapshot["authority"];
-  secret_material: AutonomousRunTraceRegistrySnapshot["secret_material"];
-}
-
-/** Publication result with persistence separated from in-memory registry ingestion. */
-export interface AutonomousBrainTraceRegistryPublicationRun extends JsonObject {
-  controller: AutonomousBrainTraceRegistryControllerProjection;
-  publication: AutonomousRunTraceRegistryPublication;
-  persisted: boolean;
-  persistence_error: { error_class: string; failure_code: string } | null;
-}
-
-/** Imported trace snapshot with an explicit persistence outcome. */
-export interface AutonomousBrainTraceRegistryImportRun extends JsonObject {
-  controller: AutonomousBrainTraceRegistryControllerProjection;
-  report: AutonomousRunTraceRegistryImportReport;
-  persisted: boolean;
-  persistence_error: { error_class: string; failure_code: string } | null;
-}
-
-/** Retention-compaction result with an explicit persistence outcome. */
-export interface AutonomousBrainTraceRegistryCompactRun extends JsonObject {
-  controller: AutonomousBrainTraceRegistryControllerProjection;
-  evicted_run_ids: string[];
-  persisted: boolean;
-  persistence_error: { error_class: string; failure_code: string } | null;
-}
-
-export type AutonomousBrainRunAnalyticsControllerStatus =
-  | "empty"
-  | "restored"
-  | "flushed"
-  | "ingested"
-  | "persistence_failed";
-
-/** Construction controls for the facade-bound, metadata-only longitudinal analytics controller. */
-export interface AutonomousBrainRunAnalyticsControllerOptions {
-  ledger: AutonomousRunAnalyticsLedger;
-  persistence: JsonAutonomousRunAnalyticsLedgerPersistence;
-}
-
-/** Operator-safe projection of the longitudinal analytics controller state. */
-export interface AutonomousBrainRunAnalyticsControllerProjection extends JsonObject {
-  schema: typeof AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_SCHEMA;
-  status: AutonomousBrainRunAnalyticsControllerStatus;
-  snapshot_generation: number;
-  snapshot_digest: string;
-  summary: AutonomousRunAnalyticsLedgerSummary;
-  policy: AutonomousRunAnalyticsLedgerPolicy;
-  persisted: boolean;
-  retention: AutonomousRunAnalyticsLedgerSummary["retention"];
-  authority: AutonomousRunAnalyticsLedgerSummary["authority"];
-  secret_material: AutonomousRunAnalyticsLedgerSummary["secret_material"];
-}
-
-/** One report ingestion with explicit in-memory and persistence outcomes. */
-export interface AutonomousBrainRunAnalyticsIngestRun extends JsonObject {
-  controller: AutonomousBrainRunAnalyticsControllerProjection;
-  ingest: AutonomousRunAnalyticsLedgerIngestResult;
-  persisted: boolean;
-  persistence_error: { error_class: string; failure_code: string } | null;
-}
-
-/** Trace analysis followed by ledger ingestion, preserving the verified report boundary. */
-export interface AutonomousBrainRunAnalyticsAnalysisRun extends JsonObject {
-  controller: AutonomousBrainRunAnalyticsControllerProjection;
-  report: AutonomousRunTraceAnalyticsReport;
-  ingest: AutonomousRunAnalyticsLedgerIngestResult;
-  persisted: boolean;
-  persistence_error: { error_class: string; failure_code: string } | null;
-}
-
-/** Digest and count projection returned after revalidating the complete ledger snapshot. */
-export interface AutonomousBrainRunAnalyticsIntegrity extends JsonObject {
-  verified: true;
-  snapshot_generation: number;
-  snapshot_digest: string;
-  summary_digest: string;
-  report_count: number;
-  retention: AutonomousRunAnalyticsLedgerSummary["retention"];
-  authority: AutonomousRunAnalyticsLedgerSummary["authority"];
-  secret_material: AutonomousRunAnalyticsLedgerSummary["secret_material"];
-}
-
-export type AutonomousBrainRunObservabilityControllerStatus =
-  | "empty"
-  | "restored"
-  | "flushed"
-  | "published_and_analyzed"
-  | "source_snapshot_failed"
-  | "trace_publication_failed"
-  | "analytics_failed"
-  | "alert_delivery_failed"
-  | "persistence_partial";
-
-/** Existing facade-bound controllers composed by the application lifecycle supervisor. */
-export interface AutonomousBrainRunObservabilityControllerOptions {
-  traceRegistry: AutonomousBrainTraceRegistryController;
-  runAnalytics: AutonomousBrainRunAnalyticsController;
-  alertSink?: AutonomousBrainRunObservabilityAlertSink;
-}
-
-/** Caller-owned metadata sink; it must use `alert_id` as its downstream idempotency key. */
-export interface AutonomousBrainRunObservabilityAlertSink {
-  publish(events: readonly AutonomousBrainRunObservabilityAlert[]): Promise<void> | void;
-}
-
-/** Redacted alert envelope derived only from the verified analytics report. */
-export interface AutonomousBrainRunObservabilityAlert extends JsonObject {
-  schema: typeof AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA;
-  alert_id: string;
-  source_snapshot_digest: string;
-  report_digest: string;
-  code: AutonomousRunTraceAnalyticsAlert["code"];
-  severity: AutonomousRunTraceAnalyticsAlert["severity"];
-  scope: AutonomousRunTraceAnalyticsAlert["scope"];
-  identity: AutonomousRunTraceAnalyticsAlert["identity"];
-  detail: AutonomousRunTraceAnalyticsAlert["detail"];
-  observed_value: number | null;
-  threshold: number | null;
-  retention: typeof AUTONOMOUS_RUN_TRACE_ANALYTICS_RETENTION;
-  secret_material: "never_returned";
-}
-
-export interface AutonomousBrainRunObservabilityAlertDelivery extends JsonObject {
-  status: "not_configured" | "not_needed" | "delivered" | "failed";
-  attempted: number;
-  delivered: number;
-  error: { error_class: string; failure_code: string } | null;
-}
-
-/** Operator-safe projection of both metadata-only stores and their shared lifecycle state. */
-export interface AutonomousBrainRunObservabilityControllerProjection extends JsonObject {
-  schema: typeof AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA;
-  status: AutonomousBrainRunObservabilityControllerStatus;
-  ready: boolean;
-  persisted: boolean;
-  trace_registry: AutonomousBrainTraceRegistryControllerProjection | null;
-  run_analytics: AutonomousBrainRunAnalyticsControllerProjection | null;
-  last_run_id: string | null;
-  last_source_snapshot_digest: string | null;
-}
-
-export interface AutonomousBrainRunObservabilityRestoreRun extends JsonObject {
-  controller: AutonomousBrainRunObservabilityControllerProjection;
-}
-
-export interface AutonomousBrainRunObservabilityFlushRun extends JsonObject {
-  controller: AutonomousBrainRunObservabilityControllerProjection;
-  persisted: boolean;
-  persistence_errors: Array<{ scope: "trace_registry" | "run_analytics"; error_class: string; failure_code: string }>;
-}
-
-export interface AutonomousBrainRunObservabilityError extends JsonObject {
-  scope: "source_snapshot" | "trace_publication" | "trace_persistence" | "analytics" | "analytics_persistence" | "alert_delivery";
-  error_class: string;
-  failure_code: string;
-}
-
-/** One shared-snapshot run with independent trace and analytics outcomes. */
-export interface AutonomousBrainRunObservabilityRun extends JsonObject {
-  controller: AutonomousBrainRunObservabilityControllerProjection;
-  run_id: string;
-  source_snapshot_digest: string | null;
-  trace_registry: AutonomousBrainTraceRegistryPublicationRun | null;
-  run_analytics: AutonomousBrainRunAnalyticsAnalysisRun | null;
-  alert_delivery: AutonomousBrainRunObservabilityAlertDelivery;
-  errors: AutonomousBrainRunObservabilityError[];
-}
-
 /** Options for the keyless readiness audit exposed at the application boundary. */
 export type AutonomousBrainReadinessOptions = Parameters<AutonomousAgent["readiness"]>[0];
 export type AutonomousBrainReadinessReport = Awaited<ReturnType<AutonomousAgent["readiness"]>>;
@@ -1355,6 +1254,7 @@ export type AutonomousBrainClaimIntegrityReassessmentOptions = Parameters<Autono
 export type AutonomousBrainClaimIntegrityAcquisitionPlanOptions = Parameters<AutonomousAgent["planClaimIntegrityAcquisition"]>[1];
 export type AutonomousBrainClaimIntegrityAcquisitionBridge = AutonomousClaimIntegrityAcquisitionBridge;
 export type AutonomousBrainClaimIntegrityAcquisitionBinding = AutonomousClaimIntegrityAcquisitionBinding;
+export type AutonomousBrainClaimIntegrityAcquisitionSettlementOptions = Parameters<AutonomousAgent["settleClaimIntegrityAcquisition"]>[0];
 export type AutonomousBrainClaimIntegrityAcquisitionExecutionOptions = Parameters<AutonomousAgent["executeClaimIntegrityAcquisition"]>[3];
 export type AutonomousBrainClaimIntegrityAcquisitionExecutionResult = Awaited<ReturnType<AutonomousAgent["executeClaimIntegrityAcquisition"]>>;
 export type AutonomousBrainClaimIntegrityAcquisitionResumableOptions = Parameters<AutonomousAgent["executeClaimIntegrityAcquisitionResumable"]>[3];
@@ -1424,294 +1324,6 @@ export interface AutonomousBrainBatchResult {
   stop_on_error: boolean;
   batch_digest: string;
   retention: "metadata_only_tasks_and_provider_connector_values_transient";
-  secret_material: "never_returned";
-}
-
-export type AutonomousBrainBatchMode = "brain" | "automatic" | "automatic_cycle" | "automatic_replan";
-
-export interface AutonomousBrainBatchRehydrationContext {
-  job_id: string;
-  index: number;
-  mode: AutonomousBrainBatchMode;
-  request_digest: string;
-  task_digest: string;
-  expected_result_digest: string;
-}
-
-/**
- * Adapt the protected receipt boundary to restart-safe brain batches.
- *
- * Checkpoints contain only digests. The receipt resolver sees the same bounded identity fields
- * that the batch engine verifies, while the adapter owns tenant/authorization/replay fencing.
- * A decoder is available for callers whose protected store returns a canonical JSON projection
- * that must be rebuilt into a richer in-memory execution object.
- */
-export class AutonomousBrainBatchProtectedRehydrator {
-  readonly adapter: AutonomousProtectedRehydrationAdapter;
-  readonly receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
-  readonly valueDecoder?: (value: unknown) => AutonomousBrainExecution | unknown;
-  readonly domain?: AutonomousDomainName;
-  readonly purpose: string;
-  readonly valueKind: string;
-  readonly oneTime: boolean;
-  readonly digestScheme: string;
-
-  constructor(options: {
-    adapter: AutonomousProtectedRehydrationAdapter;
-    receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
-    valueDecoder?: (value: unknown) => AutonomousBrainExecution | unknown;
-    domain?: AutonomousDomainName;
-    purpose?: string;
-    valueKind?: string;
-    oneTime?: boolean;
-    digestScheme?: string;
-  }) {
-    if (!(options?.adapter instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("autonomous brain batch protected rehydrator requires a protected rehydration adapter");
-    if (typeof options.receiptResolver !== "function") throw new ArgumentError("autonomous brain batch protected rehydrator receiptResolver must be callable");
-    if (options.valueDecoder !== undefined && typeof options.valueDecoder !== "function") throw new ArgumentError("autonomous brain batch protected rehydrator valueDecoder must be callable");
-    if (options.oneTime !== undefined && typeof options.oneTime !== "boolean") throw new ArgumentError("autonomous brain batch protected rehydrator oneTime must be boolean");
-    this.adapter = options.adapter;
-    this.receiptResolver = options.receiptResolver;
-    this.valueDecoder = options.valueDecoder;
-    this.domain = options.domain;
-    this.purpose = options.purpose ?? "autonomous_batch_result";
-    this.valueKind = options.valueKind ?? "autonomous_batch_result";
-    this.oneTime = options.oneTime ?? false;
-    this.digestScheme = options.digestScheme ?? "canonical_json";
-  }
-
-  async resolve(context: AutonomousBrainBatchRehydrationContext): Promise<AutonomousBrainExecution> {
-    if (!context || context.mode !== "brain") throw new ArgumentError("autonomous brain batch protected rehydrator requires a direct brain checkpoint context");
-    let receipt: unknown;
-    try {
-      receipt = await this.receiptResolver(context);
-    } catch (error) {
-      throw new ArgumentError(`autonomous brain batch protected receipt lookup failed for item ${context.index}`, { cause: error });
-    }
-    if (!isObject(receipt)) throw new ArgumentError("autonomous brain batch protected receiptResolver must return an object");
-    for (const [key, expected] of [
-      ["job_id", context.job_id],
-      ["index", context.index],
-      ["mode", context.mode],
-      ["request_digest", context.request_digest],
-      ["task_digest", context.task_digest],
-      ["expected_result_digest", context.expected_result_digest],
-    ] as const) {
-      if (receipt[key] !== expected) throw new ArgumentError(`autonomous brain batch protected receipt ${key} does not match item ${context.index}`);
-    }
-    try {
-      const value = this.adapter.resolveReceipt(receipt, {
-        domain: this.domain,
-        purpose: this.purpose,
-        valueKind: this.valueKind,
-        oneTime: this.oneTime,
-        digestScheme: this.digestScheme,
-      });
-      const decoded = this.valueDecoder === undefined ? value : await this.valueDecoder(value);
-      if (!isObject(decoded)) throw new ArgumentError(`autonomous brain batch protected result for item ${context.index} is not an execution object`);
-      return decoded as unknown as AutonomousBrainExecution;
-    } catch (error) {
-      if (error instanceof ArgumentError) throw error;
-      throw new ArgumentError(`autonomous brain batch protected result resolution failed for item ${context.index}`, { cause: error });
-    }
-  }
-}
-
-/** Protected-receipt adapter for automatic batches; it never widens a direct checkpoint into automatic execution. */
-export class AutonomousBrainAutoBatchProtectedRehydrator {
-  readonly adapter: AutonomousProtectedRehydrationAdapter;
-  readonly receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
-  readonly valueDecoder?: (value: unknown) => AutonomousBrainAutoExecution | unknown;
-  readonly domain?: AutonomousDomainName;
-  readonly purpose: string;
-  readonly valueKind: string;
-  readonly oneTime: boolean;
-  readonly digestScheme: string;
-
-  constructor(options: {
-    adapter: AutonomousProtectedRehydrationAdapter;
-    receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
-    valueDecoder?: (value: unknown) => AutonomousBrainAutoExecution | unknown;
-    domain?: AutonomousDomainName;
-    purpose?: string;
-    valueKind?: string;
-    oneTime?: boolean;
-    digestScheme?: string;
-  }) {
-    if (!(options?.adapter instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("autonomous brain automatic batch protected rehydrator requires a protected rehydration adapter");
-    if (typeof options.receiptResolver !== "function") throw new ArgumentError("autonomous brain automatic batch protected rehydrator receiptResolver must be callable");
-    if (options.valueDecoder !== undefined && typeof options.valueDecoder !== "function") throw new ArgumentError("autonomous brain automatic batch protected rehydrator valueDecoder must be callable");
-    if (options.oneTime !== undefined && typeof options.oneTime !== "boolean") throw new ArgumentError("autonomous brain automatic batch protected rehydrator oneTime must be boolean");
-    this.adapter = options.adapter;
-    this.receiptResolver = options.receiptResolver;
-    this.valueDecoder = options.valueDecoder;
-    this.domain = options.domain;
-    this.purpose = options.purpose ?? "autonomous_automatic_batch_result";
-    this.valueKind = options.valueKind ?? "autonomous_automatic_batch_result";
-    this.oneTime = options.oneTime ?? false;
-    this.digestScheme = options.digestScheme ?? "canonical_json";
-  }
-
-  async resolve(context: AutonomousBrainBatchRehydrationContext): Promise<AutonomousBrainAutoExecution> {
-    if (!context || context.mode !== "automatic") throw new ArgumentError("autonomous brain automatic batch protected rehydrator requires an automatic checkpoint context");
-    let receipt: unknown;
-    try {
-      receipt = await this.receiptResolver(context);
-    } catch (error) {
-      throw new ArgumentError(`autonomous brain automatic batch protected receipt lookup failed for item ${context.index}`, { cause: error });
-    }
-    if (!isObject(receipt)) throw new ArgumentError("autonomous brain automatic batch protected receiptResolver must return an object");
-    for (const [key, expected] of [
-      ["job_id", context.job_id],
-      ["index", context.index],
-      ["mode", context.mode],
-      ["request_digest", context.request_digest],
-      ["task_digest", context.task_digest],
-      ["expected_result_digest", context.expected_result_digest],
-    ] as const) {
-      if (receipt[key] !== expected) throw new ArgumentError(`autonomous brain automatic batch protected receipt ${key} does not match item ${context.index}`);
-    }
-    try {
-      const value = this.adapter.resolveReceipt(receipt, {
-        domain: this.domain,
-        purpose: this.purpose,
-        valueKind: this.valueKind,
-        oneTime: this.oneTime,
-        digestScheme: this.digestScheme,
-      });
-      const decoded = this.valueDecoder === undefined ? value : await this.valueDecoder(value);
-      if (!isObject(decoded)) throw new ArgumentError(`autonomous brain automatic batch protected result for item ${context.index} is not an execution object`);
-      return decoded as unknown as AutonomousBrainAutoExecution;
-    } catch (error) {
-      if (error instanceof ArgumentError) throw error;
-      throw new ArgumentError(`autonomous brain automatic batch protected result resolution failed for item ${context.index}`, { cause: error });
-    }
-  }
-}
-
-async function resolveAutomaticCycleBatchProtectedValue(
-  label: string,
-  expectedMode: "automatic_cycle" | "automatic_replan",
-  options: {
-    adapter: AutonomousProtectedRehydrationAdapter;
-    receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
-    valueDecoder?: (value: unknown) => unknown;
-    domain?: AutonomousDomainName;
-    purpose: string;
-    valueKind: string;
-    oneTime: boolean;
-    digestScheme: string;
-  },
-  context: AutonomousBrainBatchRehydrationContext,
-): Promise<unknown> {
-  if (!context || context.mode !== expectedMode) throw new ArgumentError(`autonomous brain ${label} protected rehydrator requires a ${expectedMode} checkpoint context`);
-  let receipt: unknown;
-  try {
-    receipt = await options.receiptResolver(context);
-  } catch (error) {
-    throw new ArgumentError(`autonomous brain ${label} protected receipt lookup failed for item ${context.index}`, { cause: error });
-  }
-  if (!isObject(receipt)) throw new ArgumentError(`autonomous brain ${label} protected receiptResolver must return an object`);
-  for (const [key, expected] of [
-    ["job_id", context.job_id],
-    ["index", context.index],
-    ["mode", context.mode],
-    ["request_digest", context.request_digest],
-    ["task_digest", context.task_digest],
-    ["expected_result_digest", context.expected_result_digest],
-  ] as const) {
-    if (receipt[key] !== expected) throw new ArgumentError(`autonomous brain ${label} protected receipt ${key} does not match item ${context.index}`);
-  }
-  try {
-    const value = options.adapter.resolveReceipt(receipt, { domain: options.domain, purpose: options.purpose, valueKind: options.valueKind, oneTime: options.oneTime, digestScheme: options.digestScheme });
-    const decoded = options.valueDecoder === undefined ? value : await options.valueDecoder(value);
-    if (!isObject(decoded)) throw new ArgumentError(`autonomous brain ${label} protected result for item ${context.index} is not an execution object`);
-    return decoded;
-  } catch (error) {
-    if (error instanceof ArgumentError) throw error;
-    throw new ArgumentError(`autonomous brain ${label} protected result resolution failed for item ${context.index}`, { cause: error });
-  }
-}
-
-/** Protected-receipt adapter for automatic evaluator-cycle batch results. */
-export class AutonomousBrainAutoCycleBatchProtectedRehydrator {
-  readonly adapter: AutonomousProtectedRehydrationAdapter;
-  readonly receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
-  readonly valueDecoder?: (value: unknown) => AutonomousBrainAutoCycleResult | unknown;
-  readonly domain?: AutonomousDomainName;
-  readonly purpose: string;
-  readonly valueKind: string;
-  readonly oneTime: boolean;
-  readonly digestScheme: string;
-
-  constructor(options: { adapter: AutonomousProtectedRehydrationAdapter; receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>; valueDecoder?: (value: unknown) => AutonomousBrainAutoCycleResult | unknown; domain?: AutonomousDomainName; purpose?: string; valueKind?: string; oneTime?: boolean; digestScheme?: string }) {
-    if (!(options?.adapter instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("autonomous brain automatic cycle protected rehydrator requires a protected rehydration adapter");
-    if (typeof options.receiptResolver !== "function") throw new ArgumentError("autonomous brain automatic cycle protected rehydrator receiptResolver must be callable");
-    if (options.valueDecoder !== undefined && typeof options.valueDecoder !== "function") throw new ArgumentError("autonomous brain automatic cycle protected rehydrator valueDecoder must be callable");
-    if (options.oneTime !== undefined && typeof options.oneTime !== "boolean") throw new ArgumentError("autonomous brain automatic cycle protected rehydrator oneTime must be boolean");
-    this.adapter = options.adapter;
-    this.receiptResolver = options.receiptResolver;
-    this.valueDecoder = options.valueDecoder;
-    this.domain = options.domain;
-    this.purpose = options.purpose ?? "autonomous_automatic_cycle_batch_result";
-    this.valueKind = options.valueKind ?? "autonomous_automatic_cycle_batch_result";
-    this.oneTime = options.oneTime ?? false;
-    this.digestScheme = options.digestScheme ?? "canonical_json";
-  }
-
-  async resolve(context: AutonomousBrainBatchRehydrationContext): Promise<AutonomousBrainAutoCycleResult> {
-    return await resolveAutomaticCycleBatchProtectedValue("automatic cycle", "automatic_cycle", this, context) as AutonomousBrainAutoCycleResult;
-  }
-}
-
-/** Protected-receipt adapter for automatic evaluator/replan batch results. */
-export class AutonomousBrainAutoReplanBatchProtectedRehydrator {
-  readonly adapter: AutonomousProtectedRehydrationAdapter;
-  readonly receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
-  readonly valueDecoder?: (value: unknown) => AutonomousBrainAutoReplanCycleResult | unknown;
-  readonly domain?: AutonomousDomainName;
-  readonly purpose: string;
-  readonly valueKind: string;
-  readonly oneTime: boolean;
-  readonly digestScheme: string;
-
-  constructor(options: { adapter: AutonomousProtectedRehydrationAdapter; receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>; valueDecoder?: (value: unknown) => AutonomousBrainAutoReplanCycleResult | unknown; domain?: AutonomousDomainName; purpose?: string; valueKind?: string; oneTime?: boolean; digestScheme?: string }) {
-    if (!(options?.adapter instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("autonomous brain automatic replan protected rehydrator requires a protected rehydration adapter");
-    if (typeof options.receiptResolver !== "function") throw new ArgumentError("autonomous brain automatic replan protected rehydrator receiptResolver must be callable");
-    if (options.valueDecoder !== undefined && typeof options.valueDecoder !== "function") throw new ArgumentError("autonomous brain automatic replan protected rehydrator valueDecoder must be callable");
-    if (options.oneTime !== undefined && typeof options.oneTime !== "boolean") throw new ArgumentError("autonomous brain automatic replan protected rehydrator oneTime must be boolean");
-    this.adapter = options.adapter;
-    this.receiptResolver = options.receiptResolver;
-    this.valueDecoder = options.valueDecoder;
-    this.domain = options.domain;
-    this.purpose = options.purpose ?? "autonomous_automatic_replan_batch_result";
-    this.valueKind = options.valueKind ?? "autonomous_automatic_replan_batch_result";
-    this.oneTime = options.oneTime ?? false;
-    this.digestScheme = options.digestScheme ?? "canonical_json";
-  }
-
-  async resolve(context: AutonomousBrainBatchRehydrationContext): Promise<AutonomousBrainAutoReplanCycleResult> {
-    return await resolveAutomaticCycleBatchProtectedValue("automatic replan", "automatic_replan", this, context) as AutonomousBrainAutoReplanCycleResult;
-  }
-}
-
-export interface AutonomousBrainBatchCheckpointJSON {
-  schema: typeof AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA;
-  job_id: string;
-  mode: AutonomousBrainBatchMode;
-  batch_input_digest: string;
-  /** Digest of the non-secret semantic-routing policy; absent only on legacy deterministic checkpoints. */
-  semantic_routing_policy_digest?: string;
-  /** Digest of the non-secret automatic execution policy; present for automatic checkpoints. */
-  automatic_execution_policy_digest?: string;
-  request_digests: string[];
-  completed_indices: number[];
-  completed_result_digests: string[];
-  max_parallelism: number;
-  stop_on_error: boolean;
-  status: "running" | "partial" | "completed";
-  checkpoint_digest: string;
-  retention: "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted";
   secret_material: "never_returned";
 }
 
@@ -1791,22 +1403,6 @@ function bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
-function boundedText(name: string, value: unknown, maximum: number): string {
-  if (typeof value !== "string" || !value.trim() || value.includes("\u0000") || bytes(value) > maximum) throw new ArgumentError(`${name} is outside its bounded text contract`);
-  return value;
-}
-
-function boundedIdentifier(name: string, value: unknown): string {
-  const text = boundedText(name, value, 256);
-  if (!/^[A-Za-z0-9_.:+-]+$/.test(text)) throw new ArgumentError(`${name} must be a bounded identifier`);
-  return text;
-}
-
-function digest(name: string, value: unknown): string {
-  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
-  return value;
-}
-
 function domain(name: string, value: unknown): AutonomousDomainName {
   if (typeof value !== "string" || !AUTONOMOUS_DOMAIN_NAMES.includes(value as AutonomousDomainName)) throw new ArgumentError(`${name} is not a supported autonomous domain`);
   return value as AutonomousDomainName;
@@ -1835,12 +1431,6 @@ function bindAutomaticCycleOptions(request: AutonomousBrainRequest, options: unk
     hints: request.hints,
     allowCrossDomain: request.allow_cross_domain,
   };
-}
-
-function errorProjection(error: unknown): { error_class: string; failure_code: string } {
-  if (error instanceof ProviderRuntimeError) return { error_class: error.constructor.name, failure_code: error.code };
-  if (error instanceof Error && /^[A-Za-z0-9_.:-]+$/.test(error.constructor.name)) return { error_class: error.constructor.name, failure_code: "error" };
-  return { error_class: "AutonomousBrainError", failure_code: "error" };
 }
 
 function composeBrainObservers(...observers: readonly (ProviderInvocationObserver | undefined)[]): ProviderInvocationObserver | undefined {
@@ -1906,75 +1496,6 @@ function automaticCycleBatchSucceeded(status: string): boolean {
 
 function automaticReplanBatchSucceeded(status: string): boolean {
   return status === "completed";
-}
-
-function batchStatus(completed: number, failed: number, omitted: number): "completed" | "partial" | "failed" {
-  return failed === 0 && omitted === 0 ? "completed" : completed > 0 ? "partial" : "failed";
-}
-
-function batchDigest(items: readonly { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } }[]): string {
-  return digestJsonSync(items.map((item) => batchItemProjection(item)));
-}
-
-function automaticCycleBatchDigest(items: readonly {
-  index: number;
-  status: string;
-  task_digest: string | null;
-  error_class?: string;
-  failure_code?: string;
-  execution?: {
-    status: string;
-    mode: string | null;
-    route: { route_digest: string };
-    cycle: { schema: string; status: string } | null;
-  };
-}[]): string {
-  return digestJsonSync(items.map((item) => ({
-    index: item.index,
-    status: item.status,
-    task_digest: item.task_digest,
-    error_class: item.error_class ?? null,
-    failure_code: item.failure_code ?? null,
-    mode: item.execution?.mode ?? null,
-    route_digest: item.execution?.route.route_digest ?? null,
-    cycle_schema: item.execution?.cycle?.schema ?? null,
-    cycle_status: item.execution?.cycle?.status ?? null,
-  })));
-}
-
-function batchItemProjection(item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } }): Record<string, unknown> {
-  return { index: item.index, status: item.status, task_digest: item.task_digest, error_class: item.error_class ?? null, failure_code: item.failure_code ?? null, plan_digest: item.execution?.plan.plan_digest ?? null, execution_status: item.execution?.status ?? null };
-}
-
-function batchItemDigest(item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } }): string {
-  return digestJsonSync(batchItemProjection(item));
-}
-
-function automaticCycleBatchItemDigest(item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: unknown }): string {
-  const execution = isObject(item.execution) ? item.execution : null;
-  const route = execution !== null && isObject(execution.route) ? execution.route : null;
-  const cycle = execution !== null && isObject(execution.cycle) ? execution.cycle : null;
-  return digestJsonSync({
-    index: item.index,
-    status: item.status,
-    task_digest: item.task_digest,
-    error_class: item.error_class ?? null,
-    failure_code: item.failure_code ?? null,
-    execution_schema: execution?.schema ?? null,
-    execution_status: execution?.status ?? null,
-    execution_mode: execution?.mode ?? null,
-    route_digest: route?.route_digest ?? null,
-    cycle_schema: cycle?.schema ?? null,
-    cycle_status: cycle?.status ?? null,
-    next_action: execution?.next_action ?? null,
-  });
-}
-
-function checkpointBatchItemDigest(item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: unknown }): string {
-  const execution = isObject(item.execution) ? item.execution : null;
-  return execution !== null && isObject(execution.plan)
-    ? batchItemDigest(item as { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } })
-    : automaticCycleBatchItemDigest(item);
 }
 
 /**
@@ -2193,24 +1714,6 @@ async function recordAutomaticCycleBatchTrace(
   }
 }
 
-function brainBatchTaskDigest(input: AutonomousBrainRequest): string {
-  return digestJsonSync({ task: input.task });
-}
-
-function brainBatchRequestDigest(input: AutonomousBrainRequest, index: number, mode: AutonomousBrainBatchMode = "brain"): string {
-  return digestJsonSync({
-    index,
-    mode,
-    task_digest: brainBatchTaskDigest(input),
-    domain: input.domain ?? null,
-    capability: input.capability ?? null,
-    hints_digest: digestJsonSync(input.hints ?? []),
-    allow_cross_domain: input.allow_cross_domain ?? true,
-    context_digest: input.context === undefined ? null : digestJsonSync(input.context),
-    connector_digest: input.connector === undefined ? null : digestJsonSync(input.connector),
-  });
-}
-
 const BRAIN_SEMANTIC_ROUTING_POLICY_FIELDS = [
   "enabled",
   "approveProviderCall",
@@ -2369,44 +1872,6 @@ function automaticCyclePolicyDigest(
     explicit_policy_digest: explicitPolicyDigest ?? null,
     policy: policyDigestProjection(policy),
   });
-}
-
-function checkpointText(name: string, value: unknown): string {
-  return boundedIdentifier(name, value);
-}
-
-function validateBrainBatchCheckpoint(value: unknown): AutonomousBrainBatchCheckpointJSON {
-  if (!isObject(value) || value.schema !== AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA || !["brain", "automatic", "automatic_cycle", "automatic_replan"].includes(value.mode as string)) throw new ArgumentError("autonomous brain batch checkpoint schema is invalid");
-  const allowedKeys = new Set(["schema", "job_id", "mode", "batch_input_digest", "semantic_routing_policy_digest", "automatic_execution_policy_digest", "request_digests", "completed_indices", "completed_result_digests", "max_parallelism", "stop_on_error", "status", "checkpoint_digest", "retention", "secret_material"]);
-  if (Object.keys(value).some((key) => !allowedKeys.has(key))) throw new ArgumentError("autonomous brain batch checkpoint contains unsupported metadata");
-  const jobId = checkpointText("autonomous brain batch checkpoint job_id", value.job_id);
-  const batchInputDigest = digest("autonomous brain batch checkpoint batch_input_digest", value.batch_input_digest);
-  const semanticRoutingPolicyDigest = value.semantic_routing_policy_digest === undefined ? undefined : digest("autonomous brain batch checkpoint semantic_routing_policy_digest", value.semantic_routing_policy_digest);
-  const automaticExecutionPolicyDigest = value.automatic_execution_policy_digest === undefined ? undefined : digest("autonomous brain batch checkpoint automatic_execution_policy_digest", value.automatic_execution_policy_digest);
-  const requestDigests = value.request_digests;
-  if (!Array.isArray(requestDigests) || requestDigests.length < 1 || requestDigests.length > MAX_AUTONOMOUS_BRAIN_BATCH || requestDigests.some((entry) => typeof entry !== "string" || !/^[0-9a-f]{64}$/.test(entry))) throw new ArgumentError("autonomous brain batch checkpoint request_digests are invalid");
-  if (!Array.isArray(value.completed_indices) || value.completed_indices.length > requestDigests.length || value.completed_indices.some((entry) => !Number.isSafeInteger(entry) || (entry as number) < 0 || (entry as number) >= requestDigests.length)) throw new ArgumentError("autonomous brain batch checkpoint completed_indices are invalid");
-  const completedIndices = [...(value.completed_indices as number[])];
-  if (new Set(completedIndices).size !== completedIndices.length || completedIndices.some((entry, index) => index > 0 && entry <= completedIndices[index - 1]!)) throw new ArgumentError("autonomous brain batch checkpoint completed_indices must be sorted and unique");
-  if (!Array.isArray(value.completed_result_digests) || value.completed_result_digests.length !== completedIndices.length || value.completed_result_digests.some((entry) => typeof entry !== "string" || !/^[0-9a-f]{64}$/.test(entry))) throw new ArgumentError("autonomous brain batch checkpoint result digests are invalid");
-  if (!Number.isSafeInteger(value.max_parallelism) || (value.max_parallelism as number) < 1 || (value.max_parallelism as number) > MAX_AUTONOMOUS_BRAIN_PARALLELISM) throw new ArgumentError("autonomous brain batch checkpoint maxParallelism is invalid");
-  if (typeof value.stop_on_error !== "boolean" || !["running", "partial", "completed"].includes(value.status as string)) throw new ArgumentError("autonomous brain batch checkpoint controls are invalid");
-  if (value.status === "completed" && completedIndices.length !== requestDigests.length) throw new ArgumentError("completed autonomous brain batch checkpoint is incomplete");
-  if (value.mode !== "brain" && automaticExecutionPolicyDigest === undefined) throw new ArgumentError("automatic brain batch checkpoint requires an automatic execution policy digest");
-  if (value.mode === "brain" && automaticExecutionPolicyDigest !== undefined) throw new ArgumentError("direct brain batch checkpoint cannot contain an automatic execution policy digest");
-  const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: jobId, mode: value.mode as AutonomousBrainBatchMode, batch_input_digest: batchInputDigest, ...(semanticRoutingPolicyDigest === undefined ? {} : { semantic_routing_policy_digest: semanticRoutingPolicyDigest }), ...(automaticExecutionPolicyDigest === undefined ? {} : { automatic_execution_policy_digest: automaticExecutionPolicyDigest }), request_digests: [...requestDigests as string[]], completed_indices: completedIndices, completed_result_digests: [...(value.completed_result_digests as string[])], max_parallelism: value.max_parallelism as number, stop_on_error: value.stop_on_error as boolean, status: value.status as "running" | "partial" | "completed" };
-  if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES) throw new ArgumentError("autonomous brain batch checkpoint exceeds its bounded size");
-  if (digestJsonSync(payload) !== value.checkpoint_digest) throw new ArgumentError("autonomous brain batch checkpoint digest is invalid");
-  if (value.retention !== "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted" || value.secret_material !== "never_returned") throw new ArgumentError("autonomous brain batch checkpoint retention contract is invalid");
-  return { ...payload, checkpoint_digest: value.checkpoint_digest as string, retention: value.retention, secret_material: value.secret_material };
-}
-
-function makeBrainBatchCheckpoint(input: { jobId: string; mode?: AutonomousBrainBatchMode; requestDigests: readonly string[]; batchInputDigest: string; semanticRoutingPolicyDigest: string | null; automaticExecutionPolicyDigest?: string | null; completed: readonly { index: number; item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: unknown } }[]; maxParallelism: number; stopOnError: boolean; status: "running" | "partial" | "completed" }): AutonomousBrainBatchCheckpointJSON {
-  const mode = input.mode ?? "brain";
-  if (mode === "automatic" && input.automaticExecutionPolicyDigest === undefined) throw new ArgumentError("automatic brain batch checkpoint requires an automatic execution policy digest");
-  const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: input.jobId, mode, batch_input_digest: input.batchInputDigest, ...(input.semanticRoutingPolicyDigest === null ? {} : { semantic_routing_policy_digest: input.semanticRoutingPolicyDigest }), ...(input.automaticExecutionPolicyDigest === undefined || input.automaticExecutionPolicyDigest === null ? {} : { automatic_execution_policy_digest: input.automaticExecutionPolicyDigest }), request_digests: [...input.requestDigests], completed_indices: input.completed.map((entry) => entry.index), completed_result_digests: input.completed.map((entry) => checkpointBatchItemDigest(entry.item)), max_parallelism: input.maxParallelism, stop_on_error: input.stopOnError, status: input.status };
-  if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES) throw new ArgumentError("autonomous brain batch checkpoint exceeds its bounded size");
-  return { ...payload, checkpoint_digest: digestJsonSync(payload), retention: "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted", secret_material: "never_returned" };
 }
 
 function projectTaskBlueprint(blueprint: AutonomousTaskBlueprint, routeDigest: string): AutonomousBrainDomainPlanSummary {
@@ -2689,6 +2154,7 @@ export class AutonomousBrainFacade {
         operationFacade: options.connectorOperations,
         route: (task, routeOptions) => this.agent.route(task, routeOptions),
       });
+    registerAutonomousBrainFacade(this);
   }
 
   /**
@@ -4858,6 +4324,13 @@ export class AutonomousBrainFacade {
   ): AutonomousBrainClaimIntegrityAssessment {
     if (!isObject(options)) throw new ArgumentError("autonomous brain claim integrity reassessment options must be an object");
     return this.agent.reassessClaimIntegrity(previous, options);
+  }
+
+  /** Reassess claim decisions with acquired evidence fenced to its reviewed source receipt. */
+  settleClaimIntegrityAcquisition(
+    options: AutonomousBrainClaimIntegrityAcquisitionSettlementOptions,
+  ): AutonomousBrainClaimIntegrityAssessment {
+    return this.agent.settleClaimIntegrityAcquisition(options);
   }
 
   /** Validate claim-integrity metadata before resuming a worker or creating an acquisition bridge. */
@@ -7238,868 +6711,6 @@ export class AutonomousBrainFacade {
       ? await runAutonomousCrossDomainReplanCycle(this.agent, request.task, adaptiveOptions as AutonomousCrossDomainReplanCycleOptions)
       : await runAutonomousReplanCycle(this.agent, request.task, adaptiveOptions as AutonomousReplanCycleOptions);
     return base(adaptive.status, adaptive, connector, null);
-  }
-}
-
-/**
- * Own the application lifecycle around the metadata-only trace registry projection.
- *
- * A trace journal remains the source of lifecycle events; this controller only indexes validated
- * summaries and bounded event metadata. Restore is mandatory before reads or publication, all
- * mutations are serialized, and a persistence failure is returned separately from a successful
- * in-memory publication so operators never mistake an observability failure for an execution
- * failure or trigger an unsafe provider retry.
- */
-export class AutonomousBrainTraceRegistryController {
-  private readonly persistenceCoordinator: AutonomousRunTraceRegistryPersistenceCoordinator;
-  private restored = false;
-  private busy = false;
-  private persisted = false;
-
-  constructor(
-    readonly brain: AutonomousBrainFacade,
-    readonly registry: AutonomousRunTraceRegistry,
-    readonly persistence: JsonAutonomousRunTraceRegistryPersistence,
-  ) {
-    if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain trace registry controller requires an AutonomousBrainFacade");
-    if (!(registry instanceof AutonomousRunTraceRegistry)) throw new ArgumentError("autonomous brain trace registry controller requires an AutonomousRunTraceRegistry");
-    if (!(persistence instanceof JsonAutonomousRunTraceRegistryPersistence)) throw new ArgumentError("autonomous brain trace registry controller requires JSON registry persistence");
-    this.persistenceCoordinator = new AutonomousRunTraceRegistryPersistenceCoordinator(registry, persistence);
-  }
-
-  private requireRestored(): void {
-    if (!this.restored) throw new ArgumentError("autonomous brain trace registry controller must restore before use");
-  }
-
-  private requireIdle(): void {
-    if (this.busy) throw new ArgumentError("autonomous brain trace registry controller already has an operation in progress");
-  }
-
-  private projection(status: AutonomousBrainTraceRegistryControllerStatus): AutonomousBrainTraceRegistryControllerProjection {
-    const snapshot = this.registry.snapshot();
-    return {
-      schema: AUTONOMOUS_BRAIN_TRACE_REGISTRY_CONTROLLER_SCHEMA,
-      status,
-      snapshot_generation: snapshot.snapshot_generation,
-      snapshot_digest: snapshot.snapshot_digest,
-      runs: snapshot.record_count,
-      events: snapshot.event_count,
-      retained_event_count: snapshot.retained_event_count,
-      policy: structuredClone(snapshot.policy),
-      persisted: this.persisted,
-      retention: snapshot.retention,
-      authority: snapshot.authority,
-      secret_material: snapshot.secret_material,
-    };
-  }
-
-  /** Restore and validate the last registry snapshot before any operator read or mutation. */
-  async restore(): Promise<AutonomousBrainTraceRegistryControllerProjection> {
-    this.requireIdle();
-    const snapshot = await this.persistenceCoordinator.restore();
-    this.restored = true;
-    this.persisted = snapshot !== null;
-    return this.projection(snapshot === null ? "empty" : "restored");
-  }
-
-  /** Flush the verified registry through its caller-owned JSON/CAS persistence adapter. */
-  async flush(): Promise<AutonomousBrainTraceRegistryControllerProjection> {
-    this.requireRestored();
-    this.requireIdle();
-    this.busy = true;
-    try {
-      await this.persistenceCoordinator.flush();
-      this.persisted = true;
-      return this.projection("flushed");
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  /** Publish one trace journal into the registry and persist it without coupling to execution. */
-  async publish(traceStore: AutonomousRunTraceStore, runId: string): Promise<AutonomousBrainTraceRegistryPublicationRun> {
-    this.requireRestored();
-    this.requireIdle();
-    if (!traceStore || typeof traceStore.snapshot !== "function") throw new ArgumentError("autonomous brain trace registry publication requires a trace store");
-    this.busy = true;
-    try {
-      const publication = await publishAutonomousRunTraceRegistrySnapshot(this.registry, traceStore, runId);
-      if (publication.status === "failed") {
-        return {
-          controller: this.projection("publication_failed"),
-          publication,
-          persisted: this.persisted,
-          persistence_error: null,
-        };
-      }
-      this.persisted = false;
-      try {
-        await this.persistenceCoordinator.flush();
-        this.persisted = true;
-        return {
-          controller: this.projection("published"),
-          publication,
-          persisted: true,
-          persistence_error: null,
-        };
-      } catch (error) {
-        return {
-          controller: this.projection("persistence_failed"),
-          publication,
-          persisted: false,
-          persistence_error: errorProjection(error),
-        };
-      }
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  /**
-   * Publish an already-captured snapshot without reading the source journal a second time.
-   * This is used by coordinated application lifecycles to keep registry and analytics digests
-   * bound to one source snapshot.
-   */
-  async publishSnapshot(snapshot: unknown, runId: string): Promise<AutonomousBrainTraceRegistryPublicationRun> {
-    return this.publish({ snapshot: () => snapshot } as AutonomousRunTraceStore, runId);
-  }
-
-  /** Import a validated trace snapshot, then persist the resulting retention projection. */
-  async importSnapshot(raw: unknown): Promise<AutonomousBrainTraceRegistryImportRun> {
-    this.requireRestored();
-    this.requireIdle();
-    this.busy = true;
-    try {
-      const report = this.registry.importSnapshot(raw);
-      this.persisted = false;
-      try {
-        await this.persistenceCoordinator.flush();
-        this.persisted = true;
-        return { controller: this.projection("published"), report, persisted: true, persistence_error: null };
-      } catch (error) {
-        return { controller: this.projection("persistence_failed"), report, persisted: false, persistence_error: errorProjection(error) };
-      }
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  /** Compact eligible terminal records and persist the new bounded retention projection. */
-  async compact(): Promise<AutonomousBrainTraceRegistryCompactRun> {
-    this.requireRestored();
-    this.requireIdle();
-    this.busy = true;
-    try {
-      const compacted = this.registry.compact();
-      this.persisted = false;
-      try {
-        await this.persistenceCoordinator.flush();
-        this.persisted = true;
-        return { controller: this.projection("compacted"), evicted_run_ids: compacted.evicted_run_ids, persisted: true, persistence_error: null };
-      } catch (error) {
-        return { controller: this.projection("persistence_failed"), evicted_run_ids: compacted.evicted_run_ids, persisted: false, persistence_error: errorProjection(error) };
-      }
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  /** Return one cloned metadata record after restore and idle checks. */
-  get(runId: string): AutonomousRunTraceRegistryRecord | null {
-    this.requireRestored();
-    this.requireIdle();
-    return this.registry.get(runId);
-  }
-
-  /** Query bounded run summaries and retained event metadata. */
-  query(query: AutonomousRunTraceRegistryQuery = {}): AutonomousRunTraceRegistryPage {
-    this.requireRestored();
-    this.requireIdle();
-    return this.registry.query(query);
-  }
-
-  /** Query retained lifecycle events without exposing source trace payloads. */
-  events(query: AutonomousRunTraceRegistryEventQuery = {}): ReturnType<AutonomousRunTraceRegistry["events"]> {
-    this.requireRestored();
-    this.requireIdle();
-    return this.registry.events(query);
-  }
-
-  /** Return the canonical registry snapshot for caller-owned export or inspection. */
-  snapshot(): AutonomousRunTraceRegistrySnapshot {
-    this.requireRestored();
-    this.requireIdle();
-    return this.registry.snapshot();
-  }
-
-  /** Revalidate every record, digest, count, retention, and snapshot lineage invariant. */
-  verifyIntegrity(): AutonomousRunTraceRegistryIntegrity {
-    this.requireRestored();
-    this.requireIdle();
-    return this.registry.verifyIntegrity();
-  }
-}
-
-/**
- * Own the application lifecycle around the metadata-only longitudinal analytics ledger.
- *
- * Analysis remains a pure operation over a caller-provided verified trace snapshot. Only the
- * resulting digest-bound report enters the ledger. Reads are fail-closed until restore, all
- * mutations are serialized, and a persistence failure is separated from a successful in-memory
- * ingestion so retry logic cannot accidentally re-run a provider task.
- */
-export class AutonomousBrainRunAnalyticsController {
-  private readonly persistenceCoordinator: AutonomousRunAnalyticsLedgerPersistenceCoordinator;
-  private restored = false;
-  private busy = false;
-  private persisted = false;
-
-  constructor(
-    readonly brain: AutonomousBrainFacade,
-    readonly ledger: AutonomousRunAnalyticsLedger,
-    readonly persistence: JsonAutonomousRunAnalyticsLedgerPersistence,
-  ) {
-    if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain run analytics controller requires an AutonomousBrainFacade");
-    if (!(ledger instanceof AutonomousRunAnalyticsLedger)) throw new ArgumentError("autonomous brain run analytics controller requires an AutonomousRunAnalyticsLedger");
-    if (!(persistence instanceof JsonAutonomousRunAnalyticsLedgerPersistence)) throw new ArgumentError("autonomous brain run analytics controller requires JSON analytics ledger persistence");
-    this.persistenceCoordinator = new AutonomousRunAnalyticsLedgerPersistenceCoordinator(ledger, persistence);
-  }
-
-  private requireRestored(): void {
-    if (!this.restored) throw new ArgumentError("autonomous brain run analytics controller must restore before use");
-  }
-
-  private requireIdle(): void {
-    if (this.busy) throw new ArgumentError("autonomous brain run analytics controller already has an operation in progress");
-  }
-
-  private projection(status: AutonomousBrainRunAnalyticsControllerStatus): AutonomousBrainRunAnalyticsControllerProjection {
-    const snapshot = this.ledger.snapshot();
-    const summary = this.ledger.summary();
-    return {
-      schema: AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_SCHEMA,
-      status,
-      snapshot_generation: snapshot.generation as number,
-      snapshot_digest: snapshot.snapshot_digest as string,
-      summary,
-      policy: structuredClone(this.ledger.policy),
-      persisted: this.persisted,
-      retention: summary.retention,
-      authority: summary.authority,
-      secret_material: summary.secret_material,
-    };
-  }
-
-  /** Restore and validate the last analytics snapshot before any operator read or mutation. */
-  async restore(): Promise<AutonomousBrainRunAnalyticsControllerProjection> {
-    this.requireIdle();
-    this.busy = true;
-    try {
-      const snapshot = await this.persistenceCoordinator.restore();
-      this.restored = true;
-      this.persisted = snapshot !== null;
-      return this.projection(snapshot === null ? "empty" : "restored");
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  /** Flush the verified ledger through its caller-owned JSON/CAS persistence adapter. */
-  async flush(): Promise<AutonomousBrainRunAnalyticsControllerProjection> {
-    this.requireRestored();
-    this.requireIdle();
-    this.busy = true;
-    try {
-      await this.persistenceCoordinator.flush();
-      this.persisted = true;
-      return this.projection("flushed");
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  private async ingestReport(raw: unknown, ingestedAt?: number): Promise<AutonomousBrainRunAnalyticsIngestRun> {
-    const report = validateAutonomousRunTraceAnalyticsReport(raw);
-    const ingest = ingestedAt === undefined ? this.ledger.ingest(report) : this.ledger.ingest(report, { ingestedAt });
-    if (ingest.status !== "accepted") {
-      return { controller: this.projection("ingested"), ingest, persisted: this.persisted, persistence_error: null };
-    }
-    this.persisted = false;
-    try {
-      await this.persistenceCoordinator.flush();
-      this.persisted = true;
-      return { controller: this.projection("ingested"), ingest, persisted: true, persistence_error: null };
-    } catch (error) {
-      return { controller: this.projection("persistence_failed"), ingest, persisted: false, persistence_error: errorProjection(error) };
-    }
-  }
-
-  /** Ingest one already-verified analytics report and persist accepted state. */
-  async ingest(raw: unknown, options: { ingestedAt?: number } = {}): Promise<AutonomousBrainRunAnalyticsIngestRun> {
-    this.requireRestored();
-    this.requireIdle();
-    this.busy = true;
-    try {
-      if (!isObject(options) || Array.isArray(options)) throw new ArgumentError("autonomous brain run analytics ingestion options are malformed");
-      return await this.ingestReport(raw, options.ingestedAt as number | undefined);
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  /** Analyze a verified trace snapshot, retain only its safe report, and persist it atomically. */
-  async analyzeAndIngest(
-    snapshot: unknown,
-    options: { policy?: Partial<AutonomousRunTraceAnalyticsPolicy>; ingestedAt?: number } = {},
-  ): Promise<AutonomousBrainRunAnalyticsAnalysisRun> {
-    this.requireRestored();
-    this.requireIdle();
-    this.busy = true;
-    try {
-      if (!isObject(options) || Array.isArray(options)) throw new ArgumentError("autonomous brain run analytics analysis options are malformed");
-      const { ingestedAt, ...analysisOptions } = options;
-      const report = analyzeAutonomousRunTrace(snapshot, analysisOptions);
-      const outcome = await this.ingestReport(report, ingestedAt);
-      return { ...outcome, report };
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  /** Return the current longitudinal summary after restore and idle checks. */
-  summary(): AutonomousRunAnalyticsLedgerSummary {
-    this.requireRestored();
-    this.requireIdle();
-    return this.ledger.summary();
-  }
-
-  /** Return bounded retained reports, newest first, without exposing source traces. */
-  history(options: { limit?: number; status?: AutonomousRunAnalyticsLedgerStatus } = {}): AutonomousRunAnalyticsLedgerEntry[] {
-    this.requireRestored();
-    this.requireIdle();
-    return this.ledger.history(options);
-  }
-
-  /** Return the canonical ledger snapshot for caller-owned export or inspection. */
-  snapshot(): Record<string, unknown> {
-    this.requireRestored();
-    this.requireIdle();
-    return this.ledger.snapshot();
-  }
-
-  /** Revalidate every retained report, entry digest, count, retention marker, and lineage field. */
-  verifyIntegrity(): AutonomousBrainRunAnalyticsIntegrity {
-    this.requireRestored();
-    this.requireIdle();
-    const snapshot = validateAutonomousRunAnalyticsLedgerSnapshot(this.ledger.snapshot());
-    const summary = this.ledger.summary();
-    return {
-      verified: true,
-      snapshot_generation: snapshot.generation as number,
-      snapshot_digest: snapshot.snapshot_digest as string,
-      summary_digest: summary.summary_digest,
-      report_count: summary.report_count,
-      retention: summary.retention,
-      authority: summary.authority,
-      secret_material: summary.secret_material,
-    };
-  }
-}
-
-/**
- * Coordinate the application lifecycle for trace indexing and longitudinal run analytics.
- *
- * The source journal is read exactly once per coordinated publication. Both consumers receive
- * that same verified snapshot, so an append racing with a second read cannot produce a registry
- * record whose digest differs from the analytics report. The two persistence adapters remain
- * independent: a failure in one is surfaced as a bounded partial outcome and never causes the
- * completed provider task to be replayed.
- */
-export class AutonomousBrainRunObservabilityController {
-  private busy = false;
-  private restored = false;
-  private persisted = false;
-  private lastRunId: string | null = null;
-  private lastSourceSnapshotDigest: string | null = null;
-  private lastTraceProjection: AutonomousBrainTraceRegistryControllerProjection | null = null;
-  private lastAnalyticsProjection: AutonomousBrainRunAnalyticsControllerProjection | null = null;
-
-  constructor(
-    readonly brain: AutonomousBrainFacade,
-    readonly traceRegistry: AutonomousBrainTraceRegistryController,
-    readonly runAnalytics: AutonomousBrainRunAnalyticsController,
-    readonly alertSink?: AutonomousBrainRunObservabilityAlertSink,
-  ) {
-    if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain run observability controller requires an AutonomousBrainFacade");
-    if (!(traceRegistry instanceof AutonomousBrainTraceRegistryController) || !(runAnalytics instanceof AutonomousBrainRunAnalyticsController)) throw new ArgumentError("autonomous brain run observability controller requires facade-bound metadata controllers");
-    if (traceRegistry.brain !== brain || runAnalytics.brain !== brain) throw new ArgumentError("autonomous brain run observability controllers must belong to the same facade");
-    if (alertSink !== undefined && (!isObject(alertSink) || typeof alertSink.publish !== "function")) throw new ArgumentError("autonomous brain run observability alert sink is malformed");
-  }
-
-  private requireRestored(): void {
-    if (!this.restored) throw new ArgumentError("autonomous brain run observability controller must restore before use");
-  }
-
-  private requireIdle(): void {
-    if (this.busy) throw new ArgumentError("autonomous brain run observability controller already has an operation in progress");
-  }
-
-  private projection(
-    status: AutonomousBrainRunObservabilityControllerStatus,
-    traceRegistry: AutonomousBrainTraceRegistryControllerProjection | null = this.lastTraceProjection,
-    runAnalytics: AutonomousBrainRunAnalyticsControllerProjection | null = this.lastAnalyticsProjection,
-  ): AutonomousBrainRunObservabilityControllerProjection {
-    return {
-      schema: AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA,
-      status,
-      ready: this.restored,
-      persisted: this.persisted,
-      trace_registry: traceRegistry === null ? null : structuredClone(traceRegistry),
-      run_analytics: runAnalytics === null ? null : structuredClone(runAnalytics),
-      last_run_id: this.lastRunId,
-      last_source_snapshot_digest: this.lastSourceSnapshotDigest,
-    };
-  }
-
-  private async deliverAlerts(report: AutonomousRunTraceAnalyticsReport | null): Promise<AutonomousBrainRunObservabilityAlertDelivery> {
-    if (this.alertSink === undefined) return { status: "not_configured", attempted: 0, delivered: 0, error: null };
-    if (report === null || report.alerts.length === 0) return { status: "not_needed", attempted: 0, delivered: 0, error: null };
-    const events: AutonomousBrainRunObservabilityAlert[] = report.alerts.map((alert) => {
-      const identity = { source_snapshot_digest: report.source_snapshot_digest, report_digest: report.report_digest, code: alert.code, severity: alert.severity, scope: alert.scope, identity: alert.identity };
-      return {
-        schema: AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA,
-        alert_id: digestJsonSync(identity),
-        source_snapshot_digest: report.source_snapshot_digest,
-        report_digest: report.report_digest,
-        code: alert.code,
-        severity: alert.severity,
-        scope: alert.scope,
-        identity: alert.identity,
-        detail: alert.detail,
-        observed_value: alert.observed_value,
-        threshold: alert.threshold,
-        retention: AUTONOMOUS_RUN_TRACE_ANALYTICS_RETENTION,
-        secret_material: "never_returned",
-      };
-    });
-    try {
-      await this.alertSink.publish(events);
-      return { status: "delivered", attempted: events.length, delivered: events.length, error: null };
-    } catch (error) {
-      return { status: "failed", attempted: events.length, delivered: 0, error: errorProjection(error) };
-    }
-  }
-
-  /** Restore both metadata projections before exposing the coordinated lifecycle. */
-  async restore(): Promise<AutonomousBrainRunObservabilityRestoreRun> {
-    this.requireIdle();
-    this.busy = true;
-    try {
-      this.restored = false;
-      const traceRegistry = await this.traceRegistry.restore();
-      const runAnalytics = await this.runAnalytics.restore();
-      this.lastTraceProjection = traceRegistry;
-      this.lastAnalyticsProjection = runAnalytics;
-      this.persisted = traceRegistry.persisted && runAnalytics.persisted;
-      this.restored = true;
-      const status = traceRegistry.status === "empty" && runAnalytics.status === "empty" ? "empty" : "restored";
-      return { controller: this.projection(status, traceRegistry, runAnalytics) };
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  /** Flush each store independently and report exactly which persistence boundary failed. */
-  async flush(): Promise<AutonomousBrainRunObservabilityFlushRun> {
-    this.requireRestored();
-    this.requireIdle();
-    this.busy = true;
-    const persistenceErrors: AutonomousBrainRunObservabilityFlushRun["persistence_errors"] = [];
-    try {
-      let traceRegistry = this.lastTraceProjection;
-      let runAnalytics = this.lastAnalyticsProjection;
-      try {
-        traceRegistry = await this.traceRegistry.flush();
-        this.lastTraceProjection = traceRegistry;
-      } catch (error) {
-        const failure = errorProjection(error);
-        persistenceErrors.push({ scope: "trace_registry", ...failure });
-      }
-      try {
-        runAnalytics = await this.runAnalytics.flush();
-        this.lastAnalyticsProjection = runAnalytics;
-      } catch (error) {
-        const failure = errorProjection(error);
-        persistenceErrors.push({ scope: "run_analytics", ...failure });
-      }
-      this.persisted = persistenceErrors.length === 0;
-      return {
-        controller: this.projection(persistenceErrors.length === 0 ? "flushed" : "persistence_partial", traceRegistry, runAnalytics),
-        persisted: this.persisted,
-        persistence_errors: persistenceErrors,
-      };
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  /**
-   * Publish and analyze one immutable source snapshot. The trace store is intentionally read
-   * once; the registry controller's snapshot-only path prevents a second, potentially newer
-   * journal read from drifting away from the report digest.
-   */
-  async publishAndAnalyze(
-    traceStore: AutonomousRunTraceStore,
-    runId: string,
-    options: { policy?: Partial<AutonomousRunTraceAnalyticsPolicy>; ingestedAt?: number } = {},
-  ): Promise<AutonomousBrainRunObservabilityRun> {
-    this.requireRestored();
-    this.requireIdle();
-    if (!traceStore || typeof traceStore.snapshot !== "function") throw new ArgumentError("autonomous brain run observability publication requires a trace store");
-    if (typeof runId !== "string" || !/^[A-Za-z0-9_.:-]{1,256}$/.test(runId)) throw new ArgumentError("autonomous brain run observability run_id must be a bounded identifier");
-    this.busy = true;
-    const errors: AutonomousBrainRunObservabilityError[] = [];
-    let sourceSnapshotDigest: string | null = null;
-    let traceOutcome: AutonomousBrainTraceRegistryPublicationRun | null = null;
-    let analyticsOutcome: AutonomousBrainRunAnalyticsAnalysisRun | null = null;
-    try {
-      let sourceSnapshot: unknown;
-      try {
-        sourceSnapshot = await traceStore.snapshot();
-        if (isObject(sourceSnapshot) && typeof sourceSnapshot.snapshot_digest === "string" && /^[0-9a-f]{64}$/.test(sourceSnapshot.snapshot_digest)) sourceSnapshotDigest = sourceSnapshot.snapshot_digest;
-      } catch (error) {
-        errors.push({ scope: "source_snapshot", ...errorProjection(error) });
-        return {
-          controller: this.projection("source_snapshot_failed"),
-          run_id: runId,
-          source_snapshot_digest: sourceSnapshotDigest,
-          trace_registry: null,
-          run_analytics: null,
-          alert_delivery: { status: "not_needed", attempted: 0, delivered: 0, error: null },
-          errors,
-        };
-      }
-
-      traceOutcome = await this.traceRegistry.publishSnapshot(sourceSnapshot, runId);
-      this.lastTraceProjection = traceOutcome.controller;
-      if (traceOutcome.publication.status === "failed") {
-        errors.push({
-          scope: "trace_publication",
-          error_class: traceOutcome.publication.error_class ?? "AutonomousRunTraceRegistryPublicationError",
-          failure_code: traceOutcome.publication.failure_code ?? "trace_registry_publication_failed",
-        });
-      } else if (traceOutcome.persistence_error !== null) {
-        errors.push({ scope: "trace_persistence", ...traceOutcome.persistence_error });
-      }
-
-      try {
-        analyticsOutcome = await this.runAnalytics.analyzeAndIngest(sourceSnapshot, options);
-        this.lastAnalyticsProjection = analyticsOutcome.controller;
-        if (analyticsOutcome.persistence_error !== null) errors.push({ scope: "analytics_persistence", ...analyticsOutcome.persistence_error });
-      } catch (error) {
-        errors.push({ scope: "analytics", ...errorProjection(error) });
-      }
-      const alertDelivery = await this.deliverAlerts(analyticsOutcome?.report ?? null);
-      if (alertDelivery.error !== null) errors.push({ scope: "alert_delivery", ...alertDelivery.error });
-      this.lastRunId = runId;
-      this.lastSourceSnapshotDigest = sourceSnapshotDigest;
-      this.persisted = traceOutcome.persisted && analyticsOutcome?.persisted === true;
-      const status: AutonomousBrainRunObservabilityControllerStatus = traceOutcome.publication.status === "failed"
-          ? "trace_publication_failed"
-          : analyticsOutcome === null
-            ? "analytics_failed"
-            : alertDelivery.status === "failed"
-              ? "alert_delivery_failed"
-            : errors.length > 0 && (traceOutcome.persisted === false || analyticsOutcome.persisted === false)
-            ? "persistence_partial"
-            : errors.length > 0
-              ? "analytics_failed"
-              : "published_and_analyzed";
-      return {
-        controller: this.projection(status, traceOutcome.controller, analyticsOutcome?.controller ?? this.lastAnalyticsProjection),
-        run_id: runId,
-        source_snapshot_digest: sourceSnapshotDigest,
-        trace_registry: traceOutcome,
-        run_analytics: analyticsOutcome,
-        alert_delivery: alertDelivery,
-        errors,
-      };
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  /** Revalidate both metadata stores and return their digest-bound integrity projections. */
-  verifyIntegrity(): { verified: true; trace_registry: AutonomousRunTraceRegistryIntegrity; run_analytics: AutonomousBrainRunAnalyticsIntegrity } {
-    this.requireRestored();
-    this.requireIdle();
-    return {
-      verified: true,
-      trace_registry: this.traceRegistry.verifyIntegrity(),
-      run_analytics: this.runAnalytics.verifyIntegrity(),
-    };
-  }
-}
-
-export interface AutonomousBrainBatchJobControllerOptions {
-  protectedRehydration?: AutonomousBrainBatchProtectedRehydrator;
-  automaticProtectedRehydration?: AutonomousBrainAutoBatchProtectedRehydrator;
-  automaticCycleProtectedRehydration?: AutonomousBrainAutoCycleBatchProtectedRehydrator;
-  automaticReplanProtectedRehydration?: AutonomousBrainAutoReplanBatchProtectedRehydrator;
-}
-
-/**
- * Own the process lifecycle around the verified resumable brain batch engine.
- *
- * The facade deliberately accepts a checkpoint sink so infrastructure can choose a database,
- * object store, or journal. This controller is the safer application boundary: startup restore
- * is explicit, only one run may mutate a checkpoint at a time, every checkpoint is validated
- * before it reaches the store, and task text, prompts, provider values, connector observations,
- * and credentials remain transient by construction.
- */
-export class AutonomousBrainBatchJobController {
-  private checkpoint: AutonomousBrainBatchCheckpointJSON | null = null;
-  private restored = false;
-  private running = false;
-
-  constructor(
-    readonly brain: AutonomousBrainFacade,
-    readonly persistence: AutonomousBrainBatchCheckpointStore,
-    readonly options: AutonomousBrainBatchJobControllerOptions = {},
-  ) {
-    if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain batch controller requires an AutonomousBrainFacade");
-    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("autonomous brain batch checkpoint store is malformed");
-    if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousBrainBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller protectedRehydration is malformed");
-    if (options.automaticProtectedRehydration !== undefined && !(options.automaticProtectedRehydration instanceof AutonomousBrainAutoBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller automaticProtectedRehydration is malformed");
-    if (options.automaticCycleProtectedRehydration !== undefined && !(options.automaticCycleProtectedRehydration instanceof AutonomousBrainAutoCycleBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller automaticCycleProtectedRehydration is malformed");
-    if (options.automaticReplanProtectedRehydration !== undefined && !(options.automaticReplanProtectedRehydration instanceof AutonomousBrainAutoReplanBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller automaticReplanProtectedRehydration is malformed");
-  }
-
-  private requireRestored(): void {
-    if (!this.restored) throw new ArgumentError("autonomous brain batch controller must restore before execution");
-  }
-
-  private requireIdle(): void {
-    if (this.running) throw new ArgumentError("autonomous brain batch controller already has a run in progress");
-  }
-
-  private projection(status: AutonomousBrainBatchControllerStatus, totalItems: number | null = null, jobId: string | null = this.checkpoint?.job_id ?? null): AutonomousBrainBatchControllerProjection {
-    return {
-      schema: AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA,
-      status,
-      job_id: jobId,
-      checkpoint_digest: this.checkpoint?.checkpoint_digest ?? null,
-      completed_items: this.checkpoint?.completed_indices.length ?? 0,
-      total_items: totalItems ?? (this.checkpoint?.request_digests.length ?? null),
-      persisted: true,
-      retention: "metadata_only_request_and_result_digests;task_prompt_provider_connector_values_never_persisted",
-      secret_material: "never_returned",
-    };
-  }
-
-  /** Restore and verify the last checkpoint before accepting any execution request. */
-  async restore(): Promise<AutonomousBrainBatchControllerProjection> {
-    this.requireIdle();
-    const raw = await this.persistence.read();
-    this.checkpoint = raw === null ? null : validateBrainBatchCheckpoint(raw);
-    this.restored = true;
-    return this.projection(this.checkpoint === null ? "empty" : "restored");
-  }
-
-  /** Re-write the last verified checkpoint through the caller-owned store. */
-  async flush(): Promise<AutonomousBrainBatchControllerProjection> {
-    this.requireRestored();
-    this.requireIdle();
-    if (this.checkpoint === null) return this.projection("empty");
-    const verified = validateBrainBatchCheckpoint(this.checkpoint);
-    await this.persistence.write(verified);
-    this.checkpoint = verified;
-    return this.projection("flushed");
-  }
-
-  /** Run a routed/domain/cross-domain batch while the controller owns persistence and restart state. */
-  async run(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainBatchControllerRunOptions): Promise<AutonomousBrainBatchControllerRun> {
-    this.requireRestored();
-    this.requireIdle();
-    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain batch controller run requires jobId");
-    const runtimeOptions = options as AutonomousBrainResumableBatchOptions & Record<string, unknown>;
-    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain batch controller owns checkpoint and checkpointSink");
-    const rehydrateExecution = options.rehydrateExecution ?? (this.options.protectedRehydration === undefined ? undefined : this.options.protectedRehydration.resolve.bind(this.options.protectedRehydration));
-    this.running = true;
-    try {
-      const batch = await this.brain.executeBatchResumable(inputs, {
-        ...options,
-        ...(rehydrateExecution === undefined ? {} : { rehydrateExecution }),
-        checkpoint: this.checkpoint ?? undefined,
-        checkpointSink: async (checkpoint) => {
-          const verified = validateBrainBatchCheckpoint(checkpoint);
-          await this.persistence.write(verified);
-          this.checkpoint = verified;
-        },
-      });
-      return { controller: this.projection(batch.status, inputs.length, options.jobId), batch };
-    } finally {
-      this.running = false;
-    }
-  }
-
-  /** Run a restart-safe automatic batch while sharing the controller's verified checkpoint. */
-  async runAutomatic(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainAutoBatchControllerRunOptions): Promise<AutonomousBrainAutoBatchControllerRun> {
-    this.requireRestored();
-    this.requireIdle();
-    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain automatic batch controller run requires jobId");
-    const runtimeOptions = options as AutonomousBrainAutoBatchResumableOptions & Record<string, unknown>;
-    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain automatic batch controller owns checkpoint and checkpointSink");
-    const rehydrateExecution = options.rehydrateExecution ?? (this.options.automaticProtectedRehydration === undefined ? undefined : this.options.automaticProtectedRehydration.resolve.bind(this.options.automaticProtectedRehydration));
-    this.running = true;
-    try {
-      const batch = await this.brain.executeAutoBatchResumable(inputs, {
-        ...options,
-        ...(rehydrateExecution === undefined ? {} : { rehydrateExecution }),
-        checkpoint: this.checkpoint ?? undefined,
-        checkpointSink: async (checkpoint) => {
-          const verified = validateBrainBatchCheckpoint(checkpoint);
-          await this.persistence.write(verified);
-          this.checkpoint = verified;
-        },
-      });
-      return { controller: this.projection(batch.status, inputs.length, options.jobId), batch };
-    } finally {
-      this.running = false;
-    }
-  }
-
-  /** Run restart-safe automatic evaluator cycles with controller-owned checkpoint persistence. */
-  async runAutomaticCycle(
-    inputs: readonly AutonomousBrainRequest[],
-    options: AutonomousBrainAutoCycleBatchControllerRunOptions,
-  ): Promise<AutonomousBrainAutoCycleBatchControllerRun> {
-    this.requireRestored();
-    this.requireIdle();
-    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain automatic cycle controller run requires jobId");
-    const runtimeOptions = options as AutonomousBrainAutoCycleBatchResumableOptions & Record<string, unknown>;
-    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain automatic cycle controller owns checkpoint and checkpointSink");
-    const rehydrateCycle = options.rehydrateCycle ?? (this.options.automaticCycleProtectedRehydration === undefined ? undefined : this.options.automaticCycleProtectedRehydration.resolve.bind(this.options.automaticCycleProtectedRehydration));
-    this.running = true;
-    try {
-      const batch = await this.brain.executeAutoCycleBatchResumable(inputs, {
-        ...options,
-        ...(rehydrateCycle === undefined ? {} : { rehydrateCycle }),
-        checkpoint: this.checkpoint ?? undefined,
-        checkpointSink: async (checkpoint) => {
-          const verified = validateBrainBatchCheckpoint(checkpoint);
-          await this.persistence.write(verified);
-          this.checkpoint = verified;
-        },
-      });
-      return { controller: this.projection(batch.status, inputs.length, options.jobId), batch };
-    } finally {
-      this.running = false;
-    }
-  }
-
-  /** Run restart-safe automatic evaluator/replan cycles with controller-owned persistence. */
-  async runAutomaticReplan(
-    inputs: readonly AutonomousBrainRequest[],
-    options: AutonomousBrainAutoReplanBatchControllerRunOptions,
-  ): Promise<AutonomousBrainAutoReplanBatchControllerRun> {
-    this.requireRestored();
-    this.requireIdle();
-    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain automatic replan controller run requires jobId");
-    const runtimeOptions = options as AutonomousBrainAutoReplanBatchResumableOptions & Record<string, unknown>;
-    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain automatic replan controller owns checkpoint and checkpointSink");
-    const rehydrateReplan = options.rehydrateReplan ?? (this.options.automaticReplanProtectedRehydration === undefined ? undefined : this.options.automaticReplanProtectedRehydration.resolve.bind(this.options.automaticReplanProtectedRehydration));
-    this.running = true;
-    try {
-      const batch = await this.brain.executeAutoReplanCycleBatchResumable(inputs, {
-        ...options,
-        ...(rehydrateReplan === undefined ? {} : { rehydrateReplan }),
-        checkpoint: this.checkpoint ?? undefined,
-        checkpointSink: async (checkpoint) => {
-          const verified = validateBrainBatchCheckpoint(checkpoint);
-          await this.persistence.write(verified);
-          this.checkpoint = verified;
-        },
-      });
-      return { controller: this.projection(batch.status, inputs.length, options.jobId), batch };
-    } finally {
-      this.running = false;
-    }
-  }
-
-  /** Run automatic evaluator cycles with controller-owned checkpoints and one redacted trace. */
-  async runAutomaticCycleWithTrace(
-    inputs: readonly AutonomousBrainRequest[],
-    options: AutonomousBrainAutoCycleBatchControllerTraceRunOptions,
-  ): Promise<AutonomousBrainAutoCycleBatchControllerTraceRun> {
-    this.requireRestored();
-    this.requireIdle();
-    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain automatic cycle traced controller run requires jobId");
-    const runtimeOptions = options as AutonomousBrainAutoCycleBatchResumableTraceOptions & Record<string, unknown>;
-    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain automatic cycle traced controller owns checkpoint and checkpointSink");
-    const rehydrateCycle = options.rehydrateCycle ?? (this.options.automaticCycleProtectedRehydration === undefined ? undefined : this.options.automaticCycleProtectedRehydration.resolve.bind(this.options.automaticCycleProtectedRehydration));
-    this.running = true;
-    try {
-      const traced = await this.brain.executeAutoCycleBatchResumableWithTrace(inputs, {
-        ...options,
-        ...(rehydrateCycle === undefined ? {} : { rehydrateCycle }),
-        checkpoint: this.checkpoint ?? undefined,
-        checkpointSink: async (checkpoint) => {
-          const verified = validateBrainBatchCheckpoint(checkpoint);
-          await this.persistence.write(verified);
-          this.checkpoint = verified;
-        },
-      });
-      return { controller: this.projection(traced.batch.status, inputs.length, options.jobId), traced };
-    } finally {
-      this.running = false;
-    }
-  }
-
-  /** Run automatic evaluator/replan cycles with controller-owned checkpoints and one trace. */
-  async runAutomaticReplanWithTrace(
-    inputs: readonly AutonomousBrainRequest[],
-    options: AutonomousBrainAutoReplanBatchControllerTraceRunOptions,
-  ): Promise<AutonomousBrainAutoReplanBatchControllerTraceRun> {
-    this.requireRestored();
-    this.requireIdle();
-    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain automatic replan traced controller run requires jobId");
-    const runtimeOptions = options as AutonomousBrainAutoReplanBatchResumableTraceOptions & Record<string, unknown>;
-    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain automatic replan traced controller owns checkpoint and checkpointSink");
-    const rehydrateReplan = options.rehydrateReplan ?? (this.options.automaticReplanProtectedRehydration === undefined ? undefined : this.options.automaticReplanProtectedRehydration.resolve.bind(this.options.automaticReplanProtectedRehydration));
-    this.running = true;
-    try {
-      const traced = await this.brain.executeAutoReplanCycleBatchResumableWithTrace(inputs, {
-        ...options,
-        ...(rehydrateReplan === undefined ? {} : { rehydrateReplan }),
-        checkpoint: this.checkpoint ?? undefined,
-        checkpointSink: async (checkpoint) => {
-          const verified = validateBrainBatchCheckpoint(checkpoint);
-          await this.persistence.write(verified);
-          this.checkpoint = verified;
-        },
-      });
-      return { controller: this.projection(traced.batch.status, inputs.length, options.jobId), traced };
-    } finally {
-      this.running = false;
-    }
-  }
-}
-
-/** A small verified store useful for local processes, tests, and wiring examples. */
-export class InMemoryAutonomousBrainBatchCheckpointStore implements AutonomousBrainBatchCheckpointStore {
-  private checkpoint: AutonomousBrainBatchCheckpointJSON | null = null;
-
-  constructor(initial?: AutonomousBrainBatchCheckpointJSON | null) {
-    if (initial !== undefined && initial !== null) this.checkpoint = validateBrainBatchCheckpoint(initial);
-  }
-
-  read(): AutonomousBrainBatchCheckpointJSON | null {
-    return this.checkpoint === null ? null : structuredClone(this.checkpoint);
-  }
-
-  write(checkpoint: AutonomousBrainBatchCheckpointJSON): void {
-    this.checkpoint = structuredClone(validateBrainBatchCheckpoint(checkpoint));
   }
 }
 

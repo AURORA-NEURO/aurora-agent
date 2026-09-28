@@ -7,15 +7,15 @@
 //! observed consensus as separate scientific states.
 
 use super::campaign::{
-    execute_federated_benchmark_campaign, FederatedBenchmarkAction, FederatedBenchmarkActionKind,
-    FederatedBenchmarkCampaign, FederatedBenchmarkCampaignDisposition,
-    FederatedBenchmarkCampaignError, FederatedBenchmarkCampaignExecutor,
-    FederatedBenchmarkCampaignRequest,
+    FederatedBenchmarkAction, FederatedBenchmarkActionKind, FederatedBenchmarkCampaign,
+    FederatedBenchmarkCampaignDisposition, FederatedBenchmarkCampaignError,
+    FederatedBenchmarkCampaignExecutor, FederatedBenchmarkCampaignRequest,
+    execute_federated_benchmark_campaign,
 };
 use super::consensus::FederatedBenchmarkDisposition;
 use super::site_planner::{
-    plan_federated_benchmark_sites, FederatedBenchmarkSitePlan, FederatedBenchmarkSitePlannerError,
-    FederatedBenchmarkSitePlannerRequest,
+    FederatedBenchmarkSitePlan, FederatedBenchmarkSitePlannerError,
+    FederatedBenchmarkSitePlannerRequest, plan_federated_benchmark_sites,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -460,10 +460,12 @@ mod tests {
             first.projected_disposition,
             FederatedBenchmarkDisposition::Qualified
         );
-        assert!(first
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("scenario") || item.contains("synthetic")));
+        assert!(
+            first
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("scenario") || item.contains("synthetic"))
+        );
     }
 
     #[test]

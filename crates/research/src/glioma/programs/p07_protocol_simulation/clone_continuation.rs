@@ -572,16 +572,16 @@ pub fn plan_glioma_clone_continuation(
 mod tests {
     use super::*;
     use crate::glioma::programs::p05_mechanism_exploration::{
-        analyze_glioma_clonal_evolution, ClonalEvolutionRequest, CloneMarker, CloneMarkerState,
-        CloneProfile,
+        ClonalEvolutionRequest, CloneMarker, CloneMarkerState, CloneProfile,
+        analyze_glioma_clonal_evolution,
     };
     use crate::glioma::programs::p06_experiment_design::{
-        plan_glioma_clone_perturbation_panel, ClonePerturbationCandidate, ClonePerturbationKind,
-        ClonePerturbationPanelRequest,
+        ClonePerturbationCandidate, ClonePerturbationKind, ClonePerturbationPanelRequest,
+        plan_glioma_clone_perturbation_panel,
     };
     use crate::glioma::programs::p10_interpretation_replication::{
-        analyze_glioma_clone_panel_outcomes, ClonePanelMeasurementState, ClonePanelObservation,
-        ClonePanelOutcomeRequest,
+        ClonePanelMeasurementState, ClonePanelObservation, ClonePanelOutcomeRequest,
+        analyze_glioma_clone_panel_outcomes,
     };
     use bioprism_ids::ContentHash;
 
@@ -794,10 +794,12 @@ mod tests {
         let output = plan_glioma_clone_continuation(&request(), &outcome, &[item]).unwrap();
         assert_eq!(output.disposition, CloneContinuationDisposition::Unresolved);
         assert_eq!(output.blocked_order, vec!["instrument"]);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item == "instrument-disabled:instrument"));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item == "instrument-disabled:instrument")
+        );
     }
 
     #[test]

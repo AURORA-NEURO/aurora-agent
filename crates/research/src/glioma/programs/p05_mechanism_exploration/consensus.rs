@@ -299,15 +299,15 @@ fn consensus_for_sources(
             }
             let (weighted, reliability) = values.get(mechanism).copied().unwrap_or((0, 0));
             if reliability > 0 {
-                numerator = numerator.saturating_add(weighted / reliability);
+                numerator =
+                    numerator.saturating_add(weighted.checked_div(reliability).unwrap_or_default());
                 denominator = denominator.saturating_add(1);
             }
         }
-        let value = if denominator == 0 {
-            0
-        } else {
-            (numerator / denominator).min(1_000) as u16
-        };
+        let value = numerator
+            .checked_div(denominator)
+            .unwrap_or_default()
+            .min(1_000) as u16;
         output.insert(mechanism.clone(), value);
     }
     let total = output.values().map(|value| u32::from(*value)).sum::<u32>();
@@ -331,7 +331,10 @@ fn consensus_for_sources(
             let normalized = if index + 1 == mechanisms.len() {
                 1_000_u16.saturating_sub(assigned)
             } else {
-                (u32::from(current) * 1_000 / total).min(1_000) as u16
+                (u32::from(current) * 1_000)
+                    .checked_div(total)
+                    .unwrap_or_default()
+                    .min(1_000) as u16
             };
             assigned = assigned.saturating_add(normalized);
             output.insert(mechanism.clone(), normalized);
@@ -596,10 +599,12 @@ mod tests {
         .unwrap();
         assert_eq!(result.disposition, MechanismConsensusDisposition::Partial);
         assert!(!result.conflict_pair_order.is_empty());
-        assert!(result
-            .uncertainty_order
-            .iter()
-            .any(|item| item.contains("conflict")));
+        assert!(
+            result
+                .uncertainty_order
+                .iter()
+                .any(|item| item.contains("conflict"))
+        );
         assert!(result.records.iter().any(|record| {
             record
                 .leave_one_out_max_milli
@@ -619,9 +624,11 @@ mod tests {
         let result = compile_glioma_mechanism_consensus(&request).unwrap();
         assert_eq!(result.disposition, MechanismConsensusDisposition::Partial);
         assert!(!result.negative_evidence_order.is_empty());
-        assert!(result
-            .uncertainty_order
-            .iter()
-            .any(|item| item.contains("sources")));
+        assert!(
+            result
+                .uncertainty_order
+                .iter()
+                .any(|item| item.contains("sources"))
+        );
     }
 }

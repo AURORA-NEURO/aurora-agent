@@ -1,8 +1,9 @@
 //! Adversarial robustness stress surfaces for preclinical glioma mechanisms.
 //!
 //! Mechanism rankings are often sensitive to measurement error, missing model systems, and
-//! plausible alternative interpretations.  This feature evaluates bounded stress scenarios and
-//! makes rank reversals and brittle evidence visible before the next action is selected.
+//! plausible alternative interpretations. This feature evaluates bounded stress scenarios and
+//! makes rank reversals, unmeasured omissions, and brittle evidence visible before the next action
+//! is selected.
 
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -10,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P05-F07";
-pub const OUTPUT_SCHEMA: &str = "GliomaMechanismRobustnessStress1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaMechanismRobustnessStress1@2";
 pub const MAX_MECHANISMS: usize = 512;
 pub const MAX_SCENARIOS: usize = 1_024;
 pub const MAX_ABS_DELTA_MILLI: i32 = 1_000;
@@ -47,23 +48,62 @@ pub struct MechanismRobustnessStressRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MechanismStressScenarioScore {
-    pub scenario_id: String,
-    pub score_milli: u16,
-    pub rank: u16,
-    pub available: bool,
+#[serde(tag = "availability", rename_all = "snake_case")]
+pub enum MechanismStressScenarioScore {
+    Available {
+        scenario_id: String,
+        score_milli: u16,
+        rank: u16,
+    },
+    Omitted {
+        scenario_id: String,
+    },
+}
+
+impl MechanismStressScenarioScore {
+    fn scenario_id(&self) -> &str {
+        match self {
+            MechanismStressScenarioScore::Available { scenario_id, .. }
+            | MechanismStressScenarioScore::Omitted { scenario_id } => scenario_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum MechanismRobustnessEvaluation {
+    Measured {
+        available_scenarios: usize,
+        worst_score_milli: u16,
+        best_score_milli: u16,
+        weighted_score_milli: u16,
+        rank_reversal_count: u16,
+        stability_milli: u16,
+    },
+    Unmeasured {
+        omitted_scenarios: usize,
+    },
+}
+
+impl MechanismRobustnessEvaluation {
+    fn available_scenarios(&self) -> usize {
+        match self {
+            MechanismRobustnessEvaluation::Measured {
+                available_scenarios,
+                ..
+            } => *available_scenarios,
+            MechanismRobustnessEvaluation::Unmeasured { .. } => 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MechanismRobustnessRecord {
     pub mechanism_id: String,
     pub baseline_score_milli: u16,
-    pub worst_score_milli: u16,
-    pub best_score_milli: u16,
-    pub weighted_score_milli: u16,
     pub baseline_rank: u16,
-    pub rank_reversal_count: u16,
-    pub stability_milli: u16,
+    /// Measured aggregates and the unmeasured case cannot be combined or imputed.
+    pub evaluation: MechanismRobustnessEvaluation,
     pub scenario_order: Vec<String>,
     pub scenario_scores: Vec<MechanismStressScenarioScore>,
     pub negative_evidence_order: Vec<String>,
@@ -75,6 +115,70 @@ pub enum MechanismRobustnessStressDisposition {
     Ready,
     Partial,
     Blocked,
+}
+
+fn record_is_invalid(
+    record: &MechanismRobustnessRecord,
+    scenario_order: &[String],
+    mechanism_count: usize,
+) -> bool {
+    let available_scores = record
+        .scenario_scores
+        .iter()
+        .filter(|score| matches!(score, MechanismStressScenarioScore::Available { .. }))
+        .count();
+    let scenarios_invalid = record.scenario_scores.len() != scenario_order.len()
+        || record
+            .scenario_scores
+            .iter()
+            .zip(scenario_order)
+            .any(|(score, expected)| {
+                score.scenario_id() != expected
+                    || match score {
+                        MechanismStressScenarioScore::Available {
+                            score_milli, rank, ..
+                        } => *score_milli > 1_000 || *rank == 0 || *rank as usize > mechanism_count,
+                        MechanismStressScenarioScore::Omitted { .. } => false,
+                    }
+            });
+    let evaluation_invalid = match &record.evaluation {
+        MechanismRobustnessEvaluation::Measured {
+            available_scenarios,
+            worst_score_milli,
+            best_score_milli,
+            weighted_score_milli,
+            rank_reversal_count,
+            stability_milli,
+        } => {
+            if *available_scenarios == 0
+                || *available_scenarios != available_scores
+                || *available_scenarios > scenario_order.len()
+                || *worst_score_milli > 1_000
+                || *best_score_milli > 1_000
+                || *weighted_score_milli > 1_000
+                || *rank_reversal_count as usize > *available_scenarios
+                || *stability_milli > 1_000
+            {
+                true
+            } else {
+                let expected = ((*available_scenarios as u32 - u32::from(*rank_reversal_count))
+                    * 1_000)
+                    / *available_scenarios as u32;
+                *stability_milli != expected as u16
+            }
+        }
+        MechanismRobustnessEvaluation::Unmeasured { omitted_scenarios } => {
+            available_scores != 0 || *omitted_scenarios != scenario_order.len()
+        }
+    };
+    record.mechanism_id.trim().is_empty()
+        || record.baseline_score_milli > 1_000
+        || record.baseline_rank == 0
+        || record.baseline_rank as usize > mechanism_count
+        || record.scenario_order != scenario_order
+        || scenarios_invalid
+        || evaluation_invalid
+        || !canonical(&record.negative_evidence_order)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,18 +265,7 @@ impl MechanismRobustnessStress {
             || !canonical(&self.negative_evidence)
             || !canonical(&self.uncertainty)
             || self.records.iter().any(|record| {
-                record.mechanism_id.trim().is_empty()
-                    || record.baseline_score_milli > 1_000
-                    || record.worst_score_milli > 1_000
-                    || record.best_score_milli > 1_000
-                    || record.weighted_score_milli > 1_000
-                    || record.baseline_rank == 0
-                    || record.scenario_order != self.scenario_order
-                    || record.scenario_scores.len() != self.scenario_order.len()
-                    || !canonical(&record.negative_evidence_order)
-                    || record.scenario_scores.iter().any(|score| {
-                        score.rank == 0 || score.rank as usize > self.mechanism_order.len()
-                    })
+                record_is_invalid(record, &self.scenario_order, self.mechanism_order.len())
             })
             || self.digest.as_str().len() != 64
         {
@@ -332,27 +425,19 @@ pub fn stress_glioma_mechanism_robustness(
         let mut worst = 1_000_u16;
         let mut best = 0_u16;
         let mut reversals = 0_u16;
+        let mut available_scenarios = 0_usize;
         for scenario in &request.scenarios {
             let available = !scenario
                 .omitted_mechanism_order
                 .binary_search(&candidate.mechanism_id)
                 .is_ok();
-            let score = if available {
-                let delta = scenario
-                    .adjustment_order
-                    .iter()
-                    .find(|adjustment| adjustment.mechanism_id == candidate.mechanism_id)
-                    .map(|adjustment| adjustment.delta_milli)
-                    .unwrap_or(0);
-                clamp_score(i32::from(candidate.baseline_score_milli) + delta)
-            } else {
+            if !available {
                 omitted.insert(candidate.mechanism_id.clone());
                 uncertainty.insert(format!(
                     "mechanism:{}:omitted-in:{}",
                     candidate.mechanism_id, scenario.scenario_id
                 ));
-                0
-            };
+            }
             let mut scores = BTreeMap::new();
             for other in &request.candidates {
                 if !scenario
@@ -372,38 +457,74 @@ pub fn stress_glioma_mechanism_robustness(
                     );
                 }
             }
-            let rank = ranking(&scores)
+            let scenario_ranking = ranking(&scores);
+            let rank = scenario_ranking
                 .iter()
                 .position(|id| id == &candidate.mechanism_id)
-                .map(|index| (index + 1) as u16)
-                .unwrap_or(candidate_map.len() as u16 + 1);
-            if available && rank > baseline_rank_by_id[&candidate.mechanism_id] {
-                reversals = reversals.saturating_add(1);
-            }
+                .map(|index| (index + 1) as u16);
             if available {
+                let Some(rank) = rank else {
+                    return Err(MechanismRobustnessStressError::InvalidOutput(
+                        "an available candidate is missing from its scenario ranking".into(),
+                    ));
+                };
+                let delta = scenario
+                    .adjustment_order
+                    .iter()
+                    .find(|adjustment| adjustment.mechanism_id == candidate.mechanism_id)
+                    .map(|adjustment| adjustment.delta_milli)
+                    .unwrap_or(0);
+                let score = clamp_score(i32::from(candidate.baseline_score_milli) + delta);
+                if rank > baseline_rank_by_id[&candidate.mechanism_id] {
+                    reversals = reversals.saturating_add(1);
+                }
+                available_scenarios += 1;
                 worst = worst.min(score);
                 best = best.max(score);
                 weighted_sum = weighted_sum.saturating_add(
                     u64::from(score).saturating_mul(u64::from(scenario.weight_milli)),
                 );
                 weight_total = weight_total.saturating_add(u64::from(scenario.weight_milli));
+                scenario_scores.push(MechanismStressScenarioScore::Available {
+                    scenario_id: scenario.scenario_id.clone(),
+                    score_milli: score,
+                    rank,
+                });
+            } else {
+                scenario_scores.push(MechanismStressScenarioScore::Omitted {
+                    scenario_id: scenario.scenario_id.clone(),
+                });
             }
-            scenario_scores.push(MechanismStressScenarioScore {
-                scenario_id: scenario.scenario_id.clone(),
-                score_milli: score,
-                rank,
-                available,
-            });
         }
-        let stability = ((u32::from(request.scenarios.len() as u16 - reversals) * 1_000)
-            / request.scenarios.len() as u32) as u16;
-        let weighted_score = if weight_total == 0 {
-            0
+        let (evaluation, stability) = if available_scenarios == 0 {
+            (
+                MechanismRobustnessEvaluation::Unmeasured {
+                    omitted_scenarios: request.scenarios.len(),
+                },
+                None,
+            )
         } else {
-            (weighted_sum / weight_total) as u16
+            let Some(weighted_score) = weighted_sum.checked_div(weight_total) else {
+                return Err(MechanismRobustnessStressError::InvalidOutput(
+                    "a measured mechanism has no positive scenario weight".into(),
+                ));
+            };
+            let stability = ((available_scenarios as u32 - u32::from(reversals)) * 1_000)
+                / available_scenarios as u32;
+            (
+                MechanismRobustnessEvaluation::Measured {
+                    available_scenarios,
+                    worst_score_milli: worst,
+                    best_score_milli: best,
+                    weighted_score_milli: weighted_score as u16,
+                    rank_reversal_count: reversals,
+                    stability_milli: stability as u16,
+                },
+                Some(stability as u16),
+            )
         };
         let mut negative_order = Vec::new();
-        if stability < request.min_stability_milli {
+        if stability.is_some_and(|value| value < request.min_stability_milli) {
             let evidence = format!("mechanism:{}:rank-fragility", candidate.mechanism_id);
             negative.insert(evidence.clone());
             fragile.insert(candidate.mechanism_id.clone());
@@ -412,21 +533,21 @@ pub fn stress_glioma_mechanism_robustness(
         records.push(MechanismRobustnessRecord {
             mechanism_id: candidate.mechanism_id.clone(),
             baseline_score_milli: candidate.baseline_score_milli,
-            worst_score_milli: worst,
-            best_score_milli: best,
-            weighted_score_milli: weighted_score,
             baseline_rank: baseline_rank_by_id[&candidate.mechanism_id],
-            rank_reversal_count: reversals,
-            stability_milli: stability,
+            evaluation,
             scenario_order: scenario_order.clone(),
             scenario_scores,
             negative_evidence_order: negative_order,
         });
     }
     records.sort_by(|left, right| left.mechanism_id.cmp(&right.mechanism_id));
-    let disposition = if fragile.len() == records.len() {
+    let measured = records
+        .iter()
+        .filter(|record| record.evaluation.available_scenarios() > 0)
+        .count();
+    let disposition = if measured == 0 || fragile.len() == measured {
         MechanismRobustnessStressDisposition::Blocked
-    } else if !fragile.is_empty() || !omitted.is_empty() {
+    } else if !fragile.is_empty() || !omitted.is_empty() || measured < records.len() {
         MechanismRobustnessStressDisposition::Partial
     } else {
         MechanismRobustnessStressDisposition::Ready
@@ -511,9 +632,108 @@ mod tests {
                 .iter()
                 .find(|record| record.mechanism_id == "near")
                 .unwrap()
-                .rank_reversal_count,
-            1
+                .evaluation,
+            MechanismRobustnessEvaluation::Measured {
+                available_scenarios: 2,
+                worst_score_milli: 550,
+                best_score_milli: 800,
+                weighted_score_milli: 675,
+                rank_reversal_count: 1,
+                stability_milli: 500,
+            }
         );
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn omission_scenarios_are_excluded_from_the_measured_stability_denominator() {
+        let mut request = request();
+        request.scenarios[0].weight_milli = 300;
+        request.scenarios[1].weight_milli = 300;
+        request.scenarios.push(MechanismStressScenario {
+            scenario_id: "drop-near".into(),
+            weight_milli: 400,
+            adjustment_order: vec![],
+            omitted_mechanism_order: vec!["near".into()],
+        });
+
+        let output = stress_glioma_mechanism_robustness(&request).unwrap();
+        let near = output
+            .records
+            .iter()
+            .find(|record| record.mechanism_id == "near")
+            .unwrap();
+        assert!(matches!(
+            &near.evaluation,
+            MechanismRobustnessEvaluation::Measured {
+                available_scenarios: 2,
+                rank_reversal_count: 1,
+                stability_milli: 500,
+                worst_score_milli: 550,
+                best_score_milli: 800,
+                weighted_score_milli: 675,
+            }
+        ));
+        assert!(matches!(
+            &near.scenario_scores[2],
+            MechanismStressScenarioScore::Omitted { .. }
+        ));
+        assert_eq!(
+            output.disposition,
+            MechanismRobustnessStressDisposition::Partial
+        );
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn a_mechanism_omitted_from_every_scenario_has_no_fabricated_aggregate_scores() {
+        let mut request = request();
+        for scenario in &mut request.scenarios {
+            scenario.omitted_mechanism_order = vec!["far".into(), "near".into()];
+        }
+
+        let output = stress_glioma_mechanism_robustness(&request).unwrap();
+        assert_eq!(
+            output.disposition,
+            MechanismRobustnessStressDisposition::Blocked
+        );
+        for record in &output.records {
+            assert!(matches!(
+                &record.evaluation,
+                MechanismRobustnessEvaluation::Unmeasured {
+                    omitted_scenarios: 2
+                }
+            ));
+            assert!(
+                record
+                    .scenario_scores
+                    .iter()
+                    .all(|score| matches!(score, MechanismStressScenarioScore::Omitted { .. }))
+            );
+        }
+        let wire = serde_json::to_value(&output).unwrap();
+        assert_eq!(wire["output_schema"], OUTPUT_SCHEMA);
+        assert_eq!(wire["records"][0]["evaluation"]["status"], "unmeasured");
+        assert!(
+            wire["records"][0]["evaluation"]
+                .get("worst_score_milli")
+                .is_none()
+        );
+        assert_eq!(
+            wire["records"][0]["scenario_scores"][0]["availability"],
+            "omitted"
+        );
+        let round_trip: MechanismRobustnessStress = serde_json::from_value(wire).unwrap();
+        round_trip.validate().unwrap();
+
+        let mut inconsistent = output.clone();
+        inconsistent.records[0].evaluation = MechanismRobustnessEvaluation::Unmeasured {
+            omitted_scenarios: 1,
+        };
+        assert!(matches!(
+            inconsistent.validate(),
+            Err(MechanismRobustnessStressError::InvalidOutput(_))
+        ));
         output.validate().unwrap();
     }
 

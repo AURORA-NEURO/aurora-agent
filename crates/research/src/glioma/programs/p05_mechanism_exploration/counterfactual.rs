@@ -620,9 +620,11 @@ mod tests {
             simulate_glioma_counterfactual(&request, &nodes, &edges, &[intervention(-600)])
                 .unwrap();
         assert_eq!(output.disposition, CounterfactualDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("did-not-converge")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("did-not-converge"))
+        );
     }
 }

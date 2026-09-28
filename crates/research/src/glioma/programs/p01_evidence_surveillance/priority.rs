@@ -566,10 +566,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.selected_order.len(), 2);
-        assert!(output
-            .actions
-            .iter()
-            .any(|action| { action.kind == EvidencePriorityActionKind::RefreshStale }));
+        assert!(
+            output
+                .actions
+                .iter()
+                .any(|action| { action.kind == EvidencePriorityActionKind::RefreshStale })
+        );
         assert!(output.negative_evidence_order.contains(&"negative".into()));
         output.validate().unwrap();
     }
@@ -609,10 +611,12 @@ mod tests {
         .unwrap();
         assert!(output.missing_modality_order.is_empty());
         assert!(output.missing_model_system_order.is_empty());
-        assert!(output
-            .actions
-            .iter()
-            .all(|action| action.kind == EvidencePriorityActionKind::ReplicateSupported));
+        assert!(
+            output
+                .actions
+                .iter()
+                .all(|action| action.kind == EvidencePriorityActionKind::ReplicateSupported)
+        );
         output.validate().unwrap();
     }
 
@@ -620,9 +624,11 @@ mod tests {
     fn empty_snapshot_is_a_valid_unresolved_plan() {
         let output = prioritize_glioma_evidence(&request(), &[]).unwrap();
         assert_eq!(output.disposition, EvidencePriorityDisposition::NoRecords);
-        assert!(output
-            .uncertainty_order
-            .contains(&"no-local-evidence-records".into()));
+        assert!(
+            output
+                .uncertainty_order
+                .contains(&"no-local-evidence-records".into())
+        );
         output.validate().unwrap();
     }
 }

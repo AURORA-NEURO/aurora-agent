@@ -581,9 +581,11 @@ mod tests {
         .unwrap();
         assert_eq!(output.disposition, DropoutStressDisposition::Unresolved);
         assert_eq!(output.acquisition_order, vec![GliomaModality::Spatial]);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("required")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("required"))
+        );
     }
 }

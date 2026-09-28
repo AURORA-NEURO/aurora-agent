@@ -70,7 +70,7 @@ pub enum ReleaseError {
     Digest(String),
 }
 
-fn digest_input(manifest: &ResearchObjectManifest) -> serde_json::Value {
+pub(crate) fn digest_input(manifest: &ResearchObjectManifest) -> serde_json::Value {
     serde_json::json!({
         "feature_id": manifest.feature_id,
         "output_schema": manifest.output_schema,

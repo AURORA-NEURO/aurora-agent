@@ -8,11 +8,11 @@
 //! clinical conclusion.
 
 use super::value_calibration::{
-    calibrate_glioma_decision_value, DecisionValueCalibrationCampaignDisposition,
-    DecisionValueCalibrationDisposition, DecisionValueCalibrationError,
-    DecisionValueCalibrationRequest, DecisionValueCalibrationResult,
+    DecisionValueCalibrationCampaignDisposition, DecisionValueCalibrationDisposition,
+    DecisionValueCalibrationError, DecisionValueCalibrationRequest, DecisionValueCalibrationResult,
+    calibrate_glioma_decision_value,
 };
-use super::value_optimizer::{weighted_utility, DecisionValueDisposition, DecisionValuePortfolio};
+use super::value_optimizer::{DecisionValueDisposition, DecisionValuePortfolio, weighted_utility};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -621,14 +621,13 @@ mod tests {
         .expect("adaptive controller");
         assert!(result.selected_portfolio.is_some());
         assert_eq!(result.selected_order.len(), 2);
-        assert!(result
-            .candidate_scores
-            .iter()
-            .any(|score| score.action_id == "b-prior-only"
+        assert!(result.candidate_scores.iter().any(|score| {
+            score.action_id == "b-prior-only"
                 && score
                     .reason_order
                     .iter()
-                    .any(|reason| reason.contains("exploration-bonus"))));
+                    .any(|reason| reason.contains("exploration-bonus"))
+        }));
         result.validate().expect("digest and invariants");
     }
 
@@ -649,14 +648,18 @@ mod tests {
             result.disposition,
             AdaptiveDecisionCampaignDisposition::CalibrationReview
         );
-        assert!(result
-            .negative_evidence_order
-            .iter()
-            .any(|item| item.contains("failed:a-conflicted:run-002")));
-        assert!(result
-            .candidate_scores
-            .iter()
-            .any(|score| score.conflict_penalty_milli > 0));
+        assert!(
+            result
+                .negative_evidence_order
+                .iter()
+                .any(|item| item.contains("failed:a-conflicted:run-002"))
+        );
+        assert!(
+            result
+                .candidate_scores
+                .iter()
+                .any(|score| score.conflict_penalty_milli > 0)
+        );
     }
 
     #[test]
@@ -670,13 +673,17 @@ mod tests {
             Vec::new(),
         ))
         .expect("adaptive controller");
-        assert!(result
-            .blocked_order
-            .iter()
-            .any(|item| item == "b-dependent"));
-        assert!(result
-            .negative_evidence_order
-            .iter()
-            .any(|item| item.contains("dependency-blocked")));
+        assert!(
+            result
+                .blocked_order
+                .iter()
+                .any(|item| item == "b-dependent")
+        );
+        assert!(
+            result
+                .negative_evidence_order
+                .iter()
+                .any(|item| item.contains("dependency-blocked"))
+        );
     }
 }

@@ -198,9 +198,7 @@ impl IdsEvolutionReceipt10 {
     }
     pub fn digest(&self) -> Result<ContentHash, BoundedEvolutionError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| BoundedEvolutionError::Report(error.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|error| BoundedEvolutionError::Report(error.to_string()))
     }
 }

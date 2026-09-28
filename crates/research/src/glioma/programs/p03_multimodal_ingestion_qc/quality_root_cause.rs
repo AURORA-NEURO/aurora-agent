@@ -536,10 +536,12 @@ mod tests {
             QualityRootCauseCampaignDisposition::Ready
         );
         assert_eq!(output.primary_cause, Some(QualityRootCause::Batch));
-        assert!(output
-            .remediation_order
-            .iter()
-            .any(|action| action.contains("batch")));
+        assert!(
+            output
+                .remediation_order
+                .iter()
+                .any(|action| action.contains("batch"))
+        );
         output.validate().expect("digest and invariants");
     }
 
@@ -557,10 +559,12 @@ mod tests {
             QualityRootCauseCampaignDisposition::Blocked
         );
         assert!(output.primary_cause.is_none());
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.contains("missing-cause-evidence")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry.contains("missing-cause-evidence"))
+        );
     }
 
     #[test]

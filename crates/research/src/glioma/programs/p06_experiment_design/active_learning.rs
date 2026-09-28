@@ -682,10 +682,11 @@ mod tests {
         let mut request = request();
         request.min_uncertainty_milli = 100;
         let plan = plan_glioma_active_learning(&request, &candidates(), &observations).unwrap();
-        assert!(plan
-            .uncertainty
-            .iter()
-            .any(|item| item.starts_with("matrix:")));
+        assert!(
+            plan.uncertainty
+                .iter()
+                .any(|item| item.starts_with("matrix:"))
+        );
         assert!(plan.unresolved_order.contains(&"matrix".into()));
         assert_eq!(plan.disposition, ActiveLearningDisposition::Partial);
     }
@@ -693,14 +694,16 @@ mod tests {
     #[test]
     fn missing_observations_are_explicit_exploration_not_confidence() {
         let plan = plan_glioma_active_learning(&request(), &candidates(), &[]).unwrap();
-        assert!(plan
-            .scores
-            .iter()
-            .all(|score| score.nearest_observation_count == 0));
-        assert!(plan
-            .scores
-            .iter()
-            .all(|score| score.rationale.contains("no local observations")));
+        assert!(
+            plan.scores
+                .iter()
+                .all(|score| score.nearest_observation_count == 0)
+        );
+        assert!(
+            plan.scores
+                .iter()
+                .all(|score| score.rationale.contains("no local observations"))
+        );
     }
 
     #[test]

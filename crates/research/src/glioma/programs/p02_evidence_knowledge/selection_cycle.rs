@@ -6,10 +6,10 @@
 //! completed work, budget holds, blocked dependencies, and omitted bindings remain explicit.
 
 use super::action_bridge::{
-    bridge_glioma_knowledge_actions, KnowledgeActionBridgeError, KnowledgeActionBridgeRequest,
+    KnowledgeActionBridgeError, KnowledgeActionBridgeRequest, bridge_glioma_knowledge_actions,
 };
 use super::action_compiler::KnowledgeActionPlan;
-use crate::glioma_engine::{select_glioma_actions, GliomaActionSelection, GliomaSelectionConfig};
+use crate::glioma_engine::{GliomaActionSelection, GliomaSelectionConfig, select_glioma_actions};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -215,8 +215,8 @@ pub fn execute_glioma_knowledge_selection_cycle(
 mod tests {
     use super::*;
     use crate::glioma::programs::p02_evidence_knowledge::action_compiler::{
-        digest_input as plan_digest_input, CompiledActionDisposition, CompiledResearchAction,
-        KnowledgeActionPlanDisposition,
+        CompiledActionDisposition, CompiledResearchAction, KnowledgeActionPlanDisposition,
+        digest_input as plan_digest_input,
     };
     use crate::glioma::programs::p02_evidence_knowledge::claim_frontier::FrontierActionKind;
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem};

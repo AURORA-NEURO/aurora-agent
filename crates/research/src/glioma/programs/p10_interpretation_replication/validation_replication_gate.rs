@@ -11,12 +11,12 @@ use crate::glioma::programs::p06_experiment_design::validation_campaign::{
     ValidationCampaignDisposition, ValidationCampaignRun, ValidationCampaignStopReason,
 };
 use crate::glioma::programs::p06_experiment_design::{
-    compile_glioma_replication_protocol, plan_glioma_replication_continuation,
     ReplicationContinuationDisposition, ReplicationContinuationError,
     ReplicationContinuationObservation, ReplicationContinuationPlan,
     ReplicationContinuationRequest, ReplicationPlan, ReplicationPlanError, ReplicationPlanRequest,
     ReplicationProtocolCompilation, ReplicationProtocolCompilationDisposition,
     ReplicationProtocolCompilationError, ReplicationProtocolCompileRequest,
+    compile_glioma_replication_protocol, plan_glioma_replication_continuation,
 };
 use crate::glioma::programs::p07_protocol_simulation::ProtocolResource;
 use crate::glioma_engine::GliomaModelSystem;
@@ -243,8 +243,7 @@ impl ValidationReplicationGate {
     }
 }
 
-fn finish(
-    request: &ValidationReplicationGateRequest,
+struct ValidationReplicationGateOutcome<'a> {
     independent_site_order: Vec<String>,
     validation_eligible: bool,
     replication_plan: Option<ReplicationPlan>,
@@ -253,7 +252,12 @@ fn finish(
     disposition: ValidationReplicationGateDisposition,
     negative_evidence: Vec<String>,
     uncertainty: Vec<String>,
-    next_action: &str,
+    next_action: &'a str,
+}
+
+fn finish(
+    request: &ValidationReplicationGateRequest,
+    outcome: ValidationReplicationGateOutcome<'_>,
 ) -> Result<ValidationReplicationGate, ValidationReplicationGateError> {
     let mut output = ValidationReplicationGate {
         feature_id: FEATURE_ID.into(),
@@ -262,15 +266,15 @@ fn finish(
         model_system: request.validation_campaign.model_system,
         validation_campaign_digest: request.validation_campaign.digest.clone(),
         local_site_id: request.local_site_id.clone(),
-        independent_site_order,
-        validation_eligible,
-        replication_plan,
-        continuation,
-        protocol,
-        disposition,
-        negative_evidence: sorted_unique(negative_evidence),
-        uncertainty: sorted_unique(uncertainty),
-        next_action: next_action.into(),
+        independent_site_order: outcome.independent_site_order,
+        validation_eligible: outcome.validation_eligible,
+        replication_plan: outcome.replication_plan,
+        continuation: outcome.continuation,
+        protocol: outcome.protocol,
+        disposition: outcome.disposition,
+        negative_evidence: sorted_unique(outcome.negative_evidence),
+        uncertainty: sorted_unique(outcome.uncertainty),
+        next_action: outcome.next_action.into(),
         boundary: PRECLINICAL_BOUNDARY.into(),
         digest: ContentHash::of_bytes(b"unsealed-glioma-validation-replication-gate"),
     };
@@ -315,17 +319,20 @@ fn validation_gate(
             ValidationReplicationGateDisposition::Negative,
             "publish the validation null or futility result and retire the replication request",
         ),
-        ValidationCampaignStopReason::RiskBlocked | ValidationCampaignStopReason::BudgetBlocked => (
-            ValidationReplicationGateDisposition::Blocked,
-            "repair the validation risk or budget boundary before requesting replication",
-        ),
+        ValidationCampaignStopReason::RiskBlocked | ValidationCampaignStopReason::BudgetBlocked => {
+            (
+                ValidationReplicationGateDisposition::Blocked,
+                "repair the validation risk or budget boundary before requesting replication",
+            )
+        }
         ValidationCampaignStopReason::ExecutionBlocked
         | ValidationCampaignStopReason::ProtocolBlocked
         | ValidationCampaignStopReason::Unresolved => (
             ValidationReplicationGateDisposition::Blocked,
             "resolve the incomplete validation workflow before requesting replication",
         ),
-        ValidationCampaignStopReason::AwaitingMeasurements | ValidationCampaignStopReason::MaxRounds => (
+        ValidationCampaignStopReason::AwaitingMeasurements
+        | ValidationCampaignStopReason::MaxRounds => (
             ValidationReplicationGateDisposition::HoldValidation,
             "complete a measured validation look and establish an efficacy boundary before replication",
         ),
@@ -364,15 +371,17 @@ pub fn plan_glioma_validation_replication_gate(
     if !validation_eligible {
         return finish(
             request,
-            independent_site_order,
-            false,
-            None,
-            None,
-            None,
-            initial_disposition,
-            negative_evidence,
-            uncertainty,
-            &initial_next_action,
+            ValidationReplicationGateOutcome {
+                independent_site_order,
+                validation_eligible: false,
+                replication_plan: None,
+                continuation: None,
+                protocol: None,
+                disposition: initial_disposition,
+                negative_evidence,
+                uncertainty,
+                next_action: &initial_next_action,
+            },
         );
     }
     if request.observations.is_empty() {
@@ -382,15 +391,17 @@ pub fn plan_glioma_validation_replication_gate(
         );
         return finish(
             request,
-            independent_site_order,
-            true,
-            None,
-            None,
-            None,
-            ValidationReplicationGateDisposition::HoldSites,
-            negative_evidence,
-            uncertainty,
-            &initial_next_action,
+            ValidationReplicationGateOutcome {
+                independent_site_order,
+                validation_eligible: true,
+                replication_plan: None,
+                continuation: None,
+                protocol: None,
+                disposition: ValidationReplicationGateDisposition::HoldSites,
+                negative_evidence,
+                uncertainty,
+                next_action: &initial_next_action,
+            },
         );
     }
 
@@ -467,15 +478,17 @@ pub fn plan_glioma_validation_replication_gate(
                 protocol = Some(compiled);
                 return finish(
                     request,
-                    independent_site_order,
-                    true,
-                    Some(replication_plan),
-                    Some(continuation),
-                    protocol,
-                    disposition,
-                    negative_evidence,
-                    uncertainty,
-                    "submit only the compiled, preflighted replication wave to a caller-owned local executor",
+                    ValidationReplicationGateOutcome {
+                        independent_site_order,
+                        validation_eligible: true,
+                        replication_plan: Some(replication_plan),
+                        continuation: Some(continuation),
+                        protocol,
+                        disposition,
+                        negative_evidence,
+                        uncertainty,
+                        next_action: "submit only the compiled, preflighted replication wave to a caller-owned local executor",
+                    },
                 );
             }
         }
@@ -500,15 +513,17 @@ pub fn plan_glioma_validation_replication_gate(
     };
     finish(
         request,
-        independent_site_order,
-        true,
-        Some(replication_plan),
-        Some(continuation),
-        protocol,
-        disposition,
-        negative_evidence,
-        uncertainty,
-        next_action,
+        ValidationReplicationGateOutcome {
+            independent_site_order,
+            validation_eligible: true,
+            replication_plan: Some(replication_plan),
+            continuation: Some(continuation),
+            protocol,
+            disposition,
+            negative_evidence,
+            uncertainty,
+            next_action,
+        },
     )
 }
 
@@ -601,10 +616,12 @@ mod tests {
         );
         assert!(!output.validation_eligible);
         assert!(output.replication_plan.is_none());
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("validation-stop")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("validation-stop"))
+        );
         output.validate().unwrap();
     }
 

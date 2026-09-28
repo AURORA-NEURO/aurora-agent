@@ -468,9 +468,11 @@ mod tests {
             output.disposition,
             CombinationSynergyDisposition::Unresolved
         );
-        assert!(output.cells[0]
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("single-agent-b")));
+        assert!(
+            output.cells[0]
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("single-agent-b"))
+        );
     }
 }

@@ -7,9 +7,9 @@
 //! an agent: each round still passes through the guarded P10 closure executor.
 
 use super::replication_closure_execution::{
-    execute_glioma_replication_closure, ReplicationClosureExecutionDisposition,
-    ReplicationClosureExecutionError, ReplicationClosureExecutionRequest,
-    ReplicationClosureExecutionRun,
+    ReplicationClosureExecutionDisposition, ReplicationClosureExecutionError,
+    ReplicationClosureExecutionRequest, ReplicationClosureExecutionRun,
+    execute_glioma_replication_closure,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_foundation::PRECLINICAL_BOUNDARY;

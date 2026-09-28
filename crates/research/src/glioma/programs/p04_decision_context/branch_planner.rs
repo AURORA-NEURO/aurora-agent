@@ -850,10 +850,10 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::knowledge_graph::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma::programs::p04_decision_context::{
-        compile_decision_context, DecisionContextRequest,
+        DecisionContextRequest, compile_decision_context,
     };
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
     use bioprism_foundation::{AutonomyTier, Effect};
@@ -1030,10 +1030,12 @@ mod tests {
         let output = plan_glioma_decision_branches(&request, &context).unwrap();
         assert!(!output.unresolved_scenario_order.is_empty());
         assert!(!output.uncertainty_order.is_empty());
-        assert!(output
-            .negative_evidence_order
-            .iter()
-            .any(|item| item.contains(":c")));
+        assert!(
+            output
+                .negative_evidence_order
+                .iter()
+                .any(|item| item.contains(":c"))
+        );
     }
 
     #[test]

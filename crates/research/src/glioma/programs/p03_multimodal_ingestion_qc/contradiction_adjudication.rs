@@ -122,11 +122,11 @@ fn trust(observation: &EndpointEvidence) -> u64 {
 
 fn confidence(left: u64, right: u64) -> u16 {
     let total = left.saturating_add(right);
-    if total == 0 {
-        0
-    } else {
-        ((left.min(right).saturating_mul(2_000) / total).min(1_000)) as u16
-    }
+    left.min(right)
+        .saturating_mul(2_000)
+        .checked_div(total)
+        .unwrap_or_default()
+        .min(1_000) as u16
 }
 
 fn pair_key(left: GliomaModality, right: GliomaModality) -> (GliomaModality, GliomaModality) {
@@ -630,9 +630,11 @@ mod tests {
             output.disposition,
             ContradictionAdjudicationDisposition::Blocked
         );
-        assert!(output
-            .missing_modality_order
-            .contains(&GliomaModality::Imaging));
+        assert!(
+            output
+                .missing_modality_order
+                .contains(&GliomaModality::Imaging)
+        );
         assert!(output.pairs.is_empty());
     }
 }

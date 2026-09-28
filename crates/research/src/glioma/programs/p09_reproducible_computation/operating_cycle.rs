@@ -8,14 +8,14 @@
 //! computation artifact into biological evidence by itself.
 
 use super::campaign::{
-    execute_glioma_computation_campaign, GliomaComputationCampaign,
-    GliomaComputationCampaignDisposition, GliomaComputationCampaignError,
-    StaticGliomaComputationPlanner,
+    GliomaComputationCampaign, GliomaComputationCampaignDisposition,
+    GliomaComputationCampaignError, StaticGliomaComputationPlanner,
+    execute_glioma_computation_campaign,
 };
 use super::execution::{DryRunGliomaComputationExecutor, GliomaComputationExecutor};
 use super::workflow::{
-    compile_glioma_computation_workflow, GliomaComputationWorkflow, GliomaComputationWorkflowError,
-    GliomaComputationWorkflowRequest,
+    GliomaComputationWorkflow, GliomaComputationWorkflowError, GliomaComputationWorkflowRequest,
+    compile_glioma_computation_workflow,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -350,9 +350,11 @@ mod tests {
             GliomaComputationOperatingCycleDisposition::Blocked
         );
         assert!(output.campaign.is_none());
-        assert!(output
-            .uncertainty
-            .contains(&"workflow-resource-gate-blocked-execution".to_string()));
+        assert!(
+            output
+                .uncertainty
+                .contains(&"workflow-resource-gate-blocked-execution".to_string())
+        );
         output.validate().unwrap();
     }
 }

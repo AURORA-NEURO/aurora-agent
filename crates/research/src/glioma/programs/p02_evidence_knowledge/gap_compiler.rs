@@ -527,10 +527,10 @@ mod tests {
     use super::*;
     use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
     use crate::glioma::programs::p02_evidence_knowledge::claim_frontier::{
-        prioritize_knowledge_frontier, KnowledgeFrontierRequest,
+        KnowledgeFrontierRequest, prioritize_knowledge_frontier,
     };
     use crate::glioma::programs::p02_evidence_knowledge::knowledge_graph::{
-        compile_typed_knowledge, KnowledgeRequest,
+        KnowledgeRequest, compile_typed_knowledge,
     };
     use crate::glioma_engine::LocalArtifactRef;
 
@@ -631,10 +631,12 @@ mod tests {
         let (knowledge, frontier) = knowledge_and_frontier();
         let output = compile_glioma_knowledge_gaps(&request(), &knowledge, &frontier).unwrap();
         assert!(!output.candidates.is_empty());
-        assert!(output
-            .candidates
-            .iter()
-            .any(|candidate| candidate.modality == GliomaModality::Imaging));
+        assert!(
+            output
+                .candidates
+                .iter()
+                .any(|candidate| candidate.modality == GliomaModality::Imaging)
+        );
         assert_eq!(output.knowledge_digest, knowledge.digest);
         output.validate().unwrap();
     }
@@ -661,13 +663,17 @@ mod tests {
         request.templates.reverse();
         let second = compile_glioma_knowledge_gaps(&request, &knowledge, &frontier).unwrap();
         assert_eq!(first, second);
-        assert!(first
-            .blocked_template_order
-            .contains(&"remote-human".into()));
-        assert!(first
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("remote-human-policy-blocked")));
+        assert!(
+            first
+                .blocked_template_order
+                .contains(&"remote-human".into())
+        );
+        assert!(
+            first
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("remote-human-policy-blocked"))
+        );
     }
 
     #[test]

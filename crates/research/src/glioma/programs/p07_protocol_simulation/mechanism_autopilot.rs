@@ -11,10 +11,10 @@ use super::action_execution::{
     ActionPortfolioExecutionDisposition, GliomaActionExecutor, MAX_RETRIES,
 };
 use super::mechanism_campaign::{
+    MechanismCampaignDisposition, MechanismCampaignError, MultimodalMechanismCampaign,
+    MultimodalMechanismCampaignExecution, MultimodalMechanismCampaignRequest,
     execute_glioma_multimodal_mechanism_campaign,
-    execute_glioma_multimodal_mechanism_campaign_with_executor, MechanismCampaignDisposition,
-    MechanismCampaignError, MultimodalMechanismCampaign, MultimodalMechanismCampaignExecution,
-    MultimodalMechanismCampaignRequest,
+    execute_glioma_multimodal_mechanism_campaign_with_executor,
 };
 use crate::glioma_engine::{GliomaActionCandidate, GliomaModelSystem};
 use bioprism_ids::ContentHash;
@@ -736,9 +736,10 @@ mod tests {
             run.stop_reason,
             GliomaMechanismAutopilotStopReason::CampaignEvidenceBlocked
         );
-        assert!(run
-            .negative_evidence
-            .iter()
-            .any(|evidence| evidence.contains("evidence-gate")));
+        assert!(
+            run.negative_evidence
+                .iter()
+                .any(|evidence| evidence.contains("evidence-gate"))
+        );
     }
 }

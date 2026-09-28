@@ -722,10 +722,11 @@ mod tests {
         ];
         let plan =
             plan_glioma_robust_active_learning(&request(), &candidates, &observations).unwrap();
-        assert!(plan
-            .uncertainty
-            .iter()
-            .any(|item| item.starts_with("egfr:contradictory")));
+        assert!(
+            plan.uncertainty
+                .iter()
+                .any(|item| item.starts_with("egfr:contradictory"))
+        );
         assert!(plan.unresolved_order.contains(&"egfr".into()));
     }
 
@@ -739,9 +740,10 @@ mod tests {
             RobustActiveLearningDisposition::NoCandidates
         );
         assert_eq!(plan.blocked_order.len(), 2);
-        assert!(plan
-            .scores
-            .iter()
-            .all(|score| score.model_support_count == 0));
+        assert!(
+            plan.scores
+                .iter()
+                .all(|score| score.model_support_count == 0)
+        );
     }
 }

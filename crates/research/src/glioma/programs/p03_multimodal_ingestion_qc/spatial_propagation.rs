@@ -572,10 +572,12 @@ mod tests {
             output.disposition,
             SpatialPropagationDisposition::Unresolved
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item == "no-same-sample-neighborhood-within-radius"));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item == "no-same-sample-neighborhood-within-radius")
+        );
     }
 
     #[test]

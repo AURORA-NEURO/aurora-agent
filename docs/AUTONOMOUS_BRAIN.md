@@ -113,11 +113,29 @@ caller-owned load/flush lifecycle without claiming distributed transactions.
 
 An approved receipt can be supplied as `preview_approval` / `previewApproval` to the goal control
 loop or high-level goal runtime. Execution recomputes the live provider-free preview, verifies the
-receipt is approved, unexpired, and bound to that exact digest, and only then reaches resolver,
-claim, evaluator, learner, provider, connector, tool, or effect boundaries. The receipt does not
-authorize credentials, providers, sources, connectors, tools, evaluators, learners, or effects;
-those gates remain independent. Recovery-owned resume is intentionally incompatible with a new
-preview approval, because restored execution must use its checkpoint's own admission identity.
+receipt is approved, within its issue/expiry window, and bound to that exact digest, and only then
+reaches resolver, claim, evaluator, learner, provider, connector, tool, or effect boundaries. The
+receipt does not authorize credentials, providers, sources, connectors, tools, evaluators, learners,
+or effects; those gates remain independent. Recovery-owned resume is intentionally incompatible
+with a new preview approval, because restored execution must use its checkpoint's own admission identity.
+Expiry is always checked against the runtime's live wall clock. A caller may pin the scheduler clock
+to replay the exact approved preview, but that replay clock cannot extend the approval lifetime.
+Preview-admission records and snapshots use schema 0.2 exact decimal-string epoch nanoseconds, so
+their digests and expiry checks replay the same way in both SDKs. The TypeScript SDK converts its
+millisecond wall clock to nanoseconds with integer arithmetic; Python uses its nanosecond clock.
+Persisted 0.1 approvals must be reviewed and re-issued against a current 0.2 preview, so an old
+decision is never silently carried forward.
+
+`bioprism-autonomous-goal-time/0.2` defines canonical decimal-string epoch nanoseconds, with exact
+TypeScript `bigint` arithmetic and an explicit legacy source unit. Goal records, events, snapshots,
+schedules, preview approvals, worker journals, dispatch-resolution receipts, and control-loop
+checkpoints use that representation. Persisted replay validators require canonical strings and
+reject numeric timestamp spellings; local APIs can still accept safe numeric values where their
+unit is explicitly nanoseconds. Both SDKs verify and explicitly migrate eligible 0.1 snapshots,
+journals, and checkpoints while retaining provenance. Old approvals require a fresh review, and
+old external dispatch receipts require deployment-owned re-verification. The cross-SDK recovery
+scenario migrates goal, journal, and checkpoint state, persists and completes a live cycle, then
+restarts without re-executing completed work; both SDKs assert identical final digests.
 
 An approved receipt is also a revocable capability record. `admissions.revoke()` in Python and
 `ledger.revoke()` in TypeScript append a hash-linked `revoked` revision with a bounded reason
@@ -238,6 +256,20 @@ composition hazard where a scheduler could plan with one agent while an action-h
 executed through another. The factory does not create a ledger, acquire credentials, persist
 private task values, or grant provider/effect authority; those remain explicit application inputs.
 
+Python applications can use the equivalent `AutonomousAgent.goal_agent_runtime()` and
+`run_goal_control_loop()` entrypoints. They forward the caller's protected task rehydration
+adapter, worker journal, ordered recovery coordinator, and live preview-admission ledger into the
+same goal runtime. `run_goal_control_loop()` accepts either a task resolver or the protected
+adapter alone; when both are supplied, the task resolver takes precedence. A revoked preview
+therefore remains revoked through the convenience API, and restart recovery still reconciles the
+journal before it resumes the control loop. The convenience call also forwards `run_id`,
+`resume_snapshot`, and the caller-owned `checkpoint` callback, so in-process snapshots use the same
+restart identity fence as direct runtime calls. These entrypoints do not create persistence,
+credentials, or operator approvals on the caller's behalf.
+When neither a task resolver nor protected rehydration adapter is configured, the runtime is
+preview-only: `run()` and `run_with_trace()` fail before scheduling or claiming any goal, while
+`preview()` remains available.
+
 ```typescript
 const brain = new AutonomousBrainFacade({ agent });
 const goals = new InMemoryAutonomousGoalLedger({ maxGoals: 128 });
@@ -271,7 +303,17 @@ one control loop. Evaluator rewards and bandit arm state are value-only learning
 transport success is not task quality. A `run_options_factory` may rehydrate model candidates,
 opaque credential handles, memory, tool callbacks, approvals, and observers only after a goal is
 claimed. For protected deployments, `protected_rehydration` replaces the plain task resolver and
-binds the task digest to the caller's authorization context.
+binds the task digest to the caller's authorization context. Resolver parameters are validated as
+JSON, detached, and recursively frozen before their `execution_binding_digest` is recorded. Neither
+a retained resolver reference nor the executor can mutate nested objects or arrays after binding.
+The request exposes readonly parameter types along with immutable task, schedule, and digest fields.
+
+Each goal runtime admits one mutating operation at a time (`run()`, `runWithTrace()`, `restore()`,
+and `reconcileExternalOutcome()` in TypeScript; `run()`, `run_with_trace()`, `restore()`, and
+`reconcile_external_outcome()` in Python). The worker journal, checkpoint chain, trace context,
+and adaptive learner are shared mutable state owned by that runtime; a concurrent operation fails
+before it can claim or dispatch work. Read-only `preview()` calls remain available while a loop is
+active. Use `max_concurrent` to bound work inside the admitted loop.
 
 `action_handoff_resolver` can be supplied when every goal must replay a reviewed action plan. The
 facade-injected brain verifies that the handoff covers the goal domain before `executeActionHandoff`
@@ -314,6 +356,28 @@ The Python API exposes the same contract through `autonomous_domain_policy(...)`
 `evaluate_autonomous_domain_policy(...)`, and `AutonomousTaskOrchestrator.admit_domain_policy(...)`.
 Policy metadata is value-only and digest-addressed; prompts, credentials, evidence values, and
 provider responses remain transient caller-owned data.
+
+### Joint execution candidate policy
+
+`AutonomousJointExecutionPolicy` in both SDKs ranks caller-registered candidates across the
+provider, evidence-first, workflow, planning, cross-domain, and tool-loop paths. It applies domain,
+availability, path, capability, evidence, structured-output, effect-support, cost, latency, and
+risk gates before scoring. Approval requirements produce `review_required`; they never authorize a
+provider call, source request, tool, effect, or credential. `selected` and `review_required` are
+therefore planning postures, and callers must still pass the independent runtime authorization and
+approval gates before dispatch.
+
+The fixed rank combines a four-pull quality prior, evaluator reward mean, deterministic UCB
+exploration, reliability, preferred-capability match, risk, and normalized cost/latency penalties.
+Candidates below the caller's score floor are refused. Decisions retain bounded candidate metadata
+and digests, not task text, prompts, provider responses, tool arguments, or credentials. Provider and
+model labels are limited to 256 Unicode code points; numeric metadata must be finite and within its
+declared bound in both SDKs.
+
+`settle()` updates only value-only arm statistics from caller-supplied evaluator credit in the
+`[-1, 1]` range; transport success is not a reward. Each settlement is identified for idempotent
+replay, and state generations are digest-linked. Evaluator IDs and reward values remain caller-owned
+claims: this policy does not authenticate an evaluator or establish outcome truth.
 
 ### Source and evaluator authority at the learning boundary
 
@@ -3658,6 +3722,8 @@ promotion digest before another learned selection can influence invocation. The 
 persisted and restored with revision and digest checks, but it never persists bandit parameters,
 task text, provider values, credentials, or evaluator payloads. A new report must be applied after
 drift, so stale evidence cannot silently reactivate an older learner.
+Rollback reasons are required non-empty text, reject NUL characters, and are limited to 2,000
+UTF-8 bytes in both SDKs; invalid reasons fail before lifecycle state changes.
 
 The same admission check covers provider-assisted semantic routing and single- or cross-domain
 plan refinement in Python; those entry points cannot become a selector bypass while the lifecycle
@@ -4239,6 +4305,8 @@ bounded `focus_step_ids` subset. The transient prompt may include step objective
 reason about priority, but the returned proposal never contains arguments, provider content,
 credentials, permissions, effects, claims, or new steps. The provider is therefore choosing among
 reviewed actions rather than authorizing new actions.
+Both SDKs reject a graph with a dependency cycle before provider contact; closure alone cannot make
+an impossible ordering schedulable.
 
 `runAutonomousMissionReplanCycle()` can use this primitive through `providerPlanning`. Planning
 approval and mission dispatch approval are independent. `acceptPlan: true` is still insufficient
@@ -6347,6 +6415,8 @@ control-plane contract. The MCP server exposes:
   then creation sequence and job ID, and returns `claimed=false` for an empty queue. The server
   checks owner identity, expiry, and terminal state; competing workers are refused. Lease expiry
   before dispatch requeues work, while expiry at or after dispatch enters reconciliation_required.
+  Lease transitions fail closed if the system clock is before the Unix epoch or cannot be
+  represented in the nanosecond lease format; an invalid clock is never projected as timestamp 0.
 - brain_job_checkpoint: stores only a phase and checkpoint digest, enforces the monotonic
   not_started -> preflight -> dispatched -> unknown boundary, and can release the lease into
   waiting_approval. The checkpoint body remains caller-owned.
@@ -7623,7 +7693,9 @@ boundary through `scheduleAutonomousGoals(...)` / `schedule_autonomous_goals(...
 accepts only current goal projections plus bounded caller/evaluator signals: priority, urgency,
 deadline, estimated cost, and dependency goal IDs. It computes a deterministic score from priority,
 urgency, deadline pressure, aging fairness, and retry pressure, then ranks by score-per-cost with
-stable goal-ID ties.
+stable goal-ID ties. The ledger query and schedule input bounds both cover all 4,096 supported
+goals, so a recent objective cannot lose a completed prerequisite merely because it fell outside a
+small recent-record window. Per-cycle selection and claiming remain separately capped at 128.
 
 Admission is dependency-closed and fail-closed. A goal whose dependency is incomplete, unknown, or
 part of a cycle is deferred or marked ineligible; completed dependencies are satisfied, and
@@ -7632,42 +7704,104 @@ selected prerequisites are ordered before their dependants. `max_selected`, `max
 coverage are explicit inputs. The result contains only revisions, statuses, scores, reasons,
 dependencies, selected IDs, coverage, and a `schedule_digest`; task text, prompts, provider output,
 tool arguments, evidence bodies, and credentials never enter the schedule.
+Dependency-cycle analysis and prerequisite ordering use iterative graph walks, so the complete
+4,096-goal contract does not depend on the host language's recursion or call-stack limit.
+Control-loop learning overlays only `priority` and `urgency` on the current caller signals. The
+caller’s dependencies, deadlines, and cost estimates remain authoritative on every cycle, including
+after checkpoint resume; a bandit cannot erase a dependency edge by emitting an empty dependency list.
 
 Workers call `claimAutonomousGoals(...)` / `claim_autonomous_goals(...)` with the schedule and the
 caller-owned ledger. Every admitted row is re-read and checked against its expected revision and
-status before any transition. Ready and paused goals move directly to `running`; an explicitly
-allowed failed retry first reopens to `ready` and then claims `running`. A stale or tampered
-schedule is refused, and a successful claim returns only the schedule-bound claim digest. The
-canonical numeric projection is quantized so the same twelve-domain schedule has the same digest
-in both SDKs, making Python/TypeScript replay and worker handoff portable.
+status, remaining attempt budget, and event capacity before any transition. The complete claim
+batch is committed atomically: SQLite uses one immediate transaction, while the synchronous
+TypeScript ledger precomputes every transition and reserves event capacity before mutation. Both
+ledgers preserve capacity for running-goal settlement and subsequent reconciliation, including
+when admitting new goals, restoring snapshots, or claiming a batch. Ready
+and paused goals move directly to `running`; an explicitly allowed failed retry reopens to `ready`
+and claims `running` in the same transaction. A stale schedule, exhausted attempt, or insufficient
+event capacity leaves every goal unchanged. The successful claim returns only the schedule-bound
+claim digest. The canonical numeric projection is quantized so the same twelve-domain schedule has
+the same digest in both SDKs, making Python/TypeScript replay and worker handoff portable.
 
 The Python and TypeScript `AutonomousGoalWorker` implementations provide the execution bridge
 after admission. A worker first resolves every selected goal through a caller-owned rehydration
 callback before claiming anything; this prevents a protected task lookup failure from leaving a
-batch leased. It then claims the schedule, passes each transient task and caller-owned parameter
-mapping to an executor, and settles the bounded result status back into the goal ledger. Executor
+batch leased. The goal record and schedule row passed to resolver and executor callbacks are
+detached immutable snapshots, so retained callback references cannot rewrite the goal identity or
+the admitted dependency set. It then claims the schedule, passes each transient task and caller-owned parameter
+mapping to an executor only after rechecking that every dependency is currently `completed`.
+Schedule plans and claim receipts are also immutable digest-bound snapshots in both SDKs. TypeScript
+exposes readonly nested plan and claim types, clones schedule rows before replay validation, and
+copies frozen plan and claim data into each worker JSON projection. Both schedule validators reject
+unknown nested row and coverage fields, so a recomputed outer digest cannot smuggle task payloads
+into metadata-only schedule artifacts.
+Because a batch is claimed atomically before its prerequisite runs, ordering alone cannot guarantee
+that a prerequisite will succeed. If an earlier prerequisite fails, is paused, is blocked, or is
+otherwise not completed, the dependent is settled as `paused` with bounded dependency-status
+blockers keyed by dependency-ID digests and an outcome digest, and the executor is never called for
+it. A later scheduling pass can resume it once its dependencies are completed. Executor
 results may add criterion updates and digest-only evaluator, learning-state, or progress metadata.
-Exceptions become durable `failed` attempts with a redacted error class and retry marker, while a
-provider/evaluator status maps to `completed`, `paused`, `blocked`, or `failed` through the existing
-goal policy. The live task, parameters, and executor result exist only on the initiating process;
+In the control loop, evaluator callbacks return exactly one evaluation for each run whose in-memory
+`dispatched` flag is true and whose `error_class` is null; an unknown outcome or dependency-held
+reservation receives no evaluator credit and cannot update the learner.
+An exception after `dispatch_started` is an unknown external outcome, not proof of failure. With a
+journal, the worker recovers only that goal into `blocked` and requires the existing deployment-
+verified dispatch-status reconciliation before another attempt; without a journal, it still records
+a blocked reconciliation marker. These runs carry a redacted error class and receive no evaluator
+credit. A status returned normally by the executor maps to `completed`, `paused`, `blocked`, or
+`failed` through the existing goal policy. The live task, parameters, and executor result exist only on the initiating process;
 `to_dict()` and the worker digest exclude them. The Python and TypeScript workers produce the same
 single-attempt digest, so a worker can hand off a schedule or claim across the two SDKs without
 leaking the protected execution context.
+
+The worker now executes dependency-closed waves with the schedule's `max_concurrent` ceiling.
+Independent goals in one wave may run concurrently; a dependent waits until its selected
+prerequisites settle, and is paused without executor entry if a prerequisite did not complete.
+Worker result rows and their digest remain in deterministic schedule order even when completion
+timing differs. Python uses a bounded thread pool for opted-in parallel runs, so the caller-owned
+resolver remains sequential during preflight while executor callbacks must support the requested
+concurrency. Both workers drain every started member of a wave before propagating an unexpected
+worker error; this keeps the journal's single-run fence in place until sibling ledger and journal
+settlement has finished. The default schedule admits one goal and remains serial. Journal events
+retain actual event order, since concurrent dispatch timing is inherently variable.
 
 For process-loss recovery at this exact boundary, both SDKs expose
 `AutonomousGoalWorkerJournal`. It appends a bounded SHA-256 chain of `prepared`, `claimed`,
 `dispatch_started`, `settled`, `failed`, and `reconciled` metadata, and the worker accepts a caller-
 supplied `batch_id` to bind those events to one execution pass. The journal never stores the
 rehydrated task, prompt, parameters, credentials, provider/model payload, or executor result. A
-restart must restore the journal snapshot before resuming: a goal whose last event is `claimed`
-is moved to `paused` with a retry action because dispatch is known not to have started, while a
-goal whose last event is `dispatch_started` is moved to `blocked` with
+snapshot replay requires all event envelope fields, requires `previous_digest` to be a string even
+for the empty genesis link, and accepts optional digests/status only when omitted or valid. A
+malformed value cannot normalize to a valid chain head after an attacker restamps the digests. A
+restart must restore the journal snapshot before resuming: a goal whose last event is `prepared`
+is reconciled as pre-dispatch; if the claim had committed but its journal event had not, the
+running goal is moved to `paused` with a retry action. A goal whose last event is `claimed` is also
+moved to `paused` because dispatch is known not to have started, while a goal whose last event is
+`dispatch_started` is moved to `blocked` with
 `goal-reconciliation-review` because the external outcome is uncertain and the provider is never
-silently replayed. `JsonAutonomousGoalWorkerJournalPersistence` validates canonical JSON, and
+silently replayed. If the ledger already committed its terminal transition before process loss,
+recovery seals that matching revision as `settled`; if the ledger is still running, recovery
+preserves the reconciliation hold. Goal event admission reserves enough ledger capacity to make
+these terminal and reconciliation transitions durable. Journal admission also accounts for the
+restart and status-receipt events needed to close active boundaries, and restores reject snapshots
+that cannot preserve those events. A journal shared by local workers admits one worker run at a
+time; each selected goal preflights capacity for a dispatch, recovery, and one terminal status
+receipt before task rehydration. Additional pending or unknown status receipts consume more events.
+`JsonAutonomousGoalWorkerJournalPersistence` validates canonical JSON, and
 `AutonomousGoalWorkerJournalPersistenceCoordinator` adds caller-owned restore/flush and optional
 compare-and-swap fencing. This journal complements, rather than replaces, the goal ledger: the
 ledger remains the authoritative objective state, while the journal explains whether an interrupted
 running claim crossed the irreversible execution boundary.
+
+Workers can receive a `persist_dispatch_intent` callback alongside the journal. The worker appends
+the exact `dispatch_started` event, awaits the callback, and only then invokes the executor. A
+deployment can use this barrier to commit the claimed goal snapshot and journal event before any
+provider or effect boundary; if persistence refuses, the executor is not called and recovery keeps
+the journal event held for conservative reconciliation. The callback is optional for local runs,
+and the worker serializes this callback across concurrent goal waves. Python's high-level
+`run_async()` bridges an asynchronous persister back to the caller's event loop, preserving the
+same barrier as synchronous goal runs. The SDK does not claim that separate stores share an atomic
+transaction or distributed lease.
 
 The worker also verifies the transient rehydrated task against the ledger's immutable
 `task_digest` before claim. A wrong tenant lookup, stale protected queue, or resolver drift is
@@ -7699,6 +7833,14 @@ snapshot digest, and rejects stale flushes instead of silently overwriting a new
 adapters persist lifecycle/evaluator/learning digests only: they do not persist prompts, provider
 responses, tool arguments, evidence bodies, credentials, or approval authority.
 
+For shared transactional stores, `AuthenticatedTransactionalJsonAutonomousGoalPersistence` in
+TypeScript and `AuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence` in Python add a
+cross-SDK HMAC-SHA256 envelope with a deployment-owned keyring and required atomic CAS. Readers can
+accept retained rotation keys while writes use the active key. The envelope authenticates the
+canonical snapshot and key id; it does not encrypt the metadata or detect rollback to an earlier
+valid envelope. Deployments still need their own access controls, encryption, and trusted monotonic
+anchor if they require anti-rollback guarantees.
+
 `AutonomousGoalControlLoop` is the bounded autonomous continuation above one worker batch. It can
 run up to 128 scheduler/worker cycles and 8,192 total runs, invoke a caller-owned metadata-only
 `options_factory` for fresh priority, urgency, dependency, retry, and required-domain signals, and
@@ -7717,8 +7859,9 @@ and optional evidence/failure digests. The loop binds each packet to the worker'
 outcome digest, rejects duplicates or unsupported fields, then revision-fences the evaluator digest
 back onto the goal. Transport success, HTTP status, or executor completion is never converted into
 reward. If no learner is supplied, `AutonomousGoalBanditLearner` applies an explicit UCB-style,
-domain-scoped value update to future admission signals; a custom learner may return only bounded
-priority/urgency/dependency signals plus a learning-state digest. Feedback and learner state are
+domain-scoped value update to future admission signals; a custom learner returns bounded
+priority/urgency signals plus a learning-state digest. Learners cannot change dependency edges,
+deadlines, or cost estimates. Feedback and learner state are
 retained as digests/counts only, with evaluator values and live results remaining process-local.
 
 The outer loop now has its own crash/restart boundary rather than relying on the worker journal
@@ -7736,23 +7879,40 @@ forward the run and cycle budgets, and exposes the restored history only as dige
 on the result. It does not replay completed worker batches. The caller must still recreate the
 task resolver, model candidates, prompt policy, opaque credential handles, tools, memory, approval
 callbacks, and evaluator implementation; those process-local values are obtained only after the
-new worker claim. Strict validation rejects tampered digests, identity drift, missing/extra fields,
+new worker claim. Resupply the caller-owned dependency, deadline, and cost signals through
+`schedule_options` or `options_factory` on resume; checkpoints retain learned ranking signals, not
+the caller’s scheduling policy. Strict validation rejects tampered digests, identity drift, missing/extra fields,
 non-contiguous cycles, invalid bandit arms, oversized signals, and stale writers before execution.
 Python and TypeScript use the same schema, retention posture, canonical JSON, and generation chain
 so a checkpoint can be handed across runtimes without copying private execution state.
 
+For a shared worker journal, both SDKs also provide
+`AuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence`. It authenticates canonical
+snapshot content with HMAC-SHA256, requires a store-level compare-and-swap implementation, and
+retains the logical `snapshot_digest` as the CAS version. Deployment keyrings may trust prior key IDs
+while writing with a newly activated key; a receipt signed by an untrusted or retired key is
+rejected before the journal is restored. The adapter keeps key material out of stored JSON and uses
+the same cross-language MAC contract. HMAC does not encrypt the journal, enforce tenant/store
+authorization, or prevent a storage operator from replaying an older valid snapshot. Deployments
+must provide protected key management, an authenticated transactional store, and an anti-rollback
+policy suitable for their recovery threat model.
+
 Deployments that own both stores should compose them with
 `AutonomousGoalRecoveryCoordinator` (Python and TypeScript). Its restore transaction is ordered:
-it restores the worker journal, enumerates every active `claimed`/`dispatch_started` boundary,
-reconciles those goals through the authoritative ledger, flushes the new `reconciled` events
-through the journal CAS fence, and only then restores the control-loop checkpoint. The returned
-sealed recovery report includes the journal/control snapshot digests, recovered goal identities,
-whether an external post-dispatch reconciliation is still required, and a ready-to-use
-`resume_snapshot`; it never includes task text, parameters, handoffs, prompts, credentials,
+it restores the worker journal, enumerates every active
+`prepared`/`claimed`/`dispatch_started` boundary and every unresolved post-dispatch
+reconciliation, reconciles those goals through the authoritative ledger, flushes the new
+`reconciled` events through the journal CAS fence, and only then restores the control-loop
+checkpoint. The returned sealed recovery report includes the journal/control snapshot digests,
+recovered goal identities, whether an external post-dispatch reconciliation is still required,
+and a ready-to-use `resume_snapshot`; it never includes task text, parameters, handoffs, prompts, credentials,
 provider values, evaluator payloads, or results. `recovery.resume(loop, ...)` owns the snapshot
 argument and refuses a caller-supplied replacement, preventing a stale checkpoint from bypassing
-startup recovery. A `dispatch_started` goal is safely left `blocked` for explicit external
-reconciliation, while a pre-dispatch `claimed` goal is left `paused` for an explicit retry. This
+startup recovery. A `prepared` event with no committed claim is closed without changing the goal;
+if the claim committed before its journal marker, the goal is paused because dispatch could not
+have started yet. A pre-dispatch `claimed` goal is also left `paused`, while a `dispatch_started`
+goal is left `blocked` for explicit external reconciliation. Recovery report schema `/0.2` adds
+the `prepared` phase; validators still read `/0.1` reports that use only the earlier phase set. This
 is a local ordering and identity contract, not a distributed transaction: the application still
 owns durable storage, ledger snapshot atomicity, tenant identity, protected rehydration, effect
 idempotency, provider credentials, and the authority to resolve an uncertain external outcome.
@@ -7760,6 +7920,41 @@ Passing the coordinator into `AutonomousGoalAgentRuntime` additionally makes `re
 before `run()`, wires each loop checkpoint through journal-first persistence, and rejects a second
 checkpoint callback that could bypass the recovery fence. Without a coordinator, the runtime keeps
 the lower-level caller-composed behavior so deployments can choose a different orchestration layer.
+
+An application can settle a recovered `dispatch_started` boundary with
+`reconcile_external_outcome(...)` / `reconcileExternalOutcome(...)`. The metadata-only receipt must
+bind the exact goal attempt, recovered dispatch event digest, execution-binding digest, status,
+caller-owned evidence digest, verifier identity, and an exact decimal-string nanosecond observation
+time. Worker-journal events, snapshots, authenticated envelopes, and dispatch-resolution receipts use
+schema 0.2 with that same timestamp representation. TypeScript promotes its millisecond wall clock
+to nanoseconds using integer arithmetic; Python records its nanosecond clock directly.
+`migrateLegacyAutonomousGoalWorkerJournalSnapshot(...)` in TypeScript and
+`migrate_legacy_autonomous_goal_worker_journal_snapshot(...)` in Python verify the original 0.1
+snapshot digest and event chain before re-hashing them. They require the old timestamp unit explicitly
+and retain the source digest/head in migration provenance. For a legacy authenticated shared-store
+envelope, `migrateLegacyAuthenticatedAutonomousGoalWorkerJournalEnvelope(...)` and
+`migrate_legacy_authenticated_autonomous_goal_worker_journal_envelope(...)` first verify the old HMAC,
+then migrate and seal with the selected current key. Apply the returned envelope with the store's CAS
+using the old snapshot digest as the expected version. A 0.1 dispatch-resolution receipt is rejected:
+the deployment must re-verify the external status and issue a 0.2 receipt. Control-loop checkpoints
+use schema 0.2 and decimal-string nanoseconds for saved learner deadlines. Their explicit-unit
+checkpoint migrators verify the source digest and carry provenance into future generations. A
+`completed`, `failed`, or `not_applied` status settles or safely reopens that attempt; if a
+completed external job still has required goal criteria open, the goal is paused for review instead
+of being marked complete, and its review blocker prevents the scheduler from redispatching the
+completed task. The caller must settle the criteria and explicitly reopen the goal. `pending` and
+`unknown` keep the goal blocked and the journal recovery marker active across subsequent restarts.
+The journal stores the receipt digest and the bounded goal status needed to replay a staged
+settlement; it never stores the evidence payload. The persistence coordinator flushes that stage
+before updating the ledger, and restart recovery finishes or replays the transition if the process
+stops between writes. Both SDKs require a deployment-owned `AutonomousGoalDispatchResolutionVerifier`
+when the receipt is submitted for reconciliation. Its configured `verifier_id` must match the
+receipt, and its verifier must authenticate the exact normalized, metadata-only receipt and return
+true. Verification runs before journal or ledger mutation, including idempotent replay. The SDK does
+not call the external service, own trust keys, validate an evidence payload, or certify that a
+deployment's status authority is truthful. Deployments supply that verifier and remain responsible
+for its trust roots and status authority; uncertain calls remain fenced from duplicate dispatch
+until a receipt passes that boundary.
 
 `AutonomousGoalAgentRuntime` is the production composition bridge for long-horizon work. Prefer
 `agent.goal_agent_runtime(...)` or `agent.run_goal_control_loop(...)`: Python binds the goal
@@ -7771,7 +7966,11 @@ routing, prompt, model-selection, provider, connector/tool, and learning path as
 `cross_domain` goals enter the bounded specialist/fan-in path. Neither callback, its values, nor
 provider output enters the goal, schedule, worker, control, or evaluator projections. This makes
 the loop usable as an actual agent service while retaining the caller's authority over keys and
-effect approvals.
+effect approvals. Task text, identifiers, executor statuses, batch prefixes, and persisted JSON text
+use the same UTF-8 scalar validation and encoded-byte limits in both SDKs. Malformed surrogate
+text therefore fails before dispatch, digesting, or persistence byte accounting; values are never
+silently normalized. Run-options factory keys are valid Unicode string keys in both SDKs;
+TypeScript rejects symbol keys because Python mappings cannot represent them.
 
 The long-horizon facade also exposes `runWithTrace` in TypeScript and `run_with_trace` in Python.
 These methods establish one append-only, hash-chained trace for the entire scheduler/worker/
@@ -12902,6 +13101,31 @@ campaign a live orchestrator. Full autonomous external research still requires b
 retrieval, a shared authenticated execution journal and reconciliation authority, and independent
 source-quality and claim-integrity validation layered on this campaign contract.
 
+Python and TypeScript also expose `ReviewedClinicalTrialsRetrievalAdapter` for bounded, reviewed
+ClinicalTrials.gov registry metadata. Its network-free preflight binds one or both fixed glioma
+lanes, the exact requested field list, page and byte ceilings, and the selected transport identity.
+Execution requires literal source-dispatch approval, refuses redirects and duplicate JSON fields,
+checks pagination and NCT identifiers, and records source totals and truncation. The built-in
+transport enforces the configured timeout; caller-injected transports must enforce their own
+timeout and network policy under the supplied identity. Trial rows and page tokens remain
+transient; registration in the generic evidence runtime projects only source and bundle digests.
+This source does not retrieve eligibility criteria, registry results, documents, contacts,
+participant data, or arbitrary caller-supplied conditions, and registry metadata cannot establish
+eligibility, treatment benefit, or clinical applicability.
+
+Python and TypeScript also provide `ReviewedEuropePmcRetrievalAdapter` for bounded Europe PMC
+`lite` publication metadata. Its network-free preflight binds a fixed six-lane specialty catalogue,
+the JSON `lite` response mode, transport identity, page ceiling, and byte/tree/bundle bounds. Approved
+execution uses the fixed Europe PMC REST search host, follows cursor marks only by rebuilding the
+request on that host, and never follows response-provided URLs. Stable hit counts and cursor state
+produce explicit `complete`, `partial`, or `unknown` coverage; changing totals stay unknown. Titles,
+authors, and other publication metadata remain in the caller-owned transient bundle, while durable
+receipts retain digests, counts, and bounded limitations. The single-lane registration validates
+publication rows against source, bundle, and receipt digests before emitting provenance-only
+evidence. This is discovery metadata rather than an exhaustive search, abstract/full-text retrieval,
+or scientific-quality assessment. The adapter follows the [Europe PMC REST API](https://dev.europepmc.org/RestfulWebService)
+and its [web-service reference](https://dev.europepmc.org/docs/EBI_Europe_PMC_Web_Service_Reference.pdf).
+
 ## Coordinated agent persistence lifecycle
 
 The high-level brain now has one explicit startup/shutdown seam in both SDKs:
@@ -12921,13 +13145,23 @@ the live health controller.
 
 Each operation returns a digest-bound metadata report with one row per component, component
 status, snapshot/state digest projections, generation when available, a bounded error class, and
-an explicit `next_action`. Strict mode is the default: a failed component stops the pass and raises
+an explicit `next_action`. Generation projection uses `generation`, falling back to
+`snapshot_generation` when the former is null or absent, and retains only non-negative integral
+values in JavaScript's safe-integer range; this keeps Python and TypeScript lifecycle reports
+consistent even when caller stores expose different numeric representations. Strict mode is the default: a failed component stops the pass and raises
 the typed `AutonomousAgentPersistenceLifecycleError` with the redacted report attached.
 Applications that
 want to inspect all independent stores can use `strict: false` plus `continue_on_error` /
 `continueOnError`; `require_all` / `requireAll` turns missing optional coordinators into a
 fail-closed lifecycle failure. Unconfigured components remain visible in non-strict reports rather
-than being mistaken for restored state.
+than being mistaken for restored state. A configured restore receipt with `restored: false` is
+reported as `empty`, and malformed restore flags fail the component instead of being counted as a
+successful recovery.
+
+Explicit capability-journal, decision-cycle, and execution persistence coordinators must expose
+both `restore` and `flush` and must be the same objects already bound to the agent. Both SDKs
+reject a different or malformed coordinator at construction time; the lifecycle cannot report a
+store as configured while invoking another coordinator hidden on the agent.
 
 Activation and selection-promotion stores are optional lifecycle inputs because they are
 caller-owned approval boundaries. When supplied, activation restore preserves revocation,
@@ -13057,6 +13291,28 @@ and delegates to the existing readiness recheck and explicit source-approval con
 CAS-fenced checkpoint path. This is a composition boundary, not an authorization shortcut:
 `approve_source_dispatch`, provider contracts, evaluator acceptance, and contradiction resolution
 remain independent caller-owned decisions.
+
+`settle_claim_integrity_acquisition()` / `settleClaimIntegrityAcquisition()` closes the return
+path after a reviewed execution. It requires the original assessment, bridge, exact request
+binding, completed execution result (or resumable run with a result), the original claim
+contracts, the existing evidence set, and explicit evidence-to-receipt links. It verifies that
+each receipt came from the bound request batch, that its accepted runtime assessment names the
+same evidence digest and source, and that the claim evidence targets only claims selected by that
+candidate's integrity actions. Settlement also requires a deployment-owned
+`AutonomousClaimIntegrityEvidenceAuthority` / `evidence_authority`. Its read-only review projection
+binds the exact candidate, request, source receipt, accepted source-quality assessment, claim
+contracts, and proposed evidence metadata. The verifier must independently assess the claim
+evidence against an existing authority receipt and return its digest without issuing or mutating
+receipts during settlement. The SDK records that authority identity,
+review digest, and receipt digest in the next generation. Missing, failed, or unverified requests
+cannot promote a claim. The deployment still owns the authority implementation, trust roots, and
+access to source values; the SDK does not claim that a digest or evaluator score is scientific truth.
+Review schema `/0.2` represents bounded scores and weights as integer units of `1e-8`; metadata
+fingerprints use a type-tagged portable encoding. Metadata is capped at 16 KiB of canonical JSON,
+and unsafe integer or invalid Unicode values are rejected so Python and TypeScript can check the
+same review digest. `AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES` exposes the shared limit.
+Applications must supply the full prior evidence set because assessments intentionally retain only
+bounded projections, not the raw evidence contracts.
 
 ## Outcome-integrity reliance gate
 
@@ -13428,8 +13684,10 @@ The result contains the digest-bound schedule, `admissible_work`, `all_terminal`
 `no_admissible_work` status, eligible-goal count, decision and reason histograms, lifecycle
 status counts, and dependency-blocked goal identities. When the built-in goal bandit is
 configured, its current value-state digest is included without mutating its generation. The
-preview digest binds those projections to the exact schedule digest and normalized policy. A
-caller can therefore show an operator why a goal is waiting on a dependency, paused-policy
+preview digest binds those projections to the exact schedule digest and normalized policy. The
+schedule and lifecycle status come from the same bounded ledger snapshot, so concurrent worker
+progress cannot mix two goal states into one preview digest. A caller can therefore show an
+operator why a goal is waiting on a dependency, paused-policy
 choice, retry budget, concurrency/cost quota, or terminal state before deciding whether to call
 `run()`.
 
@@ -13468,7 +13726,13 @@ legacy domain-only and current contextual retention markers during checkpoint re
 canonical arm identity and snapshot/state digests are aligned, so a learner can move between Python
 and TypeScript without silently mixing unrelated goal populations. This remains value-only admission
 priority adaptation: it does not grant permissions, choose credentials, bypass approvals, or treat
-an evaluator reward as scientific truth.
+an evaluator reward as scientific truth. Both SDKs quantize non-negative priority and urgency with
+the same ties-up rounding rule and order goal identities by Unicode scalar value, so equivalent
+histories produce the same signal order and digest. Learner restore and update are transactional:
+direct restore verifies the inner state digest and exact value-only envelope, while retaining the
+legacy domain-only marker. Malformed state or evaluation input leaves the last valid projection
+intact. Python also serializes learner snapshots with updates so a preview digest always describes
+one complete learner generation.
 
 The goal-agent bridge also binds this context into execution. For every admitted goal with a
 capability or risk class, Python and TypeScript inject the ledger value into the transient run
@@ -13859,8 +14123,12 @@ effect callback; the callback is never invoked after a refused decision.
 Issuance and use events form a bounded hash chain. Canonical JSON persistence supports restore
 validation and optional compare-and-swap fencing, and snapshot validation checks grant issuance
 history, revocation semantics, request-use accounting, event sequence, predecessor links, and
-outer digests before replacing live state. The high-level Python agent exposes
-`create_authorization_ledger()` / `create_authorization_gate()` and the TypeScript facade exposes
+outer digests before replacing live state. Grant issuance, revocation, and allowed-use recording
+check event capacity before committing the grant mutation, so a full audit log leaves ledger
+state unchanged. Validated grants, requests, decisions, and events are immutable in both SDKs, so
+their scope and metadata cannot drift away from the digest that was checked. The high-level
+Python agent exposes `create_authorization_ledger()` / `create_authorization_gate()` and the
+TypeScript facade exposes
 `createAuthorizationLedger()` / `createAuthorizationGate()` so applications do not need to
 reach below the application boundary to construct the contract.
 

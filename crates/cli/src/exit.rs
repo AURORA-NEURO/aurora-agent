@@ -282,7 +282,11 @@ impl CliError {
             | FiberError::InvalidDecisionContract(_)
             | FiberError::InvalidRateDistortionContract(_)
             | FiberError::InvalidAdaptiveAcquisitionContract(_)
+            | FiberError::InvalidOracleTimestamp { .. }
+            | FiberError::IncomparableOracleTimePrecision { .. }
+            | FiberError::WrongOracleFieldType { .. }
             | FiberError::World(_) => ExitCode::InvalidInput,
+            FiberError::WorldSource(_) => ExitCode::Io,
             FiberError::InvariantViolation(_) => ExitCode::CompileFailed,
             FiberError::BudgetExceeded { .. } => ExitCode::CompileFailed,
             FiberError::UnorderableSplitGroups { .. } => ExitCode::Indeterminate,
@@ -483,7 +487,8 @@ impl CliError {
             | AutopilotError::InvalidReport { .. }
             | AutopilotError::InvalidInstantiation { .. }
             | AutopilotError::InvalidAutopilotReport { .. }
-            | AutopilotError::InvalidCheckpoint { .. } => CliError::invalid(message),
+            | AutopilotError::InvalidCheckpoint { .. }
+            | AutopilotError::InvalidInvocationDispatchLimit { .. } => CliError::invalid(message),
             AutopilotError::Canonicalisation { .. }
             | AutopilotError::Persistence { .. }
             | AutopilotError::CompareAndSwapConflict

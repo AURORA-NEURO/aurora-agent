@@ -881,10 +881,12 @@ mod tests {
         let output = plan_glioma_evidence_acquisition(&request, &[human]).unwrap();
         assert_eq!(output.disposition, EvidenceAcquisitionDisposition::Blocked);
         assert_eq!(output.blocked_order, vec!["human-cohort"]);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("human-data")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("human-data"))
+        );
         output.validate().unwrap();
     }
 

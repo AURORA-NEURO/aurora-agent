@@ -8,7 +8,7 @@
 
 use crate::glioma::release::ReleaseStatus;
 use crate::glioma::{
-    build_research_object_manifest, ResearchObjectManifest, ResearchObjectRequest,
+    ResearchObjectManifest, ResearchObjectRequest, build_research_object_manifest,
 };
 use crate::glioma_engine::LocalArtifactRef;
 use bioprism_ids::ContentHash;
@@ -233,7 +233,7 @@ fn task_map(tasks: &[ReplayTask]) -> BTreeMap<String, &ReplayTask> {
         .collect()
 }
 
-fn validate_tasks(request: &ReplayCampaignRequest) -> Result<(), ReplayCampaignError> {
+pub(super) fn validate_tasks(request: &ReplayCampaignRequest) -> Result<(), ReplayCampaignError> {
     if request.max_rounds == 0
         || request.max_rounds > MAX_ROUNDS
         || request.max_retries > MAX_RETRIES
@@ -865,10 +865,12 @@ mod tests {
         let output = execute_glioma_replay_campaign(&request, &mut executor).unwrap();
         assert_eq!(output.disposition, ReplayCampaignDisposition::Partial);
         assert_eq!(output.unavailable_order, vec!["mechanism-replay"]);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|value| value.contains("coverage-gate")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|value| value.contains("coverage-gate"))
+        );
     }
 
     #[test]

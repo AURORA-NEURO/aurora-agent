@@ -410,8 +410,8 @@ pub fn admit_glioma_research_workflow(
 mod tests {
     use super::*;
     use crate::glioma::programs::p02_evidence_knowledge::multimodal_workflow::{
-        compile_multimodal_knowledge_workflow, ModalityWorkflowObservation,
-        MultimodalWorkflowRequest,
+        ModalityWorkflowObservation, MultimodalWorkflowRequest,
+        compile_multimodal_knowledge_workflow,
     };
     use crate::glioma::programs::p02_evidence_knowledge::workflow_compile::{
         LocalResearchWorkflow, LocalWorkflowDisposition, LocalWorkflowStep,
@@ -574,9 +574,11 @@ mod tests {
         })
         .expect("admission");
         assert_eq!(output.disposition, ResearchAdmissionDisposition::Degraded);
-        assert!(output.actions[0]
-            .stop_condition_order
-            .contains(&"coverage_below_declared_threshold".into()));
+        assert!(
+            output.actions[0]
+                .stop_condition_order
+                .contains(&"coverage_below_declared_threshold".into())
+        );
     }
 
     #[test]

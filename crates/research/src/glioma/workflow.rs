@@ -8,9 +8,9 @@
 //! seam.
 
 use super::super::glioma_engine::{
-    compile_glioma_research, execute_glioma_research, GliomaExecutionReceipt, GliomaModality,
-    GliomaPlanDisposition, GliomaResearchIntent, GliomaStageExecutor, GliomaStageKind,
-    StageReadiness,
+    GliomaExecutionReceipt, GliomaModality, GliomaPlanDisposition, GliomaResearchIntent,
+    GliomaStageExecutor, GliomaStageKind, StageReadiness, compile_glioma_research,
+    execute_glioma_research,
 };
 use super::evidence::{EvidenceDisposition, EvidenceQualification};
 use super::experiment::{ExperimentDesign, ExperimentDisposition};
@@ -907,7 +907,7 @@ pub fn execute_glioma_workflow<E: GliomaStageExecutor>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::glioma::evidence::{qualify_evidence, EvidenceRequest};
+    use crate::glioma::evidence::{EvidenceRequest, qualify_evidence};
     use crate::glioma_engine::{DryRunGliomaExecutor, GliomaModelSystem, LocalArtifactRef};
     use bioprism_onco::OutputUse;
 
@@ -996,9 +996,10 @@ mod tests {
             max_parallelism: 2,
         };
         let plan = plan_glioma_workflow(&request).unwrap();
-        assert!(plan
-            .completed_order
-            .contains(&"evidence-compilation".into()));
+        assert!(
+            plan.completed_order
+                .contains(&"evidence-compilation".into())
+        );
         assert!(plan.hold_order.contains(&"mechanism-exploration".into()));
         let mut executor = DryRunGliomaExecutor;
         assert!(matches!(
@@ -1050,12 +1051,15 @@ mod tests {
             max_parallelism: 2,
         };
         let plan = plan_glioma_workflow(&request).unwrap();
-        assert!(plan
-            .abstain_order
-            .contains(&"federation-benchmarking".into()));
-        assert!(!plan
-            .skipped_order
-            .contains(&"federation-benchmarking".into()));
+        assert!(
+            plan.abstain_order
+                .contains(&"federation-benchmarking".into())
+        );
+        assert!(
+            !plan
+                .skipped_order
+                .contains(&"federation-benchmarking".into())
+        );
     }
 
     #[test]

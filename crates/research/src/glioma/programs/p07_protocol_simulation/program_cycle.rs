@@ -8,9 +8,9 @@
 
 use super::action_execution::GliomaActionExecutor;
 use super::autonomous_engine::{
-    execute_glioma_autonomous_research_engine, GliomaAutonomousResearchEngineDisposition,
-    GliomaAutonomousResearchEngineError, GliomaAutonomousResearchEngineRequest,
-    GliomaAutonomousResearchEngineRun,
+    GliomaAutonomousResearchEngineDisposition, GliomaAutonomousResearchEngineError,
+    GliomaAutonomousResearchEngineRequest, GliomaAutonomousResearchEngineRun,
+    execute_glioma_autonomous_research_engine,
 };
 use crate::glioma_engine::GliomaStageKind;
 use bioprism_ids::ContentHash;
@@ -499,10 +499,12 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.gates.len(), GliomaStageKind::ALL.len());
         assert!(first.simulation_only);
-        assert!(first
-            .gates
-            .iter()
-            .any(|gate| gate.status == ProgramGateStatus::Cleared));
+        assert!(
+            first
+                .gates
+                .iter()
+                .any(|gate| gate.status == ProgramGateStatus::Cleared)
+        );
         assert!(first.progress_milli > 0);
         first.validate().unwrap();
     }

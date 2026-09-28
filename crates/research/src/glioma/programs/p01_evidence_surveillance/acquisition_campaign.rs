@@ -687,8 +687,8 @@ pub fn execute_glioma_evidence_acquisition_campaign<E: EvidenceAcquisitionExecut
 mod tests {
     use super::*;
     use crate::glioma::programs::p01_evidence_surveillance::acquisition::{
-        plan_glioma_evidence_acquisition, EvidenceAcquisitionRequest,
-        EvidenceAcquisitionSourceKind, EvidenceAcquisitionWeights,
+        EvidenceAcquisitionRequest, EvidenceAcquisitionSourceKind, EvidenceAcquisitionWeights,
+        plan_glioma_evidence_acquisition,
     };
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem};
 

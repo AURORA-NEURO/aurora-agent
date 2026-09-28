@@ -8,7 +8,7 @@
 //! This file does not reach every verifier in the workspace, and it no longer says it does.
 //! `every_document_verifier_in_the_workspace_is_covered_or_recorded` is what keeps that honest: it
 //! scans `crates/*/src` for verifier entry points and fails unless each one is either driven by a
-//! battery or written down with a reason. Ten of them are document verifiers neither battery
+//! battery or written down with a reason. Twelve of them are document verifiers neither battery
 //! reaches; they are named in `UNCOVERED_DOCUMENT_VERIFIERS` rather than left to be found later.
 //!
 //! # Two shapes of subject
@@ -864,7 +864,7 @@ const COVERED_BY_THE_RECEIPT_BATTERY: [(&str, &str); 5] = [
 ///
 /// A battery of document mutations has nothing to say to any of these: there is no document, or
 /// the integrity claim belongs to a chain, a key, or a live struct rather than to bytes on a wire.
-const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 63] = [
+const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 66] = [
     (
         "bundle/src/attestation.rs::verify",
         "a MAC tag over a key and purpose preimage, not a document",
@@ -1117,6 +1117,18 @@ const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 63] = [
         "services/src/research_release.rs::verify_research_release",
         "verifies a signed research release using a receiving institution's key and live object",
     ),
+    (
+        "research/src/glioma/programs/p01_evidence_surveillance/verification_gate.rs::verify_glioma_evidence",
+        "evaluates a typed evidence request and derives a report; it does not verify a persisted document",
+    ),
+    (
+        "research/src/glioma/programs/p03_multimodal_ingestion_qc/quality_recovery.rs::verify_glioma_multimodal_quality_recovery",
+        "evaluates typed remediation observations and derives a result; it does not verify a persisted document",
+    ),
+    (
+        "research/src/glioma/programs/p11_research_object_release/signature_protocol.rs::verify_glioma_local_release_signature",
+        "verifies a detached Ed25519 signature over canonical payload bytes using a caller-supplied key; it does not authenticate the signer or verify a self-sealed document",
+    ),
 ];
 
 /// Document verifiers neither battery reaches. Recorded, not excused.
@@ -1124,7 +1136,7 @@ const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 63] = [
 /// Each one reads a serialized document and checks its own integrity, which is exactly what these
 /// generators are built to attack. They are listed so the gap is a number someone can act on
 /// rather than a silence, and so the module doc above cannot quietly regrow its old claim.
-const UNCOVERED_DOCUMENT_VERIFIERS: [(&str, &str); 10] = [
+const UNCOVERED_DOCUMENT_VERIFIERS: [(&str, &str); 12] = [
     (
         "bioworlds/src/slice.rs::digest_is_intact",
         "a per-slice self-seal; the catalogue report's own check never recurses into it",
@@ -1166,9 +1178,17 @@ const UNCOVERED_DOCUMENT_VERIFIERS: [(&str, &str); 10] = [
         "bioeval/src/credit.rs::verify",
         "replays the rule on the evidence, catching an edited fraction in a serialised award",
     ),
+    (
+        "research-campaign/src/reconciliation.rs::verify_campaign_reconciliation",
+        "verifies a serialized campaign receipt against the exact query and caller-owned execution journal",
+    ),
+    (
+        "autopilot/src/goal_control.rs::verify_goal_control_report",
+        "verifies a serialized goal-control report, its cycle chain, aggregate budget, completion assertion, and mandatory limitations",
+    ),
 ];
 
-/// Every `pub fn verify...` and `pub fn digest_is_intact` under `crates/*/src`.
+/// Every public `fn verify...` and `fn digest_is_intact` under `crates/*/src`.
 ///
 /// Returned as `<path under crates/>::<fn name>`, with path separators normalised, so the keys
 /// read the same on every platform.
@@ -1200,21 +1220,110 @@ fn verifier_entry_points(crates: &Path) -> BTreeSet<String> {
                 .to_string_lossy()
                 .replace('\\', "/");
             let text = fs::read_to_string(&path).expect("a source file is readable");
-            for line in text.lines() {
-                let Some(rest) = line.trim_start().strip_prefix("pub fn ") else {
+            let lines = text.lines().collect::<Vec<_>>();
+            for (line_index, line) in lines.iter().enumerate() {
+                if !line.trim_start().starts_with("pub") {
                     continue;
-                };
-                let name: String = rest
-                    .chars()
-                    .take_while(|character| character.is_alphanumeric() || *character == '_')
-                    .collect();
-                if name.starts_with("verify") || name == "digest_is_intact" {
-                    found.insert(format!("{relative}::{name}"));
+                }
+                let mut declaration = String::new();
+                for continuation in lines.iter().skip(line_index).take(8) {
+                    declaration.push_str(continuation.trim_start());
+                    if let Some(name) = public_verifier_name(&declaration) {
+                        found.insert(format!("{relative}::{name}"));
+                        break;
+                    }
+                    if declaration.contains(';') || declaration.contains('{') {
+                        break;
+                    }
+                    declaration.push(' ');
                 }
             }
         }
     }
     found
+}
+
+fn public_verifier_name(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix("pub")?;
+    if !rest.starts_with(char::is_whitespace) {
+        // Restricted visibility (`pub(crate)`, `pub(super)`, `pub(in path)`) is not public API.
+        return None;
+    }
+    let mut tokens = rest.split_whitespace().peekable();
+    while let Some(token) = tokens.next() {
+        match token {
+            "async" | "const" | "unsafe" => {}
+            "extern" => {
+                if tokens.peek().is_some_and(|next| next.starts_with('"')) {
+                    tokens.next();
+                }
+            }
+            "fn" => {
+                let declaration = tokens.next()?;
+                let name: String = declaration
+                    .chars()
+                    .take_while(|character| character.is_alphanumeric() || *character == '_')
+                    .collect();
+                return (name.starts_with("verify") || name == "digest_is_intact").then_some(name);
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+#[test]
+fn verifier_inventory_scanner_sees_planted_entries_and_ignores_nonverifiers() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace = manifest
+        .parent()
+        .and_then(Path::parent)
+        .expect("the crate sits inside the workspace");
+    let target = workspace
+        .join("target")
+        .canonicalize()
+        .expect("the workspace target directory exists");
+    let test_root = target.join(format!("verifier-inventory-fixture-{}", std::process::id()));
+    assert!(
+        !test_root.exists(),
+        "the isolated verifier scanner fixture must start absent"
+    );
+    let source = test_root.join("crates/synthetic/src/nested/inventory.rs");
+    fs::create_dir_all(source.parent().unwrap()).expect("the fixture source directory is created");
+    fs::write(
+        &source,
+        "pub fn verify_document() {}\npub async fn verify_async_document() {}\n\
+         pub\nasync\nfn verify_multiline_document() {}\n\
+         pub const fn verify_const_document() {}\npub unsafe fn verify_unsafe_document() {}\n\
+         pub extern \"C\" fn verify_abi_document() {}\npub fn digest_is_intact() {}\n\
+         pub fn verification_helper() {}\npub(crate) fn verify_private_document() {}\n",
+    )
+    .expect("the planted source file is written");
+
+    let crates = test_root.join("crates");
+    let found = verifier_entry_points(&crates);
+    assert_eq!(
+        found,
+        BTreeSet::from([
+            "synthetic/src/nested/inventory.rs::digest_is_intact".into(),
+            "synthetic/src/nested/inventory.rs::verify_abi_document".into(),
+            "synthetic/src/nested/inventory.rs::verify_async_document".into(),
+            "synthetic/src/nested/inventory.rs::verify_const_document".into(),
+            "synthetic/src/nested/inventory.rs::verify_document".into(),
+            "synthetic/src/nested/inventory.rs::verify_multiline_document".into(),
+            "synthetic/src/nested/inventory.rs::verify_unsafe_document".into(),
+        ]),
+        "the scanner must find public verifier shapes recursively and ignore ordinary/private functions"
+    );
+
+    let resolved_test_root = test_root
+        .canonicalize()
+        .expect("the isolated fixture root exists");
+    assert!(
+        resolved_test_root.starts_with(&target),
+        "the fixture cleanup target must remain inside workspace target"
+    );
+    fs::remove_dir_all(resolved_test_root).expect("the isolated fixture is removed");
 }
 
 #[test]
@@ -1270,9 +1379,9 @@ fn every_document_verifier_in_the_workspace_is_covered_or_recorded() {
             NOT_A_DOCUMENT_VERIFIER.len(),
             UNCOVERED_DOCUMENT_VERIFIERS.len(),
         ),
-        (11, 5, 63, 10),
-        "eleven entry points driven here, five by the first battery, sixty-three that verify \
-         something other than a document, and ten document verifiers no battery reaches yet"
+        (11, 5, 66, 12),
+        "eleven entry points driven here, five by the first battery, sixty-six that verify \
+         something other than a document, and twelve document verifiers no battery reaches yet"
     );
 }
 
@@ -1424,7 +1533,7 @@ fn the_whole_battery_finds_no_hole_outside_the_gaps_this_repository_has_named() 
     // about coverage, so exactness lives where it is meaningful and the total is a floor.
     assert_eq!(
         total_positions,
-        5_229,
+        5_223,
         "every position the battery visits is a pinned claim; bounds were:\n{}",
         bounds.join("\n")
     );
@@ -1719,7 +1828,7 @@ fn deleting_any_field_at_any_visited_position_is_rejected_and_never_silently_acc
         }
         cases_run += cases.len();
     }
-    assert_eq!(cases_run, 5_216, "deletion cases across thirteen documents");
+    assert_eq!(cases_run, 5_210, "deletion cases across thirteen documents");
     excused.pin(23, &[("repair_acceptance_report", 16)], "deletion");
 }
 
@@ -1744,7 +1853,7 @@ fn replacing_any_visited_value_with_an_empty_string_or_null_is_rejected() {
         cases_run += cases.len();
     }
     assert_eq!(
-        cases_run, 10_416,
+        cases_run, 10_408,
         "empty-or-null cases across thirteen documents"
     );
     excused.pin(0, &[("repair_acceptance_report", 21)], "empty or null");

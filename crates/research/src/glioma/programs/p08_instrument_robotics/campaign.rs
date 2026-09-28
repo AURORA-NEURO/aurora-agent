@@ -7,8 +7,8 @@
 //! institution-owned `InstrumentExecutor` remains the only effectful seam.
 
 use super::execution::{
-    execute_glioma_instrument_plan, InstrumentExecutionDisposition, InstrumentExecutionRequest,
-    InstrumentExecutionRun, InstrumentExecutor,
+    InstrumentExecutionDisposition, InstrumentExecutionRequest, InstrumentExecutionRun,
+    InstrumentExecutor, execute_glioma_instrument_plan,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -467,13 +467,13 @@ pub fn execute_glioma_instrument_campaign<E: InstrumentExecutor>(
 mod tests {
     use super::*;
     use crate::glioma::programs::p08_instrument_robotics::calibration::{
-        analyze_instrument_calibration, CalibrationRequest, CalibrationRun,
+        CalibrationRequest, CalibrationRun, analyze_instrument_calibration,
     };
     use crate::glioma::programs::p08_instrument_robotics::execution::DryRunInstrumentExecutor;
     use crate::glioma::programs::p08_instrument_robotics::preflight::{
-        preflight_glioma_instrument, InstrumentAction, InstrumentAuthorization,
-        InstrumentInterlockSnapshot, InstrumentOperation, InstrumentParameter,
-        InstrumentPreflightRequest,
+        InstrumentAction, InstrumentAuthorization, InstrumentInterlockSnapshot,
+        InstrumentOperation, InstrumentParameter, InstrumentPreflightRequest,
+        preflight_glioma_instrument,
     };
     use crate::glioma_engine::GliomaModelSystem;
 

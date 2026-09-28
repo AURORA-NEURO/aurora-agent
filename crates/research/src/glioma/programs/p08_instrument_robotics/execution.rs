@@ -748,11 +748,11 @@ pub fn execute_glioma_instrument_plan<E: InstrumentExecutor>(
 mod tests {
     use super::*;
     use crate::glioma::programs::p08_instrument_robotics::calibration::{
-        analyze_instrument_calibration, CalibrationRequest, CalibrationRun,
+        CalibrationRequest, CalibrationRun, analyze_instrument_calibration,
     };
     use crate::glioma::programs::p08_instrument_robotics::preflight::{
-        preflight_glioma_instrument, InstrumentOperation, InstrumentParameter,
-        InstrumentPreflightRequest,
+        InstrumentOperation, InstrumentParameter, InstrumentPreflightRequest,
+        preflight_glioma_instrument,
     };
     use crate::glioma_engine::GliomaModelSystem;
 
@@ -760,8 +760,8 @@ mod tests {
         ContentHash::of_bytes(label.as_bytes())
     }
 
-    fn calibration(
-    ) -> crate::glioma::programs::p08_instrument_robotics::calibration::InstrumentCalibration {
+    fn calibration()
+    -> crate::glioma::programs::p08_instrument_robotics::calibration::InstrumentCalibration {
         let runs = (1..=3)
             .map(|sequence_index| CalibrationRun {
                 run_id: format!("cal-{sequence_index}"),

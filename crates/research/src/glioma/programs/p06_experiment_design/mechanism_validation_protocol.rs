@@ -12,8 +12,8 @@ use super::mechanism_validation::{
 };
 use super::power_reestimation::PowerDecisionKind;
 use crate::glioma::programs::p07_protocol_simulation::{
-    simulate_glioma_protocol, ProtocolDisposition, ProtocolResource, ProtocolResourceKind,
-    ProtocolSimulation, ProtocolSimulationError, ProtocolSimulationRequest, ProtocolTask,
+    ProtocolDisposition, ProtocolResource, ProtocolResourceKind, ProtocolSimulation,
+    ProtocolSimulationError, ProtocolSimulationRequest, ProtocolTask, simulate_glioma_protocol,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_foundation::PRECLINICAL_BOUNDARY;
@@ -506,11 +506,11 @@ mod tests {
         MechanismGraphEdge, MechanismGraphNode, MechanismGraphRelation,
     };
     use crate::glioma::programs::p05_mechanism_exploration::robust_portfolio::{
-        plan_glioma_robust_intervention_portfolio, PortfolioDirection, RobustInterventionCandidate,
-        RobustInterventionRequest,
+        PortfolioDirection, RobustInterventionCandidate, RobustInterventionRequest,
+        plan_glioma_robust_intervention_portfolio,
     };
     use crate::glioma::programs::p06_experiment_design::mechanism_validation::{
-        plan_glioma_mechanism_validation, MechanismValidationPlanRequest,
+        MechanismValidationPlanRequest, plan_glioma_mechanism_validation,
     };
     use crate::glioma::programs::p06_experiment_design::power_reestimation::{
         PowerArmObservation, PowerReestimationRequest,

@@ -70,7 +70,55 @@ workspace actually covers, and which sections have nothing standing in for them:
 [docs/COVERAGE.md](docs/COVERAGE.md). The crate layout and the blueprint path:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+The Rust glioma research engine tracks executable capabilities in
+[`docs/glioma/PROGRAM_PLAN.md`](docs/glioma/PROGRAM_PLAN.md). P10 F32 adds longitudinal replication
+transport through `analyze_glioma_longitudinal_transport` and the MCP tool
+`glioma_longitudinal_transport_analyze`: studies must bind the same estimand and effect unit and
+cover one shared time grid, with incomplete studies excluded rather than imputed. Different model
+systems incur the maximum transport gap and are included only when the request explicitly allows
+that maximum; signature similarity weights admitted sources. Effects are bounded to ±1,000,000,000
+milli-units before fixed-point pooling. Its gate and threshold policy is
+explicitly repository-defined because this checkout has no configured detailed source blueprint
+for that slot.
+
+P10 F03 plans prospective resolvers for conflicting preclinical claims through
+`analyze_glioma_prospective_contradiction` and MCP `glioma_prospective_contradiction_plan`. Rival
+statements, evidence reports, design reports, and local artifacts remain digest-bound. Evidence is
+counted by independent group, shared support across rivals cannot establish exclusive support, and
+low-quality, null, and unresolved findings remain visible. Resolver prediction intervals must
+separate a rival pair and pass feasibility, risk, and budget gates. A `plan_ready` result means the
+bounded portfolio covers all declared rival pairs; it does not mean an experiment ran or a claim
+was resolved. Its contract is repository-defined because this checkout has no detailed P10-F03
+blueprint configured.
+
+P10 F02 compares independent study effects through `analyze_glioma_multistudy_concordance` and
+MCP `glioma_multistudy_concordance_analyze`. It binds an exact estimand and unit, reports every
+eligible same-model pair by interval overlap and confident direction, and keeps cross-model pairs
+incomparable. It retains null, unresolved, and low-quality studies without imputation or pooling.
+The contract is repository-defined because this checkout has no configured detailed P10-F02
+blueprint.
+
+P10 F04 audits registered-outcome reporting through
+`audit_glioma_registered_outcome_reporting` and MCP
+`glioma_registered_outcome_reporting_audit`. It compares local registry protocols with reviewed
+result-report metadata, marks overdue missing primary outcomes, and separates incomplete,
+ambiguous, unregistered, and not-yet-due outcomes. It accepts no effect values and treats reporting
+differences as review signals rather than proof of publication bias or misconduct. Its contract is
+repository-defined because this checkout has no detailed P10-F04 blueprint.
+
+P10 F05 adds `build_glioma_registered_outcome_record` and MCP
+`glioma_registered_outcome_record_build` for a single digest-bound study outcome. P10 F06 adds
+`build_glioma_registered_outcome_evidence_panel` and MCP
+`glioma_registered_outcome_evidence_panel` to combine compatible records across independent studies
+without pooling effects. The companion `glioma_registered_outcome_sensitivity_analyze` route
+evaluates caller-declared missing-result ranges as separate scenarios. These contracts are
+repository-defined because this checkout has no detailed P10-F05/F06 blueprints.
+
 ## Autonomous agent process boundary
+
+The Rust runtime also exposes an opt-in Docker-backed command boundary for callers that need an
+explicit Linux process boundary. It is not connected to agent tool dispatch or the trial provider;
+its limits and integration boundary are documented in [docs/OCI_SANDBOX.md](docs/OCI_SANDBOX.md).
 
 The Python SDK includes a secret-safe operator entry point for the autonomous brain:
 
@@ -956,6 +1004,17 @@ exhausted grant therefore cannot contact a provider, while failover and streamin
 tenant/session boundary. The context never carries a key, prompt, message, response, or tool
 result; credentials remain caller-supplied opaque handles.
 
+Goal ledgers support canonical JSON persistence with atomic CAS. For a shared store, the TypeScript
+`AuthenticatedTransactionalJsonAutonomousGoalPersistence` and Python
+`AuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence` also authenticate snapshots
+with a deployment-owned, rotatable HMAC keyring. HMAC detects modification and untrusted origins;
+it does not encrypt snapshots or detect rollback to an older valid snapshot. The deployment still
+owns store authorization, encryption, and any trusted monotonic anti-rollback anchor.
+
+The goal worker's optional `persist_dispatch_intent` hook runs after it records `dispatch_started`
+and before the executor can run. Bind it to the deployment's journal/goal persistence transaction;
+a refused commit stops dispatch and leaves the journal held for conservative recovery.
+
 The same context can be passed to `AutonomousEvidenceRuntime.execute()` or the reviewed evidence
 execution controller. It authorizes `evidence_acquisition` immediately before each source adapter
 and `evaluation` immediately before each evaluator callback, binding the decision to a request or
@@ -1180,7 +1239,7 @@ neither; the registry it found them in is retained there as the audit's known-po
 - **VS Code**: sideload `aurora-agent-0.1.3.vsix` from the
   [v0.1.3 release](https://github.com/AURORA-NEURO/aurora-agent/releases/tag/v0.1.3)
   (`code --install-extension aurora-agent-0.1.3.vsix`). The extension registers the MCP
-  server with VS Code (1.101+) so Copilot agent mode can call the 264 tools, and adds
+  server with VS Code (1.101+) so Copilot agent mode can call the 893 tools, and adds
   workflow/autopilot/pipeline views (see [editors/vscode](editors/vscode/)).
 - **MCP registry**: listed as `io.github.MurariAmbati/aurora-agent` on
   [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io/).
@@ -1189,7 +1248,7 @@ neither; the registry it found them in is retained there as the audit's known-po
 ## Documentation
 
 Project site: [aurora-neuro.github.io/aurora-agent](https://aurora-neuro.github.io/aurora-agent/).
-The full reference lives in [docs/](docs/); contribution workflow in
+Browse the [documentation map](docs/README.md) for the full reference; contribution workflow in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Autonomous workflows, with receipts
@@ -1211,15 +1270,29 @@ tampered byte. `--dry-run` plans attempt 1 only — no dispatch, zero writes.
 ```bash
 bioprism workflow instantiate --workflow decision_context --mission-id demo --goal "compile and verify" --steps steps.json
 bioprism autopilot grant-template --json > grant.json
-bioprism autopilot run --instantiation instantiation.json --grant grant.json --report-out report.json
+bioprism autopilot run --instantiation instantiation.json --grant grant.json --report-out report.json --recovery-dir autopilot-state
+bioprism autopilot resume --instantiation instantiation.json --grant grant.json --recovery-dir autopilot-state
 bioprism autopilot verify --report report.json
 ```
 
-What it deliberately does not do: no recurrence, no MCP tool exposure of the driver itself, and
-no ownership of wall-clock deadlines. Grants can authorize deterministic logical-tick retry
-backoff; the host supplies the wait/deadline implementation. Restart is supported only through a caller-owned, metadata-only
-checkpoint: mission/report material is rehydrated by the host and matched by digest before the
-planner can continue. Full reference:
+The MCP server exposes this as autopilot_drive and autopilot_verify: preview is the default,
+execution needs the per-request grant, and every returned execution report includes an integrity
+check. `max_dispatches_this_call` can pause a longer drive and return a ready-to-submit
+caller-owned continuation request. Resume revalidates the digest-only checkpoint against the
+private attempt history before dispatch. The MCP server itself retains no recovery state,
+recurrence, or wall-clock deadlines. Grants can authorize deterministic logical-tick retry
+backoff; the MCP response records requested ticks as virtual clock events and does not sleep.
+Actual waiting and deadline enforcement remain caller-owned. The CLI's optional `--recovery-dir`
+keeps digest-only checkpoints separate from private rehydration files and writes a pending-dispatch
+marker before invoking tools, so an interrupted mission is not blindly replayed. The operator
+owns protection of those private files.
+
+The Rust kernel also exposes `drive_goal` for bounded caller-controlled continuation across
+multiple missions. It applies one aggregate dispatch ceiling and requires an explicit evaluator
+completion assertion. Safe stops can be persisted through the caller-owned goal checkpoint
+coordinator; the CLI and MCP surfaces still drive one mission at a time. See the
+[Autopilot reference](docs/AUTOPILOT.md#bounded-goal-level-continuation-in-the-rust-kernel).
+Full reference:
 [docs/AUTOPILOT.md](docs/AUTOPILOT.md).
 
 ## Autonomous research
@@ -2303,10 +2376,14 @@ so, because an incomplete factor graph turns a zero-influence claim into an unkn
    **zero** from section 43, while `context_cards.jsonl` and `doc_graph.json` both carry all 51
    FIBER modules (994 rows each). `machine/README.md` claims one row per module. Any agent routing
    off the registry never sees the canonical runtime.
-2. **The reference runtime hard-codes a radiogenomic goal string** into every Decision Section,
-   and compares label timestamps **lexicographically as strings** rather than as parsed instants.
-   Both are reproduced for parity, both are flagged: see `REFERENCE_GOAL` in
-   [`qir.rs`](crates/fiber/src/qir.rs) and the note on `temporal_witnesses` in
+2. **The CPython reference runtime hard-codes a radiogenomic goal string** into every Decision
+   Section. The Rust compiler preserves that substitution only for the two legacy query versions
+   to retain their byte-parity contract; later query versions report a missing goal explicitly.
+   The CPython temporal oracle also compares timestamp strings lexicographically. The Rust oracle
+   instead compares civil dates at day precision and parses timezone-qualified timestamps as
+   absolute instants. Mixed date/instant comparisons fail closed; mixed-offset timestamp cases
+   intentionally differ from the reference while the canonical fixture remains unchanged. See
+   `REFERENCE_GOAL` in [`qir.rs`](crates/fiber/src/qir.rs) and `temporal_witnesses` in
    [`oracle.rs`](crates/fiber/src/oracle.rs).
 
 Only 131 of the 935 registered modules are marked `Build-Ready Specification`; **400 are
@@ -2331,7 +2408,7 @@ crates/           the workspace, bottom of the dependency DAG first
   weave/          the multi-agent microkernel                    (ids, section)
   mutation/       metamorphic instance generation                (fiber, section, world)
   cli/            the bioprism binary                            (all)
-docs/             ARCHITECTURE, FINDINGS, COVERAGE, the ADRs, and generated comparisons
+docs/             topic-grouped reference; start at docs/README.md
 fixtures/         golden worlds, queries and reference artifacts
 reference/        the CPython reference runtime, vendored as the parity oracle
 schemas/          fiber-world / fiber-query / fiber-context-certificate JSON Schemas

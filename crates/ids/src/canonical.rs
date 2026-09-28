@@ -11,7 +11,446 @@
 //! not JSON). Both are handled explicitly below.
 
 use crate::error::CanonicalError;
-use serde_json::Value;
+use serde::ser::{
+    self, Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant,
+    SerializeTuple, SerializeTupleStruct, SerializeTupleVariant,
+};
+use serde_json::{Map, Value};
+use std::fmt;
+
+impl ser::Error for CanonicalError {
+    fn custom<T: fmt::Display>(message: T) -> Self {
+        CanonicalError::Serialization(message.to_string())
+    }
+}
+
+/// Serialize Rust data into JSON values while preserving the distinction between non-finite
+/// floats and explicit JSON nulls.
+pub(crate) fn finite_json_value<T: ?Sized + Serialize>(value: &T) -> Result<Value, CanonicalError> {
+    value.serialize(FiniteValueSerializer)
+}
+
+#[derive(Clone, Copy)]
+struct FiniteValueSerializer;
+
+struct SingleEntryMap<'a, T: ?Sized>(&'a T);
+
+impl<T: ?Sized + Serialize> Serialize for SingleEntryMap<'_, T> {
+    fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(1))?;
+        map.serialize_entry(self.0, &())?;
+        map.end()
+    }
+}
+
+enum CompoundKind {
+    Sequence,
+    Object,
+    TupleVariant(String),
+    StructVariant(String),
+}
+
+struct FiniteCompound {
+    kind: CompoundKind,
+    sequence: Vec<Value>,
+    object: Map<String, Value>,
+    pending_key: Option<String>,
+}
+
+impl FiniteCompound {
+    fn sequence(length: Option<usize>) -> Self {
+        Self {
+            kind: CompoundKind::Sequence,
+            sequence: Vec::with_capacity(length.unwrap_or(0)),
+            object: Map::new(),
+            pending_key: None,
+        }
+    }
+
+    fn object(length: Option<usize>) -> Self {
+        Self {
+            kind: CompoundKind::Object,
+            sequence: Vec::new(),
+            object: Map::with_capacity(length.unwrap_or(0)),
+            pending_key: None,
+        }
+    }
+
+    fn tuple_variant(variant: &str, length: usize) -> Self {
+        Self {
+            kind: CompoundKind::TupleVariant(variant.to_owned()),
+            sequence: Vec::with_capacity(length),
+            object: Map::new(),
+            pending_key: None,
+        }
+    }
+
+    fn struct_variant(variant: &str, length: usize) -> Self {
+        Self {
+            kind: CompoundKind::StructVariant(variant.to_owned()),
+            sequence: Vec::new(),
+            object: Map::with_capacity(length),
+            pending_key: None,
+        }
+    }
+
+    fn push<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), CanonicalError> {
+        self.sequence.push(finite_json_value(value)?);
+        Ok(())
+    }
+
+    fn insert<T: ?Sized + Serialize>(
+        &mut self,
+        key: &str,
+        value: &T,
+    ) -> Result<(), CanonicalError> {
+        self.object
+            .insert(key.to_owned(), finite_json_value(value)?);
+        Ok(())
+    }
+
+    fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<(), CanonicalError> {
+        if self.pending_key.is_some() {
+            return Err(CanonicalError::Serialization(
+                "map key was serialized before the previous value".into(),
+            ));
+        }
+        let key = serde_json::to_value(SingleEntryMap(key))
+            .map_err(|error| CanonicalError::Serialization(error.to_string()))?
+            .as_object()
+            .and_then(|object| object.keys().next().cloned())
+            .ok_or_else(|| {
+                CanonicalError::Serialization("JSON map key did not produce an object key".into())
+            })?;
+        self.pending_key = Some(key);
+        Ok(())
+    }
+
+    fn serialize_map_value<T: ?Sized + Serialize>(
+        &mut self,
+        value: &T,
+    ) -> Result<(), CanonicalError> {
+        let key = self.pending_key.take().ok_or_else(|| {
+            CanonicalError::Serialization("map value was serialized without a key".into())
+        })?;
+        self.object.insert(key, finite_json_value(value)?);
+        Ok(())
+    }
+
+    fn finish(self) -> Result<Value, CanonicalError> {
+        if self.pending_key.is_some() {
+            return Err(CanonicalError::Serialization(
+                "map ended with a key that had no value".into(),
+            ));
+        }
+        match self.kind {
+            CompoundKind::Sequence => Ok(Value::Array(self.sequence)),
+            CompoundKind::Object => Ok(Value::Object(self.object)),
+            CompoundKind::TupleVariant(variant) => Ok(Value::Object(Map::from_iter([(
+                variant,
+                Value::Array(self.sequence),
+            )]))),
+            CompoundKind::StructVariant(variant) => Ok(Value::Object(Map::from_iter([(
+                variant,
+                Value::Object(self.object),
+            )]))),
+        }
+    }
+}
+
+impl ser::Serializer for FiniteValueSerializer {
+    type Ok = Value;
+    type Error = CanonicalError;
+    type SerializeSeq = FiniteCompound;
+    type SerializeTuple = FiniteCompound;
+    type SerializeTupleStruct = FiniteCompound;
+    type SerializeTupleVariant = FiniteCompound;
+    type SerializeMap = FiniteCompound;
+    type SerializeStruct = FiniteCompound;
+    type SerializeStructVariant = FiniteCompound;
+
+    fn serialize_bool(self, value: bool) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Bool(value))
+    }
+
+    fn serialize_i8(self, value: i8) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Number(value.into()))
+    }
+
+    fn serialize_i16(self, value: i16) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Number(value.into()))
+    }
+
+    fn serialize_i32(self, value: i32) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Number(value.into()))
+    }
+
+    fn serialize_i64(self, value: i64) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Number(value.into()))
+    }
+
+    fn serialize_i128(self, value: i128) -> Result<Self::Ok, Self::Error> {
+        serde_json::to_value(value)
+            .map_err(|error| CanonicalError::Serialization(error.to_string()))
+    }
+
+    fn serialize_u8(self, value: u8) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Number(value.into()))
+    }
+
+    fn serialize_u16(self, value: u16) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Number(value.into()))
+    }
+
+    fn serialize_u32(self, value: u32) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Number(value.into()))
+    }
+
+    fn serialize_u64(self, value: u64) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Number(value.into()))
+    }
+
+    fn serialize_u128(self, value: u128) -> Result<Self::Ok, Self::Error> {
+        serde_json::to_value(value)
+            .map_err(|error| CanonicalError::Serialization(error.to_string()))
+    }
+
+    fn serialize_f32(self, value: f32) -> Result<Self::Ok, Self::Error> {
+        if !value.is_finite() {
+            return Err(CanonicalError::NonFiniteNumber(value.to_string()));
+        }
+        serde_json::to_value(value)
+            .map_err(|error| CanonicalError::Serialization(error.to_string()))
+    }
+
+    fn serialize_f64(self, value: f64) -> Result<Self::Ok, Self::Error> {
+        if !value.is_finite() {
+            return Err(CanonicalError::NonFiniteNumber(value.to_string()));
+        }
+        serde_json::to_value(value)
+            .map_err(|error| CanonicalError::Serialization(error.to_string()))
+    }
+
+    fn serialize_char(self, value: char) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::String(value.to_string()))
+    }
+
+    fn serialize_str(self, value: &str) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::String(value.to_owned()))
+    }
+
+    fn serialize_bytes(self, value: &[u8]) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Array(
+            value.iter().copied().map(Value::from).collect(),
+        ))
+    }
+
+    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Null)
+    }
+
+    fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Self::Ok, Self::Error> {
+        finite_json_value(value)
+    }
+
+    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Null)
+    }
+
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Null)
+    }
+
+    fn serialize_unit_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+    ) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::String(variant.to_owned()))
+    }
+
+    fn serialize_newtype_struct<T: ?Sized + Serialize>(
+        self,
+        _name: &'static str,
+        value: &T,
+    ) -> Result<Self::Ok, Self::Error> {
+        finite_json_value(value)
+    }
+
+    fn serialize_newtype_variant<T: ?Sized + Serialize>(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+        value: &T,
+    ) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Object(Map::from_iter([(
+            variant.to_owned(),
+            finite_json_value(value)?,
+        )])))
+    }
+
+    fn serialize_seq(self, length: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+        Ok(FiniteCompound::sequence(length))
+    }
+
+    fn serialize_tuple(self, length: usize) -> Result<Self::SerializeTuple, Self::Error> {
+        Ok(FiniteCompound::sequence(Some(length)))
+    }
+
+    fn serialize_tuple_struct(
+        self,
+        _name: &'static str,
+        length: usize,
+    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
+        Ok(FiniteCompound::sequence(Some(length)))
+    }
+
+    fn serialize_tuple_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+        length: usize,
+    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+        Ok(FiniteCompound::tuple_variant(variant, length))
+    }
+
+    fn serialize_map(self, length: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+        Ok(FiniteCompound::object(length))
+    }
+
+    fn serialize_struct(
+        self,
+        _name: &'static str,
+        length: usize,
+    ) -> Result<Self::SerializeStruct, Self::Error> {
+        Ok(FiniteCompound::object(Some(length)))
+    }
+
+    fn serialize_struct_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+        length: usize,
+    ) -> Result<Self::SerializeStructVariant, Self::Error> {
+        Ok(FiniteCompound::struct_variant(variant, length))
+    }
+}
+
+impl SerializeSeq for FiniteCompound {
+    type Ok = Value;
+    type Error = CanonicalError;
+
+    fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
+        self.push(value)
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        self.finish()
+    }
+}
+
+impl SerializeTuple for FiniteCompound {
+    type Ok = Value;
+    type Error = CanonicalError;
+
+    fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
+        self.push(value)
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        self.finish()
+    }
+}
+
+impl SerializeTupleStruct for FiniteCompound {
+    type Ok = Value;
+    type Error = CanonicalError;
+
+    fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
+        self.push(value)
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        self.finish()
+    }
+}
+
+impl SerializeTupleVariant for FiniteCompound {
+    type Ok = Value;
+    type Error = CanonicalError;
+
+    fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
+        self.push(value)
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        self.finish()
+    }
+}
+
+impl SerializeMap for FiniteCompound {
+    type Ok = Value;
+    type Error = CanonicalError;
+
+    fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<(), Self::Error> {
+        FiniteCompound::serialize_key(self, key)
+    }
+
+    fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Self::Error> {
+        self.serialize_map_value(value)
+    }
+
+    fn serialize_entry<K: ?Sized + Serialize, V: ?Sized + Serialize>(
+        &mut self,
+        key: &K,
+        value: &V,
+    ) -> Result<(), Self::Error> {
+        FiniteCompound::serialize_key(self, key)?;
+        self.serialize_map_value(value)
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        self.finish()
+    }
+}
+
+impl SerializeStruct for FiniteCompound {
+    type Ok = Value;
+    type Error = CanonicalError;
+
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), Self::Error> {
+        self.insert(key, value)
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        self.finish()
+    }
+}
+
+impl SerializeStructVariant for FiniteCompound {
+    type Ok = Value;
+    type Error = CanonicalError;
+
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), Self::Error> {
+        self.insert(key, value)
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        self.finish()
+    }
+}
 
 pub fn to_canonical_string(value: &Value) -> Result<String, CanonicalError> {
     let mut out = String::new();
@@ -21,6 +460,24 @@ pub fn to_canonical_string(value: &Value) -> Result<String, CanonicalError> {
 
 pub fn to_canonical_bytes(value: &Value) -> Result<Vec<u8>, CanonicalError> {
     to_canonical_string(value).map(String::into_bytes)
+}
+
+/// Canonicalize typed Rust data without allowing non-finite floats to become JSON nulls first.
+///
+/// Use this when canonical bytes must be derived from a typed value, such as a signature or a
+/// receipt. Once data has been converted to `serde_json::Value`, an explicit null cannot be
+/// distinguished from a non-finite float that an earlier serializer replaced with null.
+pub fn to_canonical_string_serializable<T: ?Sized + Serialize>(
+    value: &T,
+) -> Result<String, CanonicalError> {
+    to_canonical_string(&finite_json_value(value)?)
+}
+
+/// Return canonical UTF-8 bytes for typed Rust data, rejecting non-finite floats before conversion.
+pub fn to_canonical_bytes_serializable<T: ?Sized + Serialize>(
+    value: &T,
+) -> Result<Vec<u8>, CanonicalError> {
+    to_canonical_string_serializable(value).map(String::into_bytes)
 }
 
 fn write_value(value: &Value, out: &mut String) -> Result<(), CanonicalError> {
@@ -99,7 +556,9 @@ pub fn python_repr_f64(f: f64) -> String {
     let (mantissa, exponent) = exp_form
         .split_once('e')
         .expect("Rust LowerExp always emits an exponent");
-    let exponent: i32 = exponent.parse().expect("Rust LowerExp emits a valid exponent");
+    let exponent: i32 = exponent
+        .parse()
+        .expect("Rust LowerExp emits a valid exponent");
 
     let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
     let digits = digits.trim_end_matches('0');

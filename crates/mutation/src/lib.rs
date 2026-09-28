@@ -10,6 +10,12 @@
 //! Two constraints keep it honest — a mutation is admitted only when the oracle confirms its
 //! declared relation, and the family reports **effective diversity** rather than instance count,
 //! because a million paraphrases are not a million benchmarks.
+//!
+//! # Not implemented
+//!
+//! - Wet-lab experiments, external biological simulators, or measurements from real specimens.
+//! - Biological validation of generated instances. A passing metamorphic oracle establishes the
+//!   declared relation inside the supplied world model only.
 
 pub mod apply;
 pub mod diversity;

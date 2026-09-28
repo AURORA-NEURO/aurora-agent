@@ -253,23 +253,32 @@ impl WorldSource for CollidingIdentifiers {
     fn total_factors(&self) -> usize {
         self.inner.total_factors()
     }
-    fn count_with_tag(&self, tag: &str) -> usize {
+    fn count_with_tag(&self, tag: &str) -> Result<usize, bioprism_world::WorldSourceError> {
         self.inner.count_with_tag(tag)
     }
     fn fact_ids_with_any_tag(
         &self,
         tags: &std::collections::BTreeSet<String>,
-    ) -> std::collections::BTreeSet<String> {
+    ) -> Result<std::collections::BTreeSet<String>, bioprism_world::WorldSourceError> {
         self.inner.fact_ids_with_any_tag(tags)
     }
-    fn fact(&self, id: &str) -> Option<bioprism_world::Fact> {
-        self.inner.fact(id).cloned()
+    fn fact(
+        &self,
+        id: &str,
+    ) -> Result<Option<bioprism_world::Fact>, bioprism_world::WorldSourceError> {
+        Ok(self.inner.fact(id).cloned())
     }
-    fn fact_providing(&self, variable: &str) -> Option<bioprism_world::Fact> {
-        self.inner.fact_providing(variable).cloned()
+    fn fact_providing(
+        &self,
+        variable: &str,
+    ) -> Result<Option<bioprism_world::Fact>, bioprism_world::WorldSourceError> {
+        Ok(self.inner.fact_providing(variable).cloned())
     }
-    fn shadowed_provider_ids(&self, variable: &str) -> Vec<String> {
-        let mut ids = self.inner.shadowed_provider_ids(variable);
+    fn shadowed_provider_ids(
+        &self,
+        variable: &str,
+    ) -> Result<Vec<String>, bioprism_world::WorldSourceError> {
+        let mut ids = self.inner.shadowed_provider_ids(variable)?;
         match &self.collision {
             Collision::WinnerAmongDisplaced { variable: subject } if subject == variable => {
                 if let Some(winner) = self.inner.fact_providing(variable) {
@@ -284,12 +293,18 @@ impl WorldSource for CollidingIdentifiers {
             }
             _ => {}
         }
-        ids
+        Ok(ids)
     }
-    fn factor(&self, id: &str) -> Option<bioprism_world::Factor> {
-        self.inner.factor(id).cloned()
+    fn factor(
+        &self,
+        id: &str,
+    ) -> Result<Option<bioprism_world::Factor>, bioprism_world::WorldSourceError> {
+        Ok(self.inner.factor(id).cloned())
     }
-    fn producer_ids(&self, variable: &str) -> Vec<String> {
+    fn producer_ids(
+        &self,
+        variable: &str,
+    ) -> Result<Vec<String>, bioprism_world::WorldSourceError> {
         self.inner.producer_ids(variable)
     }
     fn events(&self) -> Vec<bioprism_world::CausalEvent> {

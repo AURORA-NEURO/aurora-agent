@@ -11,8 +11,8 @@ use super::action_execution::{
     ActionExecutionDisposition, DryRunGliomaActionExecutor, GliomaActionExecutor,
 };
 use super::director::{
-    execute_glioma_research_director, plan_glioma_research_director, GliomaDirectorCheckpoint,
-    GliomaResearchDirectorRequest, GliomaResearchDirectorRun,
+    GliomaDirectorCheckpoint, GliomaResearchDirectorRequest, GliomaResearchDirectorRun,
+    execute_glioma_research_director, plan_glioma_research_director,
 };
 use crate::glioma_engine::{GliomaModality, GliomaModelSystem};
 use bioprism_ids::ContentHash;
@@ -1074,16 +1074,22 @@ mod tests {
         assert_eq!(output.feature_id, FEATURE_ID);
         assert_eq!(output.rounds.len(), 2);
         assert_eq!(output.jobs.len(), 2);
-        assert!(output.rounds[0]
-            .selected_job_order
-            .contains(&"job-a".into()));
-        assert!(output.rounds[0]
-            .selected_job_order
-            .contains(&"job-b".into()));
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("synthetic-dry-run")));
+        assert!(
+            output.rounds[0]
+                .selected_job_order
+                .contains(&"job-a".into())
+        );
+        assert!(
+            output.rounds[0]
+                .selected_job_order
+                .contains(&"job-b".into())
+        );
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("synthetic-dry-run"))
+        );
         output.validate().unwrap();
     }
 
@@ -1102,10 +1108,12 @@ mod tests {
                 .iter()
                 .any(|hold| hold.reason == "resource_capacity")
         }));
-        assert!(output
-            .uncertainty
-            .iter()
-            .all(|item| !item.contains("clinical")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .all(|item| !item.contains("clinical"))
+        );
     }
 
     #[test]
@@ -1140,8 +1148,10 @@ mod tests {
             .completed_checkpoints
             .sort_by_key(|checkpoint| checkpoint.stage_kind);
         let output = execute_glioma_program_scheduler_dry_run(&request).unwrap();
-        assert!(output.jobs[0]
-            .completed_stage_order
-            .contains(&"intent-normalization".into()));
+        assert!(
+            output.jobs[0]
+                .completed_stage_order
+                .contains(&"intent-normalization".into())
+        );
     }
 }

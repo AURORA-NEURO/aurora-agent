@@ -12,10 +12,10 @@ use super::action_execution::{
 };
 use super::director::stage_modality;
 use crate::glioma_engine::{
-    compile_glioma_research, GliomaActionCandidate, GliomaEngineError, GliomaPlanDisposition,
-    GliomaResearchIntent, GliomaResearchPlan, GliomaStage, GliomaStageDisposition,
-    GliomaStageExecutor, GliomaStageFailure, GliomaStageInput, GliomaStageOutput, LocalArtifactRef,
-    StageReadiness,
+    GliomaActionCandidate, GliomaEngineError, GliomaPlanDisposition, GliomaResearchIntent,
+    GliomaResearchPlan, GliomaStage, GliomaStageDisposition, GliomaStageExecutor,
+    GliomaStageFailure, GliomaStageInput, GliomaStageOutput, LocalArtifactRef, StageReadiness,
+    compile_glioma_research,
 };
 use bioprism_foundation::PRECLINICAL_BOUNDARY;
 
@@ -237,7 +237,7 @@ impl<E: GliomaStageExecutor> GliomaActionExecutor for GliomaStageActionExecutor<
 mod tests {
     use super::*;
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem};
-    use bioprism_foundation::{AutonomyTier, TypedResearchArtifact, PRECLINICAL_BOUNDARY};
+    use bioprism_foundation::{AutonomyTier, PRECLINICAL_BOUNDARY, TypedResearchArtifact};
     use bioprism_ids::ContentHash;
     use bioprism_onco::OutputUse;
     use serde_json::json;
@@ -423,9 +423,11 @@ mod tests {
         let mut stage_executor = RecordingStageExecutor::default();
         let mut adapter = GliomaStageActionExecutor::new(&intent, &mut stage_executor).unwrap();
 
-        assert!(adapter
-            .execute_action_with_context(&candidate(&stage), &context, 1)
-            .is_err());
+        assert!(
+            adapter
+                .execute_action_with_context(&candidate(&stage), &context, 1)
+                .is_err()
+        );
         assert!(stage_executor.inputs.is_empty());
     }
 
@@ -464,9 +466,11 @@ mod tests {
         let mut stage_executor = RecordingStageExecutor::default();
         let mut adapter = GliomaStageActionExecutor::new(&intent, &mut stage_executor).unwrap();
 
-        assert!(adapter
-            .execute_action_with_context(&candidate(&stage), &context, 1)
-            .is_err());
+        assert!(
+            adapter
+                .execute_action_with_context(&candidate(&stage), &context, 1)
+                .is_err()
+        );
         assert!(stage_executor.inputs.is_empty());
     }
 
@@ -498,14 +502,18 @@ mod tests {
 
         assert!(output.execution.is_some());
         assert!(!stage_executor.inputs.is_empty());
-        assert!(stage_executor
-            .inputs
-            .iter()
-            .all(|input| input.source_artifacts == intent.input_artifacts));
-        assert!(stage_executor
-            .inputs
-            .iter()
-            .any(|input| !input.upstream_artifacts.is_empty()));
+        assert!(
+            stage_executor
+                .inputs
+                .iter()
+                .all(|input| input.source_artifacts == intent.input_artifacts)
+        );
+        assert!(
+            stage_executor
+                .inputs
+                .iter()
+                .any(|input| !input.upstream_artifacts.is_empty())
+        );
         assert!(!output.execution.as_ref().unwrap().negative_order.is_empty());
         output.validate().unwrap();
     }

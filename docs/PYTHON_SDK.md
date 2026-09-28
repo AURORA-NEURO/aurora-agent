@@ -11,6 +11,47 @@ the integration layer above the deterministic kernel described by [ADR-001](ADR-
 Python can orchestrate and author requests, while Rust remains the owner of canonical bytes,
 domain invariants, release gates, and evidence semantics.
 
+The generated package surface can include explicitly declared feature names that are not present
+in a particular Python distribution. Such known optional exports remain importable as placeholders
+and raise `ImportError` when used. Unknown names are not synthesized: attribute and typo checks
+raise `AttributeError` after package initialization. The import compatibility shim is scoped to
+package initialization and restores Python's original import function before `import prism_sdk`
+returns.
+
+## Reviewed Europe PMC publication-metadata retrieval
+
+`ReviewedEuropePmcRetrievalAdapter` reads Europe PMC's fixed REST search endpoint in JSON `lite`
+mode. Constructing a config and calling `prepare()` are network-free; the plan binds a fixed lane
+catalogue, query-set digest, transport identity, page limits, and response/tree/bundle bounds.
+Execution requires `approve_source_dispatch=True`, refuses redirects in the built-in transport,
+rebuilds every cursor request against the pinned host, and never follows response-provided URLs.
+Injected transports must enforce timeout, redirect, and network policy under their declared identity.
+
+```python
+from prism_sdk.reviewed_europe_pmc_retrieval import (
+    ReviewedEuropePmcRetrievalAdapter,
+    ReviewedEuropePmcRetrievalConfig,
+)
+
+adapter = ReviewedEuropePmcRetrievalAdapter(
+    ReviewedEuropePmcRetrievalConfig(lanes=("glioma",), page_size=25, max_pages=2)
+)
+plan = adapter.prepare()
+result = adapter.execute(plan, approve_source_dispatch=True)
+transient_publications = result.bundle["publications"]
+metadata_only_receipt = result.receipt
+```
+
+`result.to_dict()` retains only the receipt and retention label; publication metadata stays in the
+caller-owned transient result. Stable totals and cursor state determine explicit `complete`,
+`partial`, or `unknown` coverage; a changing hit count is never treated as zero or complete. The
+single-lane `create_reviewed_europe_pmc_autonomous_evidence_registration()` helper checks
+publication-row shape, identifiers, lane/source membership, source-content digests, receipt totals,
+and coverage before projecting provenance-only evidence. Europe PMC `lite` provides bibliographic
+metadata rather than abstracts or full text, and fixed keyword lanes are discovery aids rather than
+an exhaustive review. See the [Europe PMC REST API](https://dev.europepmc.org/RestfulWebService)
+and its [web-service reference](https://dev.europepmc.org/docs/EBI_Europe_PMC_Web_Service_Reference.pdf).
+
 ### Restart-safe autonomous execution accounting
 
 `AutonomousExecutionController` is the Python policy boundary for provider turns, tool intents,
@@ -39,6 +80,80 @@ share one linearizable provider/tool/cost budget; the journal lock alone is not 
 counter updates safe. The same metadata-only fields and serialized transition contract are
 validated by the TypeScript execution controller, preserving cross-SDK replay and failure
 semantics.
+
+### Long-horizon autonomous goals
+
+`AutonomousGoalLedger` stores bounded, value-only objective state and a verified event chain in
+SQLite. Goal timestamps now use exact decimal epoch-nanosecond strings on the shared 0.2 wire
+format. Python reads existing 0.1 SQLite databases only after the caller identifies the writer's
+old timestamp unit; the import verifies the original record and event digests and updates the
+database atomically while retaining the old chain head as migration provenance:
+
+```python
+from prism_sdk import AutonomousGoalLedger
+
+with AutonomousGoalLedger(
+    "goals.sqlite3",
+    legacy_timestamp_unit="nanoseconds",  # use the unit written by this database's SDK
+) as goals:
+    goals.verify_integrity()
+    snapshot = goals.snapshot()
+```
+
+For a portable v0.1 JSON snapshot, call `migrate_legacy_goal_snapshot(snapshot,
+source_unit="milliseconds" | "nanoseconds")` before restoring it. The function verifies the old
+snapshot digest and full event chain, converts timestamps exactly, re-hashes the 0.2 state, and
+records the original snapshot digest and chain head in the migrated snapshot. Timestamp units are
+never inferred. Migrated snapshots preserve that provenance through subsequent SQLite and JSON
+snapshot round trips.
+
+Preview-admission approvals also use exact nanosecond strings in schema 0.2. Existing 0.1 approval
+records and snapshots are refused with a re-review requirement: an old approval is not migrated
+into current authority. Supply `issued_at_ns`, `expires_at_ns`, and verification `now_ns` in the
+shared nanosecond contract.
+
+Worker-journal events, snapshots, authenticated envelopes, and dispatch-resolution receipts also
+use decimal-string epoch nanoseconds in schema 0.2. Python records its `time.time_ns()` clock
+exactly. `migrate_legacy_autonomous_goal_worker_journal_snapshot(snapshot, source_unit)` verifies
+the source snapshot digest and event chain before re-hashing it and
+preserves the source digest/head as migration provenance. For an authenticated 0.1 shared-store
+envelope, `migrate_legacy_authenticated_autonomous_goal_worker_journal_envelope(...)` verifies
+the old HMAC before converting and resealing with the selected current key. Write its returned
+envelope using the store's CAS with the old snapshot digest as the expected version. Old
+dispatch-resolution receipts require external re-verification and re-issuance under schema 0.2.
+Control-loop checkpoints also use schema 0.2; learned signal `deadline_ns` values are decimal
+strings. Convert a legacy checkpoint with
+`migrate_legacy_autonomous_goal_control_loop_snapshot(snapshot, source_unit)` to verify its source
+digest, convert deadlines using the explicitly chosen unit, and carry migration provenance through
+later checkpoint generations.
+
+Every persisted schema 0.2 replay artifact requires timestamps in canonical decimal-string form,
+including schedules, nested preview schedules, journal events, and dispatch receipts. Runtime
+arguments may accept integer nanoseconds, but validators reject numeric timestamp spellings inside
+persisted artifacts. The cross-SDK recovery scenario migrates goal, journal, and checkpoint state,
+persists a completed cycle, restarts, and verifies identical Python and TypeScript digests without
+re-executing the goal.
+
+`AutonomousGoalWorker.run_async()` supports native async resolvers and executors as well as the
+synchronous callbacks accepted by `run()`. Async callbacks passed to `run()` fail before any goal
+is claimed, with guidance to use `run_async()`. Scheduling, SQLite reads/writes, and deterministic
+settlement still use the same bounded worker path; callback coroutines run on the caller's event
+loop, and independent executor calls retain the schedule's `max_concurrent` bound and output order.
+If the awaiting task is cancelled, `run_async()` drains the worker before re-raising cancellation,
+because an in-flight external action cannot be safely force-cancelled or assumed not to have run.
+The same transient task/parameter and metadata-only journal boundary applies to both entry points.
+`AutonomousGoalControlLoop.run_async()` extends that boundary to asynchronous schedule-option,
+evaluator, learner, and checkpoint callbacks while keeping evaluation validation, learning-state
+digests, checkpoint sealing, and retry policy in the same deterministic control loop. Its sync
+`run()` rejects declared coroutine callbacks before any goal is claimed.
+
+`AutonomousAgent.run_goal_control_loop_async()` and `AutonomousGoalAgentRuntime.run_async()`/
+`run_with_trace_async()` carry async rehydration,
+runtime-option, action-handoff, evaluator, learner, and checkpoint callbacks through the complete
+application-facing goal lifecycle. The orchestration and existing recovery path run off the event
+loop; callback coroutines return to the caller's loop. The synchronous facade methods reject
+declared coroutine callbacks before starting goal execution, while protected rehydration and other
+synchronous callbacks remain supported by both entry points.
 
 ### Shared provider/model quota admission
 

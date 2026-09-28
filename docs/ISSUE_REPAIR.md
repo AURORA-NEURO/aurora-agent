@@ -386,7 +386,13 @@ pinned by `crates/cli/tests/repair_contract.rs`.
 project plan      --root <dir> --issues <path> --issue <id> [--decision-time <rfc3339>]
                   [--criteria <path>] --out <path> [--dry-run]
 project verify    --root <dir> --plan <path> [--issues <path>] [--decision-time <rfc3339>]
+                  [--succession <path>]
 ```
+
+`--succession` loads a strict JSON object containing only `declared_by` and `statement`, both
+non-empty strings. It supplies the named caller assertion required to evaluate a changed tree;
+the report records that assertion verbatim and explicitly says it was never independently
+verified. Without this file, verifying a different world remains stale and evaluates nothing.
 
 `project plan --json` reports the bound region as `region_fact_ids` (the list) with `region_facts`
 beside it (the count), which is the convention [PROJECT_MODELING](PROJECT_MODELING.md) records for
@@ -418,19 +424,18 @@ evaluated, and **9** (`Stale`) when the plan is bound to a different world — a
 nothing, so it is not a failed verification. Obligations never move the exit code; they are
 reported on their own admissibility axis.
 
-**`project verify` cannot give a repaired tree a verdict.** A project world id is derived from the
-file listing, so any edit produces a different world and the command reports `stale` — correctly,
-and unhelpfully for the case the feature exists for. `verify_successor` is what that case needs and
-no flag mints a `Succession`, so this is a gap in the command rather than in the crate. It is
-stated here and in `project_verify`'s own documentation rather than worked around by verifying
-against the new world and calling the difference immaterial.
+`project verify` retains staleness-first behavior by default. When a changed tree is intentionally
+being checked as the planned repair, `--succession` gives the caller a way to make the named
+assertion required by `verify_successor`; the command does not infer project continuity from the
+changed files or validate the assertion independently.
 
 ### MCP
 
 `repair_plan` and `repair_verify`, both root-confined exactly as `project_ingest` and
 `project_audit` are: every path parameter — `root`, `issues`, `criteria`, `plan`, `out` — resolves
 through the server's root confinement, so planning a repair cannot become a way to read or write an
-arbitrary file. The catalogue is 264 tools.
+arbitrary file. The MCP server currently advertises 893 tools, with catalogue parity asserted by
+the `capability_audit` integration test.
 
 `repair_plan` mirrors `project plan`, including the `--criteria` document, and follows the server's
 write-preview convention: with `out` but without `confirm: true` it names the exact path it would
@@ -446,6 +451,6 @@ reports a refusal that never happened.
 A stale report arrives as a **successful** call carrying a report that says `stale`, not as a
 transport error: a finding routed through an error is a finding a caller discards with `?`. Its
 `outcome` and `admissibility` are `null` and it carries no item list at all
-(`repair_verify_reports_staleness_against_a_different_world_without_evaluating_anything`). The same
-succession gap the CLI has applies here: no argument mints a `Succession`, so a repaired tree
-reports `stale` rather than receiving a verdict.
+(`repair_verify_reports_staleness_against_a_different_world_without_evaluating_anything`). An
+optional inline `succession` object with exactly `declared_by` and `statement` lets a caller provide
+the same named assertion as the CLI file; the report records it and never verifies it independently.

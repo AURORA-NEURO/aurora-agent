@@ -26,6 +26,7 @@ bioprism-atlas = { workspace = true }
 bioprism-baseline = { workspace = true }
 bioprism-atlasx = { workspace = true }
 bioprism-atlashub = { workspace = true }
+bioprism-autopilot = { workspace = true }
 bioprism-bioworlds = { workspace = true }
 bioprism-cookbook = { workspace = true }
 bioprism-conformance = { workspace = true }

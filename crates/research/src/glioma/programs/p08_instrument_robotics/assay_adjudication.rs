@@ -607,9 +607,11 @@ mod tests {
         assert_eq!(assessment.disposition, AssayEvidenceDisposition::Negative);
         assert!(!assessment.evidence_eligible);
         assert_eq!(assessment.negative_order, vec!["acquire"]);
-        assert!(assessment
-            .negative_evidence
-            .iter()
-            .any(|item| item == "null-or-negative-assay:acquire"));
+        assert!(
+            assessment
+                .negative_evidence
+                .iter()
+                .any(|item| item == "null-or-negative-assay:acquire")
+        );
     }
 }

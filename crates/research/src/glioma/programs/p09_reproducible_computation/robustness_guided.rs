@@ -12,9 +12,9 @@ use super::execution::{
 };
 use super::planning::ComputationCandidate;
 use super::portfolio_execution::{
-    execute_glioma_computation_portfolio, ComputationPortfolioExecution,
-    ComputationPortfolioExecutionDisposition, ComputationPortfolioExecutionError,
-    ComputationPortfolioExecutionRequest,
+    ComputationPortfolioExecution, ComputationPortfolioExecutionDisposition,
+    ComputationPortfolioExecutionError, ComputationPortfolioExecutionRequest,
+    execute_glioma_computation_portfolio,
 };
 use super::robustness::{RobustnessDisposition, RobustnessSuite};
 use crate::glioma::analysis::AnalysisDisposition;
@@ -541,7 +541,7 @@ mod tests {
         ComputationOperation, ComputationTask,
     };
     use crate::glioma::programs::p09_reproducible_computation::robustness::{
-        assess_glioma_robustness, RobustnessRequest,
+        RobustnessRequest, assess_glioma_robustness,
     };
     use crate::glioma_engine::{GliomaModality, LocalArtifactRef};
 
@@ -740,10 +740,12 @@ mod tests {
         request.robustness.digest = ContentHash::of_value(&serde_json::json!({})).unwrap();
         // A stable hold is tested through the explicit gate behavior; the malformed synthetic
         // digest is rejected before dispatch rather than allowing a fabricated stable result.
-        assert!(execute_glioma_robustness_guided_computation(
-            &request,
-            &mut dry_run_robustness_guided_computation_executor()
-        )
-        .is_err());
+        assert!(
+            execute_glioma_robustness_guided_computation(
+                &request,
+                &mut dry_run_robustness_guided_computation_executor()
+            )
+            .is_err()
+        );
     }
 }

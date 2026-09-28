@@ -459,10 +459,11 @@ mod tests {
             GliomaModality::Imaging,
         )]))
         .unwrap();
-        assert!(output
-            .actions
-            .iter()
-            .all(|action| action.action_kind == MultimodalGapActionKind::ContradictionResolution));
+        assert!(
+            output.actions.iter().all(
+                |action| action.action_kind == MultimodalGapActionKind::ContradictionResolution
+            )
+        );
     }
 
     #[test]

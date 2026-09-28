@@ -123,7 +123,7 @@ fn digest_input(output: &ReleaseGateEvaluation) -> serde_json::Value {
     })
 }
 
-fn validate_request(request: &ReleaseGateRequest) -> Result<(), ReleaseGateError> {
+pub(super) fn validate_request(request: &ReleaseGateRequest) -> Result<(), ReleaseGateError> {
     if request.required_coverage_milli > 1_000
         || request.max_uncertainty_items > MAX_UNCERTAINTY_ITEMS
         || request.reviews.len() > MAX_REVIEWS
@@ -352,8 +352,8 @@ pub fn evaluate_glioma_release_gate(
 mod tests {
     use super::*;
     use crate::glioma::programs::p11_research_object_release::replay::{
-        execute_glioma_replay_campaign, DryRunReplayCampaignExecutor, ReplayCampaignRequest,
-        ReplayTask,
+        DryRunReplayCampaignExecutor, ReplayCampaignRequest, ReplayTask,
+        execute_glioma_replay_campaign,
     };
     use crate::glioma::release::ResearchObjectRequest;
     use crate::glioma_engine::LocalArtifactRef;
@@ -453,10 +453,12 @@ mod tests {
         request.reviews[0].decision = ReleaseReviewDecision::Hold;
         let output = evaluate_glioma_release_gate(&request, &campaign()).unwrap();
         assert_eq!(output.status, ReleaseGateStatus::Blocked);
-        assert!(output
-            .blocking_order
-            .iter()
-            .any(|item| item == "review-hold:reviewer-a"));
+        assert!(
+            output
+                .blocking_order
+                .iter()
+                .any(|item| item == "review-hold:reviewer-a")
+        );
     }
 
     #[test]
@@ -465,10 +467,12 @@ mod tests {
         request.reviews.clear();
         let output = evaluate_glioma_release_gate(&request, &campaign()).unwrap();
         assert_eq!(output.status, ReleaseGateStatus::Blocked);
-        assert!(output
-            .blocking_order
-            .iter()
-            .any(|item| item.starts_with("independent-approvals:")));
+        assert!(
+            output
+                .blocking_order
+                .iter()
+                .any(|item| item.starts_with("independent-approvals:"))
+        );
     }
 
     #[test]

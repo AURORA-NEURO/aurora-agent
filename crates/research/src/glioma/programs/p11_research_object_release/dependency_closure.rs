@@ -87,6 +87,66 @@ pub enum DependencyClosureError {
     Digest(String),
 }
 
+type ClosureNodeState = (usize, DependencyClosureNodeStatus, BTreeSet<String>);
+
+struct ClosureTraversal<'map, 'bundle> {
+    max_depth: usize,
+    entries:
+        &'map BTreeMap<String, &'bundle super::multimodal_bundle::MultimodalResearchObjectEntry>,
+    traversal: BTreeSet<String>,
+    missing: BTreeSet<String>,
+    cycles: BTreeSet<String>,
+    depth_exceeded: BTreeSet<String>,
+    states: BTreeMap<String, ClosureNodeState>,
+}
+
+impl ClosureTraversal<'_, '_> {
+    fn visit(&mut self, id: &str, depth: usize, visiting: &mut BTreeSet<String>) {
+        if !self.traversal.insert(id.to_string()) {
+            if visiting.contains(id) {
+                self.cycles.insert(id.to_string());
+            }
+            return;
+        }
+        visiting.insert(id.to_string());
+        let upstream_order = match self.entries.get(id) {
+            Some(entry) => entry.upstream_artifact_ids.clone(),
+            None => {
+                self.missing.insert(id.to_string());
+                visiting.remove(id);
+                return;
+            }
+        };
+        let mut issues = BTreeSet::new();
+        let mut status = if upstream_order.is_empty() {
+            DependencyClosureNodeStatus::Root
+        } else {
+            DependencyClosureNodeStatus::Closed
+        };
+        if depth > self.max_depth {
+            self.depth_exceeded.insert(id.to_string());
+            issues.insert("max-depth-exceeded".into());
+            status = DependencyClosureNodeStatus::DepthExceeded;
+        }
+        for upstream in &upstream_order {
+            if !self.entries.contains_key(upstream) {
+                self.missing.insert(upstream.clone());
+                issues.insert(format!("missing-upstream:{upstream}"));
+                status = DependencyClosureNodeStatus::MissingUpstream;
+            } else if visiting.contains(upstream) {
+                self.cycles.insert(upstream.clone());
+                self.cycles.insert(id.to_string());
+                issues.insert(format!("cycle:{upstream}"));
+                status = DependencyClosureNodeStatus::Cycle;
+            } else {
+                self.visit(upstream, depth.saturating_add(1), visiting);
+            }
+        }
+        visiting.remove(id);
+        self.states.insert(id.to_string(), (depth, status, issues));
+    }
+}
+
 fn canonical<T: Ord>(values: &[T]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
 }
@@ -149,14 +209,22 @@ impl DependencyClosurePlan {
                 .root_order
                 .iter()
                 .chain(self.traversal_order.iter())
-                .chain(self.missing_upstream_order.iter())
                 .chain(self.cycle_order.iter())
                 .chain(self.orphan_order.iter())
                 .chain(self.depth_exceeded_order.iter())
                 .any(|id| !ids.contains(id))
+            || self
+                .missing_upstream_order
+                .iter()
+                .any(|id| ids.contains(id))
+            || self.nodes.iter().any(|node| {
+                node.upstream_order.iter().any(|upstream| {
+                    !ids.contains(upstream) && !self.missing_upstream_order.contains(upstream)
+                })
+            })
         {
             return Err(DependencyClosureError::InvalidOutput(
-                "closure partitions contain unknown artifacts".into(),
+                "closure partitions or upstream references do not reconcile".into(),
             ));
         }
         let expected = ContentHash::of_value(&digest_input(self))
@@ -222,97 +290,21 @@ pub fn analyze_glioma_research_object_dependency_closure(
         values.sort();
     }
     let root_order = roots.iter().cloned().collect::<Vec<_>>();
-    let mut traversal = BTreeSet::new();
-    let mut missing = BTreeSet::new();
-    let mut cycles = BTreeSet::new();
+    let mut closure = ClosureTraversal {
+        max_depth: request.max_depth,
+        entries: &entries,
+        traversal: BTreeSet::new(),
+        missing: BTreeSet::new(),
+        cycles: BTreeSet::new(),
+        depth_exceeded: BTreeSet::new(),
+        states: BTreeMap::new(),
+    };
     let mut orphans = BTreeSet::new();
-    let mut depth_exceeded = BTreeSet::new();
-    let mut node_states =
-        BTreeMap::<String, (usize, DependencyClosureNodeStatus, BTreeSet<String>)>::new();
-
-    fn visit(
-        id: &str,
-        depth: usize,
-        max_depth: usize,
-        entries: &BTreeMap<String, &super::multimodal_bundle::MultimodalResearchObjectEntry>,
-        traversal: &mut BTreeSet<String>,
-        missing: &mut BTreeSet<String>,
-        cycles: &mut BTreeSet<String>,
-        depth_exceeded: &mut BTreeSet<String>,
-        visiting: &mut BTreeSet<String>,
-        states: &mut BTreeMap<String, (usize, DependencyClosureNodeStatus, BTreeSet<String>)>,
-    ) {
-        if !traversal.insert(id.to_string()) {
-            if visiting.contains(id) {
-                cycles.insert(id.to_string());
-            }
-            return;
-        }
-        visiting.insert(id.to_string());
-        let entry = match entries.get(id) {
-            Some(entry) => *entry,
-            None => {
-                missing.insert(id.to_string());
-                visiting.remove(id);
-                return;
-            }
-        };
-        let mut issues = BTreeSet::new();
-        let mut status = if entry.upstream_artifact_ids.is_empty() {
-            DependencyClosureNodeStatus::Root
-        } else {
-            DependencyClosureNodeStatus::Closed
-        };
-        if depth > max_depth {
-            depth_exceeded.insert(id.to_string());
-            issues.insert("max-depth-exceeded".into());
-            status = DependencyClosureNodeStatus::DepthExceeded;
-        }
-        for upstream in &entry.upstream_artifact_ids {
-            if !entries.contains_key(upstream) {
-                missing.insert(upstream.clone());
-                issues.insert(format!("missing-upstream:{upstream}"));
-                status = DependencyClosureNodeStatus::MissingUpstream;
-            } else if visiting.contains(upstream) {
-                cycles.insert(upstream.clone());
-                cycles.insert(id.to_string());
-                issues.insert(format!("cycle:{upstream}"));
-                status = DependencyClosureNodeStatus::Cycle;
-            } else {
-                visit(
-                    upstream,
-                    depth.saturating_add(1),
-                    max_depth,
-                    entries,
-                    traversal,
-                    missing,
-                    cycles,
-                    depth_exceeded,
-                    visiting,
-                    states,
-                );
-            }
-        }
-        visiting.remove(id);
-        states.insert(id.to_string(), (depth, status, issues));
-    }
-
     for id in &artifact_order {
-        visit(
-            id,
-            0,
-            request.max_depth,
-            &entries,
-            &mut traversal,
-            &mut missing,
-            &mut cycles,
-            &mut depth_exceeded,
-            &mut BTreeSet::new(),
-            &mut node_states,
-        );
+        closure.visit(id, 0, &mut BTreeSet::new());
     }
     for id in &artifact_order {
-        if !roots.contains(id) && !traversal.contains(id) {
+        if !roots.contains(id) && !closure.traversal.contains(id) {
             orphans.insert(id.clone());
         }
     }
@@ -332,10 +324,10 @@ pub fn analyze_glioma_research_object_dependency_closure(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    if !missing.is_empty() {
+    if !closure.missing.is_empty() {
         limitations.insert("dependency-closure-missing-inputs".into());
     }
-    if !cycles.is_empty() {
+    if !closure.cycles.is_empty() {
         limitations.insert("dependency-closure-cycle-detected".into());
     }
     if !uncovered_program_order.is_empty() {
@@ -344,21 +336,21 @@ pub fn analyze_glioma_research_object_dependency_closure(
     let mut nodes = Vec::new();
     for id in &artifact_order {
         let entry = entries.get(id).expect("entry exists");
-        let (depth, mut status, mut issues) = node_states.remove(id).unwrap_or((
+        let (depth, mut status, mut issues) = closure.states.remove(id).unwrap_or((
             0,
             DependencyClosureNodeStatus::Orphaned,
             BTreeSet::new(),
         ));
-        if cycles.contains(id) {
+        if closure.cycles.contains(id) {
             status = DependencyClosureNodeStatus::Cycle;
             issues.insert("cycle-detected".into());
-        } else if depth_exceeded.contains(id) {
+        } else if closure.depth_exceeded.contains(id) {
             status = DependencyClosureNodeStatus::DepthExceeded;
-        } else if !missing.is_empty()
+        } else if !closure.missing.is_empty()
             && entry
                 .upstream_artifact_ids
                 .iter()
-                .any(|upstream| missing.contains(upstream))
+                .any(|upstream| closure.missing.contains(upstream))
         {
             status = DependencyClosureNodeStatus::MissingUpstream;
         }
@@ -372,10 +364,10 @@ pub fn analyze_glioma_research_object_dependency_closure(
             issue_order: issues.into_iter().collect(),
         });
     }
-    let disposition = if !missing.is_empty()
-        || !cycles.is_empty()
+    let disposition = if !closure.missing.is_empty()
+        || !closure.cycles.is_empty()
         || (request.require_program_coverage && !uncovered_program_order.is_empty())
-        || !depth_exceeded.is_empty()
+        || !closure.depth_exceeded.is_empty()
     {
         DependencyClosureDisposition::Blocked
     } else if !orphans.is_empty()
@@ -393,12 +385,12 @@ pub fn analyze_glioma_research_object_dependency_closure(
         bundle_digest: request.bundle.digest.clone(),
         artifact_order,
         root_order,
-        traversal_order: traversal.into_iter().collect(),
+        traversal_order: closure.traversal.into_iter().collect(),
         nodes,
-        missing_upstream_order: missing.into_iter().collect(),
-        cycle_order: cycles.into_iter().collect(),
+        missing_upstream_order: closure.missing.into_iter().collect(),
+        cycle_order: closure.cycles.into_iter().collect(),
         orphan_order: orphans.into_iter().collect(),
-        depth_exceeded_order: depth_exceeded.into_iter().collect(),
+        depth_exceeded_order: closure.depth_exceeded.into_iter().collect(),
         uncovered_program_order,
         program_coverage_order,
         limitations: limitations.into_iter().collect(),
@@ -415,8 +407,8 @@ pub fn analyze_glioma_research_object_dependency_closure(
 mod tests {
     use super::*;
     use crate::glioma::programs::p11_research_object_release::multimodal_bundle::{
-        compile_glioma_multimodal_research_object, MultimodalResearchObjectInput,
-        MultimodalResearchObjectRequest,
+        MultimodalResearchObjectInput, MultimodalResearchObjectRequest,
+        compile_glioma_multimodal_research_object,
     };
     use crate::glioma::release::ResearchObjectRequest;
     use crate::glioma_engine::{GliomaModality, LocalArtifactRef};

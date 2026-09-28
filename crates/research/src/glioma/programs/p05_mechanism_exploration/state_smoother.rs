@@ -457,8 +457,7 @@ pub fn smooth_glioma_mechanism_states(
     for time_index in (0..timepoint_order.len().saturating_sub(1)).rev() {
         let scores = mechanisms
             .iter()
-            .enumerate()
-            .map(|(_source, source_model)| {
+            .map(|source_model| {
                 mechanisms
                     .iter()
                     .enumerate()
@@ -574,11 +573,11 @@ pub fn smooth_glioma_mechanism_states(
                     "smoothing produced no transition support".into(),
                 )
             })?;
-        let support = if total == 0 {
-            0
-        } else {
-            (weight.saturating_mul(1_000) / total).min(1_000) as u16
-        };
+        let support = weight
+            .saturating_mul(1_000)
+            .checked_div(total)
+            .unwrap_or_default()
+            .min(1_000) as u16;
         let from_timepoint = timepoint_order[time_index];
         let to_timepoint = timepoint_order[time_index + 1];
         if support < request.min_transition_support_milli {
@@ -752,10 +751,12 @@ mod tests {
             result.disposition,
             MechanismStateSmootherDisposition::Partial
         );
-        assert!(result
-            .uncertainty_order
-            .iter()
-            .any(|item| item.contains("coverage")));
+        assert!(
+            result
+                .uncertainty_order
+                .iter()
+                .any(|item| item.contains("coverage"))
+        );
     }
 
     #[test]
@@ -765,9 +766,11 @@ mod tests {
         let replay = smooth_glioma_mechanism_states(&request).unwrap();
         assert_eq!(first, replay);
         assert!(!first.negative_evidence_order.is_empty());
-        assert!(first
-            .posteriors
-            .iter()
-            .any(|posterior| !posterior.negative_feature_order.is_empty()));
+        assert!(
+            first
+                .posteriors
+                .iter()
+                .any(|posterior| !posterior.negative_feature_order.is_empty())
+        );
     }
 }

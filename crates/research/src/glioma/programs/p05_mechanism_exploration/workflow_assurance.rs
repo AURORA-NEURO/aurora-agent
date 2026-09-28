@@ -836,14 +836,16 @@ mod tests {
         };
         let plan = assure_glioma_mechanism_workflow(&request).unwrap();
         assert_eq!(plan.blocked_order, vec!["a-first", "b-second"]);
-        assert!(plan
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.contains("contradicted")));
-        assert!(plan
-            .uncertainty
-            .iter()
-            .any(|entry| entry.contains("stale-observation")));
+        assert!(
+            plan.negative_evidence
+                .iter()
+                .any(|entry| entry.contains("contradicted"))
+        );
+        assert!(
+            plan.uncertainty
+                .iter()
+                .any(|entry| entry.contains("stale-observation"))
+        );
         assert_eq!(plan.next_route, "glioma_mechanism_feedback_replan");
         plan.validate().unwrap();
     }
@@ -864,14 +866,16 @@ mod tests {
         request.policy.permitted_execution_route_prefixes = vec!["remote".into()];
         let plan = assure_glioma_mechanism_workflow(&request).unwrap();
         assert!(plan.admitted_order.is_empty());
-        assert!(plan
-            .blocked_order
-            .iter()
-            .all(|id| id == "a-first" || id == "b-second"));
-        assert!(plan
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.contains("route-not-allowlisted")));
+        assert!(
+            plan.blocked_order
+                .iter()
+                .all(|id| id == "a-first" || id == "b-second")
+        );
+        assert!(
+            plan.negative_evidence
+                .iter()
+                .any(|entry| entry.contains("route-not-allowlisted"))
+        );
         assert_eq!(plan.disposition, MechanismAssuranceDisposition::Blocked);
         plan.validate().unwrap();
     }

@@ -644,9 +644,11 @@ mod tests {
         let output = analyze_multimodal_consensus(&request(), &vectors).unwrap();
         assert_eq!(output.disposition, ConsensusDisposition::Partial);
         assert_eq!(output.unresolved_sample_order, vec!["s4"]);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("modality-floor")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("modality-floor"))
+        );
     }
 }

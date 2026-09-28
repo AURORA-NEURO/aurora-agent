@@ -8,7 +8,7 @@
 //! the surrounding workflow.  It operates on local, de-identified preclinical rows only.
 
 use crate::glioma::analysis::{
-    analyze_preclinical_outcomes, AnalysisDataset, AnalysisDisposition, AnalysisRequest,
+    AnalysisDataset, AnalysisDisposition, AnalysisRequest, analyze_preclinical_outcomes,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -491,10 +491,12 @@ mod tests {
         ]);
         let suite = assess_glioma_robustness(&request(3), &data).unwrap();
         assert_eq!(suite.disposition, RobustnessDisposition::Unresolved);
-        assert!(suite
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("omission-cases")));
+        assert!(
+            suite
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("omission-cases"))
+        );
     }
 
     #[test]

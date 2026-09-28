@@ -570,9 +570,11 @@ mod tests {
         let output = analyze_glioma_mechanism_identifiability(&input).expect("frontier");
         assert_eq!(output.risk_blocked_order, vec!["f-high"]);
         assert_eq!(output.unresolved_pair_order, vec!["m-a__m-b"]);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry == "unresolved-pair:m-a__m-b"));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry == "unresolved-pair:m-a__m-b")
+        );
     }
 }

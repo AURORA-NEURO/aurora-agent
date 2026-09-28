@@ -650,8 +650,8 @@ pub fn plan_glioma_clone_perturbation_panel(
 mod tests {
     use super::*;
     use crate::glioma::programs::p05_mechanism_exploration::{
-        analyze_glioma_clonal_evolution, ClonalEvolutionRequest, CloneMarker, CloneMarkerState,
-        CloneProfile,
+        ClonalEvolutionRequest, CloneMarker, CloneMarkerState, CloneProfile,
+        analyze_glioma_clonal_evolution,
     };
     use bioprism_ids::ContentHash;
 
@@ -778,14 +778,18 @@ mod tests {
             output.disposition,
             ClonePerturbationPanelDisposition::Partial
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("no-selected-candidate-for-branch")));
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item == "panel-budget-exhausted"));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("no-selected-candidate-for-branch"))
+        );
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item == "panel-budget-exhausted")
+        );
     }
 
     #[test]

@@ -528,10 +528,12 @@ mod tests {
         let second = plan_glioma_power_stress_surface(&request()).expect("surface");
         assert_eq!(first, second);
         assert_eq!(first.results.len(), 2);
-        assert!(first
-            .results
-            .iter()
-            .all(|result| result.scenario_results.len() == 2));
+        assert!(
+            first
+                .results
+                .iter()
+                .all(|result| result.scenario_results.len() == 2)
+        );
         first.validate().expect("valid output");
     }
 
@@ -543,13 +545,17 @@ mod tests {
         input.target_power_milli = 999;
         let output = plan_glioma_power_stress_surface(&input).expect("surface");
         assert_eq!(output.risk_blocked_order, vec!["arm-b"]);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry == "risk-gate-blocked:arm-b"));
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry.starts_with("underpowered:")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry == "risk-gate-blocked:arm-b")
+        );
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry.starts_with("underpowered:"))
+        );
     }
 }

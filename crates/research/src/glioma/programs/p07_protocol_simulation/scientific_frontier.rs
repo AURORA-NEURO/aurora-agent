@@ -14,8 +14,8 @@ use crate::glioma::programs::p03_multimodal_ingestion_qc::{
     MultimodalResearchReadiness, MultimodalResearchReadinessDisposition, MultimodalResearchSurface,
 };
 use crate::glioma_engine::{
-    select_glioma_actions, GliomaActionCandidate, GliomaActionSelection, GliomaEngineError,
-    GliomaSelectionConfig, GliomaStageKind,
+    GliomaActionCandidate, GliomaActionSelection, GliomaEngineError, GliomaSelectionConfig,
+    GliomaStageKind, select_glioma_actions,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};

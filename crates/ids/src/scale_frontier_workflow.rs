@@ -204,9 +204,8 @@ impl IdsCapacityReport9 {
     }
     pub fn digest(&self) -> Result<ContentHash, ScaleFrontierError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| ScaleFrontierError::Report(error.to_string()))?;
-        ContentHash::of_value(&value).map_err(|error| ScaleFrontierError::Report(error.to_string()))
+        ContentHash::of_serializable(self)
+            .map_err(|error| ScaleFrontierError::Report(error.to_string()))
     }
 }
 fn validate_request(request: &IdsScaleWorkload8) -> Result<(), ScaleFrontierError> {

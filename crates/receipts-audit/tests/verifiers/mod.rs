@@ -53,10 +53,7 @@ fn projection_verdict(projection: &Value, absent_reason: &str) -> Verdict {
                 .to_string(),
         );
     }
-    Verdict::rejected(
-        RejectionClass::StructuralFailure,
-        projection.to_string(),
-    )
+    Verdict::rejected(RejectionClass::StructuralFailure, projection.to_string())
 }
 
 pub fn certificate(document: &Value) -> Verdict {

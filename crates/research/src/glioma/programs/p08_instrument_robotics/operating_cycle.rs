@@ -7,8 +7,8 @@
 //! preflight failure and keeps the safety handoff machine-readable.
 
 use super::campaign::{
-    execute_glioma_instrument_campaign, InstrumentCampaign, InstrumentCampaignDisposition,
-    InstrumentCampaignError, InstrumentCampaignRequest,
+    InstrumentCampaign, InstrumentCampaignDisposition, InstrumentCampaignError,
+    InstrumentCampaignRequest, execute_glioma_instrument_campaign,
 };
 use super::execution::{DryRunInstrumentExecutor, InstrumentExecutor};
 use super::preflight::InstrumentPreflightDisposition;

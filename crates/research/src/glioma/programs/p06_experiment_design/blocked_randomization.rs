@@ -611,9 +611,11 @@ mod tests {
         input.arms[1].risk_milli = 900;
         let output = plan_glioma_blocked_randomization(&input).expect("plan");
         assert_eq!(output.risk_blocked_order, vec!["perturb"]);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|entry| entry == "risk-gate-blocked:perturb"));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|entry| entry == "risk-gate-blocked:perturb")
+        );
     }
 }

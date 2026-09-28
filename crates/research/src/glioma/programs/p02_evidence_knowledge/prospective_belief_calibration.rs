@@ -281,33 +281,26 @@ pub fn calibrate_glioma_beliefs_prospectively(
                     * observation.weight_milli as u64
             })
             .sum::<u64>();
-        let mean_predicted = if total_weight == 0 {
-            0
-        } else {
-            (predicted_sum / total_weight).min(1_000) as u16
-        };
-        let empirical = if total_weight == 0 {
-            0
-        } else {
-            (empirical_sum / total_weight).min(1_000) as u16
-        };
-        let brier = if total_weight == 0 {
-            0
-        } else {
-            (eligible
-                .iter()
-                .map(|observation| {
-                    let prediction = observation.predicted_support_milli as i64;
-                    let outcome =
-                        outcome_value(observation.observed_state).unwrap_or_default() as i64;
-                    (prediction - outcome).unsigned_abs().pow(2) as u64
-                        * observation.weight_milli as u64
-                        / 1_000
-                })
-                .sum::<u64>()
-                / total_weight)
-                .min(1_000) as u16
-        };
+        let mean_predicted = predicted_sum
+            .checked_div(total_weight)
+            .unwrap_or_default()
+            .min(1_000) as u16;
+        let empirical = empirical_sum
+            .checked_div(total_weight)
+            .unwrap_or_default()
+            .min(1_000) as u16;
+        let brier = eligible
+            .iter()
+            .map(|observation| {
+                let prediction = observation.predicted_support_milli as i64;
+                let outcome = outcome_value(observation.observed_state).unwrap_or_default() as i64;
+                (prediction - outcome).unsigned_abs().pow(2) * observation.weight_milli as u64
+                    / 1_000
+            })
+            .sum::<u64>()
+            .checked_div(total_weight)
+            .unwrap_or_default()
+            .min(1_000) as u16;
         let calibration_error = mean_predicted.abs_diff(empirical);
         let disposition = if eligible.len() < request.min_observations {
             insufficient.insert(claim_id.clone());

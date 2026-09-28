@@ -66,6 +66,7 @@
 //! * **No obligation discharge.** Accepting a clause is a claim the caller makes about itself.
 //!   Nothing here can tell an honoured obligation from an ignored one.
 
+use crate::error::FiberError;
 use crate::qir::Query;
 use bioprism_world::{Fact, WorldSource};
 use serde_json::Value;
@@ -154,11 +155,8 @@ impl PolicyEnvelope {
     /// query is refused before any closure, slice or materialisation happens — 43.33's
     /// "enforced during compilation" taken at its word. The *screen* cannot move up with it, for
     /// the reason given at [`screen`].
-    pub fn resolve<S: WorldSource + ?Sized>(
-        source: &S,
-        query: &Query,
-    ) -> Result<Self, PolicyViolation> {
-        let governing = match source.fact_providing(DATA_POLICY_VARIABLE) {
+    pub fn resolve<S: WorldSource + ?Sized>(source: &S, query: &Query) -> Result<Self, FiberError> {
+        let governing = match source.fact_providing(DATA_POLICY_VARIABLE)? {
             Some(fact) => Some(governing_clauses(&fact)?),
             None => None,
         };
@@ -170,7 +168,8 @@ impl PolicyEnvelope {
                 return Err(PolicyViolation::Conflict {
                     clauses: ungranted,
                     governing: declared.iter().cloned().collect(),
-                });
+                }
+                .into());
             }
         }
 

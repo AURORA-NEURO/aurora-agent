@@ -22,6 +22,8 @@ JsonObject = dict[str, Any]
 JsonValue = Any
 
 CELL_SCHEMA_VERSION = "bioprism-decision-cell/0.1"
+# JavaScript Number can round-trip integer JSON values exactly only through 2**53 - 1.
+MAX_SAFE_JSON_INTEGER = 2**53 - 1
 _PACK_ID = re.compile(r"^[a-z][a-z0-9.-]*\.[a-z0-9.-]+$")
 _MODULE_ID = re.compile(r"^[0-9]{2}\.[0-9]{2}$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -129,6 +131,17 @@ def canonical_json(value: JsonValue) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
+def utf8_scalar_byte_length(value: str) -> int | None:
+    """Return strict UTF-8 size, or ``None`` when text contains an unpaired surrogate."""
+
+    if not isinstance(value, str):
+        return None
+    try:
+        return len(value.encode("utf-8"))
+    except UnicodeEncodeError:
+        return None
+
+
 def canonical_bytes(value: JsonValue) -> bytes:
     return canonical_json(value).encode("utf-8")
 
@@ -150,6 +163,8 @@ def _validate_json_value(value: JsonValue, path: str = "$", depth: int = 0) -> N
         if isinstance(value, int) and not isinstance(value, bool):
             if value < -(2**63) or value > 2**64 - 1:
                 raise AuthoringError(f"{path}: integer is outside Rust JSON's signed/unsigned range")
+        if isinstance(value, str) and utf8_scalar_byte_length(value) is None:
+            raise AuthoringError(f"{path}: text must contain only Unicode scalar values")
         return
     if isinstance(value, float):
         if not math.isfinite(value):
@@ -159,6 +174,8 @@ def _validate_json_value(value: JsonValue, path: str = "$", depth: int = 0) -> N
         for key, child in value.items():
             if not isinstance(key, str):
                 raise AuthoringError(f"{path}: JSON object keys must be strings")
+            if utf8_scalar_byte_length(key) is None:
+                raise AuthoringError(f"{path}: JSON object keys must contain only Unicode scalar values")
             _validate_json_value(child, f"{path}.{key}", depth + 1)
         return
     if isinstance(value, (list, tuple)):
@@ -171,7 +188,8 @@ def _validate_json_value(value: JsonValue, path: str = "$", depth: int = 0) -> N
 def _text(value: str, path: str, *, max_bytes: int = 4096, allow_empty: bool = False) -> str:
     if not isinstance(value, str) or (not allow_empty and not value.strip()):
         raise AuthoringError(f"{path}: expected a non-empty string")
-    if "\r" in value or "\n" in value or len(value.encode("utf-8")) > max_bytes:
+    byte_length = utf8_scalar_byte_length(value)
+    if "\r" in value or "\n" in value or byte_length is None or byte_length > max_bytes:
         raise AuthoringError(f"{path}: value is not line-safe or exceeds {max_bytes} UTF-8 bytes")
     return value
 
@@ -746,6 +764,7 @@ __all__ = [
     "AcceptanceResult",
     "AuthoringError",
     "CELL_SCHEMA_VERSION",
+    "MAX_SAFE_JSON_INTEGER",
     "DecisionCell",
     "DecisionCellBuilder",
     "InputRef",

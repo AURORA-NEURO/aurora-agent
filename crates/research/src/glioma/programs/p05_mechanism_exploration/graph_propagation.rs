@@ -566,10 +566,12 @@ mod tests {
         assert!(output.converged);
         assert_eq!(output.disposition, MechanismGraphDisposition::Qualified);
         assert_eq!(output.ranking_order.len(), 3);
-        assert!(output
-            .scores
-            .iter()
-            .any(|score| { score.node_id == "invasion" && score.propagated_score_milli > 0 }));
+        assert!(
+            output
+                .scores
+                .iter()
+                .any(|score| { score.node_id == "invasion" && score.propagated_score_milli > 0 })
+        );
         output.validate().unwrap();
     }
 
@@ -601,14 +603,18 @@ mod tests {
         });
         let output = propagate_glioma_mechanism_graph(&request(), &nodes, &edges).unwrap();
         assert_eq!(output.disposition, MechanismGraphDisposition::Partial);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item == "low-confidence-edge-excluded:e-egfr-stat3"));
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item == "disconnected-node:unmeasured"));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item == "low-confidence-edge-excluded:e-egfr-stat3")
+        );
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item == "disconnected-node:unmeasured")
+        );
     }
 
     #[test]

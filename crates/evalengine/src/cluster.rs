@@ -65,6 +65,8 @@ pub enum IccEstimate {
     NotApplicable,
     /// Not estimable: too few parents, or no variance at all in the sample.
     Undefined { reason: String },
+    /// The sample is malformed or floating-point arithmetic could not produce a finite estimate.
+    Invalid { reason: String },
 }
 
 impl IccEstimate {
@@ -72,12 +74,16 @@ impl IccEstimate {
         match self {
             IccEstimate::Estimated { value } => Some(*value),
             IccEstimate::NotApplicable => Some(0.0),
-            IccEstimate::Undefined { .. } => None,
+            IccEstimate::Undefined { .. } | IccEstimate::Invalid { .. } => None,
         }
     }
 
     pub fn is_undefined(&self) -> bool {
         matches!(self, IccEstimate::Undefined { .. })
+    }
+
+    pub fn is_invalid(&self) -> bool {
+        matches!(self, IccEstimate::Invalid { .. })
     }
 }
 
@@ -132,34 +138,62 @@ impl ClusteredSample {
     }
 
     /// The mean over instances. Named for what it does wrong: a parent with nine hundred
-    /// descendants moves this nine hundred times as much as a parent with one.
+    /// descendants moves this nine hundred times as much as a parent with one. Returns `None`
+    /// for an empty parent or a non-finite input or result.
     pub fn naive_instance_mean(&self) -> Option<f64> {
         let n = self.n_instances();
-        if n == 0 {
+        if n == 0
+            || self
+                .clusters
+                .values()
+                .any(|values| values.is_empty() || values.iter().any(|value| !value.is_finite()))
+        {
             return None;
         }
         let total: f64 = self.clusters.values().flatten().sum();
-        Some(total / n as f64)
+        let mean = total / n as f64;
+        mean.is_finite().then_some(mean)
     }
 
     /// The unweighted mean of per-parent means, which treats the parent as the sampling unit.
+    /// Returns `None` for an empty parent or a non-finite input or result.
     pub fn cluster_balanced_mean(&self) -> Option<f64> {
-        if self.clusters.is_empty() {
+        if self.clusters.is_empty()
+            || self
+                .clusters
+                .values()
+                .any(|values| values.is_empty() || values.iter().any(|value| !value.is_finite()))
+        {
             return None;
         }
         let sum: f64 = self
             .clusters
             .values()
-            .filter(|values| !values.is_empty())
             .map(|values| values.iter().sum::<f64>() / values.len() as f64)
             .sum();
-        Some(sum / self.clusters.len() as f64)
+        let mean = sum / self.clusters.len() as f64;
+        mean.is_finite().then_some(mean)
     }
 
     /// One-way random-effects ICC over the parent factor.
     pub fn icc(&self) -> IccEstimate {
         let k = self.clusters.len();
         let n_total = self.n_instances();
+        if let Some((parent, _)) = self.clusters.iter().find(|(_, values)| values.is_empty()) {
+            return IccEstimate::Invalid {
+                reason: format!("parent `{parent}` has no observations"),
+            };
+        }
+        if let Some((parent, value)) = self.clusters.iter().find_map(|(parent, values)| {
+            values
+                .iter()
+                .find(|value| !value.is_finite())
+                .map(|value| (parent, value))
+        }) {
+            return IccEstimate::Invalid {
+                reason: format!("parent `{parent}` contains non-finite score `{value}`"),
+            };
+        }
         if k < 2 {
             return IccEstimate::Undefined {
                 reason: format!("{k} parent cluster(s); between-parent variance is not estimable"),
@@ -170,6 +204,11 @@ impl ClusteredSample {
         }
 
         let grand: f64 = self.clusters.values().flatten().sum::<f64>() / n_total as f64;
+        if !grand.is_finite() {
+            return IccEstimate::Invalid {
+                reason: "grand mean overflowed floating-point range".to_string(),
+            };
+        }
 
         let mut ssb = 0.0;
         let mut ssw = 0.0;
@@ -190,6 +229,12 @@ impl ClusteredSample {
         let m0 = (n_total as f64 - sum_sq_sizes / n_total as f64) / (k as f64 - 1.0);
         let denominator = msb + (m0 - 1.0) * msw;
 
+        if !msb.is_finite() || !msw.is_finite() || !m0.is_finite() || !denominator.is_finite() {
+            return IccEstimate::Invalid {
+                reason: "variance calculation overflowed floating-point range".to_string(),
+            };
+        }
+
         if denominator <= f64::EPSILON {
             return IccEstimate::Undefined {
                 reason: "no variance in the sample; correlation is not estimable".to_string(),
@@ -197,28 +242,36 @@ impl ClusteredSample {
         }
 
         let raw = (msb - msw) / denominator;
+        if !raw.is_finite() {
+            return IccEstimate::Invalid {
+                reason: "correlation calculation was non-finite".to_string(),
+            };
+        }
         IccEstimate::Estimated {
             value: raw.clamp(0.0, 1.0),
         }
     }
 
-    /// Independent observations the sample is worth.
+    /// Independent observations the sample is worth. Returns `None` for no observations, an
+    /// invalid sample, or arithmetic that cannot produce a finite estimate.
     ///
     /// Never above the instance count and never below the parent count. The lower clamp is the
     /// statement that parents are independent of one another; the upper is arithmetic.
-    pub fn effective_sample_size(&self) -> f64 {
+    pub fn effective_sample_size(&self) -> Option<f64> {
         let n = self.n_instances() as f64;
         let k = self.n_clusters() as f64;
         if n == 0.0 {
-            return 0.0;
+            return None;
         }
         match self.icc() {
-            IccEstimate::NotApplicable => n,
-            IccEstimate::Undefined { .. } => k,
+            IccEstimate::NotApplicable => Some(n),
+            IccEstimate::Undefined { .. } => Some(k),
+            IccEstimate::Invalid { .. } => None,
             IccEstimate::Estimated { value } => {
                 let mean_size = n / k;
                 let design_effect = 1.0 + (mean_size - 1.0) * value;
-                (n / design_effect).clamp(k, n)
+                let estimate = (n / design_effect).clamp(k, n);
+                estimate.is_finite().then_some(estimate)
             }
         }
     }
@@ -240,6 +293,37 @@ impl ClusteredSample {
                 parent: parent.clone(),
             });
         }
+        if let Some((parent, value)) = self.clusters.iter().find_map(|(parent, values)| {
+            values
+                .iter()
+                .find(|value| !value.is_finite())
+                .map(|value| (parent, value))
+        }) {
+            return Err(EvalError::NonFiniteClusterValue {
+                label: self.label.clone(),
+                parent: parent.clone(),
+                value: value.to_string(),
+            });
+        }
+
+        let mean =
+            self.cluster_balanced_mean()
+                .ok_or_else(|| EvalError::NonFiniteClusterAggregate {
+                    label: self.label.clone(),
+                    statistic: "cluster-balanced mean".to_string(),
+                })?;
+        let naive_instance_mean =
+            self.naive_instance_mean()
+                .ok_or_else(|| EvalError::NonFiniteClusterAggregate {
+                    label: self.label.clone(),
+                    statistic: "instance mean".to_string(),
+                })?;
+        let effective_sample_size =
+            self.effective_sample_size()
+                .ok_or_else(|| EvalError::NonFiniteClusterAggregate {
+                    label: self.label.clone(),
+                    statistic: "effective sample size".to_string(),
+                })?;
 
         let instances = self.n_instances();
         let unknown = self.n_unknown();
@@ -247,8 +331,8 @@ impl ClusteredSample {
 
         Ok(ClusteredEstimate {
             label: self.label.clone(),
-            mean: self.cluster_balanced_mean().unwrap_or(0.0),
-            naive_instance_mean: self.naive_instance_mean().unwrap_or(0.0),
+            mean,
+            naive_instance_mean,
             instances,
             clusters: self.n_clusters(),
             largest_cluster: self
@@ -258,7 +342,7 @@ impl ClusteredSample {
                 .max()
                 .unwrap_or_default(),
             icc: self.icc(),
-            effective_sample_size: self.effective_sample_size(),
+            effective_sample_size,
             unknown_instances: unknown,
             unknown_fraction: if observed == 0 {
                 0.0
@@ -290,6 +374,106 @@ pub struct ClusteredEstimate {
 }
 
 impl ClusteredEstimate {
+    /// Check that a persisted or caller-constructed aggregate could have come from a sample.
+    ///
+    /// The fields are public for report interoperability, so every consumer that makes a claim
+    /// from an estimate must validate it before trusting the attached effective sample size.
+    pub fn validate(&self) -> Result<(), EvalError> {
+        let invalid = |detail: &str| EvalError::InvalidClusteredEstimate {
+            label: self.label.clone(),
+            detail: detail.to_string(),
+        };
+
+        if !self.mean.is_finite() || !self.naive_instance_mean.is_finite() {
+            return Err(invalid("means must be finite"));
+        }
+        if self.instances == 0 || self.clusters == 0 {
+            return Err(invalid(
+                "known instances and parent clusters must both be nonzero",
+            ));
+        }
+        if self.clusters > self.instances {
+            return Err(invalid("parent cluster count exceeds known instance count"));
+        }
+        if self.largest_cluster == 0 || self.largest_cluster > self.instances {
+            return Err(invalid(
+                "largest cluster is outside the known instance count",
+            ));
+        }
+        let smallest_possible_largest =
+            self.instances / self.clusters + usize::from(self.instances % self.clusters != 0);
+        if self.largest_cluster < smallest_possible_largest {
+            return Err(invalid(
+                "largest cluster is smaller than the average cluster size",
+            ));
+        }
+        let Some(total_instances) = self.instances.checked_add(self.unknown_instances) else {
+            return Err(invalid("known and unknown instance counts overflow"));
+        };
+        let expected_unknown_fraction = self.unknown_instances as f64 / total_instances as f64;
+        if !self.unknown_fraction.is_finite()
+            || !(0.0..=1.0).contains(&self.unknown_fraction)
+            || (self.unknown_fraction - expected_unknown_fraction).abs() > 1e-12
+        {
+            return Err(invalid(
+                "unknown fraction does not match the known and unknown counts",
+            ));
+        }
+        if !self.effective_sample_size.is_finite()
+            || self.effective_sample_size < self.clusters as f64
+            || self.effective_sample_size > self.instances as f64
+        {
+            return Err(invalid(
+                "effective sample size must be finite and between parent and instance counts",
+            ));
+        }
+
+        let expected_effective = match &self.icc {
+            IccEstimate::Estimated { value } => {
+                if !value.is_finite() || !(0.0..=1.0).contains(value) {
+                    return Err(invalid("estimated ICC must be finite and in [0, 1]"));
+                }
+                if self.clusters < 2 || self.instances == self.clusters {
+                    return Err(invalid(
+                        "estimated ICC requires repeated observations in at least two clusters",
+                    ));
+                }
+                let n = self.instances as f64;
+                let k = self.clusters as f64;
+                Some((n / (1.0 + (n / k - 1.0) * value)).clamp(k, n))
+            }
+            IccEstimate::NotApplicable => {
+                if self.instances != self.clusters {
+                    return Err(invalid(
+                        "ICC is not applicable only when every cluster is a singleton",
+                    ));
+                }
+                Some(self.instances as f64)
+            }
+            IccEstimate::Undefined { .. } => {
+                if self.clusters > 1 && self.instances == self.clusters {
+                    return Err(invalid(
+                        "singleton clusters have a defined, not undefined, ICC",
+                    ));
+                }
+                Some(self.clusters as f64)
+            }
+            IccEstimate::Invalid { .. } => {
+                return Err(invalid(
+                    "an invalid ICC cannot support a clustered estimate",
+                ));
+            }
+        };
+        if let Some(expected) = expected_effective {
+            if (self.effective_sample_size - expected).abs() > 1e-9 * expected.max(1.0) {
+                return Err(invalid(
+                    "effective sample size is inconsistent with the ICC",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// How much the instance count overstates the independent information.
     pub fn inflation_factor(&self) -> f64 {
         if self.effective_sample_size <= 0.0 {
@@ -369,7 +553,12 @@ mod tests {
     fn independent_singleton_parents_keep_their_full_sample_size() {
         let sample = sample(
             "pass_rate",
-            &[("p1", &[1.0]), ("p2", &[0.0]), ("p3", &[1.0]), ("p4", &[0.0])],
+            &[
+                ("p1", &[1.0]),
+                ("p2", &[0.0]),
+                ("p3", &[1.0]),
+                ("p4", &[0.0]),
+            ],
         );
         let estimate = sample.estimate().expect("non-empty");
         assert_eq!(estimate.icc, IccEstimate::NotApplicable);
@@ -426,6 +615,38 @@ mod tests {
     }
 
     #[test]
+    fn a_non_finite_score_cannot_escape_as_a_clustered_estimate() {
+        let mut sample = ClusteredSample::new("pass_rate");
+        sample.push("p1", 1.0);
+        sample.push("p2", f64::NAN);
+
+        assert_eq!(sample.naive_instance_mean(), None);
+        assert_eq!(sample.cluster_balanced_mean(), None);
+        assert!(sample.icc().is_invalid());
+        assert_eq!(sample.effective_sample_size(), None);
+        assert!(matches!(
+            sample.estimate(),
+            Err(EvalError::NonFiniteClusterValue { parent, .. }) if parent == "p2"
+        ));
+    }
+
+    #[test]
+    fn finite_scores_that_overflow_an_aggregate_are_rejected() {
+        let sample = sample(
+            "large_finite_score",
+            &[("p1", &[f64::MAX, f64::MAX]), ("p2", &[f64::MAX, f64::MAX])],
+        );
+
+        assert_eq!(sample.naive_instance_mean(), None);
+        assert_eq!(sample.cluster_balanced_mean(), None);
+        assert!(sample.icc().is_invalid());
+        assert!(matches!(
+            sample.estimate(),
+            Err(EvalError::NonFiniteClusterAggregate { .. })
+        ));
+    }
+
+    #[test]
     fn a_sample_with_no_variance_reports_the_conservative_parent_count() {
         let sample = sample("pass_rate", &[("p1", &[1.0, 1.0]), ("p2", &[1.0, 1.0])]);
         let estimate = sample.estimate().expect("non-empty");
@@ -441,5 +662,20 @@ mod tests {
         let text = serde_json::to_string(&estimate).expect("serialize");
         let back: ClusteredEstimate = serde_json::from_str(&text).expect("deserialize");
         assert_eq!(estimate, back);
+        back.validate().expect("valid aggregate");
+    }
+
+    #[test]
+    fn a_deserialized_effective_sample_size_cannot_exceed_its_instance_count() {
+        let estimate = sample("pass_rate", &[("p1", &[1.0]), ("p2", &[0.0])])
+            .estimate()
+            .expect("non-empty");
+        let mut json = serde_json::to_value(&estimate).expect("serialize");
+        json["effective_sample_size"] = serde_json::json!(1000.0);
+        let tampered: ClusteredEstimate = serde_json::from_value(json).expect("deserialize");
+        assert!(matches!(
+            tampered.validate(),
+            Err(EvalError::InvalidClusteredEstimate { .. })
+        ));
     }
 }

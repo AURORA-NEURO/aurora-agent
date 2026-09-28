@@ -342,11 +342,7 @@ pub fn admit_glioma_decision_actions(
             denied.insert(action.action_id.clone());
             negative.insert(format!("denied:{}", action.action_id));
         }
-        let cumulative_cost_units = if disposition == DecisionAdmissionDisposition::Admitted {
-            total_cost
-        } else {
-            total_cost
-        };
+        let cumulative_cost_units = total_cost;
         statuses.insert(action.action_id.clone(), disposition);
         records.push(DecisionAdmissionRecord {
             action_id: action.action_id,
@@ -362,13 +358,7 @@ pub fn admit_glioma_decision_actions(
         .collect::<Vec<_>>();
     let disposition = if !denied.is_empty() {
         DecisionAdmissionCampaignDisposition::Denied
-    } else if !blocked.is_empty() {
-        if admitted.is_empty() {
-            DecisionAdmissionCampaignDisposition::Blocked
-        } else {
-            DecisionAdmissionCampaignDisposition::Partial
-        }
-    } else if !approval_required.is_empty() {
+    } else if !blocked.is_empty() || !approval_required.is_empty() {
         if admitted.is_empty() {
             DecisionAdmissionCampaignDisposition::Blocked
         } else {

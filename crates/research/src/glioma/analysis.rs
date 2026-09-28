@@ -487,9 +487,11 @@ mod tests {
         ]);
         let result = analyze_preclinical_outcomes(&request(), &data).unwrap();
         assert_eq!(result.disposition, AnalysisDisposition::Negative);
-        assert!(result
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("below")));
+        assert!(
+            result
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("below"))
+        );
     }
 }

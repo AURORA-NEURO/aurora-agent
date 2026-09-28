@@ -530,6 +530,7 @@ fn choose_slot(
     workers: &BTreeMap<String, ComputationWorkerProfile>,
     worker_cursor: &BTreeMap<String, u64>,
     dependency_end: u64,
+    remaining_transfer_budget: u64,
 ) -> (Option<CandidateSlot>, Vec<String>) {
     let mut best = None;
     let mut reasons = BTreeSet::new();
@@ -579,7 +580,7 @@ fn choose_slot(
             reasons.insert(format!("{worker_id}:availability-window"));
             continue;
         }
-        if transfer_cost_units > request.max_transfer_cost_units {
+        if transfer_cost_units > remaining_transfer_budget {
             reasons.insert(format!("{worker_id}:transfer-budget"));
             continue;
         }
@@ -749,8 +750,17 @@ pub fn schedule_glioma_computation_placement(
                 .map(|assignment| assignment.scheduled_end_tick)
                 .max()
                 .unwrap_or(request.current_tick);
-            let (slot, reasons) =
-                choose_slot(task, &request, &workers, &worker_cursor, dependency_end);
+            let remaining_transfer_budget = request
+                .max_transfer_cost_units
+                .saturating_sub(total_transfer_cost);
+            let (slot, reasons) = choose_slot(
+                task,
+                &request,
+                &workers,
+                &worker_cursor,
+                dependency_end,
+                remaining_transfer_budget,
+            );
             let Some(slot) = slot else {
                 let reasons = if reasons.is_empty() {
                     vec!["no-compatible-worker".into()]
@@ -1018,10 +1028,66 @@ mod tests {
         let output = schedule_glioma_computation_placement(&request).unwrap();
         assert_eq!(output.disposition, ComputationPlacementDisposition::Blocked);
         assert!(!output.blocked_order.is_empty());
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("budget") || item.contains("operation")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("budget") || item.contains("operation"))
+        );
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn placement_uses_a_feasible_slower_worker_after_transfer_budget_is_spent() {
+        let mut request = request();
+        request.tasks = vec![
+            task("a", ComputationOperation::Normalize, Vec::new()),
+            task("b", ComputationOperation::Normalize, Vec::new()),
+        ];
+        request.max_transfer_cost_units = 3;
+        request.workers = vec![
+            ComputationWorkerProfile {
+                worker_id: "fast-remote".into(),
+                model_system_order: vec![GliomaModelSystem::Organoid],
+                operation_order: vec![ComputationOperation::Normalize],
+                local_artifact_order: Vec::new(),
+                available_from_tick: 0,
+                available_until_tick: 40,
+                max_task_cost_units: 1_000,
+                transfer_ticks_per_artifact: 0,
+                transfer_cost_units_per_artifact: 3,
+                speed_milli: 2_000,
+                enabled: true,
+            },
+            ComputationWorkerProfile {
+                worker_id: "slow-local".into(),
+                model_system_order: vec![GliomaModelSystem::Organoid],
+                operation_order: vec![ComputationOperation::Normalize],
+                local_artifact_order: vec!["matrix".into()],
+                available_from_tick: 0,
+                available_until_tick: 40,
+                max_task_cost_units: 1_000,
+                transfer_ticks_per_artifact: 0,
+                transfer_cost_units_per_artifact: 3,
+                speed_milli: 500,
+                enabled: true,
+            },
+        ];
+
+        let output = schedule_glioma_computation_placement(&request).unwrap();
+
+        assert_eq!(output.disposition, ComputationPlacementDisposition::Ready);
+        assert_eq!(output.assigned_order, vec!["a", "b"]);
+        assert_eq!(output.total_transfer_cost_units, 3);
+        assert_eq!(
+            output
+                .assignments
+                .iter()
+                .map(|assignment| (assignment.task_id.as_str(), assignment.worker_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("a", "fast-remote"), ("b", "slow-local")]
+        );
+        assert!(output.blocked_order.is_empty());
         output.validate().unwrap();
     }
 }

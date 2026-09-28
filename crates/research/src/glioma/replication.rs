@@ -349,9 +349,11 @@ mod tests {
         .unwrap();
         assert_eq!(assessment.disposition, ReplicationDisposition::Mixed);
         assert_eq!(assessment.contradictory_order, vec!["s2"]);
-        assert!(assessment
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("contradiction")));
+        assert!(
+            assessment
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("contradiction"))
+        );
     }
 }

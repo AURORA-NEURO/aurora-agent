@@ -69,7 +69,9 @@ pub enum ResearchError {
 
     /// A planned step referenced a distractor point no earlier step generated. The planner never
     /// produces such a protocol; hitting this means the executed steps and the plan diverged.
-    #[error("protocol out of order: step {step} needs the generated world for {distractors} distractors")]
+    #[error(
+        "protocol out of order: step {step} needs the generated world for {distractors} distractors"
+    )]
     ProtocolOutOfOrder { step: String, distractors: u32 },
 
     /// A document handed to [`crate::verify_dossier`] or [`crate::render_report`] is not a
@@ -85,7 +87,9 @@ pub enum ResearchError {
     /// The report renderer needed an artifact's content, but the dossier holds only its digest.
     /// Never produced for dossiers this runner builds — every figure-source artifact is far below
     /// the inline cap — so this names a foreign or hand-edited dossier.
-    #[error("artifact {name} (sha256 {digest}) is digest-only in the dossier; its figure cannot be rendered")]
+    #[error(
+        "artifact {name} (sha256 {digest}) is digest-only in the dossier; its figure cannot be rendered"
+    )]
     ArtifactNotInlined { name: String, digest: String },
 
     /// A figure renderer refused its input.

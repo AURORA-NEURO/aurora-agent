@@ -1,4 +1,5 @@
-//! Batch-conditional selection over externally supplied glioma posterior draws.
+//! Blueprint feature GAF-GLIOMA-P06-F12: batch-conditional selection over externally supplied
+//! glioma posterior draws.
 //!
 //! This is a deterministic PDBAL-inspired surrogate, not a reimplementation of BATCHIE and
 //! not a glioma efficacy claim. A calibrated institution-local model supplies posterior draws
@@ -11,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-pub const OUTPUT_SCHEMA: &str = "GliomaPosteriorDisagreementBatch1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaPosteriorDisagreementBatch1@2";
+const INPUT_SCHEMA: &str = "GliomaPosteriorDisagreementBatchInput1@1";
 pub const MAX_CANDIDATES: usize = 256;
 pub const MAX_POSTERIOR_DRAWS: usize = 64;
 pub const MAX_TARGETS: usize = 1_024;
@@ -95,6 +97,8 @@ pub struct PosteriorBatchPlan {
     pub output_schema: String,
     pub objective: String,
     pub model_system: GliomaModelSystem,
+    /// Commitment to the normalized request, candidate constraints, and posterior inputs.
+    pub input_digest: ContentHash,
     pub candidate_order: Vec<String>,
     pub draw_order: Vec<String>,
     pub selected_order: Vec<String>,
@@ -125,6 +129,7 @@ fn digest_input(plan: &PosteriorBatchPlan) -> serde_json::Value {
     serde_json::json!({
         "feature_id": plan.feature_id, "output_schema": plan.output_schema,
         "objective": plan.objective, "model_system": plan.model_system,
+        "input_digest": plan.input_digest,
         "candidate_order": plan.candidate_order, "draw_order": plan.draw_order,
         "selected_order": plan.selected_order, "deferred_order": plan.deferred_order,
         "blocked_order": plan.blocked_order, "unresolved_order": plan.unresolved_order,
@@ -136,6 +141,28 @@ fn digest_input(plan: &PosteriorBatchPlan) -> serde_json::Value {
 
 fn canonical(values: &[String]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+fn normalized_input_digest(
+    request: &PosteriorBatchRequest,
+    targets: &[PosteriorBatchTarget],
+    candidates: &[PosteriorBatchCandidate],
+    draws: &[PosteriorPredictiveDraw],
+) -> Result<ContentHash, PosteriorBatchError> {
+    let input = serde_json::json!({
+        "input_schema": INPUT_SCHEMA,
+        "objective": request.objective,
+        "model_system": request.model_system,
+        "budget_units": request.budget_units,
+        "max_selections": request.max_selections,
+        "max_risk_milli": request.max_risk_milli,
+        "min_marginal_reduction_milli": request.min_marginal_reduction_milli,
+        "targets": targets,
+        "candidates": candidates,
+        "posterior_draws": draws,
+    });
+    ContentHash::of_value(&input)
+        .map_err(|error| PosteriorBatchError::InvalidOutput(error.to_string()))
 }
 
 impl PosteriorBatchPlan {
@@ -159,11 +186,76 @@ impl PosteriorBatchPlan {
                 "identity, order, score count, or monotonicity invariant failed".into(),
             ));
         }
+        let score_order = self
+            .scores
+            .iter()
+            .map(|score| score.candidate_id.clone())
+            .collect::<Vec<_>>();
+        let selected = self.selected_order.iter().cloned().collect::<BTreeSet<_>>();
+        let deferred = self.deferred_order.iter().cloned().collect::<BTreeSet<_>>();
+        let blocked = self.blocked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let unresolved = self
+            .unresolved_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         let expected = self
             .candidate_order
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
+        if score_order != self.candidate_order {
+            return Err(PosteriorBatchError::InvalidOutput(
+                "scores are not in canonical candidate order".into(),
+            ));
+        }
+        for score in &self.scores {
+            let expected_disposition = if selected.contains(&score.candidate_id) {
+                PosteriorBatchCandidateDisposition::Selected
+            } else if blocked.contains(&score.candidate_id) {
+                PosteriorBatchCandidateDisposition::Blocked
+            } else if deferred.contains(&score.candidate_id) {
+                PosteriorBatchCandidateDisposition::Deferred
+            } else {
+                PosteriorBatchCandidateDisposition::Unresolved
+            };
+            let is_selected = expected_disposition == PosteriorBatchCandidateDisposition::Selected;
+            if score.disposition != expected_disposition
+                || score.marginal_at_selection_milli.is_some() != is_selected
+                || score.standalone_reduction_milli > self.initial_diameter_milli
+                || score.final_batch_marginal_milli > self.final_diameter_milli
+                || score.marginal_at_selection_milli.is_some_and(|marginal| {
+                    marginal == 0
+                        || marginal > score.standalone_reduction_milli
+                        || score.final_batch_marginal_milli > marginal
+                })
+                || (expected_disposition == PosteriorBatchCandidateDisposition::Deferred
+                    && score.standalone_reduction_milli == 0)
+                || (expected_disposition == PosteriorBatchCandidateDisposition::Unresolved
+                    && score.standalone_reduction_milli != 0)
+            {
+                return Err(PosteriorBatchError::InvalidOutput(
+                    "score dispositions or marginal reductions contradict the batch partition"
+                        .into(),
+                ));
+            }
+        }
+        let expected_disposition = if expected.is_empty() {
+            PosteriorBatchDisposition::NoCandidates
+        } else if selected.len() == expected.len() {
+            PosteriorBatchDisposition::Qualified
+        } else if blocked.len() == expected.len() {
+            PosteriorBatchDisposition::Blocked
+        } else if unresolved.len() == expected.len() {
+            PosteriorBatchDisposition::Unresolved
+        } else {
+            PosteriorBatchDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
+            return Err(PosteriorBatchError::InvalidOutput(
+                "batch disposition does not reconcile with candidate outcomes".into(),
+            ));
+        }
         let mut partition = BTreeSet::new();
         for id in self
             .selected_order
@@ -195,6 +287,25 @@ impl PosteriorBatchPlan {
             .map_err(|error| PosteriorBatchError::InvalidOutput(error.to_string()))?;
         if expected_digest != self.digest {
             return Err(PosteriorBatchError::InvalidOutput("digest mismatch".into()));
+        }
+        Ok(())
+    }
+
+    /// Recompute the bounded plan and compare it with this artifact to verify its input commitment.
+    ///
+    /// `validate()` checks the artifact's own structure and digest; this method additionally
+    /// proves that the caller-retained posterior, candidate constraints, and request recreate it.
+    pub fn validate_against(
+        &self,
+        request: &PosteriorBatchRequest,
+        candidates: &[PosteriorBatchCandidate],
+    ) -> Result<(), PosteriorBatchError> {
+        self.validate()?;
+        let expected = plan_glioma_posterior_batch(request, candidates)?;
+        if self != &expected {
+            return Err(PosteriorBatchError::InvalidOutput(
+                "plan does not match the supplied request and posterior inputs".into(),
+            ));
         }
         Ok(())
     }
@@ -448,7 +559,10 @@ pub fn plan_glioma_posterior_batch(
             if !(2..=MAX_OUTCOME_BINS).contains(&probabilities.len())
                 || probabilities.iter().map(|value| *value as u64).sum::<u64>() != PROBABILITY_SCALE
             {
-                return Err(PosteriorBatchError::InvalidPosterior(format!("{} in draw {} must provide 2..={MAX_OUTCOME_BINS} probabilities totaling 1,000,000", candidate.candidate_id, draw.draw_id)));
+                return Err(PosteriorBatchError::InvalidPosterior(format!(
+                    "{} in draw {} must provide 2..={MAX_OUTCOME_BINS} probabilities totaling 1,000,000",
+                    candidate.candidate_id, draw.draw_id
+                )));
             }
             if let Some(previous) = bins_by_candidate.get(&candidate.candidate_id) {
                 if *previous != probabilities.len() {
@@ -462,6 +576,8 @@ pub fn plan_glioma_posterior_batch(
             }
         }
     }
+
+    let input_digest = normalized_input_digest(request, &targets, &candidates, &draws)?;
 
     let mut pairs = Vec::new();
     for left in 0..draws.len() {
@@ -619,6 +735,7 @@ pub fn plan_glioma_posterior_batch(
         output_schema: OUTPUT_SCHEMA.into(),
         objective: request.objective.clone(),
         model_system: request.model_system,
+        input_digest,
         candidate_order: candidates
             .iter()
             .map(|candidate| candidate.candidate_id.clone())
@@ -779,6 +896,15 @@ mod tests {
     }
 
     #[test]
+    fn posterior_draw_order_does_not_change_input_or_plan_digest() {
+        let (mut request, candidates) = fixture();
+        let expected = plan_glioma_posterior_batch(&request, &candidates).expect("initial plan");
+        request.posterior_draws.reverse();
+        let actual = plan_glioma_posterior_batch(&request, &candidates).expect("permuted draws");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn target_order_does_not_change_plan_or_digest() {
         let (mut request, candidates) = fixture();
         let expected = plan_glioma_posterior_batch(&request, &candidates).expect("initial plan");
@@ -788,6 +914,80 @@ mod tests {
         }
         let actual = plan_glioma_posterior_batch(&request, &candidates).expect("permuted plan");
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn plan_commits_to_model_inputs_even_when_translation_preserves_the_ranking() {
+        let (request, candidates) = fixture();
+        let original = plan_glioma_posterior_batch(&request, &candidates).expect("original plan");
+        let mut translated = request.clone();
+        for draw in &mut translated.posterior_draws {
+            for prediction in &mut draw.target_predictions_milli {
+                *prediction += 123;
+            }
+        }
+        let translated_plan =
+            plan_glioma_posterior_batch(&translated, &candidates).expect("translated plan");
+
+        assert_eq!(translated_plan.selected_order, original.selected_order);
+        assert_eq!(
+            translated_plan.initial_diameter_milli,
+            original.initial_diameter_milli
+        );
+        assert_ne!(translated_plan.input_digest, original.input_digest);
+        assert_ne!(translated_plan.digest, original.digest);
+        original
+            .validate_against(&request, &candidates)
+            .expect("original inputs reproduce plan");
+        assert!(matches!(
+            original.validate_against(&translated, &candidates),
+            Err(PosteriorBatchError::InvalidOutput(_))
+        ));
+    }
+
+    #[test]
+    fn input_commitment_includes_planning_constraints_even_when_selection_is_unchanged() {
+        let (request, candidates) = fixture();
+        let original = plan_glioma_posterior_batch(&request, &candidates).expect("original plan");
+        let mut changed_limits = request.clone();
+        changed_limits.max_risk_milli += 1;
+        let changed_plan =
+            plan_glioma_posterior_batch(&changed_limits, &candidates).expect("changed limits");
+
+        assert_eq!(changed_plan.selected_order, original.selected_order);
+        assert_ne!(changed_plan.input_digest, original.input_digest);
+        assert!(matches!(
+            original.validate_against(&changed_limits, &candidates),
+            Err(PosteriorBatchError::InvalidOutput(_))
+        ));
+    }
+
+    #[test]
+    fn output_validation_rejects_resealed_score_partition_contradictions() {
+        let (request, candidates) = fixture();
+        let mut plan = plan_glioma_posterior_batch(&request, &candidates).expect("batch plan");
+        plan.scores[0].disposition = PosteriorBatchCandidateDisposition::Deferred;
+        plan.digest = ContentHash::of_value(&digest_input(&plan)).expect("resealed digest");
+
+        assert!(matches!(
+            plan.validate(),
+            Err(PosteriorBatchError::InvalidOutput(_))
+        ));
+    }
+
+    #[test]
+    fn empty_candidate_inventory_is_an_explicit_no_candidates_plan() {
+        let (mut request, _) = fixture();
+        for draw in &mut request.posterior_draws {
+            draw.candidate_outcome_probabilities.clear();
+        }
+        let plan = plan_glioma_posterior_batch(&request, &[]).expect("empty inventory plan");
+
+        assert_eq!(plan.disposition, PosteriorBatchDisposition::NoCandidates);
+        assert!(plan.candidate_order.is_empty());
+        assert!(plan.scores.is_empty());
+        plan.validate_against(&request, &[])
+            .expect("empty inventory inputs reproduce plan");
     }
 
     #[test]

@@ -7,16 +7,16 @@
 //! remains visible, and every round has a deterministic replay boundary.
 
 use super::action_bridge::{
-    plan_decision_actions, DecisionActionPlan, DecisionActionPlanDisposition,
-    DecisionActionPlanRequest,
+    DecisionActionPlan, DecisionActionPlanDisposition, DecisionActionPlanRequest,
+    plan_decision_actions,
 };
 use super::context_compiler::{
-    compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,
-    DecisionContextDisposition, DecisionContextRequest,
+    DecisionAction, DecisionActionKind, DecisionContext, DecisionContextDisposition,
+    DecisionContextRequest, compile_decision_context,
 };
 use crate::glioma::evidence::{EvidenceRecord, EvidenceSourceKind, EvidenceState};
 use crate::glioma::programs::p02_evidence_knowledge::{
-    compile_typed_knowledge, KnowledgeDisposition, KnowledgeRequest, TypedKnowledge,
+    KnowledgeDisposition, KnowledgeRequest, TypedKnowledge, compile_typed_knowledge,
 };
 use crate::glioma_engine::LocalArtifactRef;
 use bioprism_ids::ContentHash;

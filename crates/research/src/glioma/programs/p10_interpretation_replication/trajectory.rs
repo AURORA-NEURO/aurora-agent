@@ -537,19 +537,23 @@ mod tests {
         rows.retain(|row| row.observation_id != "treated-1-2");
         let output = analyze_glioma_trajectories(&request(), &rows).unwrap();
         assert_eq!(output.disposition, TrajectoryDisposition::Unresolved);
-        assert!(output
-            .uncertainty
-            .iter()
-            .any(|item| item.contains("unresolved")));
+        assert!(
+            output
+                .uncertainty
+                .iter()
+                .any(|item| item.contains("unresolved"))
+        );
     }
 
     #[test]
     fn small_slope_is_published_as_negative() {
         let output = analyze_glioma_trajectories(&request(), &observations(1)).unwrap();
         assert_eq!(output.disposition, TrajectoryDisposition::Negative);
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("below")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("below"))
+        );
     }
 }

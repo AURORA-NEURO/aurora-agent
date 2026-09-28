@@ -585,10 +585,12 @@ mod tests {
             output.disposition,
             FederatedBenchmarkDisposition::Heterogeneous
         );
-        assert!(output
-            .negative_evidence
-            .iter()
-            .any(|item| item.contains("direction-contradiction")));
+        assert!(
+            output
+                .negative_evidence
+                .iter()
+                .any(|item| item.contains("direction-contradiction"))
+        );
     }
 
     #[test]

@@ -7,10 +7,10 @@
 //! The executor remains institution-owned; MCP uses only the explicitly simulation-only worker.
 
 use super::campaign::{
-    execute_glioma_replication_campaign, GliomaReplicationCampaign,
-    GliomaReplicationCampaignDisposition, GliomaReplicationCampaignError,
-    GliomaReplicationCampaignExecutor, GliomaReplicationCampaignRequest,
-    GliomaReplicationCampaignStopReason,
+    GliomaReplicationCampaign, GliomaReplicationCampaignDisposition,
+    GliomaReplicationCampaignError, GliomaReplicationCampaignExecutor,
+    GliomaReplicationCampaignRequest, GliomaReplicationCampaignStopReason,
+    execute_glioma_replication_campaign,
 };
 use super::validation_replication_gate::{
     ValidationReplicationGate, ValidationReplicationGateDisposition,
@@ -106,15 +106,19 @@ fn digest_input(output: &ValidationReplicationCampaignRun) -> serde_json::Value 
     })
 }
 
-fn finish(
-    request: &ValidationReplicationCampaignRequest,
+struct ValidationReplicationCampaignOutcome {
     independent_site_order: Vec<String>,
     campaign: Option<GliomaReplicationCampaign>,
     disposition: ValidationReplicationCampaignDisposition,
     stop_reason: Option<GliomaReplicationCampaignStopReason>,
     negative_evidence: Vec<String>,
     uncertainty: Vec<String>,
-    next_action: &str,
+    next_action: &'static str,
+}
+
+fn finish(
+    request: &ValidationReplicationCampaignRequest,
+    outcome: ValidationReplicationCampaignOutcome,
 ) -> Result<ValidationReplicationCampaignRun, ValidationReplicationCampaignError> {
     let mut output = ValidationReplicationCampaignRun {
         feature_id: FEATURE_ID.into(),
@@ -123,14 +127,14 @@ fn finish(
         model_system: request.replication.model_system,
         validation_campaign_digest: request.gate.validation_campaign_digest.clone(),
         origin_site_id: request.gate.local_site_id.clone(),
-        independent_site_order,
+        independent_site_order: outcome.independent_site_order,
         gate_disposition: request.gate.disposition,
-        campaign,
-        disposition,
-        stop_reason,
-        negative_evidence: sorted_unique(negative_evidence),
-        uncertainty: sorted_unique(uncertainty),
-        next_action: next_action.into(),
+        campaign: outcome.campaign,
+        disposition: outcome.disposition,
+        stop_reason: outcome.stop_reason,
+        negative_evidence: sorted_unique(outcome.negative_evidence),
+        uncertainty: sorted_unique(outcome.uncertainty),
+        next_action: outcome.next_action.into(),
         boundary: PRECLINICAL_BOUNDARY.into(),
         digest: ContentHash::of_bytes(b"unsealed-glioma-validation-replication-campaign"),
     };
@@ -226,13 +230,15 @@ pub fn execute_glioma_validation_replication_campaign<E: GliomaReplicationCampai
         );
         return finish(
             request,
-            independent_site_order,
-            None,
-            ValidationReplicationCampaignDisposition::BlockedByValidation,
-            None,
-            negative_evidence,
-            uncertainty,
-            "complete an efficacy-qualified local validation and rerun the independent-site gate",
+            ValidationReplicationCampaignOutcome {
+                independent_site_order,
+                campaign: None,
+                disposition: ValidationReplicationCampaignDisposition::BlockedByValidation,
+                stop_reason: None,
+                negative_evidence,
+                uncertainty,
+                next_action: "complete an efficacy-qualified local validation and rerun the independent-site gate",
+            },
         );
     }
     if independent_site_order.len() < request.replication.min_sites {
@@ -247,13 +253,15 @@ pub fn execute_glioma_validation_replication_campaign<E: GliomaReplicationCampai
         );
         return finish(
             request,
-            independent_site_order,
-            None,
-            ValidationReplicationCampaignDisposition::HoldIndependentSites,
-            None,
-            negative_evidence,
-            uncertainty,
-            "collect paired study summaries from additional independent sites before campaign execution",
+            ValidationReplicationCampaignOutcome {
+                independent_site_order,
+                campaign: None,
+                disposition: ValidationReplicationCampaignDisposition::HoldIndependentSites,
+                stop_reason: None,
+                negative_evidence,
+                uncertainty,
+                next_action: "collect paired study summaries from additional independent sites before campaign execution",
+            },
         );
     }
     let campaign = execute_glioma_replication_campaign(&request.replication, executor)?;
@@ -284,13 +292,15 @@ pub fn execute_glioma_validation_replication_campaign<E: GliomaReplicationCampai
     };
     finish(
         request,
-        independent_site_order,
-        Some(campaign.clone()),
-        disposition,
-        Some(campaign.stop_reason),
-        negative_evidence,
-        uncertainty,
-        next_action,
+        ValidationReplicationCampaignOutcome {
+            independent_site_order,
+            campaign: Some(campaign.clone()),
+            disposition,
+            stop_reason: Some(campaign.stop_reason),
+            negative_evidence,
+            uncertainty,
+            next_action,
+        },
     )
 }
 
