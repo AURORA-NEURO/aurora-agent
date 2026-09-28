@@ -21,6 +21,8 @@ from prism_sdk.cli import CLI_SCHEMA
 ROOT = Path(__file__).resolve().parents[1]
 ACTION_MANIFEST = ROOT / ".github" / "actions" / "autonomous-run" / "action.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+SETUP_PYTHON_PIN = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
 
 
 def _environment(workspace: Path, **values: str) -> dict[str, str]:
@@ -44,9 +46,12 @@ def _environment(workspace: Path, **values: str) -> dict[str, str]:
 def test_composite_action_manifest_wires_the_reviewed_runner_contract() -> None:
     manifest = ACTION_MANIFEST.read_text(encoding="utf-8")
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    release_workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
     assert "using: composite" in manifest
-    assert "actions/setup-python@v5" in manifest
+    assert SETUP_PYTHON_PIN in manifest
+    assert SETUP_PYTHON_PIN in workflow
+    assert SETUP_PYTHON_PIN in release_workflow
     assert 'INPUT_APPROVE_PROVIDER_CALL: ${{ inputs[\'approve-provider-call\'] }}' in manifest
     assert 'INPUT_APPROVE_MISSION_DISPATCH: ${{ inputs[\'approve-mission-dispatch\'] }}' in manifest
     assert 'INPUT_ALLOW_MCP_TOOLS: ${{ inputs[\'allow-mcp-tools\'] }}' in manifest

@@ -55,9 +55,10 @@ statuses (`completed_provider_call` and `completed_provider_tool_loop`); gate on
 enabled in that workflow.
 
 The action requires Python 3.11 or newer and uses the dependency-free source SDK shipped beside
-the action. The workflow author must pin a reviewed action revision, provide the MCP executable,
-map secrets only to the named environment variables, and choose the provider and mission
-approvals appropriate to that workflow.
+the action. Its Python setup step is pinned to `actions/setup-python` v7.0.0 and requires a GitHub
+Actions runner v2.327.1 or newer. The workflow author must pin a reviewed action revision, provide
+the MCP executable, map secrets only to the named environment variables, and choose the provider
+and mission approvals appropriate to that workflow.
 
 The repository's Python CI exercises the action end to end against a fixture MCP process and the
 credentialless local provider. That verifies checkout-relative source loading, CLI invocation,
