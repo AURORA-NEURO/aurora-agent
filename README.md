@@ -1264,7 +1264,8 @@ neither; the registry it found them in is retained there as the audit's known-po
 - **VS Code**: sideload `aurora-agent-0.1.3.vsix` from the
   [v0.1.3 release](https://github.com/AURORA-NEURO/aurora-agent/releases/tag/v0.1.3)
   (`code --install-extension aurora-agent-0.1.3.vsix`). The extension registers the MCP
-  server with VS Code (1.101+) so Copilot agent mode can call the 893 tools, and adds
+  server with VS Code (1.101+) so Copilot agent mode can call tools from the resolved backend;
+  a backend built from this source revision exposes 893 tools. The extension also adds
   workflow/autopilot/pipeline views (see [editors/vscode](editors/vscode/)).
 - **MCP registry**: listed as `io.github.MurariAmbati/aurora-agent` on
   [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io/).

@@ -10,7 +10,7 @@ license: Apache-2.0
 version: 0.1.1
 date-released: 2026-08-23
 abstract: >-
-  AURORA Agent is a Rust workspace (88 crates) implementing the FIBER
+  AURORA Agent is a Rust workspace implementing the FIBER
   decision-context compiler: a typed decision query is compiled into the
   smallest decision-sufficient evidence region, delivered as a Decision
   Section together with a Context Certificate stating exactly what was
@@ -22,7 +22,7 @@ abstract: >-
   generated discriminating world. Certificate bytes are reproduced exactly
   by three implementations (a CPython reference, an eager Rust path, and an
   indexed store). The compiler is exposed as a command-line interface, a
-  Model Context Protocol stdio server with 893 tools, and a local HTTP
-  gateway. Research and developer infrastructure: it does not diagnose an
+  Model Context Protocol stdio server, and a local HTTP gateway. Research and
+  developer infrastructure: it does not diagnose an
   individual, recommend treatment, triage care, enroll participants, or
   claim medical-device functionality.

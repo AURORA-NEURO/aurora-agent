@@ -32,7 +32,6 @@ FACT_PATTERNS = {
 DOCUMENT_FACTS = {
     "README.md": ("crates", "rust_lines", "tools"),
     "CONTRIBUTING.md": ("crates",),
-    "CITATION.cff": ("crates", "tools"),
     "Dockerfile": ("tools",),
     "llms.txt": ("crates", "tools"),
     "site/llms.txt": ("crates", "tools"),
