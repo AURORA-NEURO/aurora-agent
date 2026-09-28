@@ -20,6 +20,10 @@ This is a responsibility map, not the complete crate dependency graph. The works
 Cargo manifests are authoritative for dependency edges. Python and TypeScript packages expose typed
 facades over selected Rust contracts rather than mirroring every Rust type.
 
+For every direct Rust workspace edge, including optional and development dependencies, see the
+[generated workspace dependency index](WORKSPACE_DEPENDENCIES.md). Regenerate it with
+`python tools/sync_workspace_dependencies.py --write`; CI checks that it matches Cargo metadata.
+
 ```
                         ┌───────────────────────────────┐
    agent interfaces     │  cli   mcp   api   SDKs       │

@@ -33,6 +33,8 @@ jobs:
         run: python tools/validate_docs_index.py
       - name: validate published repository facts
         run: python tools/sync_repository_facts.py --check
+      - name: validate complete workspace dependency index
+        run: python tools/sync_workspace_dependencies.py --check
       # The repository predates this workflow and contains unrelated stable-rustfmt drift.
       # Keep the gate actionable by checking every Rust file changed by this revision while
       # the existing baseline is migrated deliberately rather than hiding the result.

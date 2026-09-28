@@ -8,6 +8,7 @@ commands.
 ## Start with the project and architecture
 
 - [Architecture and crate ownership](ARCHITECTURE.md)
+- [Complete Rust workspace dependency index](WORKSPACE_DEPENDENCIES.md)
 - [Language strategy ADR](ADR-001-language-strategy.md)
 - [Blueprint coverage method and current coverage](COVERAGE.md)
 - [Uncovered work and its limits](BACKLOG.md)
