@@ -18,6 +18,42 @@ raise `AttributeError` after package initialization. The import compatibility sh
 package initialization and restores Python's original import function before `import prism_sdk`
 returns.
 
+## Reviewed NCBI Gene metadata retrieval
+
+`ReviewedNcbiGeneRetrievalAdapter` reads the fixed human-gene catalogue through the NCBI E-utilities
+ESummary endpoint. `prepare()` is network-free; approved execution makes exactly one request for the
+selected fixed GeneIDs. The result projects symbol, description, chromosome, map location, and
+bounded aliases. It excludes Gene summaries, sequence, variants, expression, samples, and patient
+data. The exact returned GeneIDs, human taxid, and catalogue symbols are checked before projection.
+
+```python
+from prism_sdk import (
+    ReviewedNcbiGeneRetrievalAdapter,
+    ReviewedNcbiGeneRetrievalConfig,
+    create_reviewed_ncbi_gene_autonomous_evidence_registration,
+    create_reviewed_ncbi_gene_execution_metadata,
+)
+
+config = ReviewedNcbiGeneRetrievalConfig(gene_symbols=("IDH1", "MGMT", "EGFR"))
+adapter = ReviewedNcbiGeneRetrievalAdapter(config)
+plan = adapter.prepare()  # deterministic; no network request
+review = create_reviewed_ncbi_gene_execution_metadata(
+    plan,
+    approve_source_dispatch=True,
+)
+registration = create_reviewed_ncbi_gene_autonomous_evidence_registration(adapter, plan)
+```
+
+The caller-owned transient bundle contains the metadata rows; the autonomous evidence registration
+validates the source and receipt digests and emits provenance digests only. The built-in transport
+caps response size, JSON tree size/depth, refuses redirects, applies a timeout, and paces requests
+within the process. A deployment must coordinate NCBI's request-rate policy across processes and
+hosts. An optional NCBI `tool` and developer `email` pair is included in each request and bound by
+digest, but the values are never copied into serialized plans, receipts, or source URIs; callers must
+register them with NCBI. This is fixed-catalogue metadata, not an exhaustive gene search or an
+assessment of disease relevance, variant effect, evidence quality, or clinical meaning. See the
+[NCBI E-utilities guide](https://www.ncbi.nlm.nih.gov/books/NBK25500/), [NCBI Gene FAQ](https://www.ncbi.nlm.nih.gov/books/NBK3840/), and [NCBI usage policy](https://www.ncbi.nlm.nih.gov/home/about/policies/).
+
 ## Reviewed NCI GDC project-metadata retrieval
 
 `ReviewedGdcRetrievalAdapter` supports the fixed `TCGA-GBM` and `TCGA-LGG` project catalogue.

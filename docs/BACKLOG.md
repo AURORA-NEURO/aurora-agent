@@ -91,6 +91,13 @@ fixed TCGA-GBM and TCGA-LGG project IDs. It requests only the project summary an
 category counts after literal approval, binds transport/config/plan/response metadata by digest,
 and projects only digest references into autonomous evidence. This is a bounded cohort inventory,
 not case-level research or an exhaustive GDC search.
+The Python and TypeScript SDKs now add reviewed NCBI Gene ESummary retrieval for twelve fixed human
+glioma-research marker GeneIDs. A selected catalogue subset is returned through one approved,
+bounded request; IDs, symbol, and human taxid must match the plan exactly. Only identity, concise
+description, location, and bounded alias metadata survive projection; raw ESummary fields and
+autonomous observations stay transient/digest-only, respectively. Process-local rate pacing does
+not replace a deployment-wide limiter, and the source supplies metadata rather than disease,
+variant, or evidence-quality interpretation.
 The Python and TypeScript SDKs also expose a reviewed cBioPortal metadata adapter for fixed public
 TCGA `gbm_tcga` and `lgg_tcga` studies. Each study plan permits exactly a study-summary GET and one
 sorted `SUMMARY` molecular-profile GET, with a 128-profile page cap and normalized source digests.

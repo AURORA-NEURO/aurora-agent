@@ -2402,6 +2402,33 @@ abstracts, full text, exhaustive coverage, or independent study-quality judgment
 [Europe PMC REST API](https://dev.europepmc.org/RestfulWebService) and its
 [web-service reference](https://dev.europepmc.org/docs/EBI_Europe_PMC_Web_Service_Reference.pdf).
 
+## Reviewed NCBI Gene metadata retrieval
+
+`ReviewedNcbiGeneRetrievalAdapter` reads the fixed human-gene catalogue through NCBI E-utilities
+ESummary. `prepare()` is network-free; approved execution makes exactly one request for the
+selected fixed GeneIDs. It returns symbol, description, chromosome, map location, and bounded aliases,
+while excluding Gene summaries, sequences, variants, expression, samples, and patient data. Each
+returned GeneID, human taxid, and symbol must match the reviewed catalogue.
+
+```ts
+const adapter = new ReviewedNcbiGeneRetrievalAdapter(
+  new ReviewedNcbiGeneRetrievalConfig({ geneSymbols: ["IDH1", "MGMT", "EGFR"] }),
+);
+const plan = adapter.prepare(); // deterministic; no network request
+const review = createReviewedNcbiGeneExecutionMetadata(plan, true);
+const registration = createReviewedNcbiGeneAutonomousEvidenceRegistration(adapter, plan);
+```
+
+The caller-owned transient bundle contains metadata rows. The autonomous evidence registration
+checks the source and receipt digests and emits provenance digests only. The built-in transport
+caps response and JSON-tree sizes, refuses redirects, applies a timeout, and paces requests within
+the process. Deployments must coordinate NCBI request rates across processes and hosts. Optional
+`ncbiTool` and `ncbiEmail` values are sent together on each request and bound by digest; raw values
+are excluded from serialized plans, receipts, and source URIs, and must be registered with NCBI.
+This fixed catalogue is not exhaustive and does not assess disease relevance, variant effect, study
+quality, or clinical meaning. See the [NCBI E-utilities guide](https://www.ncbi.nlm.nih.gov/books/NBK25500/),
+[NCBI Gene FAQ](https://www.ncbi.nlm.nih.gov/books/NBK3840/), and [NCBI usage policy](https://www.ncbi.nlm.nih.gov/home/about/policies/).
+
 ## Reviewed NCI GDC project-metadata retrieval
 
 `ReviewedGdcRetrievalAdapter` supports the fixed `TCGA-GBM` and `TCGA-LGG` project catalogue.

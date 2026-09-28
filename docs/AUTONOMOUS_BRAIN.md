@@ -14339,3 +14339,24 @@ Injected transports must use a distinct reviewed transport identity and own thei
 redirect, and network policy. The Python and TypeScript contract tests use one shared fixture
 transport identity and require matching configuration, plan, bundle, and receipt digests; each
 built-in transport retains its own implementation identity.
+
+## Reviewed NCBI Gene summary metadata
+
+The Python and TypeScript SDKs also expose `ReviewedNcbiGeneRetrievalAdapter` over the NCBI
+E-utilities ESummary endpoint. Its reviewed catalogue pins twelve human GeneIDs (IDH1, IDH2,
+MGMT, EGFR, TERT, TP53, ATRX, NF1, PTEN, CDKN2A, PDGFRA, and BRAF). Preflight is network-free;
+approved execution makes exactly one request for the caller-selected subset. The response must
+return precisely those UIDs, in plan order, with taxid 9606 and the expected current gene symbols.
+Changed or incomplete source records fail closed.
+
+The projection contains only symbol, description, chromosome, map location, and bounded aliases;
+it discards ESummary fields outside that projection, including NCBI's function summaries, sequence,
+and genomic-coordinate history. Response bytes, tree depth/size, alias count, request timeout, and
+bundle bytes are bounded; duplicate JSON fields and redirects are refused. The built-in transports
+pace requests within their process. A deployment still needs a shared rate policy across processes
+and hosts. The optional paired NCBI `tool` and developer-email identity is digest-bound while the
+raw values remain outside serialized plans, receipts, and source URIs. Its one evidence-runtime
+registration validates the transient source binding and emits only provenance digests. This is a
+fixed-catalogue metadata source, not an exhaustive gene search, disease-relevance judgment, variant
+assessment, quality authority, or clinical interpretation. See the [NCBI E-utilities guide](https://www.ncbi.nlm.nih.gov/books/NBK25500/),
+[NCBI Gene FAQ](https://www.ncbi.nlm.nih.gov/books/NBK3840/), and [NCBI usage policy](https://www.ncbi.nlm.nih.gov/home/about/policies/).
