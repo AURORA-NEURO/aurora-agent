@@ -2481,3 +2481,38 @@ include indirect ontology-propagated evidence. A top-ranked page is not an exhau
 search, and this adapter does not establish evidence quality, causal effect, treatment benefit, or
 clinical meaning. See the [Open Targets GraphQL API](https://platform-docs.opentargets.org/data-access/graphql-api)
 and [association score interpretation](https://platform-docs.opentargets.org/associations).
+
+## Reviewed GWAS Catalog association retrieval
+
+`ReviewedGwasCatalogRetrievalAdapter` uses only GWAS Catalog REST API v2 and supports the fixed
+glioblastoma and glioma ontology lanes. `prepare()` is network-free. Approved execution follows a
+bounded number of same-origin pagination links for direct trait matches, paces requests below the
+Catalog's documented rate limit, validates page totals across the run, and rejects duplicate
+association identifiers. Returned/omitted counts and full-versus-prefix coverage remain explicit.
+Caller-owned transient results contain curated association metadata; autonomous evidence receives
+verified digests only.
+
+```ts
+const config = new ReviewedGwasCatalogRetrievalConfig({
+  lanes: ["gbm", "glioma"],
+  pageSize: 20,
+  maxPages: 2,
+});
+const adapter = new ReviewedGwasCatalogRetrievalAdapter(config);
+const plan = adapter.prepare();
+const review = createReviewedGwasCatalogExecutionMetadata(plan, true);
+const registration = createReviewedGwasCatalogAutonomousEvidenceRegistration(
+  adapter,
+  plan,
+  "gbm",
+);
+```
+
+The Catalog provides literature-curated top associations, not complete genome-wide summary
+statistics. The adapter returns a bounded prefix in API pagination order, not an association
+ranking, and uses direct ontology-trait matches only (`show_child_traits=false`). P-values, reported
+traits, mapped genes, and locations remain source metadata; a source p-value of zero is explicitly
+marked as possibly precision-limited. These fields do not establish causal effect, clinical relevance,
+or treatment benefit. See the [GWAS Catalog REST API guide](https://www.ebi.ac.uk/gwas/docs/programmatic-access/rest-api/),
+[v2 API reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference), and
+[v1-to-v2 migration guide](https://www.ebi.ac.uk/gwas/docs/news/rest-api-v2-migration-guide/).

@@ -120,6 +120,51 @@ search, and this adapter does not establish evidence quality, causal effect, tre
 clinical meaning. See the [Open Targets GraphQL API](https://platform-docs.opentargets.org/data-access/graphql-api)
 and [association score interpretation](https://platform-docs.opentargets.org/associations).
 
+## Reviewed GWAS Catalog association retrieval
+
+`ReviewedGwasCatalogRetrievalAdapter` uses only GWAS Catalog REST API v2 and supports the fixed
+glioblastoma and glioma ontology lanes. `prepare()` is network-free. Approved execution follows a
+bounded number of same-origin pagination links for direct trait matches, with a process-wide
+request pace below the Catalog's documented rate limit. It validates page totals across the run,
+rejects duplicate association identifiers, and preserves returned/omitted counts and whether the
+page prefix covers the entire direct-trait result. Its caller-owned transient records contain
+curated association metadata; the autonomous evidence registration emits only verified digests.
+
+```python
+from prism_sdk import (
+    ReviewedGwasCatalogRetrievalAdapter,
+    ReviewedGwasCatalogRetrievalConfig,
+    create_reviewed_gwas_catalog_autonomous_evidence_registration,
+    create_reviewed_gwas_catalog_execution_metadata,
+)
+
+config = ReviewedGwasCatalogRetrievalConfig(
+    lanes=("gbm", "glioma"),
+    page_size=20,
+    max_pages=2,
+)
+adapter = ReviewedGwasCatalogRetrievalAdapter(config)
+plan = adapter.prepare()
+review = create_reviewed_gwas_catalog_execution_metadata(
+    plan,
+    approve_source_dispatch=True,
+)
+registration = create_reviewed_gwas_catalog_autonomous_evidence_registration(
+    adapter,
+    plan,
+    lane="gbm",
+)
+```
+
+The GWAS Catalog API provides literature-curated top associations, not complete genome-wide
+summary statistics. The returned page prefix follows API pagination order and is not an association
+ranking. The adapter uses direct ontology-trait matches only (`show_child_traits=false`), and p-values,
+reported traits, mapped genes, and locations remain source metadata; a source p-value of zero is
+explicitly marked as possibly precision-limited. These fields are not causal, clinical, or treatment
+claims. See the [GWAS Catalog REST API guide](https://www.ebi.ac.uk/gwas/docs/programmatic-access/rest-api/),
+[v2 API reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference), and
+[v1-to-v2 migration guide](https://www.ebi.ac.uk/gwas/docs/news/rest-api-v2-migration-guide/).
+
 ## Reviewed Europe PMC publication-metadata retrieval
 
 `ReviewedEuropePmcRetrievalAdapter` reads Europe PMC's fixed REST search endpoint in JSON `lite`

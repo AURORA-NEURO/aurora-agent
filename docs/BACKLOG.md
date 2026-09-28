@@ -120,6 +120,16 @@ Open Targets scores remain rankings rather than confidence values; disease resul
 indirect ontology evidence, and the adapter makes no causal, treatment, clinical, or evidence-quality
 claim ([API](https://platform-docs.opentargets.org/data-access/graphql-api),
 [score interpretation](https://platform-docs.opentargets.org/associations)).
+Python and TypeScript now also provide a reviewed GWAS Catalog REST API v2 adapter for fixed direct
+glioblastoma and glioma ontology-trait lanes. It follows only validated same-origin pagination links,
+paces requests below the source's documented rate limit, enforces per-page/aggregate/tree/bundle
+bounds, and reports whether returned rows cover all direct matches or only a bounded page prefix.
+Association values remain transient and autonomous evidence receives digests only. The Catalog's
+API serves literature-curated top associations rather than full genome-wide summary statistics;
+the adapter preserves source page order and marks a numeric p-value of zero as possibly
+precision-limited. It makes no causal, clinical, or treatment claims
+([REST API](https://www.ebi.ac.uk/gwas/docs/programmatic-access/rest-api),
+[v2 reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference)).
 The claim-integrity acquisition settlement path now requires a deployment-owned independent
 evidence authority, gives it a read-only digest-bound projection of the exact request, receipt,
 accepted source-quality assessment, claim contracts, and evidence metadata, and records the
