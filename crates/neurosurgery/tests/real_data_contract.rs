@@ -791,6 +791,64 @@ fn real_data_reasoning_context_exposes_gdc_availability_without_molecular_values
 }
 
 #[test]
+fn real_data_reasoning_context_preserves_bounded_source_metadata_per_record() {
+    let data = bundle();
+    let agent = NeurosurgicalAgent::default();
+    let context_for = |record_kind| {
+        agent
+            .real_data_reasoning_context(
+                &data,
+                &RealDataReasoningContextQuery {
+                    packet: RealDataEvidencePacketQuery {
+                        query: RealDataQuery {
+                            record_kind: Some(record_kind),
+                            limit: 8,
+                            ..RealDataQuery::default()
+                        },
+                        ..RealDataEvidencePacketQuery::default()
+                    },
+                    ..RealDataReasoningContextQuery::default()
+                },
+            )
+            .expect("source metadata context builds from the validated snapshot")
+    };
+
+    let trials = context_for(RealDataRecordKind::ClinicalTrial);
+    assert!(trials.context_text.contains("phases: "));
+    assert!(trials.context_text.contains("last_update: "));
+    assert!(trials.context_text.contains("study_type: "));
+    assert!(trials.context_text.contains("enrollment_count: "));
+    assert!(trials.context_text.contains("intervention_names: "));
+
+    let portal_studies = context_for(RealDataRecordKind::PortalStudy);
+    assert!(portal_studies.context_text.contains("sample_count: "));
+
+    let publications = context_for(RealDataRecordKind::LiteratureArticle);
+    assert!(publications.context_text.contains("publication_date: "));
+
+    let genomic = NeurosurgicalAgent::default()
+        .real_data_reasoning_context(
+            &extended_bundle(),
+            &RealDataReasoningContextQuery {
+                packet: RealDataEvidencePacketQuery {
+                    query: RealDataQuery {
+                        record_kind: Some(RealDataRecordKind::GenomicProject),
+                        limit: 2,
+                        ..RealDataQuery::default()
+                    },
+                    ..RealDataEvidencePacketQuery::default()
+                },
+                ..RealDataReasoningContextQuery::default()
+            },
+        )
+        .expect("GDC metadata context builds from the extended snapshot");
+    assert!(genomic.context_text.contains("genomic_data_type_counts: "));
+    assert!(genomic
+        .context_text
+        .contains("Annotated Somatic Mutation=4822"));
+}
+
+#[test]
 fn real_data_reasoning_context_reports_omissions_instead_of_silent_truncation() {
     let report = NeurosurgicalAgent::default()
         .real_data_reasoning_context(

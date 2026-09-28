@@ -279,10 +279,11 @@ snapshot includes them; these are availability metadata only and never file, sam
 values. The exact case-insensitive `genomic_data_type` facet narrows project hits to one GDC
 availability modality without fetching files. Clinical-trial hits preserve optional registry study type, aggregate
 enrollment target, intervention names, phases, and last-update date; portal-study hits preserve
-optional public sample counts; guideline-reference hits include the source-reported PDQ update
-date separately from snapshot retrieval time, including in the digest-bound reasoning context;
-PubMed hits include publication date, a bounded abstract excerpt,
-and indexing tags when available. Partial PubMed chronology (year-only or month-only source
+optional public sample counts; genomic-project hits preserve aggregate GDC data-type counts;
+guideline-reference hits include the source-reported PDQ update date separately from snapshot
+retrieval time; and PubMed hits include publication date, a bounded abstract excerpt, and indexing
+tags when available. These bounded per-record fields also appear in the digest-bound reasoning
+context. Partial PubMed chronology (year-only or month-only source
 dates) remains missing rather than being padded with an invented day. Missing upstream fields
 remain absent rather than guessed. A
 query is never a network fetch, and a missing match is reported as zero rather than

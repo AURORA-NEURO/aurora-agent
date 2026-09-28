@@ -28,7 +28,8 @@ The glioma population refresh now fetches the fixed NCI PDQ page and records its
 title and machine-readable update date in the source hash and guideline query hits. It retains
 citation metadata only; the PDQ body is not copied into the snapshot. The optional date preserves
 validation of older bundles. Digest-bound model reasoning contexts carry that date through with
-the exact guideline citation.
+the exact guideline citation. The packet-to-model renderer also preserves bounded per-record trial,
+study, publication, and genomic-file-type metadata already present in query hits.
 
 When a caller supplies an explicit freshness clock, the autonomous workflow distinguishes stale
 from future-dated sources: stale sources emit a `refresh_source_snapshot` action pointing the
