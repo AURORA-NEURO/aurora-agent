@@ -91,6 +91,35 @@ adapter does not query case, sample, file, molecular-value, or controlled-access
 fixed catalogue is not exhaustive and does not establish patient eligibility, quality, outcomes, or
 clinical meaning. See the [GDC Search and Retrieval guide](https://docs.gdc.cancer.gov/API/Users_Guide/Search_and_Retrieval/).
 
+## Reviewed Open Targets association retrieval
+
+`ReviewedOpenTargetsRetrievalAdapter` supports only the fixed glioblastoma and low-grade glioma
+MONDO entities. `prepare()` is network-free; approved execution makes one pinned GraphQL POST per
+lane and retrieves the first page of at most 50 target associations. The bundle retains source
+rank, score, returned/omitted counts, and page coverage as caller-owned transient metadata. The
+autonomous evidence registration emits only bundle/source digests with `confidence=None`.
+
+```python
+from prism_sdk import (
+    ReviewedOpenTargetsRetrievalAdapter,
+    ReviewedOpenTargetsRetrievalConfig,
+    create_reviewed_open_targets_autonomous_evidence_registration,
+    create_reviewed_open_targets_execution_metadata,
+)
+
+config = ReviewedOpenTargetsRetrievalConfig(lanes=("gbm",), page_size=50)
+adapter = ReviewedOpenTargetsRetrievalAdapter(config)
+plan = adapter.prepare()
+review = create_reviewed_open_targets_execution_metadata(plan, approve_source_dispatch=True)
+registration = create_reviewed_open_targets_autonomous_evidence_registration(adapter, plan, lane="gbm")
+```
+
+The source's association scores are ranking aids, not confidence values, and disease pages may
+include indirect ontology-propagated evidence. A top-ranked page is not an exhaustive disease
+search, and this adapter does not establish evidence quality, causal effect, treatment benefit, or
+clinical meaning. See the [Open Targets GraphQL API](https://platform-docs.opentargets.org/data-access/graphql-api)
+and [association score interpretation](https://platform-docs.opentargets.org/associations).
+
 ## Reviewed Europe PMC publication-metadata retrieval
 
 `ReviewedEuropePmcRetrievalAdapter` reads Europe PMC's fixed REST search endpoint in JSON `lite`

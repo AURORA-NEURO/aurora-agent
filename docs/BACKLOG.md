@@ -113,6 +113,13 @@ coverage, concrete tenant-authorized shared-store and monotonic-anchor integrati
 deployment-owned independent claim-quality authority over retrieved evidence, human-review
 settlement integrations, production scheduling integrations, and production retention/authorization
 policy.
+Python and TypeScript now provide a reviewed Open Targets adapter for the fixed glioblastoma and
+low-grade glioma MONDO entities. It retrieves one bounded top-ranked association page per approved
+lane, reports returned and omitted counts, and projects only digests into autonomous evidence.
+Open Targets scores remain rankings rather than confidence values; disease results may include
+indirect ontology evidence, and the adapter makes no causal, treatment, clinical, or evidence-quality
+claim ([API](https://platform-docs.opentargets.org/data-access/graphql-api),
+[score interpretation](https://platform-docs.opentargets.org/associations)).
 The claim-integrity acquisition settlement path now requires a deployment-owned independent
 evidence authority, gives it a read-only digest-bound projection of the exact request, receipt,
 accepted source-quality assessment, claim contracts, and evidence metadata, and records the

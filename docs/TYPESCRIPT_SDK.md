@@ -2455,3 +2455,29 @@ transient result, while durable evidence observations contain source and bundle 
 adapter does not query case, sample, file, molecular-value, or controlled-access endpoints. Its
 fixed catalogue is not exhaustive and does not establish patient eligibility, quality, outcomes, or
 clinical meaning. See the [GDC Search and Retrieval guide](https://docs.gdc.cancer.gov/API/Users_Guide/Search_and_Retrieval/).
+
+## Reviewed Open Targets association retrieval
+
+`ReviewedOpenTargetsRetrievalAdapter` supports only the fixed glioblastoma and low-grade glioma
+MONDO entities. `prepare()` is network-free; approved execution makes one pinned GraphQL POST per
+lane and retrieves the first page of at most 50 target associations. The bundle retains source
+rank, score, returned/omitted counts, and page coverage as caller-owned transient metadata. The
+autonomous evidence registration emits only bundle/source digests with `confidence: null`.
+
+```ts
+const config = new ReviewedOpenTargetsRetrievalConfig({ lanes: ["gbm"], pageSize: 50 });
+const adapter = new ReviewedOpenTargetsRetrievalAdapter(config);
+const plan = adapter.prepare();
+const review = createReviewedOpenTargetsExecutionMetadata(plan, true);
+const registration = createReviewedOpenTargetsAutonomousEvidenceRegistration(
+  adapter,
+  plan,
+  "gbm",
+);
+```
+
+The source's association scores are ranking aids, not confidence values, and disease pages may
+include indirect ontology-propagated evidence. A top-ranked page is not an exhaustive disease
+search, and this adapter does not establish evidence quality, causal effect, treatment benefit, or
+clinical meaning. See the [Open Targets GraphQL API](https://platform-docs.opentargets.org/data-access/graphql-api)
+and [association score interpretation](https://platform-docs.opentargets.org/associations).
