@@ -154,6 +154,9 @@ The API router keeps request dispatch and shared state in
 in [`router/operations.rs`](../crates/api/src/router/operations.rs). Bounded local checkpoint
 adapters live in [`router/persistence.rs`](../crates/api/src/router/persistence.rs). These modules
 share one router instance and do not create separate dispatch or persistence authorities.
+Router white-box tests stay under `router/tests.rs` and are grouped by transport, mission,
+operations, events, registries, and domain workflows so private route behavior remains testable
+without keeping every contract in the router implementation file.
 
 Signed bundles, signed webhook envelopes, and caller-supplied key-registry policy are present; the
 workspace does not own production key custody or deployment trust roots. `DockerSandbox` provides a
