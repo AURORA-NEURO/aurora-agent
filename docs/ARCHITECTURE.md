@@ -158,6 +158,15 @@ Router white-box tests stay under `router/tests.rs` and are grouped by transport
 operations, events, registries, and domain workflows so private route behavior remains testable
 without keeping every contract in the router implementation file.
 
+The MCP protocol integration target keeps its shared server fixtures in
+[`tests/protocol.rs`](../crates/mcp/tests/protocol.rs), with contract tests grouped under
+[`tests/protocol/`](../crates/mcp/tests/protocol/). The top-level groups separate transport,
+agent workflows, domain evidence, developer operations, evaluation, runtime infrastructure,
+context and repository tools, research modeling, governance and safety, and cross-crate contracts.
+Glioma workflow contracts are further grouped by research pipeline, experiments, computation,
+federation, release, and related operating areas. The groups are child modules of the integration
+target, so their tests keep access to the same private fixtures and exercise the same MCP server.
+
 Signed bundles, signed webhook envelopes, and caller-supplied key-registry policy are present; the
 workspace does not own production key custody or deployment trust roots. `DockerSandbox` provides a
 separate opt-in Docker command boundary for a pinned Linux image. It resolves and pins the selected
