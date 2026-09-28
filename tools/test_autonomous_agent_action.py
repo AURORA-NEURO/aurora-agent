@@ -9,6 +9,7 @@ import sys
 
 import pytest
 
+import autonomous_agent_action as action_module
 from autonomous_agent_action import (
     AutonomousAgentActionError,
     build_cli_argv,
@@ -264,6 +265,21 @@ def test_action_rejects_malformed_success_projection_before_writing_outputs(
         run_action(environment, command=malformed_cli)
     assert not Path(environment["GITHUB_OUTPUT"]).exists()
     assert not (tmp_path / "result.json").exists()
+
+
+def test_action_enforces_result_byte_bound_while_cli_writes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    environment = _environment(tmp_path)
+    monkeypatch.setattr(action_module, "MAX_ACTION_RESULT_BYTES", 8)
+
+    def oversized_cli(_argv, *, environ, writer, error_writer) -> int:
+        writer.write("123456789")
+        return 0
+
+    with pytest.raises(AutonomousAgentActionError, match="exceeds its byte bound"):
+        run_action(environment, command=oversized_cli)
+    assert not Path(environment["GITHUB_OUTPUT"]).exists()
 
 
 def test_action_runs_local_provider_and_caller_owned_mcp_end_to_end(tmp_path: Path, monkeypatch) -> None:

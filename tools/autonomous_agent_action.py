@@ -36,6 +36,28 @@ class AutonomousAgentActionError(ValueError):
     """A caller input, CLI response, or output path violates the action contract."""
 
 
+class _BoundedTextBuffer(io.TextIOBase):
+    """Capture CLI output without retaining more than the action's byte limit."""
+
+    def __init__(self, maximum_bytes: int) -> None:
+        self._maximum_bytes = maximum_bytes
+        self._parts: list[str] = []
+        self._size_bytes = 0
+
+    def write(self, value: str) -> int:
+        if not isinstance(value, str):
+            raise TypeError("CLI output must be text")
+        value_size = len(value) if value.isascii() else len(value.encode("utf-8"))
+        if self._size_bytes + value_size > self._maximum_bytes:
+            raise AutonomousAgentActionError("autonomous CLI result exceeds its byte bound")
+        self._parts.append(value)
+        self._size_bytes += value_size
+        return len(value)
+
+    def getvalue(self) -> str:
+        return "".join(self._parts)
+
+
 def _input(environ: Mapping[str, str], name: str, default: str = "") -> str:
     value = environ.get(f"INPUT_{name.upper().replace('-', '_')}", default)
     return value if isinstance(value, str) else default
@@ -275,7 +297,7 @@ def run_action(
     effective_environ["INPUT_RUN_ID"] = run_id
     argv = build_cli_argv(effective_environ)
     result_path = _result_path(environ)
-    output = io.StringIO()
+    output = _BoundedTextBuffer(MAX_ACTION_RESULT_BYTES)
     errors = io.StringIO()
     exit_code = _call_cli_with_private_environment(
         command,
