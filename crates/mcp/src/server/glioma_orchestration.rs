@@ -3,6 +3,156 @@
 use super::*;
 
 impl Server {
+    /// Evaluate the autonomous engine's selection policy against held-out utility without
+    /// dispatching a provider, instrument, federation, or biological operation.
+    pub(super) fn glioma_autonomous_research_engine_evaluate(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaAutonomousResearchEngineRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_autonomous_research_engine_evaluate requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma autonomous engine evaluation request: {error}"))?;
+        let held_out: BTreeMap<String, i64> = serde_json::from_value(
+            arguments
+                .get("held_out_utility_milli")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_autonomous_research_engine_evaluate requires held_out_utility_milli"
+                        .to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid held-out utility map: {error}"))?;
+        let evaluation = evaluate_glioma_autonomous_research_engine(&request, &held_out)
+            .map_err(|error| format!("glioma autonomous engine evaluation refused: {error}"))?;
+        Ok(json!({
+            "evaluation": evaluation,
+            "evaluation_only": true,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "held-out utility is evaluated after planning and never enters the planner",
+                "policy comparisons use a bounded dependency-aware oracle and deterministic baselines",
+                "no provider, assay, instrument, federation, raw-data transfer, or clinical operation is invoked"
+            ]
+        }))
+    }
+
+    /// Stress the autonomous engine policy over a bounded map of held-out utility worlds.
+    pub(super) fn glioma_autonomous_research_engine_stress_evaluate(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaAutonomousResearchEngineRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_autonomous_research_engine_stress_evaluate requires request"
+                        .to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma autonomous engine stress request: {error}"))?;
+        let scenarios: BTreeMap<String, BTreeMap<String, i64>> = serde_json::from_value(
+            arguments
+                .get("held_out_scenarios")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_autonomous_research_engine_stress_evaluate requires held_out_scenarios"
+                        .to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid held-out scenario map: {error}"))?;
+        let evaluation = evaluate_glioma_autonomous_research_engine_scenarios(&request, &scenarios)
+            .map_err(|error| format!("glioma autonomous engine stress evaluation refused: {error}"))?;
+        Ok(json!({
+            "evaluation": evaluation,
+            "evaluation_only": true,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "the number of named held-out scenarios is bounded by the domain evaluator",
+                "stress utilities are not exposed to planning and do not become biological evidence",
+                "no provider, assay, instrument, federation, raw-data transfer, or clinical operation is invoked"
+            ]
+        }))
+    }
+
+    /// Replay the autonomous engine against named synthetic outcome traces without dispatch.
+    pub(super) fn glioma_autonomous_research_engine_trace_evaluate(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaAutonomousResearchEngineRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_autonomous_research_engine_trace_evaluate requires request"
+                        .to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma autonomous engine trace request: {error}"))?;
+        let traces: BTreeMap<String, BTreeMap<String, GliomaEngineTraceOutcome>> =
+            serde_json::from_value(
+                arguments
+                    .get("outcome_traces")
+                    .cloned()
+                    .ok_or_else(|| {
+                        "glioma_autonomous_research_engine_trace_evaluate requires outcome_traces"
+                            .to_string()
+                    })?,
+            )
+            .map_err(|error| format!("invalid synthetic outcome traces: {error}"))?;
+        let evaluation = evaluate_glioma_autonomous_research_engine_traces(&request, &traces)
+            .map_err(|error| format!("glioma autonomous engine trace evaluation refused: {error}"))?;
+        Ok(json!({
+            "evaluation": evaluation,
+            "evaluation_only": true,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "trace outcomes are synthetic evaluator inputs, never biological observations",
+                "missing action outcomes fail closed in every policy replay",
+                "no provider, assay, instrument, federation, raw-data transfer, or clinical operation is invoked"
+            ]
+        }))
+    }
+
+    /// Reconcile temporal multimodal mechanistic predictions with declared local preclinical
+    /// observations and emit a bounded next-measurement frontier.
+    pub(super) fn glioma_temporal_multimodal_mechanism_fusion(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: TemporalMultimodalMechanismFusionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_temporal_multimodal_mechanism_fusion requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid temporal multimodal mechanism-fusion request: {error}"))?;
+        let fusion = execute_glioma_temporal_multimodal_mechanism_fusion(&request)
+            .map_err(|error| format!("temporal multimodal mechanism fusion refused: {error}"))?;
+        Ok(json!({
+            "fusion": fusion,
+            "dispatch": "analysis_only",
+            "simulation_only": true,
+            "guarantees": [
+                "mechanism predictions are compared only with caller-supplied local observations",
+                "missing evidence and contradictory predictions remain visible in the assessment",
+                "the next-measurement frontier is a plan and does not execute assays or make clinical decisions"
+            ]
+        }))
+    }
+
     /// Infer longitudinal multimodal state transitions from caller-supplied local preclinical
     /// summaries. Missing timepoints, modalities, and non-comparable features remain explicit;
     /// this route does not fetch data, execute an assay, or make a clinical decision.

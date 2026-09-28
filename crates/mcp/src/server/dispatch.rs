@@ -306,6 +306,18 @@ impl Server {
             "glioma_autonomous_research_engine_execute" => {
                 self.glioma_autonomous_research_engine_execute(&arguments)
             }
+            "glioma_autonomous_research_engine_evaluate" => {
+                self.glioma_autonomous_research_engine_evaluate(&arguments)
+            }
+            "glioma_autonomous_research_engine_stress_evaluate" => {
+                self.glioma_autonomous_research_engine_stress_evaluate(&arguments)
+            }
+            "glioma_autonomous_research_engine_trace_evaluate" => {
+                self.glioma_autonomous_research_engine_trace_evaluate(&arguments)
+            }
+            "glioma_temporal_multimodal_mechanism_fusion" => {
+                self.glioma_temporal_multimodal_mechanism_fusion(&arguments)
+            }
             "glioma_autonomous_program_cycle" => self.glioma_autonomous_program_cycle(&arguments),
             "glioma_adaptive_workflow" => self.glioma_adaptive_workflow(&arguments),
             "glioma_interpretation_synthesize" => self.glioma_interpretation_synthesize(&arguments),

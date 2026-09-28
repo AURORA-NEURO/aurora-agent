@@ -21336,6 +21336,108 @@
     }
   },
   {
+    "name": "glioma_autonomous_research_engine_evaluate",
+    "description": "Evaluate autonomous preclinical glioma research-engine action selection against held-out utility. The held-out values are compared only after planning, produce policy and bounded-oracle metrics, and never become biological evidence or authorize dispatch.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "GliomaAutonomousResearchEngineRequest1@1 with high-level GliomaResearchIntent, focus, typed starting checkpoints, cycle/action/budget bounds, authority switches, selection weights, retry bound, and local-artifact policy."
+        },
+        "held_out_utility_milli": {
+          "type": "object",
+          "description": "Action ID to bounded held-out utility in milli-units; keys must exactly match the compiled action frontier.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": -1000000,
+            "maximum": 1000000
+          }
+        }
+      },
+      "required": [
+        "request",
+        "held_out_utility_milli"
+      ]
+    }
+  },
+  {
+    "name": "glioma_autonomous_research_engine_stress_evaluate",
+    "description": "Stress-test autonomous preclinical glioma research-engine policy across a bounded set of held-out utility worlds. Scenarios remain outside planning and are summarized as policy robustness evidence without biological or execution claims.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "GliomaAutonomousResearchEngineRequest1@1 with high-level GliomaResearchIntent, focus, typed starting checkpoints, cycle/action/budget bounds, authority switches, selection weights, retry bound, and local-artifact policy."
+        },
+        "held_out_scenarios": {
+          "type": "object",
+          "description": "At most 32 named scenarios, each mapping the exact compiled action frontier to bounded held-out utility.",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": -1000000,
+              "maximum": 1000000
+            }
+          }
+        }
+      },
+      "required": [
+        "request",
+        "held_out_scenarios"
+      ]
+    }
+  },
+  {
+    "name": "glioma_autonomous_research_engine_trace_evaluate",
+    "description": "Replay autonomous preclinical glioma research-engine policies over bounded named synthetic outcome traces. Missing action outcomes fail closed, and the trace evaluator never calls providers or treats synthetic outcomes as biological evidence.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "GliomaAutonomousResearchEngineRequest1@1 with high-level GliomaResearchIntent, focus, typed starting checkpoints, cycle/action/budget bounds, authority switches, selection weights, retry bound, and local-artifact policy."
+        },
+        "outcome_traces": {
+          "type": "object",
+          "description": "At most 32 named synthetic traces, mapping action IDs to typed outcomes.",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "negative",
+                  "partial",
+                  "failed"
+                ]
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "disposition"
+            ]
+          }
+        }
+      },
+      "required": [
+        "request",
+        "outcome_traces"
+      ]
+    }
+  },
+  {
     "name": "glioma_autonomous_program_cycle",
     "description": "Run the autonomous preclinical glioma engine and compile a researcher-facing program handoff. Every stage is classified as cleared, active, held, approval-required, blocked, or pending; current frontier actions, progress, negative evidence, uncertainty, and the next operator action remain explicit. MCP uses a deterministic local sandbox and never performs real assays, instrument effects, federation, raw-data movement, or clinical decisions.",
     "inputSchema": {
@@ -22743,6 +22845,23 @@
       "required": [
         "request",
         "observations"
+      ]
+    }
+  },
+  {
+    "name": "glioma_temporal_multimodal_mechanism_fusion",
+    "description": "Compare temporal multimodal mechanistic predictions with caller-supplied local preclinical observations, retain uncertainty and contradiction, and rank a bounded next-measurement frontier. This analysis does not execute assays or make clinical decisions.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "TemporalMultimodalMechanismFusionRequest1@1 with objective, model system, bounded mechanism predictions, local artifact-bound observations, support and contradiction thresholds, and bounded acquisition count."
+        }
+      },
+      "required": [
+        "request"
       ]
     }
   },
