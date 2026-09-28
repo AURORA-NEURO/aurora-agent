@@ -176,7 +176,7 @@ impl ComputationTaskReproducibilitySummary {
                     _ => {
                         return Err(ComputationReproducibilityError::InvalidOutput(
                             "effect bounds must be both present or both absent".into(),
-                        ))
+                        ));
                     }
                 }
             || !canonical(&self.negative_evidence)

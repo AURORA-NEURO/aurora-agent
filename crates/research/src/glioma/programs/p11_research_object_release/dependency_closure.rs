@@ -149,7 +149,6 @@ impl DependencyClosurePlan {
                 .root_order
                 .iter()
                 .chain(self.traversal_order.iter())
-                .chain(self.missing_upstream_order.iter())
                 .chain(self.cycle_order.iter())
                 .chain(self.orphan_order.iter())
                 .chain(self.depth_exceeded_order.iter())

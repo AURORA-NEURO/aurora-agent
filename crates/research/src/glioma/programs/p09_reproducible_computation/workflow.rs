@@ -506,6 +506,7 @@ impl GliomaComputationWorkflow {
             require_local_artifacts: request.require_local_artifacts,
             cache: request.cache.clone(),
             replay_identity: request.replay_identity.clone(),
+            outcome_summaries: std::collections::BTreeMap::new(),
         })
     }
 }
@@ -655,10 +656,10 @@ pub fn compile_glioma_computation_workflow(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn request() -> GliomaComputationWorkflowRequest {
+    pub(crate) fn request() -> GliomaComputationWorkflowRequest {
         GliomaComputationWorkflowRequest {
             objective: "profile invasive organoid state across modalities".into(),
             study_id: "study-glioma-01".into(),

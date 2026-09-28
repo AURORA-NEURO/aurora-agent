@@ -14,14 +14,15 @@ use super::mechanism_transport::{
 use crate::glioma_engine::{GliomaModelSystem, LocalArtifactRef};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P12-F28";
-pub const OUTPUT_SCHEMA: &str = "GliomaFederatedMechanismTransportCampaign1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaFederatedMechanismTransportCampaign1@2";
 pub const MAX_ROUNDS: u16 = 32;
 pub const MAX_ACTIONS: usize = 256;
 pub const MAX_RETRIES: u8 = 6;
+const PORTFOLIO_BEAM_WIDTH: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedMechanismTransportAction {
@@ -276,6 +277,122 @@ fn action_score(
     value.saturating_sub(penalty)
 }
 
+#[derive(Clone)]
+struct TransportPortfolioState {
+    selected_indices: Vec<usize>,
+    spent: u64,
+    utility: u128,
+}
+
+fn transport_state_better(
+    left: &TransportPortfolioState,
+    right: &TransportPortfolioState,
+    actions: &[&FederatedMechanismTransportAction],
+) -> bool {
+    if left.utility != right.utility {
+        return left.utility > right.utility;
+    }
+    if left.selected_indices.len() != right.selected_indices.len() {
+        return left.selected_indices.len() > right.selected_indices.len();
+    }
+    if left.spent != right.spent {
+        return left.spent < right.spent;
+    }
+    left.selected_indices
+        .iter()
+        .map(|index| actions[*index].action_id.as_str())
+        .cmp(
+            right
+                .selected_indices
+                .iter()
+                .map(|index| actions[*index].action_id.as_str()),
+        )
+        == std::cmp::Ordering::Less
+}
+
+fn transport_portfolio_utility(
+    selected_indices: &[usize],
+    actions: &[&FederatedMechanismTransportAction],
+    transport: &FederatedMechanismTransportAnalysis,
+) -> u128 {
+    let mut diversity_counts = BTreeMap::<(GliomaModelSystem, Vec<i64>), u64>::new();
+    for index in selected_indices {
+        let action = actions[*index];
+        *diversity_counts
+            .entry((action.model_system, action.population_signature.clone()))
+            .or_default() += 1;
+    }
+    selected_indices
+        .iter()
+        .map(|index| {
+            let action = actions[*index];
+            let key = (action.model_system, action.population_signature.clone());
+            let diversity = 1_000_u64 / diversity_counts[&key];
+            action_score(action, transport).saturating_mul(u128::from(diversity))
+        })
+        .sum()
+}
+
+fn select_transport_portfolio<'a>(
+    eligible: &[&'a FederatedMechanismTransportAction],
+    transport: &FederatedMechanismTransportAnalysis,
+    remaining: u64,
+) -> Vec<&'a FederatedMechanismTransportAction> {
+    let mut beam = vec![TransportPortfolioState {
+        selected_indices: Vec::new(),
+        spent: 0,
+        utility: 0,
+    }];
+    for index in 0..eligible.len() {
+        let mut expanded = beam.clone();
+        for state in &beam {
+            if state.selected_indices.len() >= 4 {
+                continue;
+            }
+            let cost = u64::from(eligible[index].cost_units);
+            if state.spent.saturating_add(cost) > remaining {
+                continue;
+            }
+            let mut selected_indices = state.selected_indices.clone();
+            selected_indices.push(index);
+            let spent = state.spent.saturating_add(cost);
+            let utility = transport_portfolio_utility(&selected_indices, eligible, transport);
+            expanded.push(TransportPortfolioState {
+                selected_indices,
+                spent,
+                utility,
+            });
+        }
+        expanded.sort_by(|left, right| {
+            if transport_state_better(left, right, eligible) {
+                std::cmp::Ordering::Less
+            } else if transport_state_better(right, left, eligible) {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        });
+        let mut seen = BTreeSet::new();
+        expanded.retain(|state| seen.insert(state.selected_indices.clone()));
+        expanded.truncate(PORTFOLIO_BEAM_WIDTH);
+        beam = expanded;
+    }
+    let selected = beam
+        .iter()
+        .max_by(|left, right| {
+            if transport_state_better(left, right, eligible) {
+                std::cmp::Ordering::Greater
+            } else if transport_state_better(right, left, eligible) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .map(|state| state.selected_indices.clone())
+        .unwrap_or_default();
+    selected.into_iter().map(|index| eligible[index]).collect()
+}
+
 fn validate_returned_site(
     site: &FederatedMechanismSite,
     action: &FederatedMechanismTransportAction,
@@ -478,25 +595,32 @@ pub fn execute_federated_mechanism_transport_campaign<E: FederatedMechanismTrans
             break;
         }
         let before_budget = remaining;
-        let mut selected = Vec::new();
-        let mut selected_cost = 0_u64;
-        for action in eligible {
-            let cost = u64::from(action.cost_units);
-            if selected.is_empty() || selected_cost.saturating_add(cost) <= remaining {
-                selected_cost = selected_cost.saturating_add(cost);
-                selected.push(action);
-            }
-            if selected.len() >= 4 {
-                break;
-            }
+        let selected = select_transport_portfolio(&eligible, &transport, remaining);
+        if selected.is_empty() {
+            stop_reason = FederatedMechanismTransportCampaignStopReason::BudgetExhausted;
+            break;
         }
         let mut returned_site_order = Vec::new();
         let mut failed_action_order = Vec::new();
         let mut round_retries = 0_u32;
         let mut progress = false;
+        let mut round_spent = 0_u64;
+        let mut budget_exhausted_during_execution = false;
         for action in selected.iter().copied() {
+            let action_cost = u64::from(action.cost_units);
+            if round_spent.saturating_add(action_cost) > remaining {
+                budget_exhausted_during_execution = true;
+                break;
+            }
             let mut returned = None;
             for attempt in 1..=request.max_retries.saturating_add(1) {
+                if round_spent.saturating_add(action_cost) > remaining {
+                    budget_exhausted_during_execution = true;
+                    failed_action_order.push(action.action_id.clone());
+                    failed.insert(action.action_id.clone());
+                    break;
+                }
+                round_spent = round_spent.saturating_add(action_cost);
                 match executor.execute_action(action, &request.transport, attempt) {
                     Ok(site) => {
                         validate_returned_site(&site, action, &request.transport, &sites)?;
@@ -529,7 +653,7 @@ pub fn execute_federated_mechanism_transport_campaign<E: FederatedMechanismTrans
         }
         returned_site_order.sort();
         failed_action_order.sort();
-        budget_spent = budget_spent.saturating_add(selected_cost);
+        budget_spent = budget_spent.saturating_add(round_spent);
         let after_budget = request.budget_units.saturating_sub(budget_spent);
         let updated = analyze_federated_mechanism_transport(&request.transport, &sites)?;
         negative_evidence.extend(updated.negative_evidence.iter().cloned());
@@ -543,11 +667,15 @@ pub fn execute_federated_mechanism_transport_campaign<E: FederatedMechanismTrans
             returned_site_order,
             failed_action_order,
             transport_disposition: updated.disposition,
-            cost_units: selected_cost.min(u64::from(u32::MAX)) as u32,
+            cost_units: round_spent.min(u64::from(u32::MAX)) as u32,
             budget_before_units: before_budget,
             budget_after_units: after_budget,
             retry_count: round_retries,
         });
+        if budget_exhausted_during_execution {
+            stop_reason = FederatedMechanismTransportCampaignStopReason::BudgetExhausted;
+            break;
+        }
         if !progress {
             stop_reason = FederatedMechanismTransportCampaignStopReason::ExecutorFailed;
             break;
@@ -718,6 +846,99 @@ mod tests {
         assert_eq!(result.rounds.len(), 1);
         assert_eq!(result.sites.len(), 3);
         assert_eq!(result.completed_action_order, vec!["replicate-site-c"]);
+        result.validate().unwrap();
+    }
+
+    #[test]
+    fn transport_portfolio_beam_prefers_complementary_model_signatures() {
+        let mut request = request();
+        request.max_rounds = 1;
+        request.budget_units = 4;
+        request.actions = vec![
+            FederatedMechanismTransportAction {
+                action_id: "expensive-transport".into(),
+                target_site_id: Some("site-expensive".into()),
+                model_system: GliomaModelSystem::Organoid,
+                population_signature: vec![0, 0],
+                cost_units: 4,
+                expected_information_milli: 1_000,
+                expected_effect_milli: 650,
+                expected_heterogeneity_reduction_milli: 400,
+                feasibility_milli: 950,
+                risk_milli: 20,
+                requested_replicates: 2,
+            },
+            FederatedMechanismTransportAction {
+                action_id: "cheap-organoid".into(),
+                target_site_id: Some("site-cheap-organoid".into()),
+                model_system: GliomaModelSystem::Organoid,
+                population_signature: vec![0, 0],
+                cost_units: 2,
+                expected_information_milli: 820,
+                expected_effect_milli: 500,
+                expected_heterogeneity_reduction_milli: 300,
+                feasibility_milli: 900,
+                risk_milli: 20,
+                requested_replicates: 2,
+            },
+            FederatedMechanismTransportAction {
+                action_id: "cheap-xenograft".into(),
+                target_site_id: Some("site-cheap-xenograft".into()),
+                model_system: GliomaModelSystem::PatientDerivedXenograft,
+                population_signature: vec![1, 0],
+                cost_units: 2,
+                expected_information_milli: 820,
+                expected_effect_milli: 500,
+                expected_heterogeneity_reduction_milli: 300,
+                feasibility_milli: 900,
+                risk_milli: 20,
+                requested_replicates: 2,
+            },
+        ];
+        let result = execute_federated_mechanism_transport_campaign_dry_run(&request).unwrap();
+        assert_eq!(
+            result.completed_action_order,
+            vec!["cheap-organoid", "cheap-xenograft"]
+        );
+        result.validate().unwrap();
+    }
+
+    #[test]
+    fn transport_retry_attempts_consume_budget() {
+        struct RetryOnce {
+            calls: u8,
+        }
+
+        impl FederatedMechanismTransportExecutor for RetryOnce {
+            fn execute_action(
+                &mut self,
+                action: &FederatedMechanismTransportAction,
+                request: &FederatedMechanismTransportRequest,
+                attempt: u8,
+            ) -> Result<FederatedMechanismSite, FederatedMechanismTransportExecutionFailure>
+            {
+                self.calls = self.calls.saturating_add(1);
+                if self.calls == 1 {
+                    return Err(FederatedMechanismTransportExecutionFailure {
+                        reason: "transient transport worker outage".into(),
+                        retryable: true,
+                    });
+                }
+                let mut dry_run = DryRunFederatedMechanismTransportExecutor;
+                dry_run.execute_action(action, request, attempt)
+            }
+        }
+
+        let mut request = request();
+        request.budget_units = 2;
+        request.max_rounds = 1;
+        let mut executor = RetryOnce { calls: 0 };
+        let result =
+            execute_federated_mechanism_transport_campaign(&request, &mut executor).unwrap();
+        assert_eq!(result.retry_count, 1);
+        assert_eq!(result.rounds[0].cost_units, 2);
+        assert_eq!(result.budget_spent_units, 2);
+        assert_eq!(result.remaining_budget_units, 0);
         result.validate().unwrap();
     }
 

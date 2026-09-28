@@ -1,4 +1,4 @@
-//! Robust, model-ensemble active learning for preclinical glioma assays.
+//! Robust, model-ensemble active learning with bounded portfolio selection for preclinical glioma assays.
 //!
 //! This planner is deliberately different from the single-surrogate active learner: it keeps
 //! competing mechanistic surrogates alive, computes a conservative lower-tail acquisition under
@@ -20,6 +20,7 @@ pub const MAX_MODELS: usize = 128;
 pub const MAX_OBSERVATIONS: usize = 32_768;
 pub const MAX_FEATURES: usize = 512;
 const SCORE_SCALE: i128 = 1_000;
+const ACTIVE_LEARNING_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RobustActiveLearningModel {
@@ -334,6 +335,130 @@ fn weighted_mean(values: &[(i64, u64)]) -> i64 {
     }
 }
 
+fn precision_weight(uncertainty_milli: u16) -> u64 {
+    let uncertainty = u64::from(uncertainty_milli.max(1));
+    1_000_000_u64
+        .checked_div(uncertainty.saturating_mul(uncertainty).max(1))
+        .unwrap_or(1)
+}
+
+fn weighted_median_observations(observations: &[&RobustActiveLearningObservation]) -> Option<i64> {
+    if observations.is_empty() {
+        return None;
+    }
+    let mut ordered = observations
+        .iter()
+        .map(|observation| {
+            (
+                observation.outcome_milli,
+                precision_weight(observation.uncertainty_milli),
+                observation.observation_id.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    ordered.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.2.cmp(right.2)));
+    let total_weight = ordered.iter().map(|(_, weight, _)| *weight).sum::<u64>();
+    let threshold = total_weight.div_ceil(2);
+    let mut cumulative = 0_u64;
+    for (value, weight, _) in ordered {
+        cumulative = cumulative.saturating_add(weight);
+        if cumulative >= threshold {
+            return Some(value);
+        }
+    }
+    observations
+        .last()
+        .map(|observation| observation.outcome_milli)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveLearningPortfolioOption {
+    candidate_id: String,
+    redundancy_group: String,
+    cost_units: u32,
+    acquisition_milli: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveLearningPortfolioState {
+    selected_indices: Vec<usize>,
+    groups: BTreeSet<String>,
+    spent_units: u32,
+    utility_milli: i128,
+}
+
+/// Select a complementary robust-active-learning batch under hard budget and redundancy gates.
+/// Keeping a bounded beam avoids the common failure mode where one attractive arm crowds out two
+/// cheaper, mechanistically independent assays. Negative total acquisition is never forced: the
+/// empty portfolio remains a valid deterministic option until an informative combination exists.
+fn select_active_learning_portfolio(
+    options: &[ActiveLearningPortfolioOption],
+    budget_units: u32,
+    max_selections: usize,
+) -> BTreeSet<String> {
+    let mut states = vec![ActiveLearningPortfolioState {
+        selected_indices: Vec::new(),
+        groups: BTreeSet::new(),
+        spent_units: 0,
+        utility_milli: 0,
+    }];
+    for (index, option) in options.iter().enumerate() {
+        let mut next = states.clone();
+        for state in &states {
+            if state.selected_indices.len() >= max_selections
+                || state.groups.contains(&option.redundancy_group)
+                || state.spent_units.saturating_add(option.cost_units) > budget_units
+            {
+                continue;
+            }
+            let mut selected_indices = state.selected_indices.clone();
+            selected_indices.push(index);
+            let mut groups = state.groups.clone();
+            groups.insert(option.redundancy_group.clone());
+            next.push(ActiveLearningPortfolioState {
+                selected_indices,
+                groups,
+                spent_units: state.spent_units.saturating_add(option.cost_units),
+                utility_milli: state
+                    .utility_milli
+                    .saturating_add(i128::from(option.acquisition_milli)),
+            });
+        }
+        next.sort_by(|left, right| {
+            right
+                .utility_milli
+                .cmp(&left.utility_milli)
+                .then_with(|| left.spent_units.cmp(&right.spent_units))
+                .then_with(|| {
+                    left.selected_indices
+                        .len()
+                        .cmp(&right.selected_indices.len())
+                })
+                .then_with(|| {
+                    let left_ids = left
+                        .selected_indices
+                        .iter()
+                        .map(|index| options[*index].candidate_id.as_str())
+                        .collect::<Vec<_>>();
+                    let right_ids = right
+                        .selected_indices
+                        .iter()
+                        .map(|index| options[*index].candidate_id.as_str())
+                        .collect::<Vec<_>>();
+                    left_ids.cmp(&right_ids)
+                })
+        });
+        next.truncate(ACTIVE_LEARNING_BEAM_WIDTH);
+        states = next;
+    }
+    states
+        .first()
+        .into_iter()
+        .flat_map(|state| state.selected_indices.iter())
+        .map(|index| options[*index].candidate_id.clone())
+        .collect()
+}
+
 /// Compile a conservative next assay batch across competing local mechanistic surrogates.
 pub fn plan_glioma_robust_active_learning(
     request: &RobustActiveLearningRequest,
@@ -369,17 +494,7 @@ pub fn plan_glioma_robust_active_learning(
             .filter(|observation| observation.candidate_id == candidate.candidate_id)
             .collect::<Vec<_>>();
         let direct_count = direct.len();
-        let direct_mean = if direct.is_empty() {
-            None
-        } else {
-            Some(
-                direct
-                    .iter()
-                    .map(|observation| observation.outcome_milli)
-                    .sum::<i64>()
-                    / direct_count as i64,
-            )
-        };
+        let direct_center = weighted_median_observations(&direct);
         let direct_spread = direct
             .iter()
             .map(|observation| observation.outcome_milli)
@@ -409,7 +524,7 @@ pub fn plan_glioma_robust_active_learning(
             let baseline = (i128::from(model.intercept_milli) + dot)
                 .clamp(i128::from(i64::MIN), i128::from(i64::MAX))
                 as i64;
-            let prediction = if let Some(observed) = direct_mean {
+            let prediction = if let Some(observed) = direct_center {
                 ((i128::from(baseline) * i128::from(model.reliability_milli)
                     + i128::from(observed) * 1_000)
                     / i128::from(model.reliability_milli.saturating_add(1_000)))
@@ -492,13 +607,13 @@ pub fn plan_glioma_robust_active_learning(
                 candidate.candidate_id, direct_spread
             ));
         }
-        if direct_mean.is_some_and(|mean| mean < 0)
+        if direct_center.is_some_and(|center| center < 0)
             && direct_count >= request.min_observations_per_candidate
         {
             negative.insert(format!(
                 "{}:negative-observed-{}",
                 candidate.candidate_id,
-                direct_mean.unwrap_or_default()
+                direct_center.unwrap_or_default()
             ));
         }
         scores.push(RobustActiveLearningScore {
@@ -522,6 +637,37 @@ pub fn plan_glioma_robust_active_learning(
             .cmp(&scores[*left].acquisition_milli)
             .then_with(|| scores[*left].candidate_id.cmp(&scores[*right].candidate_id))
     });
+    let portfolio_options = ranking
+        .iter()
+        .filter_map(|index| {
+            let score = &scores[*index];
+            let candidate = candidate_map[&score.candidate_id];
+            let count = replicate_counts
+                .get(&candidate.candidate_id)
+                .copied()
+                .unwrap_or(0);
+            if score.model_support_count == 0
+                || candidate.risk_milli > request.max_risk_milli
+                || count >= usize::from(candidate.max_replicates)
+                || (count > 0
+                    && score.direct_observation_count >= 2
+                    && score.posterior_uncertainty_milli >= request.min_model_reliability_milli)
+            {
+                return None;
+            }
+            Some(ActiveLearningPortfolioOption {
+                candidate_id: candidate.candidate_id.clone(),
+                redundancy_group: candidate.redundancy_group.clone(),
+                cost_units: candidate.cost_units,
+                acquisition_milli: score.acquisition_milli,
+            })
+        })
+        .collect::<Vec<_>>();
+    let selected_ids = select_active_learning_portfolio(
+        &portfolio_options,
+        request.budget_units,
+        request.max_selections,
+    );
     let mut selected = Vec::new();
     let mut deferred = Vec::new();
     let mut blocked = Vec::new();
@@ -558,20 +704,24 @@ pub fn plan_glioma_robust_active_learning(
             unresolved.push(candidate.candidate_id.clone());
             score.disposition = RobustActiveLearningCandidateDisposition::Unresolved;
             Some("contradiction-hold")
-        } else if selected.len() >= request.max_selections {
-            deferred.push(candidate.candidate_id.clone());
-            score.disposition = RobustActiveLearningCandidateDisposition::Deferred;
-            Some("selection-cap-deferred")
-        } else if groups.contains(&candidate.redundancy_group) {
-            deferred.push(candidate.candidate_id.clone());
-            score.disposition = RobustActiveLearningCandidateDisposition::Deferred;
-            Some("redundancy-group-deferred")
-        } else {
+        } else if selected_ids.contains(&candidate.candidate_id) {
             selected.push(candidate.candidate_id.clone());
             groups.insert(candidate.redundancy_group.clone());
             budget = budget.saturating_sub(candidate.cost_units);
             score.disposition = RobustActiveLearningCandidateDisposition::Selected;
             None
+        } else if candidate.cost_units > request.budget_units {
+            blocked.push(candidate.candidate_id.clone());
+            score.disposition = RobustActiveLearningCandidateDisposition::Blocked;
+            Some("budget-blocked")
+        } else if groups.contains(&candidate.redundancy_group) {
+            deferred.push(candidate.candidate_id.clone());
+            score.disposition = RobustActiveLearningCandidateDisposition::Deferred;
+            Some("redundancy-group-deferred")
+        } else {
+            deferred.push(candidate.candidate_id.clone());
+            score.disposition = RobustActiveLearningCandidateDisposition::Deferred;
+            Some("portfolio-optimization-deferred")
         };
         if reason == Some("budget-blocked") {
             negative.insert(format!("{}:budget-blocked", candidate.candidate_id));
@@ -616,6 +766,38 @@ pub fn plan_glioma_robust_active_learning(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn beam_batch_prefers_two_independent_assays_over_one_expensive_arm() {
+        let selected = select_active_learning_portfolio(
+            &[
+                ActiveLearningPortfolioOption {
+                    candidate_id: "expensive".into(),
+                    redundancy_group: "g-expensive".into(),
+                    cost_units: 4,
+                    acquisition_milli: 100,
+                },
+                ActiveLearningPortfolioOption {
+                    candidate_id: "independent-a".into(),
+                    redundancy_group: "g-a".into(),
+                    cost_units: 2,
+                    acquisition_milli: 60,
+                },
+                ActiveLearningPortfolioOption {
+                    candidate_id: "independent-b".into(),
+                    redundancy_group: "g-b".into(),
+                    cost_units: 2,
+                    acquisition_milli: 60,
+                },
+            ],
+            4,
+            2,
+        );
+        assert_eq!(
+            selected,
+            BTreeSet::from(["independent-a".to_string(), "independent-b".to_string()])
+        );
+    }
 
     fn artifact(id: &str) -> LocalArtifactRef {
         LocalArtifactRef {
@@ -727,6 +909,49 @@ mod tests {
             .iter()
             .any(|item| item.starts_with("egfr:contradictory")));
         assert!(plan.unresolved_order.contains(&"egfr".into()));
+    }
+
+    #[test]
+    fn weighted_median_replicates_resist_a_single_precise_outlier() {
+        let observations = vec![
+            RobustActiveLearningObservation {
+                observation_id: "a".into(),
+                candidate_id: "egfr".into(),
+                outcome_milli: 900,
+                uncertainty_milli: 20,
+                artifact: artifact("a"),
+            },
+            RobustActiveLearningObservation {
+                observation_id: "b".into(),
+                candidate_id: "egfr".into(),
+                outcome_milli: 900,
+                uncertainty_milli: 20,
+                artifact: artifact("b"),
+            },
+            RobustActiveLearningObservation {
+                observation_id: "outlier".into(),
+                candidate_id: "egfr".into(),
+                outcome_milli: -900,
+                uncertainty_milli: 20,
+                artifact: artifact("outlier"),
+            },
+        ];
+        let mut candidates = candidates();
+        candidates[0].max_replicates = 4;
+        let plan = plan_glioma_robust_active_learning(&request(), &candidates, &observations)
+            .expect("plan");
+        let score = plan
+            .scores
+            .iter()
+            .find(|score| score.candidate_id == "egfr")
+            .expect("egfr score");
+        assert!(score.weighted_mean_milli > 500);
+        assert!(plan
+            .uncertainty
+            .iter()
+            .any(|item| item.starts_with("egfr:contradictory")));
+        assert!(plan.unresolved_order.contains(&"egfr".into()));
+        plan.validate().unwrap();
     }
 
     #[test]

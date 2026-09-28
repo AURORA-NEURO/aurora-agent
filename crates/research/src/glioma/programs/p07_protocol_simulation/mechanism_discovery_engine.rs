@@ -537,11 +537,21 @@ pub fn execute_glioma_mechanism_discovery_engine<E: GliomaActionExecutor + ?Size
             .as_ref()
             .map(|value| set_difference(&value.failed_order, &failed_actions))
             .unwrap_or_default();
-        let cost = attempted
-            .iter()
-            .filter_map(|id| action_costs.get(id))
-            .copied()
-            .sum::<u32>();
+        // Charge the worker's retry-aware spend, not the nominal selected portfolio. A failed
+        // action can consume one or more attempts while later actions are only planned and then
+        // skipped behind the halt; summing `attempted` would make those skipped actions consume
+        // budget and would make a resumed mechanism mission diverge from the local executor.
+        let cost = execution
+            .execution
+            .as_ref()
+            .map(|portfolio| portfolio.budget_spent_units)
+            .unwrap_or_else(|| {
+                attempted
+                    .iter()
+                    .filter_map(|id| action_costs.get(id))
+                    .copied()
+                    .sum::<u32>()
+            });
         let budget_after = remaining.saturating_sub(cost);
         if cost == 0 && attempted.is_empty() {
             stop_reason = if matches!(
@@ -682,6 +692,9 @@ mod tests {
         CounterfactualIntervention, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRelation,
         PathwayActivityNode, PathwayActivityRequest, PortfolioDirection,
     };
+    use crate::glioma::programs::p07_protocol_simulation::action_execution::{
+        ActionExecutionFailure, ActionExecutionResult, GliomaActionExecutor,
+    };
     use crate::glioma::programs::p07_protocol_simulation::DryRunGliomaActionExecutor;
     use crate::glioma_engine::{
         GliomaModality, GliomaSelectionWeights, GliomaStageKind, LocalArtifactRef,
@@ -728,6 +741,8 @@ mod tests {
             min_confidence_milli: 100,
             max_pathways: 4,
             require_cross_modal: false,
+            min_edge_agreement_milli: 700,
+            require_edge_consistency: true,
         };
         let campaign = MultimodalMechanismCampaignRequest {
             objective: "discover invasion mechanism".into(),
@@ -939,6 +954,26 @@ mod tests {
         }
     }
 
+    struct RetryOnceExecutor;
+
+    impl GliomaActionExecutor for RetryOnceExecutor {
+        fn execute_action(
+            &mut self,
+            candidate: &GliomaActionCandidate,
+            attempt: u8,
+        ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+            if attempt == 1 {
+                Err(ActionExecutionFailure {
+                    reason: "simulated transient worker failure".into(),
+                    retryable: true,
+                })
+            } else {
+                let mut dry_run = DryRunGliomaActionExecutor;
+                dry_run.execute_action(candidate, attempt)
+            }
+        }
+    }
+
     #[test]
     fn engine_runs_mechanism_stack_and_executes_one_local_assay() {
         let mut executor = DryRunGliomaActionExecutor;
@@ -972,6 +1007,25 @@ mod tests {
             GliomaMechanismDiscoveryStopReason::MultimodalEvidenceBlocked
         );
         assert!(run.rounds[0].execution.is_none());
+        run.validate().unwrap();
+    }
+
+    #[test]
+    fn retryable_mechanism_round_charges_all_worker_attempts() {
+        let mut request = request();
+        request.selection.max_actions = 2;
+        request.selection.budget_units = 2;
+        request.budget_units = 2;
+        request.max_rounds = 1;
+
+        let mut executor = RetryOnceExecutor;
+        let run = execute_glioma_mechanism_discovery_engine(&request, &mut executor).unwrap();
+        assert_eq!(run.rounds.len(), 1);
+        assert_eq!(run.rounds[0].attempted_action_order.len(), 1);
+        assert_eq!(run.rounds[0].executed_action_order, vec!["assay-invasion"]);
+        assert_eq!(run.rounds[0].cost_units, 2);
+        assert_eq!(run.budget_spent_units, 2);
+        assert_eq!(run.remaining_budget_units, 0);
         run.validate().unwrap();
     }
 }

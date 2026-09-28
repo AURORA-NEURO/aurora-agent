@@ -8,8 +8,9 @@
 
 use super::{DecisionActionGraph, DecisionActionGraphDisposition, DecisionContext};
 use crate::glioma::programs::p07_protocol_simulation::{
-    execute_glioma_autonomous_research_mission, GliomaActionExecutor,
-    GliomaAutonomousResearchMission, GliomaMissionError, GliomaMissionGates, GliomaMissionRequest,
+    execute_glioma_autonomous_research_mission_with_context, GliomaActionExecutor,
+    GliomaAutonomousResearchMission, GliomaMissionError, GliomaMissionExecutionContext,
+    GliomaMissionGates, GliomaMissionRequest,
 };
 use crate::glioma_engine::GliomaSelectionConfig;
 use bioprism_ids::ContentHash;
@@ -26,6 +27,9 @@ pub struct DecisionMissionBridgeRequest {
     pub objective: String,
     pub context: DecisionContext,
     pub graph: DecisionActionGraph,
+    /// Local data references and completed prerequisite outputs used by action workers.
+    #[serde(default)]
+    pub execution_context: GliomaMissionExecutionContext,
     /// Canonical actions already completed by an earlier local run.  This makes the bridge
     /// resumable without mutating the original context or graph digest.
     #[serde(default)]
@@ -225,7 +229,11 @@ pub fn execute_glioma_decision_mission<E: GliomaActionExecutor>(
         require_artifacts: request.require_artifacts,
         stop_on_negative: request.stop_on_negative,
     };
-    let mission = execute_glioma_autonomous_research_mission(&mission_request, executor)?;
+    let mission = execute_glioma_autonomous_research_mission_with_context(
+        &mission_request,
+        &request.execution_context,
+        executor,
+    )?;
     let omitted = mission
         .unresolved_order
         .iter()
@@ -267,4 +275,44 @@ pub fn execute_glioma_decision_mission<E: GliomaActionExecutor>(
         .map_err(|error| DecisionMissionBridgeError::Digest(error.to_string()))?;
     output.validate()?;
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn held_run() -> DecisionMissionBridgeRun {
+        let mut run = DecisionMissionBridgeRun {
+            feature_id: FEATURE_ID.into(),
+            output_schema: OUTPUT_SCHEMA.into(),
+            mission_id: "mission:bridge".into(),
+            objective: "resolve an invasion mechanism".into(),
+            context_digest: ContentHash::of_bytes(b"context"),
+            graph_digest: ContentHash::of_bytes(b"graph"),
+            action_order: vec!["action:a".into(), "action:b".into()],
+            omitted_action_order: vec!["action:b".into()],
+            mission: None,
+            disposition: DecisionMissionBridgeDisposition::Held,
+            next_step: "resolve the graph frontier before dispatch".into(),
+            digest: ContentHash::of_bytes(b"unsealed"),
+        };
+        run.digest = ContentHash::of_value(&digest_input(&run)).expect("bridge digest");
+        run
+    }
+
+    #[test]
+    fn held_graph_is_replayable_without_dispatching_a_mission() {
+        let run = held_run();
+        run.validate().expect("held bridge should validate");
+        assert!(run.mission.is_none());
+        assert_eq!(run.omitted_action_order, vec!["action:b"]);
+    }
+
+    #[test]
+    fn changing_a_digest_bound_action_partition_is_rejected() {
+        let mut run = held_run();
+        run.omitted_action_order = vec!["action:a".into()];
+        let error = run.validate().expect_err("tampered bridge must fail");
+        assert!(error.to_string().contains("content-addressed"));
+    }
 }

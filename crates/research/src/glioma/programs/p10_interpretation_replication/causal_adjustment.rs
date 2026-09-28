@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F11";
-pub const OUTPUT_SCHEMA: &str = "GliomaStratifiedCausalAdjustment1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaStratifiedCausalAdjustment1@2";
 pub const MAX_OBSERVATIONS: usize = 65_536;
 pub const MAX_STRATA: usize = 4_096;
 
@@ -29,6 +29,12 @@ pub struct StratifiedCausalRequest {
     pub effect_threshold_milli: u64,
     pub max_stratum_imbalance_milli: u16,
     pub max_leave_one_stratum_shift_milli: u64,
+    /// Maximum tolerated influence of omitting one technical assay batch.
+    pub max_leave_one_batch_shift_milli: u64,
+    /// Declared worst-case absolute shift from an unmeasured preclinical confounder.
+    /// The sensitivity interval is used as a release gate, not as an imputed correction.
+    #[serde(default)]
+    pub max_unmeasured_bias_milli: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,11 +94,16 @@ pub struct StratifiedCausalAdjustment {
     pub summaries: Vec<CausalStratumSummary>,
     pub eligible_unit_count: usize,
     pub adjusted_effect_milli: i64,
+    pub sensitivity_low_milli: i64,
+    pub sensitivity_high_milli: i64,
+    pub sensitivity_robust: bool,
     pub interval_low_milli: i64,
     pub interval_high_milli: i64,
     pub uncertainty_milli: u64,
     pub max_stratum_imbalance_milli: u16,
     pub stratum_effect_range_milli: u64,
+    pub batch_leave_one_out_order: Vec<String>,
+    pub max_leave_one_batch_shift_milli: u64,
     pub negative_evidence: Vec<String>,
     pub uncertainty: Vec<String>,
     pub next_action: StratifiedCausalActionKind,
@@ -141,11 +152,16 @@ fn digest_input(output: &StratifiedCausalAdjustment) -> serde_json::Value {
         "summaries": output.summaries,
         "eligible_unit_count": output.eligible_unit_count,
         "adjusted_effect_milli": output.adjusted_effect_milli,
+        "sensitivity_low_milli": output.sensitivity_low_milli,
+        "sensitivity_high_milli": output.sensitivity_high_milli,
+        "sensitivity_robust": output.sensitivity_robust,
         "interval_low_milli": output.interval_low_milli,
         "interval_high_milli": output.interval_high_milli,
         "uncertainty_milli": output.uncertainty_milli,
         "max_stratum_imbalance_milli": output.max_stratum_imbalance_milli,
         "stratum_effect_range_milli": output.stratum_effect_range_milli,
+        "batch_leave_one_out_order": output.batch_leave_one_out_order,
+        "max_leave_one_batch_shift_milli": output.max_leave_one_batch_shift_milli,
         "negative_evidence": output.negative_evidence,
         "uncertainty": output.uncertainty,
         "next_action": output.next_action,
@@ -164,9 +180,11 @@ impl StratifiedCausalAdjustment {
             || !ordered_unique(&self.stratum_order)
             || !ordered_unique(&self.eligible_stratum_order)
             || !ordered_unique(&self.excluded_stratum_order)
+            || !ordered_unique(&self.batch_leave_one_out_order)
             || !ordered_unique(&self.negative_evidence)
             || !ordered_unique(&self.uncertainty)
             || self.interval_low_milli > self.interval_high_milli
+            || self.sensitivity_low_milli > self.sensitivity_high_milli
             || self.max_stratum_imbalance_milli > 1_000
             || self
                 .summaries
@@ -245,6 +263,8 @@ pub fn analyze_stratified_causal_adjustment(
         || request.effect_threshold_milli > i64::MAX as u64
         || request.max_stratum_imbalance_milli > 1_000
         || request.max_leave_one_stratum_shift_milli > i64::MAX as u64
+        || request.max_leave_one_batch_shift_milli > i64::MAX as u64
+        || request.max_unmeasured_bias_milli > i64::MAX as u64
         || observations.is_empty()
         || observations.len() > MAX_OBSERVATIONS
     {
@@ -255,6 +275,7 @@ pub fn analyze_stratified_causal_adjustment(
     let mut observation_ids = BTreeSet::new();
     let mut unit_strata = BTreeMap::<String, String>::new();
     let mut unit_arms = BTreeMap::<String, String>::new();
+    let mut unit_batches = BTreeMap::<String, BTreeSet<String>>::new();
     let mut grouped = BTreeMap::<String, BTreeMap<String, BTreeMap<String, Vec<i64>>>>::new();
     for observation in observations {
         if observation.observation_id.trim().is_empty()
@@ -292,6 +313,10 @@ pub fn analyze_stratified_causal_adjustment(
         } else {
             unit_arms.insert(observation.unit_id.clone(), observation.arm_id.clone());
         }
+        unit_batches
+            .entry(observation.unit_id.clone())
+            .or_default()
+            .insert(observation.batch_id.clone());
         grouped
             .entry(observation.stratum_id.clone())
             .or_default()
@@ -307,18 +332,41 @@ pub fn analyze_stratified_causal_adjustment(
         ));
     }
     let mut summaries = Vec::with_capacity(grouped.len());
+    let mut unit_means = BTreeMap::<(String, String, String), i64>::new();
     for (stratum_id, arms) in grouped {
         let control_units = arms
             .get(&request.control_arm)
             .into_iter()
             .flat_map(|units| units.iter())
-            .map(|(unit_id, values)| (unit_id.clone(), mean(values)))
+            .map(|(unit_id, values)| {
+                let unit_mean = mean(values);
+                unit_means.insert(
+                    (
+                        stratum_id.clone(),
+                        request.control_arm.clone(),
+                        unit_id.clone(),
+                    ),
+                    unit_mean,
+                );
+                (unit_id.clone(), unit_mean)
+            })
             .collect::<BTreeMap<_, _>>();
         let treatment_units = arms
             .get(&request.treatment_arm)
             .into_iter()
             .flat_map(|units| units.iter())
-            .map(|(unit_id, values)| (unit_id.clone(), mean(values)))
+            .map(|(unit_id, values)| {
+                let unit_mean = mean(values);
+                unit_means.insert(
+                    (
+                        stratum_id.clone(),
+                        request.treatment_arm.clone(),
+                        unit_id.clone(),
+                    ),
+                    unit_mean,
+                );
+                (unit_id.clone(), unit_mean)
+            })
             .collect::<BTreeMap<_, _>>();
         let control_order = control_units.keys().cloned().collect::<Vec<_>>();
         let treatment_order = treatment_units.keys().cloned().collect::<Vec<_>>();
@@ -420,6 +468,98 @@ pub fn analyze_stratified_causal_adjustment(
         .zip(effects.iter().max())
         .map(|(low, high)| (*high - *low).unsigned_abs())
         .unwrap_or(0);
+    // Technical batches are not allowed to silently disappear from the causal audit. Recompute
+    // the adjusted contrast after omitting every batch, retaining folds with two-arm positivity
+    // and flagging any fold that falls below the primary stratum floor. This catches a result
+    // that is really a single processing run while preserving the primary estimand when batches
+    // are exchangeable.
+    let batch_order = unit_batches
+        .values()
+        .flat_map(|batches| batches.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let mut batch_leave_one_out_order = Vec::new();
+    let mut max_leave_one_batch_shift = 0_u64;
+    let mut batch_floor_relaxed = false;
+    for omitted_batch in batch_order {
+        let mut included_numerator = 0_i128;
+        let mut included_units = 0_usize;
+        let mut included_strata = 0_usize;
+        for summary in &eligible_summary {
+            let control_values = summary
+                .control_unit_order
+                .iter()
+                .filter(|unit_id| {
+                    !unit_batches
+                        .get(*unit_id)
+                        .is_some_and(|batches| batches.contains(&omitted_batch))
+                })
+                .filter_map(|unit_id| {
+                    unit_means
+                        .get(&(
+                            summary.stratum_id.clone(),
+                            request.control_arm.clone(),
+                            unit_id.clone(),
+                        ))
+                        .copied()
+                })
+                .collect::<Vec<_>>();
+            let treatment_values = summary
+                .treatment_unit_order
+                .iter()
+                .filter(|unit_id| {
+                    !unit_batches
+                        .get(*unit_id)
+                        .is_some_and(|batches| batches.contains(&omitted_batch))
+                })
+                .filter_map(|unit_id| {
+                    unit_means
+                        .get(&(
+                            summary.stratum_id.clone(),
+                            request.treatment_arm.clone(),
+                            unit_id.clone(),
+                        ))
+                        .copied()
+                })
+                .collect::<Vec<_>>();
+            if control_values.is_empty() || treatment_values.is_empty() {
+                continue;
+            }
+            if control_values.len() < request.min_units_per_arm_per_stratum
+                || treatment_values.len() < request.min_units_per_arm_per_stratum
+            {
+                // A minimal two-arm fold is still informative when the primary design has only
+                // two units per arm. Keep it as a sensitivity diagnostic, but mark that this
+                // fold is below the release floor instead of pretending it is a full replicate.
+                batch_floor_relaxed = true;
+            }
+            let effect = mean(&treatment_values).saturating_sub(mean(&control_values));
+            let pooled_units = control_values.len().saturating_add(treatment_values.len());
+            included_numerator = included_numerator
+                .saturating_add(i128::from(effect).saturating_mul(pooled_units as i128));
+            included_units = included_units.saturating_add(pooled_units);
+            included_strata = included_strata.saturating_add(1);
+        }
+        if included_strata < request.min_eligible_strata || included_units == 0 {
+            continue;
+        }
+        let leave_one_batch_effect = (included_numerator / included_units as i128)
+            .clamp(i128::from(i64::MIN), i128::from(i64::MAX))
+            as i64;
+        let shift = (i128::from(leave_one_batch_effect) - i128::from(adjusted_effect))
+            .unsigned_abs()
+            .min(u128::from(u64::MAX)) as u64;
+        max_leave_one_batch_shift = max_leave_one_batch_shift.max(shift);
+        batch_leave_one_out_order.push(omitted_batch);
+    }
+    batch_leave_one_out_order.sort();
+    let uncertainty_milli = uncertainty_milli.max(max_leave_one_batch_shift);
+    let sensitivity_low = adjusted_effect.saturating_sub(request.max_unmeasured_bias_milli as i64);
+    let sensitivity_high = adjusted_effect.saturating_add(request.max_unmeasured_bias_milli as i64);
+    let sensitivity_robust = if adjusted_effect >= 0 {
+        sensitivity_low >= request.effect_threshold_milli as i64
+    } else {
+        sensitivity_high <= -(request.effect_threshold_milli as i64)
+    };
     let mut negative_evidence = BTreeSet::new();
     if !eligible_summary.is_empty()
         && adjusted_effect.unsigned_abs() < request.effect_threshold_milli
@@ -439,11 +579,33 @@ pub fn analyze_stratified_causal_adjustment(
     if uncertainty_milli > request.max_leave_one_stratum_shift_milli {
         uncertainty.insert("leave-one-stratum-influence-exceeds-bound".into());
     }
+    if batch_leave_one_out_order.is_empty() {
+        uncertainty.insert("batch-leave-one-out-floor-not-met".into());
+    }
+    if batch_floor_relaxed {
+        uncertainty.insert("batch-sensitivity-below-stratum-floor".into());
+    }
+    if max_leave_one_batch_shift > request.max_leave_one_batch_shift_milli {
+        uncertainty.insert("leave-one-batch-influence-exceeds-bound".into());
+    }
+    let sensitivity_crosses_practical_null =
+        adjusted_effect.unsigned_abs() >= request.effect_threshold_milli && !sensitivity_robust;
+    if sensitivity_crosses_practical_null {
+        uncertainty
+            .insert("unmeasured-confounding-sensitivity-crosses-practical-effect-floor".into());
+    }
     let qualified = eligible_summary.len() >= request.min_eligible_strata
         && adjusted_effect.unsigned_abs() >= request.effect_threshold_milli
         && max_imbalance <= request.max_stratum_imbalance_milli
-        && uncertainty_milli <= request.max_leave_one_stratum_shift_milli;
-    let disposition = if eligible_summary.len() < request.min_eligible_strata {
+        && uncertainty_milli <= request.max_leave_one_stratum_shift_milli
+        && !batch_leave_one_out_order.is_empty()
+        && max_leave_one_batch_shift <= request.max_leave_one_batch_shift_milli
+        && sensitivity_robust;
+    let disposition = if eligible_summary.len() < request.min_eligible_strata
+        || batch_leave_one_out_order.is_empty()
+    {
+        StratifiedCausalDisposition::Unresolved
+    } else if sensitivity_crosses_practical_null {
         StratifiedCausalDisposition::Unresolved
     } else if qualified {
         StratifiedCausalDisposition::Qualified
@@ -454,6 +616,8 @@ pub fn analyze_stratified_causal_adjustment(
         StratifiedCausalActionKind::AddMissingStratumCoverage
     } else if max_imbalance > request.max_stratum_imbalance_milli
         || uncertainty_milli > request.max_leave_one_stratum_shift_milli
+        || max_leave_one_batch_shift > request.max_leave_one_batch_shift_milli
+        || sensitivity_crosses_practical_null
     {
         StratifiedCausalActionKind::ReplicateUnbalancedStrata
     } else if qualified {
@@ -477,11 +641,16 @@ pub fn analyze_stratified_causal_adjustment(
         summaries,
         eligible_unit_count,
         adjusted_effect_milli: adjusted_effect,
+        sensitivity_low_milli: sensitivity_low,
+        sensitivity_high_milli: sensitivity_high,
+        sensitivity_robust,
         interval_low_milli: interval_low,
         interval_high_milli: interval_high,
         uncertainty_milli,
         max_stratum_imbalance_milli: max_imbalance,
         stratum_effect_range_milli: range,
+        batch_leave_one_out_order,
+        max_leave_one_batch_shift_milli: max_leave_one_batch_shift,
         negative_evidence: negative_evidence.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         next_action,
@@ -521,6 +690,8 @@ mod tests {
             effect_threshold_milli: 100,
             max_stratum_imbalance_milli: 400,
             max_leave_one_stratum_shift_milli: 80,
+            max_leave_one_batch_shift_milli: 80,
+            max_unmeasured_bias_milli: 0,
         }
     }
 
@@ -591,6 +762,36 @@ mod tests {
     }
 
     #[test]
+    fn unmeasured_bias_tipping_point_holds_a_nominally_strong_effect() {
+        let mut request = request();
+        request.max_unmeasured_bias_milli = 100;
+        let observations = vec![
+            observation("a-c1", "c1", "low", "control", 100),
+            observation("a-c2", "c2", "low", "control", 110),
+            observation("a-t1", "t1", "low", "treated", 260),
+            observation("a-t2", "t2", "low", "treated", 270),
+            observation("b-c1", "c3", "high", "control", 200),
+            observation("b-c2", "c4", "high", "control", 210),
+            observation("b-t1", "t3", "high", "treated", 340),
+            observation("b-t2", "t4", "high", "treated", 350),
+        ];
+        let output = analyze_stratified_causal_adjustment(&request, &observations).unwrap();
+        assert_eq!(output.adjusted_effect_milli, 150);
+        assert_eq!(output.sensitivity_low_milli, 50);
+        assert_eq!(output.sensitivity_high_milli, 250);
+        assert!(!output.sensitivity_robust);
+        assert_eq!(output.disposition, StratifiedCausalDisposition::Unresolved);
+        assert!(output
+            .uncertainty
+            .contains(&"unmeasured-confounding-sensitivity-crosses-practical-effect-floor".into()));
+        assert_eq!(
+            output.next_action,
+            StratifiedCausalActionKind::ReplicateUnbalancedStrata
+        );
+        output.validate().unwrap();
+    }
+
+    #[test]
     fn repeated_unit_measurements_are_collapsed_and_replay_stable() {
         let mut observations = vec![
             observation("a-c1-1", "c1", "low", "control", 100),
@@ -624,5 +825,42 @@ mod tests {
         ];
         let error = analyze_stratified_causal_adjustment(&request(), &observations).unwrap_err();
         assert!(error.to_string().contains("both causal arms"));
+    }
+
+    #[test]
+    fn influential_assay_batch_is_exposed_without_relabeling_stratum_stability() {
+        let mut observations = Vec::new();
+        for (stratum, prefix) in [("low", "l"), ("high", "h")] {
+            for (index, treatment_outcome) in [200, 200, 1_200].into_iter().enumerate() {
+                let mut control = observation(
+                    &format!("{prefix}-c{index}"),
+                    &format!("{prefix}-c{index}"),
+                    stratum,
+                    "control",
+                    100,
+                );
+                let mut treatment = observation(
+                    &format!("{prefix}-t{index}"),
+                    &format!("{prefix}-t{index}"),
+                    stratum,
+                    "treated",
+                    treatment_outcome,
+                );
+                control.batch_id = format!("paired-batch-{index}");
+                treatment.batch_id = format!("paired-batch-{index}");
+                observations.extend([control, treatment]);
+            }
+        }
+        let output = analyze_stratified_causal_adjustment(&request(), &observations).unwrap();
+        assert_eq!(output.stratum_effect_range_milli, 0);
+        assert!(output.max_leave_one_batch_shift_milli > 80);
+        assert!(output
+            .uncertainty
+            .contains(&"leave-one-batch-influence-exceeds-bound".into()));
+        assert_eq!(
+            output.next_action,
+            StratifiedCausalActionKind::ReplicateUnbalancedStrata
+        );
+        assert_eq!(output.disposition, StratifiedCausalDisposition::Negative);
     }
 }

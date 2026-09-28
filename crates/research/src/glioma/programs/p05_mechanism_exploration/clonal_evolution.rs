@@ -192,6 +192,15 @@ fn unmeasured_markers(profile: &CloneProfile) -> BTreeSet<String> {
         .collect()
 }
 
+fn marker_confidence(profile: &CloneProfile, state: CloneMarkerState) -> BTreeMap<String, u16> {
+    profile
+        .markers
+        .iter()
+        .filter(|marker| marker.state == state)
+        .map(|marker| (marker.marker_id.clone(), marker.confidence_milli))
+        .collect()
+}
+
 fn digest_input(output: &ClonalEvolutionGraph) -> serde_json::Value {
     serde_json::json!({
         "feature_id": output.feature_id,
@@ -449,6 +458,8 @@ fn build_node(profile: &CloneProfile) -> Result<ClonalNode, ClonalEvolutionError
 fn build_edge(
     parent: &ClonalNode,
     child: &ClonalNode,
+    parent_profile: &CloneProfile,
+    child_profile: &CloneProfile,
     request: &ClonalEvolutionRequest,
 ) -> Option<ClonalEdge> {
     if parent.sample_lineage != child.sample_lineage
@@ -457,16 +468,12 @@ fn build_edge(
     {
         return None;
     }
-    let parent_markers = parent
-        .present_marker_order
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let child_markers = child
-        .present_marker_order
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
+    let parent_present = marker_confidence(parent_profile, CloneMarkerState::Present);
+    let child_present = marker_confidence(child_profile, CloneMarkerState::Present);
+    let parent_absent = marker_confidence(parent_profile, CloneMarkerState::Absent);
+    let child_absent = marker_confidence(child_profile, CloneMarkerState::Absent);
+    let parent_markers = parent_present.keys().cloned().collect::<BTreeSet<_>>();
+    let child_markers = child_present.keys().cloned().collect::<BTreeSet<_>>();
     let shared = parent_markers
         .intersection(&child_markers)
         .cloned()
@@ -491,7 +498,57 @@ fn build_edge(
         .saturating_sub(child.timepoint - parent.timepoint))
     .saturating_mul(1_000)
         / request.max_time_gap;
-    let score = ((overlap_parent + overlap_child) / 2 * 8 + temporal * 2) / 10;
+    let shared_confidence = shared
+        .iter()
+        .map(|marker| {
+            u64::from(
+                parent_present
+                    .get(marker)
+                    .copied()
+                    .unwrap_or_default()
+                    .min(child_present.get(marker).copied().unwrap_or_default()),
+            )
+        })
+        .sum::<u64>();
+    let mean_shared_confidence = (shared_confidence / shared.len().max(1) as u64).min(1_000);
+    let structural_overlap = u64::from((overlap_parent + overlap_child) / 2)
+        .saturating_mul(mean_shared_confidence)
+        .checked_div(1_000)
+        .unwrap_or(0) as u32;
+    let conflict_markers = parent_present
+        .keys()
+        .filter(|marker| child_absent.contains_key(*marker))
+        .chain(
+            parent_absent
+                .keys()
+                .filter(|marker| child_present.contains_key(*marker)),
+        )
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let conflict_support = conflict_markers
+        .iter()
+        .map(|marker| {
+            u64::from(
+                parent_present
+                    .get(marker)
+                    .copied()
+                    .or_else(|| parent_absent.get(marker).copied())
+                    .unwrap_or_default()
+                    .min(
+                        child_present
+                            .get(marker)
+                            .copied()
+                            .or_else(|| child_absent.get(marker).copied())
+                            .unwrap_or_default(),
+                    ),
+            )
+        })
+        .sum::<u64>();
+    let conflict_penalty = (conflict_support.min(1_000) as u32)
+        .saturating_mul(400)
+        .checked_div(1_000)
+        .unwrap_or(0);
+    let score = ((structural_overlap * 8 + temporal * 2) / 10).saturating_sub(conflict_penalty);
     if score < u32::from(request.min_parent_score_milli) {
         return None;
     }
@@ -508,6 +565,11 @@ fn build_edge(
         ClonalRelation::Stable
     };
     let mut uncertainty = Vec::new();
+    uncertainty.extend(
+        conflict_markers
+            .iter()
+            .map(|marker| format!("marker-state-conflict:{marker}")),
+    );
     if !parent.unmeasured_marker_order.is_empty() {
         uncertainty.push("parent-marker-unmeasured-at-source".into());
     }
@@ -560,11 +622,19 @@ pub fn analyze_glioma_clonal_evolution(
             "node bound exceeded".into(),
         ));
     }
+    let profile_by_node = profiles
+        .iter()
+        .map(|profile| (node_id(profile), profile))
+        .collect::<BTreeMap<_, _>>();
     let mut candidate_edges = Vec::new();
     for child in &nodes {
         let mut candidates = nodes
             .iter()
-            .filter_map(|parent| build_edge(parent, child, request))
+            .filter_map(|parent| {
+                let parent_profile = profile_by_node.get(&parent.node_id)?;
+                let child_profile = profile_by_node.get(&child.node_id)?;
+                build_edge(parent, child, parent_profile, child_profile, request)
+            })
             .collect::<Vec<_>>();
         candidates.sort_by(|left, right| {
             right
@@ -867,6 +937,83 @@ mod tests {
             .uncertainty
             .iter()
             .any(|item| item.contains("no-parent-child-edge")));
+    }
+
+    #[test]
+    fn low_confidence_marker_overlap_does_not_promote_parentage() {
+        let mut profiles = vec![
+            profile(
+                "root",
+                "clone-a",
+                0,
+                400,
+                &[
+                    ("egfr", CloneMarkerState::Present),
+                    ("tp53", CloneMarkerState::Present),
+                ],
+            ),
+            profile(
+                "child",
+                "clone-b",
+                1,
+                700,
+                &[
+                    ("egfr", CloneMarkerState::Present),
+                    ("tp53", CloneMarkerState::Present),
+                    ("ecDNA", CloneMarkerState::Present),
+                ],
+            ),
+        ];
+        for item in &mut profiles {
+            for marker in &mut item.markers {
+                marker.confidence_milli = 100;
+            }
+        }
+        let output = analyze_glioma_clonal_evolution(&request(), &profiles).unwrap();
+        assert!(output.edges.is_empty());
+        assert_eq!(output.disposition, ClonalEvolutionDisposition::Unresolved);
+        assert!(output
+            .uncertainty
+            .iter()
+            .any(|item| item.contains("no-parent-child-edge")));
+    }
+
+    #[test]
+    fn present_absent_conflict_is_retained_as_edge_uncertainty() {
+        let mut request = request();
+        request.min_shared_markers = 1;
+        request.min_parent_score_milli = 100;
+        let profiles = vec![
+            profile(
+                "root",
+                "clone-a",
+                0,
+                400,
+                &[
+                    ("egfr", CloneMarkerState::Present),
+                    ("tp53", CloneMarkerState::Present),
+                ],
+            ),
+            profile(
+                "child",
+                "clone-b",
+                1,
+                700,
+                &[
+                    ("egfr", CloneMarkerState::Absent),
+                    ("tp53", CloneMarkerState::Present),
+                    ("ecDNA", CloneMarkerState::Present),
+                ],
+            ),
+        ];
+        let output = analyze_glioma_clonal_evolution(&request, &profiles).unwrap();
+        assert_eq!(output.edges.len(), 1);
+        assert!(output.edges[0]
+            .uncertainty
+            .iter()
+            .any(|item| item == "marker-state-conflict:egfr"));
+        assert_eq!(output.edges[0].relation, ClonalRelation::Mixed);
+        output.validate().unwrap();
     }
 
     #[test]

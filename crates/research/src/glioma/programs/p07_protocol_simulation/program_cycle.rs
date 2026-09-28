@@ -19,7 +19,7 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P07-F17";
-pub const OUTPUT_SCHEMA: &str = "GliomaAutonomousProgramCycle1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaAutonomousProgramCycle1@2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -173,10 +173,7 @@ fn stage_action_index(
 }
 
 fn active_actions(run: &GliomaAutonomousResearchEngineRun) -> BTreeSet<String> {
-    run.cycles
-        .last()
-        .map(|cycle| cycle.director.next_stage_order.iter().cloned().collect())
-        .unwrap_or_else(|| run.pending_stage_order.iter().cloned().collect())
+    run.pending_action_order.iter().cloned().collect()
 }
 
 fn compile_gates(run: &GliomaAutonomousResearchEngineRun) -> Vec<ProgramGate> {
@@ -244,8 +241,9 @@ fn next_operator_action(run: &GliomaAutonomousResearchEngineRun, gates: &[Progra
         "resolve blocked dependencies or missing evidence before granting more autonomy".into()
     } else if !run.approval_order.is_empty() {
         "review and explicitly approve the held local actions".into()
-    } else if !run.pending_stage_order.is_empty() {
-        "inspect the selected local batch and continue the bounded engine cycle".into()
+    } else if !run.pending_action_order.is_empty() {
+        "resume or inspect the unresolved local action frontier before another bounded engine cycle"
+            .into()
     } else if gates
         .iter()
         .all(|gate| gate.status == ProgramGateStatus::Cleared)
@@ -435,7 +433,7 @@ mod tests {
     use bioprism_foundation::{AutonomyTier, PRECLINICAL_BOUNDARY};
     use bioprism_ids::ContentHash;
     use bioprism_onco::OutputUse;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn request() -> AutonomousProgramCycleRequest {
         let hash = ContentHash::of_bytes(b"program-cycle-input");
@@ -483,6 +481,8 @@ mod tests {
                 selection_weights: GliomaSelectionWeights::default(),
                 max_retries: 1,
                 require_artifacts: true,
+                outcome_summaries: BTreeMap::new(),
+                adaptive_policy: Default::default(),
             },
             execution_mode: ProgramExecutionMode::LocalSimulation,
         }
@@ -504,6 +504,15 @@ mod tests {
             .iter()
             .any(|gate| gate.status == ProgramGateStatus::Cleared));
         assert!(first.progress_milli > 0);
+        assert_eq!(first.active_action_order, first.engine.pending_action_order);
+        assert!(first
+            .gates
+            .iter()
+            .filter(|gate| gate.status == ProgramGateStatus::Cleared)
+            .all(|gate| gate
+                .action_order
+                .iter()
+                .all(|action_id| !first.active_action_order.contains(action_id))));
         first.validate().unwrap();
     }
 

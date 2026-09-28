@@ -241,7 +241,7 @@ mod tests {
     use bioprism_ids::ContentHash;
     use bioprism_onco::OutputUse;
     use serde_json::json;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn intent() -> GliomaResearchIntent {
         let hash = ContentHash::of_bytes(b"glioma-stage-adapter-input");
@@ -485,6 +485,7 @@ mod tests {
             selection_weights: crate::glioma_engine::GliomaSelectionWeights::default(),
             max_retries: 1,
             require_artifacts: true,
+            outcome_summaries: BTreeMap::new(),
         };
         let mut stage_executor = RecordingStageExecutor::default();
         let mut adapter = GliomaStageActionExecutor::new(&intent, &mut stage_executor).unwrap();

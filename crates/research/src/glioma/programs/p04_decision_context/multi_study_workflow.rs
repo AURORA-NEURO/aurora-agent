@@ -263,7 +263,7 @@ fn collect_dependency_closure(
         Some(1) => {
             return Err(MultiStudyWorkflowError::InvalidArtifact(format!(
                 "action dependency cycle includes {action_id}"
-            )))
+            )));
         }
         Some(2) => return Ok(()),
         _ => {}

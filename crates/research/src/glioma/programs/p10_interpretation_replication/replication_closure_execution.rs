@@ -7,13 +7,13 @@
 //! silently become a campaign.
 
 use super::campaign::{
-    execute_glioma_replication_campaign, GliomaReplicationCampaign,
-    GliomaReplicationCampaignDisposition, GliomaReplicationCampaignError,
-    GliomaReplicationCampaignExecutor, GliomaReplicationCampaignRequest,
-    GliomaReplicationCampaignStopReason,
+    execute_glioma_replication_campaign_with_action_kinds, GliomaReplicationActionKind,
+    GliomaReplicationCampaign, GliomaReplicationCampaignDisposition,
+    GliomaReplicationCampaignError, GliomaReplicationCampaignExecutor,
+    GliomaReplicationCampaignRequest, GliomaReplicationCampaignStopReason,
 };
 use super::replication_closure_frontier::{
-    ReplicationClosureDisposition, ReplicationClosureFrontier,
+    ReplicationClosureDisposition, ReplicationClosureFrontier, ReplicationClosureTarget,
 };
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_foundation::PRECLINICAL_BOUNDARY;
@@ -139,6 +139,44 @@ fn validate_request(
     Ok(executable)
 }
 
+fn action_kind_for_target(target: ReplicationClosureTarget) -> Option<GliomaReplicationActionKind> {
+    match target {
+        ReplicationClosureTarget::ExtendIndependentSites => {
+            Some(GliomaReplicationActionKind::ReplicateStudy)
+        }
+        ReplicationClosureTarget::ReconcileHeterogeneity => {
+            Some(GliomaReplicationActionKind::ResolveHeterogeneity)
+        }
+        ReplicationClosureTarget::AcquireTargetModel => {
+            Some(GliomaReplicationActionKind::AcquireTargetModel)
+        }
+        ReplicationClosureTarget::StressTestInfluentialStudy => {
+            Some(GliomaReplicationActionKind::ReassayInfluentialStudy)
+        }
+        ReplicationClosureTarget::ConfirmNegativeResult => {
+            Some(GliomaReplicationActionKind::PublishNegativeResult)
+        }
+        ReplicationClosureTarget::MethodsReview => None,
+    }
+}
+
+fn admitted_action_kinds(
+    frontier: &ReplicationClosureFrontier,
+) -> BTreeSet<GliomaReplicationActionKind> {
+    frontier
+        .scores
+        .iter()
+        .filter(|score| {
+            frontier
+                .selected_order
+                .binary_search(&score.action_id)
+                .is_ok()
+                && score.route == EXECUTION_ROUTE
+        })
+        .filter_map(|score| action_kind_for_target(score.target))
+        .collect()
+}
+
 fn finish(
     request: &ReplicationClosureExecutionRequest,
     executable_action_order: Vec<String>,
@@ -214,9 +252,11 @@ pub fn execute_glioma_replication_closure<E: GliomaReplicationCampaignExecutor>(
     executor: &mut E,
 ) -> Result<ReplicationClosureExecutionRun, ReplicationClosureExecutionError> {
     let executable_action_order = validate_request(request)?;
+    let admitted_action_kinds = admitted_action_kinds(&request.frontier);
     let mut negative_evidence = Vec::new();
     let mut uncertainty = Vec::new();
     if executable_action_order.is_empty()
+        || admitted_action_kinds.is_empty()
         || matches!(
             request.frontier.disposition,
             ReplicationClosureDisposition::Blocked
@@ -227,6 +267,12 @@ pub fn execute_glioma_replication_closure<E: GliomaReplicationCampaignExecutor>(
         uncertainty.push(
             "the closure frontier did not select an executable campaign route with permission to proceed".into(),
         );
+        if !executable_action_order.is_empty() && admitted_action_kinds.is_empty() {
+            uncertainty.push(
+                "selected closure routes did not map to an executable replication action family"
+                    .into(),
+            );
+        }
         return finish(
             request,
             executable_action_order,
@@ -238,7 +284,11 @@ pub fn execute_glioma_replication_closure<E: GliomaReplicationCampaignExecutor>(
             "revise the bounded frontier or complete methods review before campaign execution",
         );
     }
-    let campaign = execute_glioma_replication_campaign(&request.campaign, executor)?;
+    let campaign = execute_glioma_replication_campaign_with_action_kinds(
+        &request.campaign,
+        executor,
+        Some(&admitted_action_kinds),
+    )?;
     negative_evidence.extend(campaign.negative_evidence.clone());
     uncertainty.extend(campaign.uncertainty.clone());
     let (disposition, next_action) = match campaign.disposition {
@@ -258,7 +308,8 @@ pub fn execute_glioma_replication_closure<E: GliomaReplicationCampaignExecutor>(
             ReplicationClosureExecutionDisposition::Unresolved,
             "resolve missing or contradictory replication evidence before another execution wave",
         ),
-        GliomaReplicationCampaignDisposition::Failed | GliomaReplicationCampaignDisposition::Blocked => (
+        GliomaReplicationCampaignDisposition::Failed
+        | GliomaReplicationCampaignDisposition::Blocked => (
             ReplicationClosureExecutionDisposition::Blocked,
             "repair the institution-local executor or policy boundary before retrying",
         ),
@@ -283,7 +334,7 @@ mod tests {
     fn held_frontier() -> ReplicationClosureFrontier {
         let mut frontier = ReplicationClosureFrontier {
             feature_id: "GAF-GLIOMA-P10-F27".into(),
-            output_schema: "GliomaReplicationClosureFrontier1@1".into(),
+            output_schema: "GliomaReplicationClosureFrontier1@2".into(),
             objective: "replicate organoid invasion".into(),
             model_system: GliomaModelSystem::Organoid,
             source_replication_digest: ContentHash::of_bytes(b"replication"),

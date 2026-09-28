@@ -128,6 +128,18 @@ fn prefixed(run_id: &str, action_id: &str) -> String {
     format!("{run_id}:{action_id}")
 }
 
+fn canonicalize_assessment_pairs<T>(
+    assessment_run_order: Vec<String>,
+    assessments: Vec<T>,
+) -> (Vec<String>, Vec<T>) {
+    let mut assessment_pairs = assessment_run_order
+        .into_iter()
+        .zip(assessments)
+        .collect::<Vec<_>>();
+    assessment_pairs.sort_by(|left, right| left.0.cmp(&right.0));
+    assessment_pairs.into_iter().unzip()
+}
+
 impl InstrumentScienceLoop {
     pub fn validate(&self) -> Result<(), InstrumentScienceLoopError> {
         if self.feature_id != FEATURE_ID
@@ -236,7 +248,11 @@ pub fn execute_glioma_instrument_science_loop<E: InstrumentExecutor>(
             .insert("instrument-operating-cycle-did-not-produce-an-admitted-campaign".into());
         next_actions.insert("resolve-instrument-preflight-before-assay-adjudication".into());
     }
-    assessment_run_order.sort();
+    // Keep the canonical run order and the assessment payloads bound together. Sorting only the
+    // identifiers would make downstream frontier compilation attribute an assay result to the
+    // wrong instrument run whenever execution order differs from lexical run-id order.
+    let (assessment_run_order, assessments) =
+        canonicalize_assessment_pairs(assessment_run_order, assessments);
     let disposition = if matches!(
         operating_cycle.disposition,
         InstrumentOperatingCycleDisposition::Blocked
@@ -304,13 +320,15 @@ mod tests {
     use crate::glioma::programs::p08_instrument_robotics::operating_cycle::dry_run_instrument_executor_from_request;
 
     fn blocked_request() -> InstrumentScienceLoopRequest {
+        let empty_action_manifest_digest = ContentHash::of_value(&serde_json::json!([])).unwrap();
         let plan_without_digest = serde_json::json!({
             "feature_id": "GAF-GLIOMA-P08-F10",
-            "output_schema": "GliomaInstrumentPreflight1@1",
+            "output_schema": "GliomaInstrumentPreflight1@2",
             "objective": "blocked science loop",
             "instrument_id": "imager-1",
             "model_system": "organoid",
             "authorization_id": "approval-1",
+            "action_manifest_digest": empty_action_manifest_digest.clone(),
             "action_order": ["acquire"],
             "admitted_order": [],
             "blocked_order": ["acquire"],
@@ -328,11 +346,12 @@ mod tests {
         let digest = ContentHash::of_value(&plan_without_digest).unwrap();
         let plan = serde_json::json!({
             "feature_id": "GAF-GLIOMA-P08-F10",
-            "output_schema": "GliomaInstrumentPreflight1@1",
+            "output_schema": "GliomaInstrumentPreflight1@2",
             "objective": "blocked science loop",
             "instrument_id": "imager-1",
             "model_system": "organoid",
             "authorization_id": "approval-1",
+            "action_manifest_digest": empty_action_manifest_digest,
             "action_order": ["acquire"],
             "admitted_order": [],
             "blocked_order": ["acquire"],
@@ -370,6 +389,16 @@ mod tests {
             "stop_on_first_qualified_run":true
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn canonical_run_order_preserves_assessment_binding() {
+        let (run_order, assessments) = canonicalize_assessment_pairs(
+            vec!["run-z".into(), "run-a".into()],
+            vec!["assessment-z", "assessment-a"],
+        );
+        assert_eq!(run_order, vec!["run-a", "run-z"]);
+        assert_eq!(assessments, vec!["assessment-a", "assessment-z"]);
     }
 
     #[test]

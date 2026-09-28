@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P09-F10";
-pub const OUTPUT_SCHEMA: &str = "GliomaComputationExecution1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaComputationExecution1@3";
 pub const MAX_TASKS: usize = 2_048;
 pub const MAX_INPUTS_PER_TASK: usize = 128;
 pub const MAX_RETRIES: u8 = 8;
@@ -216,7 +216,7 @@ fn canonical(values: &[String]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
-fn digest_input(output: &ComputationExecution) -> serde_json::Value {
+pub(crate) fn digest_input(output: &ComputationExecution) -> serde_json::Value {
     serde_json::json!({
         "feature_id": output.feature_id,
         "output_schema": output.output_schema,
@@ -521,6 +521,11 @@ fn cache_result(
 }
 
 /// Execute a validated computation DAG through a caller-owned local executor.
+///
+/// The request budget is an admission envelope for actual worker invocations: each attempted
+/// execution consumes the task's declared cost and duration, while replay-cache hits consume
+/// neither. A retry is therefore observable and cannot be admitted after it would exceed the
+/// remaining budget.
 pub fn execute_glioma_computation<E: GliomaComputationExecutor>(
     request: &ComputationExecutionRequest,
     executor: &mut E,
@@ -598,7 +603,7 @@ pub fn execute_glioma_computation<E: GliomaComputationExecutor>(
             stop_reason = ComputationExecutionStopReason::DependencyBlocked;
             continue;
         }
-        if request.allow_cache {
+        if request.allow_cache && task.deterministic {
             if let Some(result) = cache_result(
                 task,
                 &cache,
@@ -610,6 +615,11 @@ pub fn execute_glioma_computation<E: GliomaComputationExecutor>(
                 task_results.push(result);
                 continue;
             }
+        } else if request.allow_cache && !task.deterministic {
+            uncertainty.insert(format!(
+                "non-deterministic-task-not-cacheable:{}",
+                task.task_id
+            ));
         }
         if budget_used_units.saturating_add(task.estimated_cost_units) > request.max_budget_units {
             uncertainty.insert("computation-budget-exhausted-before-task".into());
@@ -635,17 +645,64 @@ pub fn execute_glioma_computation<E: GliomaComputationExecutor>(
             .collect::<Vec<_>>();
         let mut final_result = None;
         for attempt in 1..=request.max_retries.saturating_add(1) {
+            if budget_used_units.saturating_add(task.estimated_cost_units)
+                > request.max_budget_units
+            {
+                uncertainty.insert("computation-budget-exhausted-during-retry".into());
+                final_result = Some(ComputationTaskResult {
+                    task_id: task.task_id.clone(),
+                    output_schema: task.output_schema.clone(),
+                    disposition: ComputationTaskDisposition::Failed,
+                    attempt_count: attempt.saturating_sub(1),
+                    artifact: None,
+                    cache_hit: false,
+                    note: "retry suppressed because the next attempt exceeded the declared computation budget".into(),
+                });
+                halted = true;
+                stop_reason = ComputationExecutionStopReason::BudgetExhausted;
+                break;
+            }
+            budget_used_units = budget_used_units.saturating_add(task.estimated_cost_units);
+            duration_used_ticks = duration_used_ticks.saturating_add(task.estimated_duration_ticks);
             match executor.execute_task(task, &upstream, attempt) {
                 Ok(result) => {
-                    let result = validate_provider_result(
+                    let mut result = validate_provider_result(
                         task,
                         result,
                         attempt,
                         request.require_local_artifacts,
                     )?;
-                    if result.disposition == ComputationTaskDisposition::Partial {
-                        halted = true;
-                        stop_reason = ComputationExecutionStopReason::DependencyBlocked;
+                    if !task.deterministic
+                        && result.disposition == ComputationTaskDisposition::Completed
+                    {
+                        // A successful stochastic run is still useful as a local partial result,
+                        // but it cannot satisfy a replayable dependency without a declared seed
+                        // and deterministic environment lock. Fail closed before dependants can
+                        // mistake it for reproducible evidence.
+                        uncertainty.insert(format!(
+                            "non-deterministic-task-not-replayable:{}",
+                            task.task_id
+                        ));
+                        result.disposition = ComputationTaskDisposition::Partial;
+                        result.note = format!(
+                            "{}; marked partial because task is declared non-deterministic and lacks a replay lock",
+                            result.note
+                        );
+                    }
+                    match result.disposition {
+                        ComputationTaskDisposition::Partial => {
+                            halted = true;
+                            stop_reason = ComputationExecutionStopReason::DependencyBlocked;
+                        }
+                        ComputationTaskDisposition::Failed => {
+                            // A provider may surface a typed, non-retryable failure through the
+                            // success channel when it has a structured failure artifact. Treat it
+                            // exactly like an error-channel failure: stop immediately so later
+                            // independent tasks cannot be mistaken for part of a successful run.
+                            halted = true;
+                            stop_reason = ComputationExecutionStopReason::TaskFailed;
+                        }
+                        _ => {}
                     }
                     final_result = Some(result);
                     break;
@@ -658,8 +715,27 @@ pub fn execute_glioma_computation<E: GliomaComputationExecutor>(
                         )));
                     }
                     if failure.retryable && attempt <= request.max_retries {
-                        retry_count = retry_count.saturating_add(1);
-                        continue;
+                        // A retry is counted only when the next invocation can actually fit the
+                        // remaining envelope. The current attempt was already charged above.
+                        if budget_used_units.saturating_add(task.estimated_cost_units)
+                            <= request.max_budget_units
+                        {
+                            retry_count = retry_count.saturating_add(1);
+                            continue;
+                        }
+                        uncertainty.insert("computation-budget-exhausted-during-retry".into());
+                        final_result = Some(ComputationTaskResult {
+                            task_id: task.task_id.clone(),
+                            output_schema: task.output_schema.clone(),
+                            disposition: ComputationTaskDisposition::Failed,
+                            attempt_count: attempt,
+                            artifact: None,
+                            cache_hit: false,
+                            note: "retry suppressed because the next attempt exceeded the declared computation budget".into(),
+                        });
+                        halted = true;
+                        stop_reason = ComputationExecutionStopReason::BudgetExhausted;
+                        break;
                     }
                     final_result = Some(ComputationTaskResult {
                         task_id: task.task_id.clone(),
@@ -682,8 +758,6 @@ pub fn execute_glioma_computation<E: GliomaComputationExecutor>(
                 task.task_id
             ))
         })?;
-        budget_used_units = budget_used_units.saturating_add(task.estimated_cost_units);
-        duration_used_ticks = duration_used_ticks.saturating_add(task.estimated_duration_ticks);
         if result.disposition == ComputationTaskDisposition::Negative {
             negative_evidence.insert(format!("{}:{}", task.task_id, result.note));
         }
@@ -862,6 +936,67 @@ mod tests {
     }
 
     #[test]
+    fn retry_attempts_consume_budget_and_over_budget_retry_is_suppressed() {
+        let mut constrained = request();
+        constrained.max_budget_units = 3;
+        let mut executor = RecordingExecutor {
+            calls: Vec::new(),
+            fail_once: true,
+        };
+        let output = execute_glioma_computation(&constrained, &mut executor).unwrap();
+        assert_eq!(executor.calls, vec!["normalize:1"]);
+        assert_eq!(output.budget_used_units, 2);
+        assert_eq!(output.duration_used_ticks, 1);
+        assert_eq!(output.failed_order, vec!["normalize"]);
+        assert_eq!(output.skipped_order, vec!["fit"]);
+        assert_eq!(
+            output.stop_reason,
+            ComputationExecutionStopReason::BudgetExhausted
+        );
+        assert!(output
+            .uncertainty
+            .iter()
+            .any(|item| item == "computation-budget-exhausted-during-retry"));
+        assert!(!output
+            .uncertainty
+            .iter()
+            .any(|item| item == "1-retry-attempts-required"));
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn non_deterministic_tasks_are_partial_and_block_replay_dependents() {
+        let mut request = request();
+        request
+            .tasks
+            .iter_mut()
+            .find(|task| task.task_id == "normalize")
+            .expect("normalize task")
+            .deterministic = false;
+        let mut executor = RecordingExecutor {
+            calls: Vec::new(),
+            fail_once: false,
+        };
+        let output = execute_glioma_computation(&request, &mut executor).unwrap();
+        assert_eq!(executor.calls, vec!["normalize:1"]);
+        assert_eq!(output.partial_order, vec!["normalize"]);
+        assert_eq!(output.skipped_order, vec!["fit"]);
+        assert_eq!(
+            output.stop_reason,
+            ComputationExecutionStopReason::DependencyBlocked
+        );
+        assert!(output
+            .uncertainty
+            .iter()
+            .any(|item| item == "non-deterministic-task-not-replayable:normalize"));
+        assert!(output
+            .uncertainty
+            .iter()
+            .any(|item| item == "non-deterministic-task-not-cacheable:normalize"));
+        output.validate().unwrap();
+    }
+
+    #[test]
     fn replay_cache_avoids_worker_and_preserves_artifact() {
         let mut first_executor = RecordingExecutor {
             calls: Vec::new(),
@@ -910,6 +1045,48 @@ mod tests {
             ComputationExecutionStopReason::BudgetExhausted
         );
         assert_eq!(output.skipped_order, vec!["fit"]);
+    }
+
+    #[test]
+    fn typed_provider_failure_halts_without_waiting_for_dependency_block() {
+        struct TypedFailureExecutor;
+
+        impl GliomaComputationExecutor for TypedFailureExecutor {
+            fn execute_task(
+                &mut self,
+                task: &ComputationTask,
+                _upstream: &[ComputationTaskResult],
+                attempt: u8,
+            ) -> Result<ComputationTaskResult, ComputationExecutionFailure> {
+                Ok(ComputationTaskResult {
+                    task_id: task.task_id.clone(),
+                    output_schema: task.output_schema.clone(),
+                    disposition: ComputationTaskDisposition::Failed,
+                    attempt_count: attempt,
+                    artifact: Some(LocalArtifactRef {
+                        artifact_id: format!("failure:{}", task.task_id),
+                        content_hash: hash(&format!("failure:{}", task.task_id)),
+                        content_type: task.output_schema.clone(),
+                        local_only: true,
+                        contains_human_data: false,
+                        contains_direct_identifiers: false,
+                    }),
+                    cache_hit: false,
+                    note: "typed worker failure with structured diagnostic artifact".into(),
+                })
+            }
+        }
+
+        let mut executor = TypedFailureExecutor;
+        let output = execute_glioma_computation(&request(), &mut executor).unwrap();
+        assert_eq!(output.failed_order, vec!["normalize"]);
+        assert_eq!(output.skipped_order, vec!["fit"]);
+        assert_eq!(
+            output.stop_reason,
+            ComputationExecutionStopReason::TaskFailed
+        );
+        assert_eq!(output.disposition, ComputationExecutionDisposition::Failed);
+        output.validate().unwrap();
     }
 
     #[test]

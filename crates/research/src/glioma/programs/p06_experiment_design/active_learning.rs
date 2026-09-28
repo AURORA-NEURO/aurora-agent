@@ -20,6 +20,7 @@ pub const MAX_OBSERVATIONS: usize = 65_536;
 pub const MAX_DIMENSIONS: usize = 64;
 const SCORE_SCALE: i128 = 1_000;
 const VALUE_LIMIT: i64 = 1_000_000;
+const ACTIVE_LEARNING_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -481,36 +482,26 @@ pub fn plan_glioma_active_learning(
                 .or_insert(0_usize) += 1;
             counts
         });
-    let mut selected = Vec::new();
+    let selected;
     let mut deferred = Vec::new();
     let mut blocked = Vec::new();
     let mut unresolved = Vec::new();
     let mut negative = BTreeSet::new();
     let mut uncertainty = BTreeSet::new();
-    let mut remaining_budget = request.budget_units;
-    let mut groups = BTreeSet::new();
+    let mut eligible = Vec::new();
     for (index, score) in &ranking {
         let candidate = ordered_candidates[*index];
         let count = replicate_counts
             .get(&candidate.candidate_id)
             .copied()
             .unwrap_or(0);
-        let mut reason = None;
         if candidate.risk_milli > request.max_risk_milli {
-            reason = Some("risk-ceiling-blocked");
             blocked.push(candidate.candidate_id.clone());
         } else if count >= candidate.max_replicates {
-            reason = Some("replicate-ceiling-reached");
             blocked.push(candidate.candidate_id.clone());
-        } else if candidate.cost_units > remaining_budget {
-            reason = Some("budget-blocked");
+        } else if candidate.cost_units > request.budget_units {
             blocked.push(candidate.candidate_id.clone());
-        } else if selected.len() >= request.max_selections {
-            reason = Some("selection-cap-deferred");
-            deferred.push(candidate.candidate_id.clone());
-        } else if groups.contains(&candidate.redundancy_group) {
-            reason = Some("redundancy-group-deferred");
-            deferred.push(candidate.candidate_id.clone());
+            negative.insert(format!("{}:budget-blocked", candidate.candidate_id));
         } else if score.posterior_uncertainty_milli > request.min_uncertainty_milli
             && score.nearest_observation_count > 0
         {
@@ -519,18 +510,109 @@ pub fn plan_glioma_active_learning(
                 "{}:uncertainty-{}",
                 candidate.candidate_id, score.posterior_uncertainty_milli
             ));
-            reason = Some("uncertainty-hold");
         } else {
-            selected.push(candidate.candidate_id.clone());
-            remaining_budget = remaining_budget.saturating_sub(candidate.cost_units);
-            groups.insert(candidate.redundancy_group.clone());
-        }
-        if let Some(reason) = reason {
-            if reason.contains("budget") {
-                negative.insert(format!("{}:{reason}", candidate.candidate_id));
-            }
+            eligible.push((*index, score.acquisition_milli));
         }
     }
+    // Greedy score order can consume the whole budget on one candidate. Keep a bounded portfolio
+    // beam over candidates, enforcing one candidate per redundancy group while maximizing total
+    // acquisition utility under the selection and budget caps. Ranking order is retained inside
+    // each state, making the selected order and tie breaks replay-stable.
+    #[derive(Clone)]
+    struct ActiveLearningState {
+        selections: Vec<String>,
+        groups: BTreeSet<String>,
+        spent: u32,
+        utility: u128,
+    }
+    fn state_better(left: &ActiveLearningState, right: &ActiveLearningState) -> bool {
+        left.utility > right.utility
+            || (left.utility == right.utility
+                && (left.selections.len() > right.selections.len()
+                    || (left.selections.len() == right.selections.len()
+                        && (left.spent < right.spent
+                            || (left.spent == right.spent && left.selections < right.selections)))))
+    }
+    let mut beam = vec![ActiveLearningState {
+        selections: Vec::new(),
+        groups: BTreeSet::new(),
+        spent: 0,
+        utility: 0,
+    }];
+    for (index, acquisition) in &eligible {
+        let candidate = ordered_candidates[*index];
+        let mut expanded = beam.clone();
+        for state in &beam {
+            if state.selections.len() >= request.max_selections
+                || state.groups.contains(&candidate.redundancy_group)
+                || state.spent.saturating_add(candidate.cost_units) > request.budget_units
+            {
+                continue;
+            }
+            let mut selections = state.selections.clone();
+            selections.push(candidate.candidate_id.clone());
+            let mut groups = state.groups.clone();
+            groups.insert(candidate.redundancy_group.clone());
+            expanded.push(ActiveLearningState {
+                selections,
+                groups,
+                spent: state.spent.saturating_add(candidate.cost_units),
+                utility: state
+                    .utility
+                    .saturating_add(u128::try_from((*acquisition).max(0)).unwrap_or(0)),
+            });
+        }
+        expanded.sort_by(|left, right| {
+            right
+                .utility
+                .cmp(&left.utility)
+                .then_with(|| left.spent.cmp(&right.spent))
+                .then_with(|| left.selections.cmp(&right.selections))
+        });
+        let mut seen = BTreeSet::new();
+        expanded.retain(|state| seen.insert(state.selections.clone()));
+        expanded.truncate(ACTIVE_LEARNING_BEAM_WIDTH);
+        beam = expanded;
+    }
+    let best = beam
+        .iter()
+        .max_by(|left, right| {
+            if state_better(left, right) {
+                std::cmp::Ordering::Greater
+            } else if state_better(right, left) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .cloned()
+        .unwrap_or_else(|| ActiveLearningState {
+            selections: Vec::new(),
+            groups: BTreeSet::new(),
+            spent: 0,
+            utility: 0,
+        });
+    selected = best.selections;
+    let groups = best.groups;
+    let remaining_budget = request.budget_units.saturating_sub(best.spent);
+    for (index, _) in &eligible {
+        let candidate = ordered_candidates[*index];
+        if selected.contains(&candidate.candidate_id) {
+            continue;
+        }
+        if candidate.cost_units > remaining_budget {
+            blocked.push(candidate.candidate_id.clone());
+            negative.insert(format!("{}:budget-blocked", candidate.candidate_id));
+        } else if groups.contains(&candidate.redundancy_group) {
+            deferred.push(candidate.candidate_id.clone());
+        } else if selected.len() >= request.max_selections {
+            deferred.push(candidate.candidate_id.clone());
+        } else {
+            deferred.push(candidate.candidate_id.clone());
+        }
+    }
+    blocked.sort();
+    unresolved.sort();
     for score in &mut scores {
         score.disposition = if selected.contains(&score.candidate_id) {
             ActiveLearningCandidateDisposition::Selected
@@ -576,6 +658,400 @@ pub fn plan_glioma_active_learning(
         .map_err(|error| ActiveLearningError::Digest(error.to_string()))?;
     plan.validate()?;
     Ok(plan)
+}
+
+/// Evaluation-only policy names used by the held-out active-learning harness.
+///
+/// `OracleBeam` is an upper-bound comparator over the supplied held-out utility map; it is never
+/// available to the production planner and must not be interpreted as a biological predictor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActiveLearningEvaluationPolicy {
+    AuroraActiveLearning,
+    AcquisitionGreedy,
+    FixedCoverage,
+    OracleBeam,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveLearningEvaluationMetric {
+    pub policy: ActiveLearningEvaluationPolicy,
+    pub selected_order: Vec<String>,
+    pub cost_units: u32,
+    pub held_out_utility_milli: i64,
+    pub regret_to_oracle_milli: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveLearningEvaluation {
+    pub feature_id: String,
+    pub output_schema: String,
+    pub objective: String,
+    pub plan_digest: ContentHash,
+    pub held_out_truth_digest: ContentHash,
+    pub oracle_selected_order: Vec<String>,
+    pub oracle_utility_milli: i64,
+    pub metrics: Vec<ActiveLearningEvaluationMetric>,
+    pub uncertainty: Vec<String>,
+    pub negative_evidence: Vec<String>,
+    pub digest: ContentHash,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ActiveLearningEvaluationError {
+    #[error("active-learning evaluation request is invalid: {0}")]
+    InvalidRequest(String),
+    #[error("active-learning evaluation planning failed: {0}")]
+    Planning(#[from] ActiveLearningError),
+    #[error("active-learning evaluation output is invalid: {0}")]
+    InvalidOutput(String),
+    #[error("active-learning evaluation digest failed: {0}")]
+    Digest(String),
+}
+
+const EVALUATION_OUTPUT_SCHEMA: &str = "GliomaActiveLearningEvaluation1@1";
+const EVALUATION_BEAM_WIDTH: usize = 256;
+
+fn evaluation_digest_input(output: &ActiveLearningEvaluation) -> serde_json::Value {
+    serde_json::json!({
+        "feature_id": output.feature_id,
+        "output_schema": output.output_schema,
+        "objective": output.objective,
+        "plan_digest": output.plan_digest,
+        "held_out_truth_digest": output.held_out_truth_digest,
+        "oracle_selected_order": output.oracle_selected_order,
+        "oracle_utility_milli": output.oracle_utility_milli,
+        "metrics": output.metrics,
+        "uncertainty": output.uncertainty,
+        "negative_evidence": output.negative_evidence,
+    })
+}
+
+fn evaluation_canonical(values: &[String]) -> bool {
+    values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+impl ActiveLearningEvaluation {
+    pub fn validate(&self) -> Result<(), ActiveLearningEvaluationError> {
+        if self.feature_id != FEATURE_ID
+            || self.output_schema != EVALUATION_OUTPUT_SCHEMA
+            || self.objective.trim().is_empty()
+            || self.plan_digest.as_str().len() != 64
+            || self.held_out_truth_digest.as_str().len() != 64
+            || self
+                .oracle_selected_order
+                .iter()
+                .collect::<BTreeSet<_>>()
+                .len()
+                != self.oracle_selected_order.len()
+            || !evaluation_canonical(&self.uncertainty)
+            || !evaluation_canonical(&self.negative_evidence)
+            || self.metrics.is_empty()
+            || self.metrics.iter().any(|metric| {
+                metric.selected_order.iter().collect::<BTreeSet<_>>().len()
+                    != metric.selected_order.len()
+                    || metric.cost_units == 0 && !metric.selected_order.is_empty()
+            })
+            || self
+                .metrics
+                .windows(2)
+                .any(|pair| pair[0].policy >= pair[1].policy)
+        {
+            return Err(ActiveLearningEvaluationError::InvalidOutput(
+                "evaluation identity, ordering, metric, or digest bounds are invalid".into(),
+            ));
+        }
+        let expected = ContentHash::of_value(&evaluation_digest_input(self))
+            .map_err(|error| ActiveLearningEvaluationError::Digest(error.to_string()))?;
+        if expected != self.digest {
+            return Err(ActiveLearningEvaluationError::InvalidOutput(
+                "evaluation digest is not content-addressed".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct EvaluationPortfolioState {
+    selected: Vec<String>,
+    groups: BTreeSet<String>,
+    spent: u32,
+    utility: i128,
+}
+
+fn evaluation_state_better(
+    left: &EvaluationPortfolioState,
+    right: &EvaluationPortfolioState,
+) -> bool {
+    left.utility > right.utility
+        || (left.utility == right.utility
+            && (left.selected.len() > right.selected.len()
+                || (left.selected.len() == right.selected.len()
+                    && (left.spent < right.spent
+                        || (left.spent == right.spent && left.selected < right.selected)))))
+}
+
+fn candidate_counts(observations: &[ActiveLearningObservation]) -> BTreeMap<String, usize> {
+    observations
+        .iter()
+        .fold(BTreeMap::new(), |mut counts, observation| {
+            *counts.entry(observation.candidate_id.clone()).or_default() += 1;
+            counts
+        })
+}
+
+fn select_evaluation_policy(
+    request: &ActiveLearningRequest,
+    candidates: &[&ActiveLearningCandidate],
+    ranking: &[String],
+    counts: &BTreeMap<String, usize>,
+) -> Vec<String> {
+    let by_id = candidates
+        .iter()
+        .map(|candidate| (candidate.candidate_id.as_str(), *candidate))
+        .collect::<BTreeMap<_, _>>();
+    let mut selected = Vec::new();
+    let mut groups = BTreeSet::new();
+    let mut spent = 0_u32;
+    for id in ranking {
+        let Some(candidate) = by_id.get(id.as_str()) else {
+            continue;
+        };
+        if selected.len() >= request.max_selections
+            || candidate.risk_milli > request.max_risk_milli
+            || counts.get(id).copied().unwrap_or(0) >= candidate.max_replicates
+            || groups.contains(&candidate.redundancy_group)
+            || spent.saturating_add(candidate.cost_units) > request.budget_units
+        {
+            continue;
+        }
+        selected.push(id.clone());
+        groups.insert(candidate.redundancy_group.clone());
+        spent = spent.saturating_add(candidate.cost_units);
+    }
+    selected.sort();
+    selected
+}
+
+fn oracle_beam(
+    request: &ActiveLearningRequest,
+    candidates: &[&ActiveLearningCandidate],
+    truth: &BTreeMap<String, i64>,
+    counts: &BTreeMap<String, usize>,
+) -> EvaluationPortfolioState {
+    let mut beam = vec![EvaluationPortfolioState {
+        selected: Vec::new(),
+        groups: BTreeSet::new(),
+        spent: 0,
+        utility: 0,
+    }];
+    for candidate in candidates {
+        let mut expanded = beam.clone();
+        for state in &beam {
+            if state.selected.len() >= request.max_selections
+                || state.groups.contains(&candidate.redundancy_group)
+                || candidate.risk_milli > request.max_risk_milli
+                || counts.get(&candidate.candidate_id).copied().unwrap_or(0)
+                    >= candidate.max_replicates
+                || state.spent.saturating_add(candidate.cost_units) > request.budget_units
+            {
+                continue;
+            }
+            let mut selected = state.selected.clone();
+            selected.push(candidate.candidate_id.clone());
+            selected.sort();
+            let mut groups = state.groups.clone();
+            groups.insert(candidate.redundancy_group.clone());
+            expanded.push(EvaluationPortfolioState {
+                selected,
+                groups,
+                spent: state.spent.saturating_add(candidate.cost_units),
+                utility: state.utility.saturating_add(i128::from(
+                    truth.get(&candidate.candidate_id).copied().unwrap_or(0),
+                )),
+            });
+        }
+        expanded.sort_by(|left, right| {
+            if evaluation_state_better(left, right) {
+                std::cmp::Ordering::Less
+            } else if evaluation_state_better(right, left) {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        });
+        let mut seen = BTreeSet::new();
+        expanded.retain(|state| seen.insert(state.selected.clone()));
+        expanded.truncate(EVALUATION_BEAM_WIDTH);
+        beam = expanded;
+    }
+    beam.into_iter()
+        .max_by(|left, right| {
+            if evaluation_state_better(left, right) {
+                std::cmp::Ordering::Greater
+            } else if evaluation_state_better(right, left) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .unwrap_or(EvaluationPortfolioState {
+            selected: Vec::new(),
+            groups: BTreeSet::new(),
+            spent: 0,
+            utility: 0,
+        })
+}
+
+/// Compare the active-learning policy with deterministic baselines on caller-supplied held-out
+/// utility values. The truth map must come from a held-out preclinical split or synthetic fixture;
+/// it is never used by the planner and cannot create biological evidence.
+pub fn evaluate_glioma_active_learning(
+    request: &ActiveLearningRequest,
+    candidates: &[ActiveLearningCandidate],
+    observations: &[ActiveLearningObservation],
+    held_out_utility_milli: &BTreeMap<String, i64>,
+) -> Result<ActiveLearningEvaluation, ActiveLearningEvaluationError> {
+    if held_out_utility_milli.is_empty()
+        || held_out_utility_milli.len() != candidates.len()
+        || held_out_utility_milli.keys().any(|id| id.trim().is_empty())
+        || held_out_utility_milli
+            .values()
+            .any(|value| value.unsigned_abs() > VALUE_LIMIT as u64)
+    {
+        return Err(ActiveLearningEvaluationError::InvalidRequest(
+            "held-out utility must cover every candidate with bounded values".into(),
+        ));
+    }
+    let plan = plan_glioma_active_learning(request, candidates, observations)?;
+    let mut ordered_candidates = candidates.iter().collect::<Vec<_>>();
+    ordered_candidates.sort_by(|left, right| left.candidate_id.cmp(&right.candidate_id));
+    let candidate_ids = ordered_candidates
+        .iter()
+        .map(|candidate| candidate.candidate_id.clone())
+        .collect::<BTreeSet<_>>();
+    if candidate_ids
+        != held_out_utility_milli
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    {
+        return Err(ActiveLearningEvaluationError::InvalidRequest(
+            "held-out utility keys must match the unique candidate IDs".into(),
+        ));
+    }
+    let counts = candidate_counts(observations);
+    let oracle = oracle_beam(
+        request,
+        &ordered_candidates,
+        held_out_utility_milli,
+        &counts,
+    );
+    let score_by_id = plan
+        .scores
+        .iter()
+        .map(|score| (score.candidate_id.as_str(), score.acquisition_milli))
+        .collect::<BTreeMap<_, _>>();
+    let mut acquisition_order = candidate_ids.iter().cloned().collect::<Vec<_>>();
+    acquisition_order.sort_by(|left, right| {
+        score_by_id
+            .get(right.as_str())
+            .copied()
+            .unwrap_or(i64::MIN)
+            .cmp(&score_by_id.get(left.as_str()).copied().unwrap_or(i64::MIN))
+            .then_with(|| left.cmp(right))
+    });
+    let fixed_order = candidate_ids.iter().cloned().collect::<Vec<_>>();
+    let policy_orders = [
+        (
+            ActiveLearningEvaluationPolicy::AuroraActiveLearning,
+            plan.selected_order.clone(),
+        ),
+        (
+            ActiveLearningEvaluationPolicy::AcquisitionGreedy,
+            select_evaluation_policy(request, &ordered_candidates, &acquisition_order, &counts),
+        ),
+        (
+            ActiveLearningEvaluationPolicy::FixedCoverage,
+            select_evaluation_policy(request, &ordered_candidates, &fixed_order, &counts),
+        ),
+    ];
+    let candidate_by_id = ordered_candidates
+        .iter()
+        .map(|candidate| (candidate.candidate_id.as_str(), *candidate))
+        .collect::<BTreeMap<_, _>>();
+    let metric_for = |policy: ActiveLearningEvaluationPolicy, selected_order: Vec<String>| {
+        let cost_units = selected_order
+            .iter()
+            .filter_map(|id| candidate_by_id.get(id.as_str()))
+            .map(|candidate| candidate.cost_units)
+            .sum::<u32>();
+        let utility = selected_order
+            .iter()
+            .map(|id| held_out_utility_milli.get(id).copied().unwrap_or(0))
+            .sum::<i64>();
+        ActiveLearningEvaluationMetric {
+            policy,
+            selected_order,
+            cost_units,
+            held_out_utility_milli: utility,
+            regret_to_oracle_milli: oracle
+                .utility
+                .saturating_sub(i128::from(utility))
+                .clamp(i128::from(i64::MIN), i128::from(i64::MAX))
+                as i64,
+        }
+    };
+    let mut metrics = policy_orders
+        .into_iter()
+        .map(|(policy, order)| metric_for(policy, order))
+        .collect::<Vec<_>>();
+    metrics.push(metric_for(
+        ActiveLearningEvaluationPolicy::OracleBeam,
+        oracle.selected.clone(),
+    ));
+    metrics.sort_by_key(|metric| metric.policy);
+    let held_out_truth_digest = ContentHash::of_value(
+        &serde_json::to_value(held_out_utility_milli)
+            .map_err(|error| ActiveLearningEvaluationError::Digest(error.to_string()))?,
+    )
+    .map_err(|error| ActiveLearningEvaluationError::Digest(error.to_string()))?;
+    let mut uncertainty = BTreeSet::from([
+        "held-out-utility-is-evaluation-only-not-biological-evidence".to_string(),
+        "oracle-is-a-bounded-beam-upper-bound-not-a-global-optimum".to_string(),
+    ]);
+    if plan.disposition != ActiveLearningDisposition::Qualified {
+        uncertainty.insert("active-learning-plan-is-partial-or-unresolved".into());
+    }
+    let negative_evidence = if metrics
+        .iter()
+        .find(|metric| metric.policy == ActiveLearningEvaluationPolicy::AuroraActiveLearning)
+        .is_some_and(|metric| metric.held_out_utility_milli < 0)
+    {
+        vec!["active-learning-policy-negative-held-out-utility".to_string()]
+    } else {
+        Vec::new()
+    };
+    let mut output = ActiveLearningEvaluation {
+        feature_id: FEATURE_ID.into(),
+        output_schema: EVALUATION_OUTPUT_SCHEMA.into(),
+        objective: request.objective.clone(),
+        plan_digest: plan.digest,
+        held_out_truth_digest,
+        oracle_selected_order: oracle.selected,
+        oracle_utility_milli: oracle
+            .utility
+            .clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64,
+        metrics,
+        uncertainty: uncertainty.into_iter().collect(),
+        negative_evidence,
+        digest: ContentHash::of_bytes(b"unsealed-glioma-active-learning-evaluation"),
+    };
+    output.digest = ContentHash::of_value(&evaluation_digest_input(&output))
+        .map_err(|error| ActiveLearningEvaluationError::Digest(error.to_string()))?;
+    output.validate()?;
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -709,6 +1185,72 @@ mod tests {
         assert_eq!(plan.disposition, ActiveLearningDisposition::NoCandidates);
         assert!(plan.selected_order.is_empty());
         assert!(plan.uncertainty.is_empty());
+        plan.validate().unwrap();
+    }
+
+    #[test]
+    fn held_out_evaluation_compares_policies_and_replays() {
+        let truth = BTreeMap::from([
+            ("egfr".to_string(), 450_i64),
+            ("matrix".to_string(), 800_i64),
+            ("unsafe".to_string(), -200_i64),
+        ]);
+        let first =
+            evaluate_glioma_active_learning(&request(), &candidates(), &observations(), &truth)
+                .unwrap();
+        let second = evaluate_glioma_active_learning(
+            &request(),
+            &candidates().into_iter().rev().collect::<Vec<_>>(),
+            &observations(),
+            &truth,
+        )
+        .unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.metrics.len(), 4);
+        assert_eq!(first.oracle_utility_milli, 1_250);
+        assert!(first
+            .uncertainty
+            .iter()
+            .any(|item| item.contains("evaluation-only")));
+        first.validate().unwrap();
+    }
+
+    #[test]
+    fn held_out_evaluation_refuses_incomplete_truth() {
+        let truth = BTreeMap::from([("egfr".to_string(), 450_i64)]);
+        let error =
+            evaluate_glioma_active_learning(&request(), &candidates(), &observations(), &truth)
+                .unwrap_err();
+        assert!(matches!(
+            error,
+            ActiveLearningEvaluationError::InvalidRequest(_)
+        ));
+    }
+
+    #[test]
+    fn portfolio_beam_prefers_two_cheap_mechanism_groups() {
+        let mut expensive = candidates()[0].clone();
+        expensive.candidate_id = "expensive".into();
+        expensive.mechanism_id = "expensive-mechanism".into();
+        expensive.cost_units = 4;
+        expensive.redundancy_group = "expensive-group".into();
+        let mut cheap_a = candidates()[0].clone();
+        cheap_a.candidate_id = "cheap-a".into();
+        cheap_a.mechanism_id = "cheap-a-mechanism".into();
+        cheap_a.cost_units = 2;
+        cheap_a.redundancy_group = "cheap-a-group".into();
+        let mut cheap_b = cheap_a.clone();
+        cheap_b.candidate_id = "cheap-b".into();
+        cheap_b.mechanism_id = "cheap-b-mechanism".into();
+        cheap_b.redundancy_group = "cheap-b-group".into();
+        let mut follow_up = request();
+        follow_up.budget_units = 4;
+        follow_up.max_selections = 2;
+        let plan =
+            plan_glioma_active_learning(&follow_up, &[expensive, cheap_a, cheap_b], &[]).unwrap();
+        assert_eq!(plan.selected_order, vec!["cheap-a", "cheap-b"]);
+        assert_eq!(plan.remaining_budget_units, 0);
+        assert!(plan.blocked_order.contains(&"expensive".into()));
         plan.validate().unwrap();
     }
 }

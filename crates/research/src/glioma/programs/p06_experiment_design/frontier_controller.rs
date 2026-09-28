@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F08";
-pub const OUTPUT_SCHEMA: &str = "GliomaExperimentFrontierController1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaExperimentFrontierController1@2";
 pub const EXECUTION_OUTPUT_SCHEMA: &str = "GliomaExperimentFrontierExecution1@1";
 pub const MAX_MECHANISMS: usize = 128;
 pub const MAX_CANDIDATES: usize = 4_096;
@@ -319,7 +319,7 @@ fn predictive_probability(
     outcome: &GliomaFrontierOutcome,
     mechanism_order: &[String],
 ) -> Result<u64, GliomaExperimentFrontierError> {
-    let mut total = 0_u64;
+    let mut weighted = 0_u128;
     for (mechanism_id, prior) in mechanism_order.iter().zip(posterior.iter()) {
         let likelihood = outcome
             .probability_milli_by_mechanism
@@ -331,9 +331,87 @@ fn predictive_probability(
                     outcome.outcome_id, mechanism_id
                 ))
             })?;
-        total = total.saturating_add(u64::from(*prior) * u64::from(likelihood) / SCORE_SCALE);
+        weighted = weighted.saturating_add(u128::from(*prior) * u128::from(likelihood));
     }
-    Ok(total.min(SCORE_SCALE))
+    Ok((weighted / u128::from(SCORE_SCALE))
+        .min(u128::from(SCORE_SCALE))
+        .try_into()
+        .unwrap_or(SCORE_SCALE))
+}
+
+/// Similarity of two declared outcome likelihood profiles. A high value means that running both
+/// actions is likely to produce redundant mechanism information; a low value means that their
+/// outcome signatures are complementary. This is deliberately based on declared likelihoods,
+/// never on unobserved or synthetic payloads.
+fn outcome_profile_similarity_milli(
+    left: &GliomaFrontierCandidate,
+    right: &GliomaFrontierCandidate,
+    mechanism_order: &[String],
+) -> u16 {
+    let outcome_ids = left
+        .outcomes
+        .iter()
+        .map(|outcome| outcome.outcome_id.as_str())
+        .chain(
+            right
+                .outcomes
+                .iter()
+                .map(|outcome| outcome.outcome_id.as_str()),
+        )
+        .collect::<BTreeSet<_>>();
+    let cell_count = outcome_ids
+        .len()
+        .saturating_mul(mechanism_order.len())
+        .max(1) as u64;
+    let mut distance = 0_u64;
+    for outcome_id in outcome_ids {
+        let left_outcome = left
+            .outcomes
+            .iter()
+            .find(|outcome| outcome.outcome_id == outcome_id);
+        let right_outcome = right
+            .outcomes
+            .iter()
+            .find(|outcome| outcome.outcome_id == outcome_id);
+        for mechanism_id in mechanism_order {
+            let left_probability = left_outcome
+                .and_then(|outcome| outcome.probability_milli_by_mechanism.get(mechanism_id))
+                .copied()
+                .unwrap_or_default();
+            let right_probability = right_outcome
+                .and_then(|outcome| outcome.probability_milli_by_mechanism.get(mechanism_id))
+                .copied()
+                .unwrap_or_default();
+            distance =
+                distance.saturating_add(u64::from(left_probability.abs_diff(right_probability)));
+        }
+    }
+    let mean_distance = distance / cell_count;
+    SCORE_SCALE.saturating_sub(mean_distance).min(SCORE_SCALE) as u16
+}
+
+/// Estimate the diversity that a candidate adds to the *current* dispatch batch. The ordinary
+/// score compares against completed history; this marginal term prevents a single round from
+/// spending its whole budget on the same clone or modality when complementary work is available.
+fn marginal_round_diversity_milli(
+    candidate: &GliomaFrontierCandidate,
+    selected_candidates: &[&GliomaFrontierCandidate],
+) -> u16 {
+    if selected_candidates.is_empty() {
+        return 1_000;
+    }
+    let selected_clones = selected_candidates
+        .iter()
+        .flat_map(|selected| selected.clone_ids.iter())
+        .collect::<BTreeSet<_>>();
+    let clone_novelty = candidate
+        .clone_ids
+        .iter()
+        .any(|clone_id| !selected_clones.contains(clone_id));
+    let modality_novelty = selected_candidates
+        .iter()
+        .all(|selected| selected.modality != candidate.modality);
+    ((u16::from(clone_novelty) * 1_000 + u16::from(modality_novelty) * 1_000) / 2) as u16
 }
 
 fn expected_information_gain(
@@ -594,7 +672,12 @@ fn score_candidate(
     } else {
         format!(
             "information gain {}, power {}, clone novelty {}, modality novelty {}, fidelity {}, utility {}",
-            information_gain, candidate.power_milli, clone_novelty_milli, modality_novelty_milli, fidelity_milli, utility_milli
+            information_gain,
+            candidate.power_milli,
+            clone_novelty_milli,
+            modality_novelty_milli,
+            fidelity_milli,
+            utility_milli
         )
     };
     Ok(GliomaFrontierScore {
@@ -845,19 +928,49 @@ pub fn execute_glioma_experiment_frontier_controller<
             .map(|score| score.candidate_id.clone())
             .collect::<Vec<_>>();
         let mut selected = Vec::new();
+        let mut selected_candidates = Vec::new();
         let mut selected_families = BTreeSet::new();
         let mut selected_cost = 0_u64;
-        for score in &scores {
-            if !score.eligible || selected.len() >= request.max_actions_per_round {
-                continue;
-            }
-            let candidate = &candidates[&score.candidate_id];
-            if selected_cost.saturating_add(u64::from(candidate.cost_units)) > budget_remaining
-                || !selected_families.insert(candidate.action_family.clone())
-            {
-                continue;
-            }
+        while selected.len() < request.max_actions_per_round {
+            let next = scores
+                .iter()
+                .filter(|score| score.eligible && !selected.contains(&score.candidate_id))
+                .filter_map(|score| {
+                    let candidate = &candidates[&score.candidate_id];
+                    if selected_families.contains(&candidate.action_family)
+                        || selected_cost.saturating_add(u64::from(candidate.cost_units))
+                            > budget_remaining
+                    {
+                        return None;
+                    }
+                    let overlap = selected_candidates
+                        .iter()
+                        .map(|other: &&GliomaFrontierCandidate| {
+                            outcome_profile_similarity_milli(candidate, other, &mechanism_order)
+                        })
+                        .max()
+                        .unwrap_or(0);
+                    let marginal_diversity =
+                        marginal_round_diversity_milli(candidate, &selected_candidates);
+                    let diversity_reward = u64::from(request.diversity_weight_milli)
+                        .saturating_mul(u64::from(marginal_diversity))
+                        / SCORE_SCALE;
+                    let redundancy_penalty = u64::from(request.diversity_weight_milli)
+                        .saturating_mul(u64::from(overlap))
+                        / SCORE_SCALE;
+                    let adjusted_utility = score
+                        .utility_milli
+                        .saturating_add(diversity_reward)
+                        .saturating_sub(redundancy_penalty);
+                    Some((adjusted_utility, score.candidate_id.as_str(), candidate))
+                })
+                .max_by(|left, right| left.0.cmp(&right.0).then_with(|| right.1.cmp(left.1)));
+            let Some((_, _, candidate)) = next else {
+                break;
+            };
             selected_cost = selected_cost.saturating_add(u64::from(candidate.cost_units));
+            selected_families.insert(candidate.action_family.clone());
+            selected_candidates.push(candidate);
             selected.push(candidate.candidate_id.clone());
         }
         if selected.is_empty() {
@@ -951,7 +1064,7 @@ pub fn execute_glioma_experiment_frontier_controller<
             round: round_number,
             posterior_before_milli: posterior_before,
             ranked_candidate_order,
-            selected_candidate_order: selected,
+            selected_candidate_order: selected.clone(),
             completed_order: completed_round,
             negative_order: negative_round,
             failed_order: failed_round,
@@ -964,6 +1077,7 @@ pub fn execute_glioma_experiment_frontier_controller<
                 "round": round_number,
                 "posterior": posterior,
                 "scores": scores,
+                "selected": selected,
             }))
             .map_err(|error| GliomaExperimentFrontierError::Digest(error.to_string()))?,
         };
@@ -1255,5 +1369,37 @@ mod tests {
         assert_eq!(run.mechanism_order, vec!["invasion", "repair"]);
         assert_eq!(run.posterior_milli.iter().sum::<u16>(), 1_000);
         run.validate().unwrap();
+    }
+
+    #[test]
+    fn outcome_profile_similarity_distinguishes_redundant_and_complementary_assays() {
+        let request = request();
+        let mechanism_order = vec!["invasion".to_string(), "repair".to_string()];
+        let same = outcome_profile_similarity_milli(
+            &request.candidates[0],
+            &request.candidates[0],
+            &mechanism_order,
+        );
+        let different = outcome_profile_similarity_milli(
+            &request.candidates[0],
+            &request.candidates[1],
+            &mechanism_order,
+        );
+        assert_eq!(same, 1_000);
+        assert!(different < same);
+    }
+
+    #[test]
+    fn marginal_round_diversity_rewards_new_clone_and_modality() {
+        let request = request();
+        let selected = vec![&request.candidates[0]];
+        assert_eq!(
+            marginal_round_diversity_milli(&request.candidates[1], &selected),
+            1_000
+        );
+        assert_eq!(
+            marginal_round_diversity_milli(&request.candidates[0], &selected),
+            0
+        );
     }
 }

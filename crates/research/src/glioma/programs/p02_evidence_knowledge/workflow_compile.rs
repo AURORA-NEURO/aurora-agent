@@ -316,10 +316,18 @@ pub fn compile_local_research_workflow(
         LocalWorkflowDisposition::Ready
     };
     let next_step = match disposition {
-        LocalWorkflowDisposition::Ready => "hand parallel waves to the local action dispatcher with checkpoint and compensation hooks",
-        LocalWorkflowDisposition::ApprovalRequired => "obtain approval before admitting physical or approval-required actions",
-        LocalWorkflowDisposition::Partial => "resolve omitted dependencies or deferred actions before full workflow promotion",
-        LocalWorkflowDisposition::Blocked => "recompile a dependency-complete selected frontier before execution",
+        LocalWorkflowDisposition::Ready => {
+            "hand parallel waves to the local action dispatcher with checkpoint and compensation hooks"
+        }
+        LocalWorkflowDisposition::ApprovalRequired => {
+            "obtain approval before admitting physical or approval-required actions"
+        }
+        LocalWorkflowDisposition::Partial => {
+            "resolve omitted dependencies or deferred actions before full workflow promotion"
+        }
+        LocalWorkflowDisposition::Blocked => {
+            "recompile a dependency-complete selected frontier before execution"
+        }
     };
     let mut output = LocalResearchWorkflow {
         feature_id: FEATURE_ID.into(),

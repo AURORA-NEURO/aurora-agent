@@ -427,8 +427,10 @@ pub fn execute_glioma_knowledge_resolution_campaign<E: KnowledgeResolutionCampai
         negative_evidence.extend(knowledge.negative_evidence_order.iter().cloned());
         uncertainty.extend(knowledge.uncertainty_order.iter().cloned());
         let eligible = frontier
-            .selected_order
+            .ranking
             .iter()
+            .filter(|score| score.priority_milli >= request.frontier.min_priority_milli)
+            .map(|score| &score.claim_id)
             .filter(|claim_id| !completed.contains(*claim_id) && !failed.contains(*claim_id))
             .cloned()
             .collect::<Vec<_>>();
@@ -449,9 +451,13 @@ pub fn execute_glioma_knowledge_resolution_campaign<E: KnowledgeResolutionCampai
             break;
         }
         let max_batch = (remaining / u64::from(request.cost_per_action_units)) as usize;
+        let round_cap = request
+            .frontier
+            .max_selected_claims
+            .min(MAX_ACTIONS_PER_ROUND);
         let selected = eligible
             .into_iter()
-            .take(max_batch.clamp(1, MAX_ACTIONS_PER_ROUND))
+            .take(max_batch.clamp(1, round_cap))
             .collect::<Vec<_>>();
         let actions = selected
             .iter()
@@ -545,9 +551,10 @@ pub fn execute_glioma_knowledge_resolution_campaign<E: KnowledgeResolutionCampai
             break;
         }
         let next_eligible = updated_frontier
-            .selected_order
+            .ranking
             .iter()
-            .any(|claim_id| !completed.contains(claim_id) && !failed.contains(claim_id));
+            .filter(|score| score.priority_milli >= request.frontier.min_priority_milli)
+            .any(|score| !completed.contains(&score.claim_id) && !failed.contains(&score.claim_id));
         if request.stop_on_qualified
             && updated_knowledge.disposition == KnowledgeDisposition::Qualified
             && !next_eligible
@@ -568,9 +575,10 @@ pub fn execute_glioma_knowledge_resolution_campaign<E: KnowledgeResolutionCampai
     negative_evidence.extend(final_knowledge.negative_evidence_order.iter().cloned());
     uncertainty.extend(final_knowledge.uncertainty_order.iter().cloned());
     let final_eligible = final_frontier
-        .selected_order
+        .ranking
         .iter()
-        .any(|claim_id| !completed.contains(claim_id) && !failed.contains(claim_id));
+        .filter(|score| score.priority_milli >= request.frontier.min_priority_milli)
+        .any(|score| !completed.contains(&score.claim_id) && !failed.contains(&score.claim_id));
     if request.stop_on_qualified
         && final_knowledge.disposition == KnowledgeDisposition::Qualified
         && !final_eligible
@@ -712,6 +720,34 @@ mod tests {
         assert_ne!(
             output.disposition,
             KnowledgeResolutionCampaignDisposition::Qualified
+        );
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn campaign_promotes_deferred_claims_after_the_frontier_cap() {
+        let mut request = request();
+        request.frontier.max_selected_claims = 1;
+        request.records.push(record(
+            "e2",
+            "PDGF signaling increases invasion",
+            EvidenceState::Unknown,
+        ));
+        request.budget_units = 2;
+        request.max_rounds = 3;
+        let mut executor = DryRunKnowledgeResolutionCampaignExecutor;
+        let output = execute_glioma_knowledge_resolution_campaign(&request, &mut executor).unwrap();
+
+        assert_eq!(output.completed_order.len(), 2);
+        assert!(output.rounds.len() >= 2);
+        assert!(
+            output
+                .rounds
+                .iter()
+                .flat_map(|round| round.completed_order.iter())
+                .collect::<BTreeSet<_>>()
+                .len()
+                >= 2
         );
         output.validate().unwrap();
     }

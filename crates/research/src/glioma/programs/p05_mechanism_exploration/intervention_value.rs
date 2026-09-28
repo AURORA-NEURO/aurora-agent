@@ -12,10 +12,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P05-F04";
-pub const OUTPUT_SCHEMA: &str = "GliomaMechanismInterventionValue1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaMechanismInterventionValue1@2";
 pub const MAX_CANDIDATES: usize = 2_048;
 pub const MAX_MECHANISMS: usize = 128;
 pub const MAX_SELECTED: usize = 256;
+const PORTFOLIO_DIVERSITY_WEIGHT_MILLI: u64 = 250;
+const MAX_PORTFOLIO_DIVERSITY_BONUS: u64 = 500_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MechanismInterventionValueRequest {
@@ -58,6 +60,8 @@ pub struct MechanismInterventionValueScore {
     pub disagreement_milli: u16,
     pub uncertainty_penalty_milli: u64,
     pub value_milli: u64,
+    /// Static value plus the marginal profile-diversity gain at portfolio selection time.
+    pub portfolio_gain_milli: u64,
     pub feasibility_milli: u16,
     pub cost_units: u32,
     pub risk_milli: u16,
@@ -152,6 +156,7 @@ impl MechanismInterventionValue {
                     || score.feasibility_milli > 1_000
                     || score.disagreement_milli > 1_000
                     || score.risk_milli > 1_000
+                    || score.portfolio_gain_milli < score.value_milli
                     || (score.eligible && score.exclusion_reason.is_some())
                     || (!score.eligible && score.exclusion_reason.is_none())
             })
@@ -256,6 +261,7 @@ fn score_candidate(candidate: &MechanismInterventionCandidate) -> MechanismInter
         disagreement_milli: disagreement,
         uncertainty_penalty_milli: uncertainty,
         value_milli: value,
+        portfolio_gain_milli: value,
         feasibility_milli: candidate.feasibility_milli,
         cost_units: candidate.cost_units,
         risk_milli: candidate.risk_milli,
@@ -266,6 +272,54 @@ fn score_candidate(candidate: &MechanismInterventionCandidate) -> MechanismInter
             Some("invalid_cost_feasibility_or_risk".into())
         },
     }
+}
+
+/// Weighted distance between two predicted intervention profiles. A high distance means the
+/// second assay probes a different mechanism response pattern and can add information to an
+/// already-selected portfolio. Shared posterior mass is used as the weight so low-prior
+/// mechanisms cannot dominate the diversity term.
+fn profile_distance_milli(
+    left: &MechanismInterventionCandidate,
+    right: &MechanismInterventionCandidate,
+) -> u64 {
+    let right_by_mechanism = right
+        .predictions
+        .iter()
+        .map(|prediction| (prediction.mechanism_id.as_str(), prediction))
+        .collect::<BTreeMap<_, _>>();
+    let mut weighted_distance = 0_u128;
+    let mut shared_prior = 0_u128;
+    for prediction in &left.predictions {
+        let Some(other) = right_by_mechanism.get(prediction.mechanism_id.as_str()) else {
+            continue;
+        };
+        let weight = u128::from(prediction.prior_milli.min(other.prior_milli));
+        shared_prior = shared_prior.saturating_add(weight);
+        weighted_distance = weighted_distance.saturating_add(weight.saturating_mul(u128::from(
+            prediction.effect_milli.abs_diff(other.effect_milli),
+        )));
+    }
+    if shared_prior == 0 {
+        0
+    } else {
+        (weighted_distance / shared_prior).min(u128::from(u64::MAX)) as u64
+    }
+}
+
+fn portfolio_gain_milli(
+    score: &MechanismInterventionValueScore,
+    candidate: &MechanismInterventionCandidate,
+    selected: &[&MechanismInterventionCandidate],
+) -> u64 {
+    let diversity = selected
+        .iter()
+        .map(|other| profile_distance_milli(candidate, other))
+        .max()
+        .unwrap_or(0);
+    let diversity_bonus = diversity
+        .saturating_mul(PORTFOLIO_DIVERSITY_WEIGHT_MILLI)
+        .min(MAX_PORTFOLIO_DIVERSITY_BONUS);
+    score.value_milli.saturating_add(diversity_bonus)
 }
 
 pub fn analyze_glioma_mechanism_intervention_value(
@@ -359,30 +413,76 @@ pub fn analyze_glioma_mechanism_intervention_value(
         .iter()
         .map(|score| score.candidate_id.clone())
         .collect::<Vec<_>>();
-    let mut selected_order = Vec::new();
-    let mut deferred_order = Vec::new();
+    let mut selected_order: Vec<String> = Vec::new();
     let mut groups = BTreeSet::new();
     let candidate_by_id = candidates
         .iter()
         .map(|candidate| (candidate.candidate_id.as_str(), candidate))
         .collect::<BTreeMap<_, _>>();
     let mut total_cost_units = 0_u64;
-    for score in &ranked {
-        let candidate = candidate_by_id[score.candidate_id.as_str()];
-        let selectable = score.eligible
-            && score.value_milli >= request.min_value_milli
-            && score.disagreement_milli >= request.min_disagreement_milli
-            && score.risk_milli <= request.risk_ceiling_milli
-            && !groups.contains(&candidate.redundancy_group)
-            && selected_order.len() < request.max_selected
-            && total_cost_units.saturating_add(u64::from(score.cost_units)) <= request.budget_units;
-        if selectable {
-            selected_order.push(score.candidate_id.clone());
-            groups.insert(candidate.redundancy_group.clone());
-            total_cost_units = total_cost_units.saturating_add(u64::from(score.cost_units));
-        } else {
-            deferred_order.push(score.candidate_id.clone());
+    let mut portfolio_gains = BTreeMap::<String, u64>::new();
+    while selected_order.len() < request.max_selected {
+        let selected_candidates = selected_order
+            .iter()
+            .filter_map(|id| candidate_by_id.get(id.as_str()).copied())
+            .collect::<Vec<_>>();
+        let mut best: Option<(&MechanismInterventionValueScore, u64)> = None;
+        for score in &ranked {
+            if selected_order.iter().any(|id| id == &score.candidate_id) {
+                continue;
+            }
+            let candidate = candidate_by_id[score.candidate_id.as_str()];
+            let gain = portfolio_gain_milli(score, candidate, &selected_candidates);
+            portfolio_gains
+                .entry(score.candidate_id.clone())
+                .and_modify(|current| *current = (*current).max(gain))
+                .or_insert(gain);
+            let selectable = score.eligible
+                && score.value_milli >= request.min_value_milli
+                && score.disagreement_milli >= request.min_disagreement_milli
+                && score.risk_milli <= request.risk_ceiling_milli
+                && !groups.contains(&candidate.redundancy_group)
+                && total_cost_units.saturating_add(u64::from(score.cost_units))
+                    <= request.budget_units;
+            if !selectable {
+                continue;
+            }
+            let is_better = best.is_none_or(|(current, current_gain)| {
+                gain > current_gain
+                    || (gain == current_gain
+                        && (score.value_milli > current.value_milli
+                            || (score.value_milli == current.value_milli
+                                && (score.disagreement_milli > current.disagreement_milli
+                                    || (score.disagreement_milli == current.disagreement_milli
+                                        && score.candidate_id < current.candidate_id)))))
+            });
+            if is_better {
+                best = Some((score, gain));
+            }
         }
+        let Some((score, gain)) = best else {
+            break;
+        };
+        selected_order.push(score.candidate_id.clone());
+        groups.insert(
+            candidate_by_id[score.candidate_id.as_str()]
+                .redundancy_group
+                .clone(),
+        );
+        total_cost_units = total_cost_units.saturating_add(u64::from(score.cost_units));
+        portfolio_gains.insert(score.candidate_id.clone(), gain);
+    }
+    let mut deferred_order: Vec<String> = ranked
+        .iter()
+        .filter(|score| !selected_order.contains(&score.candidate_id))
+        .map(|score| score.candidate_id.clone())
+        .collect();
+    deferred_order.sort();
+    for score in &mut scores {
+        score.portfolio_gain_milli = portfolio_gains
+            .get(&score.candidate_id)
+            .copied()
+            .unwrap_or(score.value_milli);
     }
     let mut negative_evidence = Vec::new();
     let mut uncertainty = Vec::new();
@@ -508,5 +608,39 @@ mod tests {
         .expect("valid intervention value");
         assert_eq!(output.selected_order, vec!["a"]);
         assert!(output.deferred_order.contains(&"unsafe".to_string()));
+    }
+
+    #[test]
+    fn portfolio_gain_prefers_an_orthogonal_profile_over_a_redundant_high_score() {
+        let redundant = candidate("redundant", "g2", 850, -850);
+        let mut orthogonal = candidate("orthogonal", "g3", -900, 900);
+        orthogonal.feasibility_milli = 700;
+        orthogonal.risk_milli = 400;
+        let output = analyze_glioma_mechanism_intervention_value(
+            &MechanismInterventionValueRequest {
+                max_selected: 2,
+                budget_units: 4,
+                ..request()
+            },
+            &[candidate("anchor", "g1", 900, -900), redundant, orthogonal],
+        )
+        .expect("valid diversified intervention portfolio");
+
+        assert_eq!(output.selected_order, vec!["anchor", "orthogonal"]);
+        assert!(output.deferred_order.contains(&"redundant".to_string()));
+        let orthogonal_gain = output
+            .scores
+            .iter()
+            .find(|score| score.candidate_id == "orthogonal")
+            .expect("orthogonal score")
+            .portfolio_gain_milli;
+        let redundant_gain = output
+            .scores
+            .iter()
+            .find(|score| score.candidate_id == "redundant")
+            .expect("redundant score")
+            .portfolio_gain_milli;
+        assert!(orthogonal_gain > redundant_gain);
+        output.validate().unwrap();
     }
 }

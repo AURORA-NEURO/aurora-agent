@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F17";
-pub const OUTPUT_SCHEMA: &str = "GliomaSequentialDesign1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaSequentialDesign1@2";
 pub const MAX_ARMS: usize = 256;
 pub const MAX_ROUNDS: u16 = 128;
 pub const MAX_NEW_REPLICATES: u32 = 10_000;
@@ -116,6 +116,7 @@ pub struct SequentialDesignPlan {
     pub control_arm_id: String,
     pub arm_order: Vec<String>,
     pub selected_order: Vec<String>,
+    pub deferred_order: Vec<String>,
     pub rounds: Vec<SequentialDesignRound>,
     pub decisions: Vec<SequentialArmDecision>,
     pub budget_remaining_units: u64,
@@ -156,6 +157,7 @@ fn digest_input(plan: &SequentialDesignPlan) -> serde_json::Value {
         "control_arm_id": plan.control_arm_id,
         "arm_order": plan.arm_order,
         "selected_order": plan.selected_order,
+        "deferred_order": plan.deferred_order,
         "rounds": plan.rounds,
         "decisions": plan.decisions,
         "budget_remaining_units": plan.budget_remaining_units,
@@ -272,6 +274,7 @@ impl SequentialDesignPlan {
             || self.control_arm_id.trim().is_empty()
             || !canonical(&self.arm_order)
             || !canonical(&self.selected_order)
+            || !canonical(&self.deferred_order)
             || !canonical(&self.success_stop_order)
             || !canonical(&self.futility_stop_order)
             || !canonical(&self.hold_order)
@@ -320,6 +323,18 @@ impl SequentialDesignPlan {
         if all != decision_ids {
             return Err(SequentialDesignError::InvalidOutput(
                 "arm order and decision identities do not partition".into(),
+            ));
+        }
+        let selected = self.selected_order.iter().cloned().collect::<BTreeSet<_>>();
+        let deferred = self.deferred_order.iter().cloned().collect::<BTreeSet<_>>();
+        if selected.len() != self.selected_order.len()
+            || deferred.len() != self.deferred_order.len()
+            || !selected.is_subset(&all)
+            || !deferred.is_subset(&all)
+            || !selected.is_disjoint(&deferred)
+        {
+            return Err(SequentialDesignError::InvalidOutput(
+                "selected and deferred arm partitions do not reconcile".into(),
             ));
         }
         let expected = ContentHash::of_value(&digest_input(self))
@@ -524,6 +539,12 @@ pub fn plan_glioma_sequential_design(
         }
     }
     selected = selected_ids;
+    let deferred_order = candidate_utilities
+        .iter()
+        .map(|(arm_id, _)| arm_id)
+        .filter(|arm_id| !selected.contains(*arm_id) && !budget_blocked.contains(*arm_id))
+        .cloned()
+        .collect::<Vec<_>>();
     let mut rounds = Vec::new();
     let mut round_arm_order = selected.iter().cloned().collect::<Vec<_>>();
     round_arm_order.sort();
@@ -589,6 +610,7 @@ pub fn plan_glioma_sequential_design(
         control_arm_id: request.control_arm_id.clone(),
         arm_order,
         selected_order: selected.into_iter().collect(),
+        deferred_order,
         rounds,
         decisions,
         budget_remaining_units: remaining_budget,
@@ -712,6 +734,28 @@ mod tests {
             .decisions
             .iter()
             .any(|decision| decision.arm_id == "control" && decision.planned_replicates > 0));
+    }
+
+    #[test]
+    fn arm_selection_cap_preserves_eligible_deferred_candidates() {
+        let mut request = request();
+        request.max_selected_arms = 1;
+        let output = plan_glioma_sequential_design(
+            &request,
+            &[
+                arm("control", 3, 7, 200),
+                arm("candidate-a", 2, 0, 200),
+                arm("candidate-b", 2, 0, 200),
+            ],
+        )
+        .unwrap();
+        assert_eq!(output.selected_order.len(), 1);
+        assert_eq!(output.deferred_order.len(), 1);
+        assert!(output
+            .selected_order
+            .iter()
+            .all(|id| !output.deferred_order.contains(id)));
+        output.validate().unwrap();
     }
 
     #[test]

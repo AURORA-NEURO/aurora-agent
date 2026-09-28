@@ -105,10 +105,10 @@ impl MechanismOperatingCycle {
             || self.campaign.objective != self.objective
             || self.action_plan.source_discrimination_digest
                 != self.campaign.final_discrimination.digest
-            || !self.simulation_only
+            || self.simulation_only != self.campaign.simulation_only
         {
             return Err(MechanismOperatingCycleError::InvalidOutput(
-                "identity, phase order, objective, digest binding, simulation, or ordering is invalid".into(),
+                "identity, phase order, objective, digest binding, execution mode, or ordering is invalid".into(),
             ));
         }
         self.campaign
@@ -180,6 +180,7 @@ pub fn execute_glioma_mechanism_operating_cycle<E: MechanismDiscriminationCampai
     uncertainty.extend(action_plan.uncertainty.iter().cloned());
     uncertainty.sort();
     uncertainty.dedup();
+    let simulation_only = campaign.simulation_only;
     let mut output = MechanismOperatingCycle {
         feature_id: FEATURE_ID.into(),
         output_schema: OUTPUT_SCHEMA.into(),
@@ -189,7 +190,7 @@ pub fn execute_glioma_mechanism_operating_cycle<E: MechanismDiscriminationCampai
             "action_plan_compilation".into(),
         ],
         selected_action_order: action_plan.action_order.clone(),
-        simulation_only: true,
+        simulation_only,
         disposition: disposition(campaign.disposition),
         campaign,
         action_plan,
@@ -210,11 +211,42 @@ mod tests {
         MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
         MechanismPrediction,
     };
+    use crate::glioma::programs::p05_mechanism_exploration::discrimination_campaign::MechanismDiscriminationCampaignExecutionFailure;
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
     use std::collections::BTreeMap;
 
     fn hash(id: &str) -> ContentHash {
         ContentHash::of_value(&serde_json::json!({"id": id})).unwrap()
+    }
+
+    struct LocalMeasurementExecutor;
+
+    impl MechanismDiscriminationCampaignExecutor for LocalMeasurementExecutor {
+        fn simulation_only(&self) -> bool {
+            false
+        }
+
+        fn execute_action(
+            &mut self,
+            action: &MechanismDiscriminatorAction,
+            _discrimination: &super::super::discrimination::MechanismDiscrimination,
+            _attempt: u8,
+        ) -> Result<MechanismFeatureObservation, MechanismDiscriminationCampaignExecutionFailure>
+        {
+            Ok(MechanismFeatureObservation {
+                feature_id: action.feature_id.clone(),
+                observed_milli: 150,
+                uncertainty_milli: action.measurement_uncertainty_milli,
+                artifact: LocalArtifactRef {
+                    artifact_id: format!("local-measurement:{}", action.action_id),
+                    content_hash: hash(&format!("local-measurement:{}", action.action_id)),
+                    content_type: "application/vnd.aurora.glioma.local-measurement+json".into(),
+                    local_only: true,
+                    contains_human_data: false,
+                    contains_direct_identifiers: false,
+                },
+            })
+        }
     }
 
     fn request() -> MechanismOperatingCycleRequest {
@@ -310,6 +342,7 @@ mod tests {
                 model_system: GliomaModelSystem::Organoid,
                 modality: GliomaModality::Transcriptomics,
                 max_actions: 2,
+                budget_units: 2,
             },
         }
     }
@@ -331,7 +364,25 @@ mod tests {
             first.action_plan.source_discrimination_digest,
             first.campaign.final_discrimination.digest
         );
+        assert!(first.simulation_only);
+        assert!(first.campaign.simulation_only);
         first.validate().unwrap();
+    }
+
+    #[test]
+    fn operating_cycle_preserves_institution_local_execution_mode() {
+        let request = request();
+        let mut executor = LocalMeasurementExecutor;
+        let output = execute_glioma_mechanism_operating_cycle(&request, &mut executor).unwrap();
+        assert!(!output.simulation_only);
+        assert!(!output.campaign.simulation_only);
+        assert!(output.campaign.observations.iter().any(|observation| {
+            observation
+                .artifact
+                .artifact_id
+                .starts_with("local-measurement:")
+        }));
+        output.validate().unwrap();
     }
 
     #[test]

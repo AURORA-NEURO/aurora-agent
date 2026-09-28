@@ -14,6 +14,7 @@ pub mod graph_fusion;
 pub mod harmonization;
 pub mod ingestion_manifest;
 pub mod latent_factors;
+pub mod microscopy_morphodynamics;
 pub mod missingness_audit;
 pub mod modality_portfolio;
 pub mod operating_cycle;
@@ -94,6 +95,13 @@ pub use latent_factors::{
     analyze_glioma_latent_factors, LatentFactorAnalysis, LatentFactorComponent,
     LatentFactorDisposition, LatentFactorError, LatentFactorRequest, LatentFactorVector,
     LatentLoading, LatentScore,
+};
+pub use microscopy_morphodynamics::{
+    analyze_glioma_microscopy_morphodynamics, CellTrackFrame, GliomaMicroscopyMaterial,
+    LabeledMorphodynamicField, MicroscopyFieldInput, MicroscopyMorphodynamicAnalysis,
+    MicroscopyMorphodynamicError, MicroscopyMorphodynamicRequest, MicroscopyOutcomeLikelihood,
+    MicroscopyStateProbability, MorphodynamicFieldDisposition, MorphodynamicFieldEstimate,
+    MorphodynamicModelDisposition, StateValidationSummary, TrackedGliomaCell,
 };
 pub use missingness_audit::{
     analyze_glioma_multimodal_missingness, MissingnessAudit, MissingnessAuditDisposition,

@@ -20,7 +20,7 @@ use crate::glioma_engine::{
 };
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P07-F12";
-pub const OUTPUT_SCHEMA: &str = "GliomaAdaptiveWorkflowScheduler1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaAdaptiveWorkflowScheduler1@2";
 pub const MAX_CANDIDATES: usize = 256;
 pub const MAX_OBSERVATIONS: usize = 512;
 pub const MAX_ACTIONS: u16 = 64;
@@ -317,11 +317,13 @@ fn state_score(
 ) -> i64 {
     let mut modalities = BTreeSet::new();
     let mut models = BTreeSet::new();
+    let mut stages = BTreeSet::new();
     let mut ready = 0_i64;
     for id in &state.selected {
         if let Some(candidate) = candidates.get(id) {
             modalities.insert(candidate.candidate.modality);
             models.insert(candidate.candidate.model_system);
+            stages.insert(candidate.candidate.stage_kind);
         }
     }
     for (id, candidate) in candidates {
@@ -340,6 +342,7 @@ fn state_score(
     i64::from(state.expected_gain_milli) * 1_000_000
         + i64::try_from(modalities.len()).unwrap_or(i64::MAX) * 10_000
         + i64::try_from(models.len()).unwrap_or(i64::MAX) * 10_000
+        + i64::try_from(stages.len()).unwrap_or(i64::MAX) * 2_000_000
         + ready * 1_000
         - i64::from(state.cost_units) * 100
         - i64::from(state.risk_milli) * 50
@@ -759,6 +762,38 @@ mod tests {
         assert!(output
             .selected_order
             .contains(&"negative-assay".to_string()));
+    }
+
+    #[test]
+    fn scheduler_prefers_a_near_tied_new_stage_over_a_redundant_stage() {
+        let mut request = request(vec![
+            candidate(
+                "first",
+                GliomaStageKind::MechanismExploration,
+                vec![],
+                1,
+                700,
+            ),
+            candidate(
+                "repeat",
+                GliomaStageKind::MechanismExploration,
+                vec![],
+                1,
+                699,
+            ),
+            candidate(
+                "orthogonal",
+                GliomaStageKind::ExperimentDesign,
+                vec![],
+                1,
+                698,
+            ),
+        ]);
+        request.max_actions = 2;
+        request.budget_units = 2;
+        let output = plan_glioma_adaptive_workflow(&request).unwrap();
+        assert_eq!(output.selected_order, vec!["first", "orthogonal"]);
+        output.validate().unwrap();
     }
 
     #[test]

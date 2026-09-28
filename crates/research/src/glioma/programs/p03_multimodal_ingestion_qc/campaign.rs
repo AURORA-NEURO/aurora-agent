@@ -1,9 +1,11 @@
-//! Bounded autonomous multimodal-ingestion and QC campaigns for preclinical glioma research.
+//! Bounded beam-selected autonomous multimodal-ingestion and QC campaigns for preclinical glioma research.
 //!
 //! The campaign repeatedly evaluates metadata-only observations, turns missing coverage and
 //! quality defects into typed local ingestion actions, and replans from returned observations.
 //! It never imputes a missing modality, moves raw payloads, or turns a QC defect into a biological
-//! conclusion.
+//! conclusion. Each round uses a bounded deterministic beam over complete action batches so
+//! modality, model-system, defect-kind, and target coverage are optimized jointly rather than by
+//! a myopic greedy pick.
 
 use crate::glioma::multimodal::{
     harmonize_multimodal_inputs, MultimodalDisposition, MultimodalObservation, MultimodalQcReport,
@@ -16,11 +18,17 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P03-F20";
-pub const OUTPUT_SCHEMA: &str = "GliomaMultimodalIngestionCampaign1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaMultimodalIngestionCampaign1@3";
 pub const MAX_ROUNDS: u16 = 24;
 pub const MAX_ACTIONS_PER_ROUND: usize = 16;
 pub const MAX_RETRIES: u8 = 6;
 pub const MAX_OBSERVATIONS: usize = 16_384;
+const PRIORITY_SELECTION_SCALE: u64 = 1_000_000;
+const MODALITY_NOVELTY_BONUS: u64 = 100_000_000;
+const MODEL_NOVELTY_BONUS: u64 = 100_000_000;
+const ACTION_KIND_NOVELTY_BONUS: u64 = 75_000_000;
+const TARGET_NOVELTY_BONUS: u64 = 10_000_000;
+const ACTION_BATCH_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -154,7 +162,7 @@ pub struct MultimodalIngestionCampaignRound {
     pub accepted_observation_order: Vec<String>,
     pub actions: Vec<IngestionQcAction>,
     pub report: MultimodalQcReport,
-    pub cost_units: u32,
+    pub cost_units: u64,
     pub budget_before_units: u64,
     pub budget_after_units: u64,
     pub retry_count: u32,
@@ -334,8 +342,101 @@ fn plan_actions(
             .then_with(|| left.action_id.cmp(&right.action_id))
     });
     actions.dedup_by(|left, right| left.action_id == right.action_id);
-    actions.truncate(request.max_actions_per_round.min(MAX_ACTIONS_PER_ROUND));
     Ok(actions)
+}
+
+fn action_kind_key(kind: IngestionQcActionKind) -> &'static str {
+    match kind {
+        IngestionQcActionKind::AddMissingModality => "add_missing_modality",
+        IngestionQcActionKind::AddMissingModelSystem => "add_missing_model_system",
+        IngestionQcActionKind::RepairExcludedObservation => "repair_excluded_observation",
+        IngestionQcActionKind::ResolveQualityDefect => "resolve_quality_defect",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActionBatchState {
+    selected: Vec<usize>,
+}
+
+fn action_batch_score(state: &ActionBatchState, actions: &[IngestionQcAction]) -> u64 {
+    let mut score = 0_u64;
+    let mut modalities = BTreeSet::new();
+    let mut models = BTreeSet::new();
+    let mut kinds = BTreeSet::new();
+    let mut targets = BTreeSet::new();
+    for index in &state.selected {
+        let action = &actions[*index];
+        score = score.saturating_add(
+            u64::from(action.priority_milli).saturating_mul(PRIORITY_SELECTION_SCALE),
+        );
+        if action
+            .modality
+            .is_some_and(|modality| modalities.insert(modality))
+        {
+            score = score.saturating_add(MODALITY_NOVELTY_BONUS);
+        }
+        if action
+            .model_system
+            .is_some_and(|model| models.insert(model))
+        {
+            score = score.saturating_add(MODEL_NOVELTY_BONUS);
+        }
+        if kinds.insert(action_kind_key(action.kind)) {
+            score = score.saturating_add(ACTION_KIND_NOVELTY_BONUS);
+        }
+        if targets.insert(action.target.as_str()) {
+            score = score.saturating_add(TARGET_NOVELTY_BONUS);
+        }
+    }
+    score
+}
+
+/// Choose a deterministic QC batch that preserves priority while paying for orthogonal coverage.
+/// A batch can therefore repair one defect and acquire a missing modality/model in the same
+/// round. The bounded beam scores the *whole* batch, avoiding a myopic greedy choice when two
+/// individually weaker actions jointly close more independent QC debt.
+fn select_action_batch(
+    actions: &[IngestionQcAction],
+    batch_limit: usize,
+) -> Vec<IngestionQcAction> {
+    if batch_limit == 0 || actions.is_empty() {
+        return Vec::new();
+    }
+    let mut states = vec![ActionBatchState {
+        selected: Vec::new(),
+    }];
+    for index in 0..actions.len() {
+        let mut next = states.clone();
+        for state in &states {
+            if state.selected.len() < batch_limit {
+                let mut selected = state.selected.clone();
+                selected.push(index);
+                next.push(ActionBatchState { selected });
+            }
+        }
+        next.sort_by(|left, right| {
+            action_batch_score(right, actions)
+                .cmp(&action_batch_score(left, actions))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        next.dedup_by(|left, right| left.selected == right.selected);
+        next.truncate(ACTION_BATCH_BEAM_WIDTH);
+        states = next;
+    }
+    let chosen = states
+        .into_iter()
+        .max_by(|left, right| {
+            action_batch_score(left, actions)
+                .cmp(&action_batch_score(right, actions))
+                .then_with(|| right.selected.cmp(&left.selected))
+        })
+        .expect("action beam always retains an empty state");
+    chosen
+        .selected
+        .into_iter()
+        .map(|index| actions[index].clone())
+        .collect()
 }
 
 fn replace_observations(
@@ -436,7 +537,7 @@ impl MultimodalIngestionCampaign {
                 || !canonical(&round.failed_order)
                 || !canonical(&round.accepted_observation_order)
                 || round.budget_after_units > round.budget_before_units
-                || u64::from(round.cost_units)
+                || round.cost_units
                     != round
                         .budget_before_units
                         .saturating_sub(round.budget_after_units)
@@ -448,7 +549,7 @@ impl MultimodalIngestionCampaign {
             round.report.validate().map_err(|error| {
                 MultimodalIngestionCampaignError::InvalidOutput(error.to_string())
             })?;
-            spent = spent.saturating_add(u64::from(round.cost_units));
+            spent = spent.saturating_add(round.cost_units);
             retries = retries.saturating_add(round.retry_count);
         }
         if spent != self.budget_spent_units || retries != self.retry_count {
@@ -514,19 +615,30 @@ pub fn execute_glioma_multimodal_ingestion_campaign<E: MultimodalIngestionCampai
             break;
         }
         let max_batch = (remaining / u64::from(request.cost_per_action_units)) as usize;
-        let selected = eligible
-            .into_iter()
-            .take(max_batch.clamp(1, MAX_ACTIONS_PER_ROUND))
-            .collect::<Vec<_>>();
+        let batch_limit = max_batch
+            .max(1)
+            .min(request.max_actions_per_round)
+            .min(MAX_ACTIONS_PER_ROUND);
+        let selected = select_action_batch(&eligible, batch_limit);
         let before_budget = remaining;
+        let before_spent = budget_spent;
         let mut completed_round = Vec::new();
         let mut failed_round = Vec::new();
         let mut accepted_round = Vec::new();
         let mut retry_round = 0_u32;
         let mut progress = false;
+        let mut budget_blocked_round = false;
         for action in &selected {
             let mut returned = None;
             for attempt in 1..=request.max_retries.saturating_add(1) {
+                let action_cost = u64::from(request.cost_per_action_units);
+                if budget_spent.saturating_add(action_cost) > request.budget_units {
+                    budget_blocked_round = true;
+                    break;
+                }
+                // Charge every provider invocation before dispatch. A retry therefore consumes
+                // the same declared action cost and cannot create fictitious budget headroom.
+                budget_spent = budget_spent.saturating_add(action_cost);
                 match executor.ingest_action(
                     &request.request,
                     action,
@@ -546,6 +658,12 @@ pub fn execute_glioma_multimodal_ingestion_campaign<E: MultimodalIngestionCampai
                             ));
                         }
                         if error.retryable && attempt <= request.max_retries {
+                            if budget_spent.saturating_add(action_cost) > request.budget_units {
+                                budget_blocked_round = true;
+                                failed_round.push(action.action_id.clone());
+                                failed.insert(action.action_id.clone());
+                                break;
+                            }
                             retry_count = retry_count.saturating_add(1);
                             retry_round = retry_round.saturating_add(1);
                             continue;
@@ -572,10 +690,7 @@ pub fn execute_glioma_multimodal_ingestion_campaign<E: MultimodalIngestionCampai
         completed_round.sort();
         failed_round.sort();
         accepted_round.sort();
-        let cost = request
-            .cost_per_action_units
-            .saturating_mul(selected.len() as u32);
-        budget_spent = budget_spent.saturating_add(u64::from(cost));
+        let cost = budget_spent.saturating_sub(before_spent);
         let after_budget = request.budget_units.saturating_sub(budget_spent);
         let updated_report = harmonize_multimodal_inputs(&request.request, &observations)
             .map_err(|error| MultimodalIngestionCampaignError::Planning(error.to_string()))?;
@@ -599,6 +714,10 @@ pub fn execute_glioma_multimodal_ingestion_campaign<E: MultimodalIngestionCampai
             budget_after_units: after_budget,
             retry_count: retry_round,
         });
+        if budget_blocked_round {
+            stop_reason = MultimodalIngestionCampaignStopReason::BudgetExhausted;
+            break;
+        }
         if !failed_round.is_empty() {
             stop_reason = MultimodalIngestionCampaignStopReason::ExecutorFailed;
             break;
@@ -770,6 +889,97 @@ mod tests {
     }
 
     #[test]
+    fn batch_selection_keeps_missing_modality_visible_beside_repeated_repairs() {
+        let actions = vec![
+            IngestionQcAction {
+                action_id: "repair:defect-a".into(),
+                kind: IngestionQcActionKind::RepairExcludedObservation,
+                target: "defect-a".into(),
+                modality: None,
+                model_system: None,
+                priority_milli: 1_000,
+                rationale: "repair first excluded observation".into(),
+            },
+            IngestionQcAction {
+                action_id: "repair:defect-b".into(),
+                kind: IngestionQcActionKind::RepairExcludedObservation,
+                target: "defect-b".into(),
+                modality: None,
+                model_system: None,
+                priority_milli: 990,
+                rationale: "repair second excluded observation".into(),
+            },
+            IngestionQcAction {
+                action_id: "missing:imaging".into(),
+                kind: IngestionQcActionKind::AddMissingModality,
+                target: "Imaging".into(),
+                modality: Some(GliomaModality::Imaging),
+                model_system: None,
+                priority_milli: 900,
+                rationale: "acquire missing imaging coverage".into(),
+            },
+        ];
+        let selected = select_action_batch(&actions, 2);
+        let selected_ids = selected
+            .iter()
+            .map(|action| action.action_id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(selected_ids.len(), 2);
+        assert!(selected_ids.contains("repair:defect-a"));
+        assert!(selected_ids.contains("missing:imaging"));
+    }
+
+    #[test]
+    fn bounded_beam_prefers_two_orthogonal_qc_actions_over_repeated_repairs() {
+        let actions = vec![
+            IngestionQcAction {
+                action_id: "repair:defect-a".into(),
+                kind: IngestionQcActionKind::RepairExcludedObservation,
+                target: "defect-a".into(),
+                modality: None,
+                model_system: None,
+                priority_milli: 950,
+                rationale: "repair a repeated technical defect".into(),
+            },
+            IngestionQcAction {
+                action_id: "repair:defect-b".into(),
+                kind: IngestionQcActionKind::RepairExcludedObservation,
+                target: "defect-b".into(),
+                modality: None,
+                model_system: None,
+                priority_milli: 949,
+                rationale: "repair another repeated technical defect".into(),
+            },
+            IngestionQcAction {
+                action_id: "missing:imaging".into(),
+                kind: IngestionQcActionKind::AddMissingModality,
+                target: "Imaging".into(),
+                modality: Some(GliomaModality::Imaging),
+                model_system: None,
+                priority_milli: 900,
+                rationale: "restore spatial coverage".into(),
+            },
+            IngestionQcAction {
+                action_id: "missing:model".into(),
+                kind: IngestionQcActionKind::AddMissingModelSystem,
+                target: "CellLine".into(),
+                modality: Some(GliomaModality::Genomics),
+                model_system: Some(GliomaModelSystem::CellLine),
+                priority_milli: 900,
+                rationale: "restore independent model-system coverage".into(),
+            },
+        ];
+        let selected_ids = select_action_batch(&actions, 2)
+            .into_iter()
+            .map(|action| action.action_id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            selected_ids,
+            BTreeSet::from(["missing:imaging".to_string(), "missing:model".to_string(),])
+        );
+    }
+
+    #[test]
     fn budget_exhaustion_is_explicit_for_multiple_missing_modalities() {
         let mut request = request();
         request.request.required_modalities = BTreeSet::from([
@@ -788,6 +998,61 @@ mod tests {
             output.disposition,
             MultimodalIngestionCampaignDisposition::BudgetBlocked
         );
+        output.validate().unwrap();
+    }
+
+    struct RetryThenSuccessExecutor {
+        attempts: Vec<u8>,
+    }
+
+    impl MultimodalIngestionCampaignExecutor for RetryThenSuccessExecutor {
+        fn ingest_action(
+            &mut self,
+            _request: &MultimodalRequest,
+            action: &IngestionQcAction,
+            _report: &MultimodalQcReport,
+            _observations: &[MultimodalObservation],
+            attempt: u8,
+        ) -> Result<Vec<MultimodalObservation>, MultimodalIngestionExecutionFailure> {
+            self.attempts.push(attempt);
+            if attempt == 1 {
+                return Err(MultimodalIngestionExecutionFailure {
+                    reason: "temporary catalog lock".into(),
+                    retryable: true,
+                });
+            }
+            Ok(vec![observation(
+                &format!("returned-{}", action.action_id),
+                action.modality.unwrap_or(GliomaModality::Imaging),
+            )])
+        }
+    }
+
+    #[test]
+    fn retry_is_not_counted_or_dispatched_when_remaining_budget_cannot_fund_it() {
+        let mut request = request();
+        request.budget_units = 1;
+        request.max_rounds = 1;
+        let mut executor = RetryThenSuccessExecutor {
+            attempts: Vec::new(),
+        };
+        let output = execute_glioma_multimodal_ingestion_campaign(&request, &mut executor)
+            .expect("budget stop is a valid campaign result");
+
+        assert_eq!(executor.attempts, vec![1]);
+        assert_eq!(output.retry_count, 0);
+        assert_eq!(output.budget_spent_units, 1);
+        assert_eq!(output.remaining_budget_units, 0);
+        assert_eq!(
+            output.stop_reason,
+            MultimodalIngestionCampaignStopReason::BudgetExhausted
+        );
+        assert!(output
+            .failed_order
+            .iter()
+            .any(|action_id| action_id.starts_with("qc:missing-modality:")));
+        assert_eq!(output.rounds[0].cost_units, 1);
+        assert_eq!(output.rounds[0].retry_count, 0);
         output.validate().unwrap();
     }
 }

@@ -315,17 +315,20 @@ fn validation_gate(
             ValidationReplicationGateDisposition::Negative,
             "publish the validation null or futility result and retire the replication request",
         ),
-        ValidationCampaignStopReason::RiskBlocked | ValidationCampaignStopReason::BudgetBlocked => (
-            ValidationReplicationGateDisposition::Blocked,
-            "repair the validation risk or budget boundary before requesting replication",
-        ),
+        ValidationCampaignStopReason::RiskBlocked | ValidationCampaignStopReason::BudgetBlocked => {
+            (
+                ValidationReplicationGateDisposition::Blocked,
+                "repair the validation risk or budget boundary before requesting replication",
+            )
+        }
         ValidationCampaignStopReason::ExecutionBlocked
         | ValidationCampaignStopReason::ProtocolBlocked
         | ValidationCampaignStopReason::Unresolved => (
             ValidationReplicationGateDisposition::Blocked,
             "resolve the incomplete validation workflow before requesting replication",
         ),
-        ValidationCampaignStopReason::AwaitingMeasurements | ValidationCampaignStopReason::MaxRounds => (
+        ValidationCampaignStopReason::AwaitingMeasurements
+        | ValidationCampaignStopReason::MaxRounds => (
             ValidationReplicationGateDisposition::HoldValidation,
             "complete a measured validation look and establish an efficacy boundary before replication",
         ),

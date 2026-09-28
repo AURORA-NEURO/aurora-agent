@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P05-F29";
-pub const OUTPUT_SCHEMA: &str = "GliomaPathwayActivity1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaPathwayActivity1@2";
 const SCALE: i64 = 1_000;
 const MAX_PATHWAYS: usize = 4_096;
 const MAX_NODES: usize = 32_768;
@@ -29,6 +29,8 @@ pub struct PathwayActivityRequest {
     pub min_confidence_milli: u16,
     pub max_pathways: usize,
     pub require_cross_modal: bool,
+    pub min_edge_agreement_milli: u16,
+    pub require_edge_consistency: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +88,9 @@ pub struct PathwayActivityRecord {
     pub observed_node_order: Vec<String>,
     pub missing_node_order: Vec<String>,
     pub modality_order: Vec<GliomaModality>,
+    pub edge_order: Vec<String>,
+    pub edge_conflict_order: Vec<String>,
+    pub edge_agreement_milli: u16,
     pub signed_activity_milli: i64,
     pub coverage_milli: u16,
     pub cross_modal_agreement_milli: u16,
@@ -167,10 +172,13 @@ impl PathwayActivityAnalysis {
                     || !ordered(&pathway.observed_node_order)
                     || !ordered(&pathway.missing_node_order)
                     || !ordered(&pathway.modality_order)
+                    || !ordered(&pathway.edge_order)
+                    || !ordered(&pathway.edge_conflict_order)
                     || !ordered(&pathway.bottleneck_order)
                     || pathway.coverage_milli > 1_000
                     || pathway.cross_modal_agreement_milli > 1_000
                     || pathway.confidence_milli > 1_000
+                    || pathway.edge_agreement_milli > 1_000
             })
         {
             return Err(PathwayActivityError::InvalidOutput(
@@ -214,6 +222,7 @@ fn validate_request(request: &PathwayActivityRequest) -> Result<(), PathwayActiv
         || request.min_confidence_milli > 1_000
         || request.max_pathways == 0
         || request.max_pathways > MAX_PATHWAYS
+        || request.min_edge_agreement_milli > 1_000
     {
         return Err(PathwayActivityError::InvalidRequest(
             "objective, study, pathway floors, confidence, or pathway bounds are invalid".into(),
@@ -243,6 +252,10 @@ fn validate_definition(definition: &PathwayActivityDefinition) -> Result<(), Pat
                 || ![-1, 1].contains(&edge.relation)
                 || edge.confidence_milli > 1_000
         })
+        || definition
+            .edges
+            .windows(2)
+            .any(|pair| edge_id(&pair[0]) >= edge_id(&pair[1]))
     {
         return Err(PathwayActivityError::InvalidInput(format!(
             "pathway definition {} is not canonical or bounded",
@@ -268,6 +281,58 @@ fn validate_definition(definition: &PathwayActivityDefinition) -> Result<(), Pat
 
 fn normalize(value: i64) -> i64 {
     value.clamp(-SCALE, SCALE)
+}
+
+fn edge_id(edge: &PathwayActivityEdge) -> String {
+    format!(
+        "{}>{}:{}",
+        edge.source_node_id, edge.target_node_id, edge.relation
+    )
+}
+
+fn reliability_weighted_median(values: &[(i64, u16)]) -> i64 {
+    if values.is_empty() {
+        return 0;
+    }
+    let mut ordered = values.to_vec();
+    ordered.sort_by_key(|(value, _)| *value);
+    let total_weight = ordered
+        .iter()
+        .map(|(_, reliability)| u64::from(*reliability))
+        .sum::<u64>();
+    if total_weight == 0 {
+        return ordered[ordered.len() / 2].0;
+    }
+    let threshold = total_weight.div_ceil(2);
+    let mut cumulative = 0_u64;
+    for (value, reliability) in ordered {
+        cumulative = cumulative.saturating_add(u64::from(reliability));
+        if cumulative >= threshold {
+            return value;
+        }
+    }
+    values[values.len() - 1].0
+}
+
+fn aggregate_lineage_observations(values: &[(i64, u16)]) -> (i64, u16, u64) {
+    let value = reliability_weighted_median(values);
+    let reliability = (values
+        .iter()
+        .map(|(_, reliability)| u64::from(*reliability))
+        .sum::<u64>()
+        / values.len().max(1) as u64)
+        .min(1_000) as u16;
+    let min = values
+        .iter()
+        .map(|(value, _)| *value)
+        .min()
+        .unwrap_or(value);
+    let max = values
+        .iter()
+        .map(|(value, _)| *value)
+        .max()
+        .unwrap_or(value);
+    (value, reliability, max.saturating_sub(min).unsigned_abs())
 }
 
 /// Infer signed pathway activity from local molecular observations. The result is deliberately a
@@ -306,7 +371,7 @@ pub fn analyze_glioma_pathway_activity(
             "total pathway nodes exceed bounded analysis budget".into(),
         ));
     }
-    let mut values: BTreeMap<(GliomaModality, String), (i64, u16)> = BTreeMap::new();
+    let mut values: BTreeMap<(GliomaModality, String), Vec<(i64, u16)>> = BTreeMap::new();
     let mut seen = BTreeSet::new();
     for observation in observations {
         if observation.observation_id.trim().is_empty()
@@ -333,12 +398,8 @@ pub fn analyze_glioma_pathway_activity(
         let key = (observation.modality, observation.feature_id.clone());
         values
             .entry(key)
-            .and_modify(|current| {
-                if observation.reliability_milli > current.1 {
-                    *current = (observation.value_milli, observation.reliability_milli);
-                }
-            })
-            .or_insert((observation.value_milli, observation.reliability_milli));
+            .or_default()
+            .push((observation.value_milli, observation.reliability_milli));
     }
     let pathway_order = pathways.keys().cloned().collect::<Vec<_>>();
     let mut records = Vec::new();
@@ -358,20 +419,30 @@ pub fn analyze_glioma_pathway_activity(
         let mut weight_total = 0i128;
         let mut confidence_sum = 0i128;
         let mut bottleneck = Vec::new();
+        let mut lineage_disagreement = BTreeSet::new();
         let mut per_modality: BTreeMap<GliomaModality, Vec<i64>> = BTreeMap::new();
+        let mut signed_by_node = BTreeMap::<String, i64>::new();
         for node in &definition.nodes {
             let key = (node.modality, node.node_id.clone());
-            if let Some((value, reliability)) = values.get(&key) {
-                let signed = normalize(*value) * i64::from(node.expected_direction);
-                let weight = i128::from(node.weight_milli) * i128::from(*reliability);
+            if let Some(lineage_values) = values.get(&key) {
+                let (value, reliability, spread) = aggregate_lineage_observations(lineage_values);
+                let signed = normalize(value) * i64::from(node.expected_direction);
+                signed_by_node.insert(node.node_id.clone(), signed);
+                let weight = i128::from(node.weight_milli) * i128::from(reliability);
                 weighted_sum += i128::from(signed) * weight;
                 weight_total += weight;
-                confidence_sum += i128::from(*reliability) * i128::from(node.weight_milli);
+                confidence_sum += i128::from(reliability) * i128::from(node.weight_milli);
                 observed.push(node.node_id.clone());
                 modalities.insert(node.modality);
                 per_modality.entry(node.modality).or_default().push(signed);
-                if *reliability < request.min_confidence_milli {
+                if reliability < request.min_confidence_milli {
                     bottleneck.push(node.node_id.clone());
+                }
+                if spread > 500 {
+                    lineage_disagreement.insert(format!(
+                        "cross-lineage-disagreement:{}:spread-{}",
+                        node.node_id, spread
+                    ));
                 }
             } else {
                 missing.push(node.node_id.clone());
@@ -407,10 +478,43 @@ pub fn analyze_glioma_pathway_activity(
             let max = *modality_means.iter().max().unwrap_or(&0);
             (SCALE - (max - min).unsigned_abs().min(SCALE as u64) as i64) as u16
         };
+        let edge_order = definition.edges.iter().map(edge_id).collect::<Vec<_>>();
+        let mut edge_conflict_order = Vec::new();
+        let mut edge_weight_total = 0_u128;
+        let mut edge_weight_agree = 0_u128;
+        for edge in &definition.edges {
+            let Some(source) = signed_by_node.get(&edge.source_node_id) else {
+                continue;
+            };
+            let Some(target) = signed_by_node.get(&edge.target_node_id) else {
+                continue;
+            };
+            if *source == 0 || *target == 0 {
+                continue;
+            }
+            let edge_weight = u128::from(edge.confidence_milli);
+            edge_weight_total = edge_weight_total.saturating_add(edge_weight);
+            if source.signum() * target.signum() == i64::from(edge.relation) {
+                edge_weight_agree = edge_weight_agree.saturating_add(edge_weight);
+            } else {
+                edge_conflict_order.push(edge_id(edge));
+            }
+        }
+        let edge_agreement = if definition.edges.is_empty() {
+            1_000
+        } else if edge_weight_total == 0 {
+            0
+        } else {
+            (edge_weight_agree.saturating_mul(1_000) / edge_weight_total).min(1_000) as u16
+        };
+        let edge_gate = !request.require_edge_consistency
+            || definition.edges.is_empty()
+            || (edge_weight_total > 0 && edge_agreement >= request.min_edge_agreement_milli);
         let direction = if observed.len() < request.min_observed_nodes
             || modalities.len() < request.min_modalities
             || confidence < request.min_confidence_milli
             || (request.require_cross_modal && modalities.len() < 2)
+            || !edge_gate
         {
             PathwayActivityDirection::Unresolved
         } else if activity > 100 {
@@ -428,9 +532,22 @@ pub fn analyze_glioma_pathway_activity(
         if agreement < request.min_confidence_milli {
             record_negative.insert("modalities disagree on signed pathway activity".into());
         }
+        if !edge_conflict_order.is_empty() {
+            record_negative
+                .insert("declared pathway edges contradict observed signed activity".into());
+        }
+        if !edge_gate {
+            record_uncertainty
+                .insert("pathway edge-consistency evidence did not meet the release floor".into());
+        }
         if confidence < request.min_confidence_milli {
             record_uncertainty
                 .insert("observed node reliability is below the release floor".into());
+        }
+        record_uncertainty.extend(lineage_disagreement.iter().cloned());
+        if !lineage_disagreement.is_empty() {
+            record_negative
+                .insert("cross-lineage disagreement was retained in the pathway estimate".into());
         }
         if direction == PathwayActivityDirection::Unresolved {
             record_uncertainty.insert(
@@ -446,6 +563,9 @@ pub fn analyze_glioma_pathway_activity(
             observed_node_order: observed,
             missing_node_order: missing,
             modality_order: modalities.into_iter().collect(),
+            edge_order,
+            edge_conflict_order,
+            edge_agreement_milli: edge_agreement,
             signed_activity_milli: activity,
             coverage_milli: coverage,
             cross_modal_agreement_milli: agreement,
@@ -463,7 +583,8 @@ pub fn analyze_glioma_pathway_activity(
                 record.pathway_id.clone(),
                 (record.signed_activity_milli.unsigned_abs()
                     * u64::from(record.coverage_milli)
-                    * u64::from(record.confidence_milli)),
+                    * u64::from(record.confidence_milli)
+                    * u64::from(record.edge_agreement_milli)),
             )
         })
         .collect::<Vec<_>>();
@@ -526,6 +647,8 @@ mod tests {
             min_confidence_milli: 700,
             max_pathways: 8,
             require_cross_modal: true,
+            min_edge_agreement_milli: 700,
+            require_edge_consistency: true,
         }
     }
     fn definition() -> PathwayActivityDefinition {
@@ -606,5 +729,54 @@ mod tests {
         assert_eq!(output.disposition, PathwayActivityDisposition::Unresolved);
         assert_eq!(output.pathways[0].missing_node_order, vec!["vimentin"]);
         assert!(!output.negative_evidence.is_empty());
+    }
+
+    #[test]
+    fn cross_lineage_disagreement_is_visible_and_median_resists_single_outlier() {
+        let mut observations = vec![
+            observation("g-a", GliomaModality::Genomics, "egfr", 700),
+            observation("g-b", GliomaModality::Genomics, "egfr", 720),
+            observation("g-c", GliomaModality::Genomics, "egfr", -900),
+            observation("t-a", GliomaModality::Transcriptomics, "vimentin", 800),
+        ];
+        observations[0].sample_lineage = "lineage-a".into();
+        observations[1].sample_lineage = "lineage-b".into();
+        observations[2].sample_lineage = "lineage-c".into();
+        observations[3].sample_lineage = "lineage-a".into();
+        let output = analyze_glioma_pathway_activity(&request(), &[definition()], &observations)
+            .expect("analysis");
+        let pathway = &output.pathways[0];
+        assert!(pathway
+            .uncertainty
+            .iter()
+            .any(|item| item.starts_with("cross-lineage-disagreement:egfr:")));
+        assert!(pathway
+            .negative_evidence
+            .iter()
+            .any(|item| item.contains("cross-lineage disagreement")));
+        assert!(pathway.signed_activity_milli > 0);
+        assert_eq!(output.disposition, PathwayActivityDisposition::Partial);
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn contradictory_declared_edge_blocks_pathway_release() {
+        let observations = vec![
+            observation("g", GliomaModality::Genomics, "egfr", 700),
+            observation("t", GliomaModality::Transcriptomics, "vimentin", -800),
+        ];
+        let output = analyze_glioma_pathway_activity(&request(), &[definition()], &observations)
+            .expect("analysis");
+        let pathway = &output.pathways[0];
+        assert_eq!(pathway.edge_order, vec!["egfr>vimentin:1"]);
+        assert_eq!(pathway.edge_conflict_order, vec!["egfr>vimentin:1"]);
+        assert_eq!(pathway.edge_agreement_milli, 0);
+        assert_eq!(pathway.direction, PathwayActivityDirection::Unresolved);
+        assert!(pathway
+            .negative_evidence
+            .iter()
+            .any(|item| item.contains("declared pathway edges contradict")));
+        assert_eq!(output.disposition, PathwayActivityDisposition::Unresolved);
+        output.validate().unwrap();
     }
 }

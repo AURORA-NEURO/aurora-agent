@@ -583,12 +583,12 @@ pub fn execute_glioma_replay_campaign<E: ReplayCampaignExecutor>(
             break;
         }
         let mut selected = Vec::new();
-        let mut round_cost = 0_u64;
+        let mut planned_cost = 0_u64;
         for task in eligible {
             let cost = u64::from(task.cost_units);
-            if selected.is_empty() || round_cost.saturating_add(cost) <= remaining {
+            if selected.is_empty() || planned_cost.saturating_add(cost) <= remaining {
                 selected.push(task);
-                round_cost = round_cost.saturating_add(cost);
+                planned_cost = planned_cost.saturating_add(cost);
             }
             if selected.len() >= 8 {
                 break;
@@ -603,11 +603,30 @@ pub fn execute_glioma_replay_campaign<E: ReplayCampaignExecutor>(
         let mut mismatched = Vec::new();
         let mut unavailable = Vec::new();
         let mut failed_round = Vec::new();
+        let mut round_cost = 0_u64;
         let mut retry_round = 0_u32;
         let mut progress = false;
+        let mut budget_exhausted_during_round = false;
         for task in selected.iter().copied() {
             let mut accepted = None;
             for attempt in 1..=request.max_retries.saturating_add(1) {
+                // Every replay worker invocation consumes the declared task cost.  Charge before
+                // dispatch so retries and terminal failures cannot create budget headroom that
+                // the replay manifest does not actually have.
+                let round_remaining = request
+                    .budget_units
+                    .saturating_sub(spent.saturating_add(round_cost));
+                if u64::from(task.cost_units) > round_remaining {
+                    failed_round.push(task.task_id.clone());
+                    failed.insert(task.task_id.clone());
+                    uncertainty.insert(format!(
+                        "replay-budget-exhausted-before-attempt:{}",
+                        task.task_id
+                    ));
+                    budget_exhausted_during_round = true;
+                    break;
+                }
+                round_cost = round_cost.saturating_add(u64::from(task.cost_units));
                 match executor.replay_task(task, request, attempt) {
                     Ok(observation) => {
                         validate_observation(&observation, task)?;
@@ -635,6 +654,9 @@ pub fn execute_glioma_replay_campaign<E: ReplayCampaignExecutor>(
                         break;
                     }
                 }
+            }
+            if budget_exhausted_during_round {
+                break;
             }
             if let Some(observation) = accepted {
                 match observation.status {
@@ -680,6 +702,10 @@ pub fn execute_glioma_replay_campaign<E: ReplayCampaignExecutor>(
             budget_after_units: after_budget,
             retry_count: retry_round,
         });
+        if budget_exhausted_during_round {
+            stop_reason = ReplayCampaignStopReason::BudgetExhausted;
+            break;
+        }
         if !failed_round.is_empty() {
             stop_reason = ReplayCampaignStopReason::ExecutorFailed;
             break;
@@ -843,6 +869,24 @@ mod tests {
         }
     }
 
+    fn matching_observation(task: &ReplayTask) -> ReplayObservation {
+        ReplayObservation {
+            task_id: task.task_id.clone(),
+            status: ReplayObservationStatus::Match,
+            observed_content_hash: Some(task.expected_content_hash.clone()),
+            artifact: Some(LocalArtifactRef {
+                artifact_id: task.artifact_id.clone(),
+                content_hash: task.expected_content_hash.clone(),
+                content_type: "application/vnd.aurora.glioma.replay-artifact+json".into(),
+                local_only: true,
+                contains_human_data: false,
+                contains_direct_identifiers: false,
+            }),
+            runtime_ticks: u64::from(task.cost_units),
+            note: "independent replay match".into(),
+        }
+    }
+
     #[test]
     fn replay_campaign_runs_dependency_order_and_is_stable() {
         let request = request();
@@ -916,5 +960,117 @@ mod tests {
         let mut executor = DryRunReplayCampaignExecutor;
         let error = execute_glioma_replay_campaign(&request, &mut executor).unwrap_err();
         assert!(error.to_string().contains("acyclic"));
+    }
+
+    #[test]
+    fn replay_retries_are_charged_before_dispatch() {
+        struct FailOnceExecutor {
+            calls: u8,
+        }
+
+        impl ReplayCampaignExecutor for FailOnceExecutor {
+            fn replay_task(
+                &mut self,
+                task: &ReplayTask,
+                _request: &ReplayCampaignRequest,
+                _attempt: u8,
+            ) -> Result<ReplayObservation, ReplayExecutionFailure> {
+                self.calls = self.calls.saturating_add(1);
+                if self.calls == 1 {
+                    Err(ReplayExecutionFailure {
+                        reason: "transient replay worker failure".into(),
+                        retryable: true,
+                    })
+                } else {
+                    Ok(matching_observation(task))
+                }
+            }
+        }
+
+        let mut request = request();
+        request.budget_units = 3;
+        let mut executor = FailOnceExecutor { calls: 0 };
+        let output = execute_glioma_replay_campaign(&request, &mut executor).unwrap();
+
+        assert_eq!(executor.calls, 3, "retry plus the dependent replay task");
+        assert_eq!(output.retry_count, 1);
+        assert_eq!(output.budget_spent_units, 3);
+        assert_eq!(output.remaining_budget_units, 0);
+        assert_eq!(output.disposition, ReplayCampaignDisposition::Reproducible);
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn replay_retry_is_stopped_when_budget_cannot_fund_the_next_attempt() {
+        struct FailOnceExecutor {
+            calls: u8,
+        }
+
+        impl ReplayCampaignExecutor for FailOnceExecutor {
+            fn replay_task(
+                &mut self,
+                task: &ReplayTask,
+                _request: &ReplayCampaignRequest,
+                _attempt: u8,
+            ) -> Result<ReplayObservation, ReplayExecutionFailure> {
+                self.calls = self.calls.saturating_add(1);
+                if self.calls == 1 {
+                    Err(ReplayExecutionFailure {
+                        reason: "transient replay worker failure".into(),
+                        retryable: true,
+                    })
+                } else {
+                    Ok(matching_observation(task))
+                }
+            }
+        }
+
+        let mut request = request();
+        request.budget_units = 2;
+        let mut executor = FailOnceExecutor { calls: 0 };
+        let output = execute_glioma_replay_campaign(&request, &mut executor).unwrap();
+
+        assert_eq!(executor.calls, 2, "the retry consumes the complete budget");
+        assert_eq!(output.retry_count, 1);
+        assert_eq!(output.budget_spent_units, 2);
+        assert_eq!(output.remaining_budget_units, 0);
+        assert_eq!(
+            output.stop_reason,
+            ReplayCampaignStopReason::BudgetExhausted
+        );
+        assert_eq!(output.disposition, ReplayCampaignDisposition::Blocked);
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn terminal_replay_failure_preserves_the_attempted_round_spend() {
+        struct TerminalFailureExecutor;
+
+        impl ReplayCampaignExecutor for TerminalFailureExecutor {
+            fn replay_task(
+                &mut self,
+                _task: &ReplayTask,
+                _request: &ReplayCampaignRequest,
+                _attempt: u8,
+            ) -> Result<ReplayObservation, ReplayExecutionFailure> {
+                Err(ReplayExecutionFailure {
+                    reason: "replay worker rejected the task".into(),
+                    retryable: false,
+                })
+            }
+        }
+
+        let mut request = request();
+        request.budget_units = 2;
+        let mut executor = TerminalFailureExecutor;
+        let output = execute_glioma_replay_campaign(&request, &mut executor).unwrap();
+
+        assert_eq!(output.rounds.len(), 1);
+        assert_eq!(output.rounds[0].cost_units, 1);
+        assert_eq!(output.budget_spent_units, 1);
+        assert_eq!(output.remaining_budget_units, 1);
+        assert_eq!(output.stop_reason, ReplayCampaignStopReason::ExecutorFailed);
+        assert_eq!(output.disposition, ReplayCampaignDisposition::Blocked);
+        output.validate().unwrap();
     }
 }

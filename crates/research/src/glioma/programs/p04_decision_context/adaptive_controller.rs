@@ -621,14 +621,13 @@ mod tests {
         .expect("adaptive controller");
         assert!(result.selected_portfolio.is_some());
         assert_eq!(result.selected_order.len(), 2);
-        assert!(result
-            .candidate_scores
-            .iter()
-            .any(|score| score.action_id == "b-prior-only"
+        assert!(result.candidate_scores.iter().any(|score| {
+            score.action_id == "b-prior-only"
                 && score
                     .reason_order
                     .iter()
-                    .any(|reason| reason.contains("exploration-bonus"))));
+                    .any(|reason| reason.contains("exploration-bonus"))
+        }));
         result.validate().expect("digest and invariants");
     }
 

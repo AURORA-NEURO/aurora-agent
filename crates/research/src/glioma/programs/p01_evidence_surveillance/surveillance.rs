@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P01-F09";
-pub const OUTPUT_SCHEMA: &str = "GliomaEvidenceSurveillance1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaEvidenceSurveillance1@2";
 pub const MAX_RECORDS: usize = 16_384;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +98,7 @@ pub struct EvidenceSurveillance {
     pub missing_model_order: Vec<GliomaModelSystem>,
     pub negative_evidence: Vec<String>,
     pub uncertainty: Vec<String>,
+    pub deferred_action_order: Vec<String>,
     pub disposition: EvidenceSurveillanceDisposition,
     pub digest: ContentHash,
 }
@@ -130,6 +131,7 @@ fn digest_input(output: &EvidenceSurveillance) -> serde_json::Value {
         "missing_model_order": output.missing_model_order,
         "negative_evidence": output.negative_evidence,
         "uncertainty": output.uncertainty,
+        "deferred_action_order": output.deferred_action_order,
         "disposition": output.disposition,
     })
 }
@@ -194,6 +196,10 @@ impl EvidenceSurveillance {
                 .windows(2)
                 .any(|pair| pair[0] >= pair[1])
             || self.uncertainty.windows(2).any(|pair| pair[0] >= pair[1])
+            || self
+                .deferred_action_order
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
         {
             return Err(EvidenceSurveillanceError::InvalidOutput(
                 "identity, ordering, score bounds, or rationale is invalid".into(),
@@ -243,6 +249,11 @@ impl EvidenceSurveillance {
                     .iter()
                     .map(|action| action.action_id.clone())
                     .collect::<Vec<_>>()
+            || !self
+                .action_order
+                .iter()
+                .collect::<BTreeSet<_>>()
+                .is_disjoint(&self.deferred_action_order.iter().collect::<BTreeSet<_>>())
             || self.change_order
                 != self
                     .changes
@@ -523,11 +534,29 @@ pub fn surveil_glioma_evidence(
             .cmp(&left.priority_milli)
             .then_with(|| left.action_id.cmp(&right.action_id))
     });
-    actions.truncate(request.max_actions);
-    let action_order = actions
+    let generated_action_order = actions
         .iter()
         .map(|action| action.action_id.clone())
         .collect::<Vec<_>>();
+    let selected_actions = actions
+        .iter()
+        .take(request.max_actions)
+        .cloned()
+        .collect::<Vec<_>>();
+    let selected_ids = selected_actions
+        .iter()
+        .map(|action| action.action_id.clone())
+        .collect::<BTreeSet<_>>();
+    let action_order = selected_actions
+        .iter()
+        .map(|action| action.action_id.clone())
+        .collect::<Vec<_>>();
+    let mut deferred_action_order = generated_action_order
+        .into_iter()
+        .filter(|action_id| !selected_ids.contains(action_id))
+        .collect::<Vec<_>>();
+    deferred_action_order.sort();
+    actions = selected_actions;
     let change_order = changes
         .iter()
         .map(|change| change.change_id.clone())
@@ -566,6 +595,9 @@ pub fn surveil_glioma_evidence(
     if !unresolved.is_empty() {
         uncertainty.insert("current-snapshot-retains-stale-or-unknown-evidence".into());
     }
+    if !deferred_action_order.is_empty() {
+        uncertainty.insert("surveillance-actions-deferred-at-request-cap".into());
+    }
     let disposition = if current.is_empty() {
         EvidenceSurveillanceDisposition::Unresolved
     } else if !uncertainty.is_empty() || !unresolved.is_empty() {
@@ -588,6 +620,7 @@ pub fn surveil_glioma_evidence(
         missing_model_order,
         negative_evidence: negative.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
+        deferred_action_order,
         disposition,
         digest: ContentHash::of_value(&serde_json::json!({}))
             .map_err(|error| EvidenceSurveillanceError::Digest(error.to_string()))?,
@@ -681,5 +714,30 @@ mod tests {
         assert_eq!(first.disposition, EvidenceSurveillanceDisposition::Partial);
         assert!(first.negative_evidence.contains(&"e2".to_string()));
         assert!(first.unresolved_order.contains(&"e1".to_string()));
+    }
+
+    #[test]
+    fn surveillance_retains_deferred_review_actions_at_the_request_cap() {
+        let mut request = request();
+        request.max_actions = 1;
+        let output = surveil_glioma_evidence(
+            &request,
+            &[],
+            &[
+                record("e1", EvidenceState::Supported, 900),
+                record("e2", EvidenceState::Supported, 850),
+            ],
+        )
+        .unwrap();
+        assert_eq!(output.actions.len(), 1);
+        assert_eq!(output.deferred_action_order.len(), 1);
+        assert!(output
+            .action_order
+            .iter()
+            .all(|action_id| !output.deferred_action_order.contains(action_id)));
+        assert!(output
+            .uncertainty
+            .contains(&"surveillance-actions-deferred-at-request-cap".into()));
+        output.validate().unwrap();
     }
 }

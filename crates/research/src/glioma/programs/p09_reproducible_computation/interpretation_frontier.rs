@@ -23,8 +23,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P09-F26";
-pub const OUTPUT_SCHEMA: &str = "GliomaComputationInterpretationFrontier1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaComputationInterpretationFrontier1@2";
 pub const MAX_ACTIONS: usize = 256;
+const FRONTIER_BEAM_WIDTH: usize = 96;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComputationInterpretationFrontierRequest {
@@ -54,6 +55,7 @@ pub struct ComputationInterpretationFrontier {
     pub replay_identity: ContentHash,
     pub action_order: Vec<String>,
     pub candidates: Vec<GliomaActionCandidate>,
+    pub deferred_action_order: Vec<String>,
     pub completed_source_order: Vec<String>,
     pub negative_source_order: Vec<String>,
     pub unresolved_source_order: Vec<String>,
@@ -111,6 +113,7 @@ fn digest_input(frontier: &ComputationInterpretationFrontier) -> serde_json::Val
         "replay_identity": frontier.replay_identity,
         "action_order": frontier.action_order,
         "candidates": frontier.candidates,
+        "deferred_action_order": frontier.deferred_action_order,
         "completed_source_order": frontier.completed_source_order,
         "negative_source_order": frontier.negative_source_order,
         "unresolved_source_order": frontier.unresolved_source_order,
@@ -181,6 +184,103 @@ fn action_for_status(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FrontierSelectionState {
+    selected: Vec<String>,
+    stages: BTreeSet<GliomaStageKind>,
+    utility: u128,
+    spent_units: u64,
+}
+
+fn candidate_utility(candidate: &GliomaActionCandidate) -> u128 {
+    u128::from(candidate.information_gain_milli)
+        .saturating_mul(4)
+        .saturating_add(u128::from(candidate.frontier_novelty_milli).saturating_mul(2))
+        .saturating_add(u128::from(candidate.workflow_leverage_milli).saturating_mul(3))
+        .saturating_add(u128::from(candidate.cross_stage_unlock_milli).saturating_mul(3))
+        .saturating_add(u128::from(candidate.reproducibility_safety_milli).saturating_mul(2))
+        .saturating_add(u128::from(candidate.federation_value_milli))
+        .saturating_add(u128::from(candidate.feasibility_milli))
+}
+
+fn frontier_state_score(state: &FrontierSelectionState) -> u128 {
+    state
+        .utility
+        .saturating_add((state.stages.len() as u128).saturating_mul(50_000))
+        .saturating_add((state.selected.len() as u128).saturating_mul(100))
+        .saturating_sub(state.spent_units.saturating_mul(10) as u128)
+}
+
+fn select_frontier_candidates(
+    candidates: &[GliomaActionCandidate],
+    max_actions: usize,
+    budget_units: u32,
+    forced_ids: &[String],
+) -> BTreeSet<String> {
+    let forced = forced_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let mut initial = FrontierSelectionState {
+        selected: Vec::new(),
+        stages: BTreeSet::new(),
+        utility: 0,
+        spent_units: 0,
+    };
+    for candidate in candidates {
+        if forced.contains(&candidate.action_id) && initial.selected.len() < max_actions {
+            initial.selected.push(candidate.action_id.clone());
+            initial.stages.insert(candidate.stage_kind);
+            initial.utility = initial.utility.saturating_add(candidate_utility(candidate));
+        }
+    }
+    let mut states = vec![initial];
+    for candidate in candidates {
+        if forced.contains(&candidate.action_id) {
+            continue;
+        }
+        let mut next = states.clone();
+        for state in &states {
+            if state.selected.len() >= max_actions
+                || state
+                    .spent_units
+                    .saturating_add(u64::from(candidate.cost_units))
+                    > u64::from(budget_units)
+            {
+                continue;
+            }
+            let mut selected = state.selected.clone();
+            selected.push(candidate.action_id.clone());
+            let mut stages = state.stages.clone();
+            stages.insert(candidate.stage_kind);
+            next.push(FrontierSelectionState {
+                selected,
+                stages,
+                utility: state.utility.saturating_add(candidate_utility(candidate)),
+                spent_units: state
+                    .spent_units
+                    .saturating_add(u64::from(candidate.cost_units)),
+            });
+        }
+        next.sort_by(|left, right| {
+            frontier_state_score(right)
+                .cmp(&frontier_state_score(left))
+                .then_with(|| left.spent_units.cmp(&right.spent_units))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        next.dedup_by(|left, right| left.selected == right.selected);
+        next.truncate(FRONTIER_BEAM_WIDTH);
+        states = next;
+    }
+    states
+        .into_iter()
+        .max_by(|left, right| {
+            frontier_state_score(left)
+                .cmp(&frontier_state_score(right))
+                .then_with(|| right.spent_units.cmp(&left.spent_units))
+                .then_with(|| right.selected.cmp(&left.selected))
+        })
+        .map(|state| state.selected.into_iter().collect())
+        .unwrap_or_default()
+}
+
 fn validate_request(
     request: &ComputationInterpretationFrontierRequest,
 ) -> Result<(), ComputationInterpretationFrontierError> {
@@ -191,6 +291,7 @@ fn validate_request(
         || request.default_cost_units == 0
         || request.selection.budget_units == 0
         || request.selection.max_actions == 0
+        || request.completed_action_order.len() > request.max_actions
         || request.max_rounds == 0
         || !canonical(&request.completed_action_order)
         || request
@@ -216,18 +317,27 @@ fn validate_request(
 
 impl ComputationInterpretationFrontier {
     pub fn validate(&self) -> Result<(), ComputationInterpretationFrontierError> {
-        let ids = self
+        let candidate_ids = self
             .candidates
             .iter()
             .map(|candidate| candidate.action_id.clone())
             .collect::<Vec<_>>();
+        let mut partition_ids = candidate_ids.clone();
+        partition_ids.extend(self.deferred_action_order.iter().cloned());
+        partition_ids.sort();
+        partition_ids.dedup();
         if self.feature_id != FEATURE_ID
             || self.output_schema != OUTPUT_SCHEMA
             || self.objective.trim().is_empty()
             || self.source_campaign_digest.as_str().len() != 64
             || self.replay_identity.as_str().len() != 64
-            || self.action_order != ids
             || !canonical(&self.action_order)
+            || !canonical(&candidate_ids)
+            || !canonical(&self.deferred_action_order)
+            || partition_ids != self.action_order
+            || candidate_ids
+                .iter()
+                .any(|id| self.deferred_action_order.binary_search(id).is_ok())
             || self.candidates.len() > MAX_ACTIONS
             || !canonical(&self.completed_source_order)
             || !canonical(&self.negative_source_order)
@@ -350,8 +460,24 @@ pub fn compile_glioma_computation_interpretation_frontier(
     }
     let mut candidates = candidates.into_values().collect::<Vec<_>>();
     candidates.sort_by(|left, right| left.action_id.cmp(&right.action_id));
-    candidates.truncate(request.max_actions);
-    if candidates.is_empty() && !request.allow_empty_frontier {
+    let all_action_order = candidates
+        .iter()
+        .map(|candidate| candidate.action_id.clone())
+        .collect::<Vec<_>>();
+    let selected_ids = select_frontier_candidates(
+        &candidates,
+        request.max_actions,
+        request.selection.budget_units,
+        &request.completed_action_order,
+    );
+    let deferred_action_order = candidates
+        .iter()
+        .filter(|candidate| !selected_ids.contains(&candidate.action_id))
+        .map(|candidate| candidate.action_id.clone())
+        .collect::<Vec<_>>();
+    candidates.retain(|candidate| selected_ids.contains(&candidate.action_id));
+    candidates.sort_by(|left, right| left.action_id.cmp(&right.action_id));
+    if all_action_order.is_empty() && !request.allow_empty_frontier {
         return Err(ComputationInterpretationFrontierError::InvalidInput(
             "computation campaign produced no interpretation, replication, or recovery action"
                 .into(),
@@ -368,23 +494,27 @@ pub fn compile_glioma_computation_interpretation_frontier(
     if !unresolved_source.is_empty() {
         requirements.insert("failed-partial-task-recovery-before-interpretation".into());
     }
+    let mut frontier_uncertainty = request.campaign.uncertainty.clone();
+    if !deferred_action_order.is_empty() {
+        frontier_uncertainty.push("frontier-portfolio-deferred-candidates-remain-routable".into());
+    }
+    frontier_uncertainty.sort();
+    frontier_uncertainty.dedup();
     let mut frontier = ComputationInterpretationFrontier {
         feature_id: FEATURE_ID.into(),
         output_schema: OUTPUT_SCHEMA.into(),
         objective: request.objective.clone(),
         source_campaign_digest: request.campaign.digest.clone(),
         replay_identity: request.campaign.replay_identity.clone(),
-        action_order: candidates
-            .iter()
-            .map(|candidate| candidate.action_id.clone())
-            .collect(),
+        action_order: all_action_order,
         candidates,
+        deferred_action_order,
         completed_source_order: completed_source.into_iter().collect(),
         negative_source_order: negative_source.into_iter().collect(),
         unresolved_source_order: unresolved_source.into_iter().collect(),
         evaluation_requirement_order: requirements.into_iter().collect(),
         negative_evidence: request.campaign.negative_evidence.clone(),
-        uncertainty: request.campaign.uncertainty.clone(),
+        uncertainty: frontier_uncertainty,
         digest: ContentHash::of_bytes(b"unsealed-glioma-computation-interpretation-frontier"),
     };
     frontier.digest = ContentHash::of_value(&digest_input(&frontier))
@@ -497,5 +627,24 @@ mod tests {
         assert_eq!(failed.stage_kind, GliomaStageKind::ComputationalExecution);
         assert!(completed.effects.contains(&Effect::ReadLocalData));
         assert_eq!(completed.autonomy_tier, AutonomyTier::A1);
+    }
+
+    #[test]
+    fn frontier_beam_keeps_complementary_actions_and_defers_expensive_candidate() {
+        let mut expensive =
+            action_for_status("expensive", "completed", GliomaModality::Transcriptomics, 7);
+        expensive.action_id = "action-expensive".into();
+        let mut negative =
+            action_for_status("negative", "negative", GliomaModality::Transcriptomics, 3);
+        negative.action_id = "action-negative".into();
+        let mut recovery =
+            action_for_status("recovery", "failed", GliomaModality::Transcriptomics, 3);
+        recovery.action_id = "action-recovery".into();
+        let candidates = vec![expensive, negative, recovery];
+        let selected = select_frontier_candidates(&candidates, 2, 6, &[]);
+        assert_eq!(
+            selected,
+            BTreeSet::from(["action-negative".into(), "action-recovery".into()])
+        );
     }
 }

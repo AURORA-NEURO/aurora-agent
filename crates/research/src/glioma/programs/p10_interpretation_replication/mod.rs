@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod adaptive_campaign;
 pub mod adaptive_execution;
 pub mod adaptive_frontier;
+pub mod autonomous_stage_bridge;
 pub mod campaign;
 pub mod causal_adjustment;
 pub mod causal_contrast;
@@ -12,13 +13,21 @@ pub mod claim_adjudication;
 pub mod clone_outcomes;
 pub mod closure_interpretation;
 pub mod computation_evidence_gate;
+pub mod cross_model_claim_envelope;
+pub mod cross_model_replication_frontier;
 pub mod dynamic_policy;
+pub mod lineage_dynamics;
+pub mod lineage_propagation;
+pub mod lineage_response_decomposition;
+pub mod lineage_transport;
 pub mod mediation;
 pub mod meta_analysis;
 pub mod operating_cycle;
+pub mod replication_assay_mapping_ledger;
 pub mod replication_closure_campaign;
 pub mod replication_closure_execution;
 pub mod replication_closure_frontier;
+pub mod replication_protocol_schema;
 pub mod sensitivity;
 pub mod state_transition;
 pub mod synthesis;
@@ -29,11 +38,12 @@ pub mod validation_replication_gate;
 
 pub use adaptive_campaign::{
     execute_glioma_adaptive_interpretation_campaign,
-    execute_glioma_adaptive_interpretation_campaign_dry_run, AdaptiveInterpretationCampaign,
-    AdaptiveInterpretationCampaignDisposition, AdaptiveInterpretationCampaignError,
-    AdaptiveInterpretationCampaignRequest, AdaptiveInterpretationCampaignRound,
-    AdaptiveInterpretationCampaignStopReason, AdaptiveInterpretationPlanner,
-    AdaptiveInterpretationPlanningFailure, DryRunAdaptiveInterpretationPlanner,
+    execute_glioma_adaptive_interpretation_campaign_dry_run, AdaptiveActionOutcomeSummary,
+    AdaptiveInterpretationCampaign, AdaptiveInterpretationCampaignDisposition,
+    AdaptiveInterpretationCampaignError, AdaptiveInterpretationCampaignRequest,
+    AdaptiveInterpretationCampaignRound, AdaptiveInterpretationCampaignStopReason,
+    AdaptiveInterpretationPlanner, AdaptiveInterpretationPlanningFailure,
+    DryRunAdaptiveInterpretationPlanner,
 };
 pub use adaptive_execution::{
     dry_run_glioma_adaptive_frontier_executor, execute_glioma_adaptive_frontier,
@@ -43,6 +53,14 @@ pub use adaptive_execution::{
 pub use adaptive_frontier::{
     plan_glioma_adaptive_research_frontier, AdaptiveFrontierCandidate, AdaptiveFrontierDisposition,
     AdaptiveFrontierError, AdaptiveFrontierRequest, AdaptiveResearchFrontier, AdaptiveTarget,
+};
+pub use autonomous_stage_bridge::{
+    dry_run_glioma_interpretation_stage_worker, dry_run_glioma_replication_stage_worker,
+    GliomaInterpretationStageBridgeError, GliomaInterpretationStageBridgeReceipt,
+    GliomaInterpretationStageWorker, GliomaReplicationStageBridgeError,
+    GliomaReplicationStageBridgeReceipt, GliomaReplicationStageWorker,
+    INTERPRETATION_OUTPUT_SCHEMA, INTERPRETATION_PARENT_FEATURE_ID, REPLICATION_OUTPUT_SCHEMA,
+    REPLICATION_PARENT_FEATURE_ID,
 };
 pub use campaign::{
     execute_glioma_replication_campaign, DryRunGliomaReplicationCampaignExecutor,
@@ -78,11 +96,50 @@ pub use computation_evidence_gate::{
     ComputationInterpretationEvidenceGateRequest, ComputationInterpretationObservation,
     ComputationInterpretationSynthesisPolicy,
 };
+pub use cross_model_claim_envelope::{
+    analyze_glioma_cross_model_claim_envelope, CrossModelClaimEnvelope,
+    CrossModelClaimEnvelopeDisposition, CrossModelClaimEnvelopeError,
+    CrossModelClaimEnvelopeRequest, CrossModelStudyEstimate, CrossModelSystemEnvelope,
+};
+pub use cross_model_replication_frontier::{
+    materialize_glioma_cross_model_replication_actions,
+    plan_glioma_cross_model_replication_frontier, CrossModelFollowUpKind,
+    CrossModelReplicationCandidate, CrossModelReplicationFrontier,
+    CrossModelReplicationFrontierDisposition, CrossModelReplicationFrontierError,
+    CrossModelReplicationFrontierRequest, CrossModelReplicationScore,
+};
 pub use dynamic_policy::{
     evaluate_glioma_dynamic_policies, DynamicPolicyCandidate, DynamicPolicyContribution,
     DynamicPolicyDisposition, DynamicPolicyError, DynamicPolicyEvaluation,
     DynamicPolicyObservation, DynamicPolicyRequest, DynamicPolicyRule, DynamicPolicyScore,
     DynamicPolicyScoreDisposition, DynamicPolicyTrajectory,
+};
+pub use lineage_dynamics::{
+    analyze_glioma_lineage_dynamics, ArmStateDynamics, BootstrapInterval, ComponentCall,
+    LineageDynamicsAnalysis, LineageDynamicsDisposition, LineageDynamicsError,
+    LineageDynamicsRequest, LineageStateCount, LineageStateSnapshot, LineageUnitDynamics,
+    StateLineageDynamicsContrast, UnitEligibility, UnitStateDynamics,
+};
+pub use lineage_propagation::{
+    analyze_glioma_lineage_propagation, CoefficientDisposition, EffectDisposition, HeldOutForecast,
+    LineagePropagationAnalysis, LineagePropagationBatchSensitivity,
+    LineagePropagationBatchSensitivityDisposition, LineagePropagationBootstrapDraw,
+    LineagePropagationCoefficient, LineagePropagationContrast, LineagePropagationDisposition,
+    LineagePropagationError, LineagePropagationOperator, LineagePropagationRequest,
+    LineagePropagationSnapshot, PpmInterval, PropagationDestinationShare, SourceStatePropagation,
+};
+pub use lineage_response_decomposition::{
+    analyze_glioma_lineage_response_decomposition, LineageResponseDecomposition,
+    LineageResponseDecompositionDisposition, LineageResponseDecompositionError,
+    LineageResponseDecompositionRequest, LineageResponseFollowUpFocus,
+    LineageResponsePairDecomposition,
+};
+pub use lineage_transport::{
+    analyze_glioma_lineage_transport, LineageTransportAnalysis, LineageTransportContrast,
+    LineageTransportContrastDisposition, LineageTransportDisposition, LineageTransportError,
+    LineageTransportFollowUpKind, LineageTransportRequest, LineageTransportStudy,
+    LineageTransportStudyExclusion, LineageTransportStudyExclusionReason,
+    LineageTransportSystemContrast,
 };
 pub use mediation::{
     analyze_glioma_mediation, MediationAnalysis, MediationDisposition, MediationError,
@@ -102,6 +159,11 @@ pub use operating_cycle::{
     GliomaInterpretationOperatingCycleError, GliomaInterpretationOperatingCycleRequest,
     InterpretationOperatingCycleDisposition,
 };
+pub use replication_assay_mapping_ledger::{
+    compile_glioma_replication_assay_mapping_ledger, AssayMappingDisposition, AssayMappingLedger,
+    AssayMappingLedgerError, AssayMappingLedgerRequest, AssayVariableSpec, CalibrationObservation,
+    EquivalenceTier, MappingProposal, MappingTransform,
+};
 pub use replication_closure_campaign::{
     execute_glioma_replication_closure_campaign, ReplicationClosureCampaignDisposition,
     ReplicationClosureCampaignError, ReplicationClosureCampaignRequest,
@@ -118,16 +180,23 @@ pub use replication_closure_frontier::{
     ReplicationClosureDisposition, ReplicationClosureFrontier, ReplicationClosureFrontierError,
     ReplicationClosureFrontierRequest, ReplicationClosureScore, ReplicationClosureTarget,
 };
+pub use replication_protocol_schema::{
+    compile_glioma_replication_protocol_schema, IndependentSiteSpec, MaskingSpec,
+    PrespecifiedAnalysis, ProtocolDeviation, ProtocolUnknown, RandomizationSpec, RandomizationUnit,
+    ReplicationEstimand, ReplicationProtocol, ReplicationProtocolDisposition,
+    ReplicationProtocolError, ReplicationProtocolRequest, StoppingRule,
+};
 pub use sensitivity::{
     analyze_causal_sensitivity, CausalSensitivityAnalysis, SensitivityDirection,
     SensitivityDisposition, SensitivityError, SensitivityObservation, SensitivityPoint,
     SensitivityRequest,
 };
 pub use state_transition::{
-    analyze_glioma_state_transitions, StateTransitionAnalysis, StateTransitionCell,
-    StateTransitionContrast, StateTransitionDisposition, StateTransitionError,
-    StateTransitionObservation, StateTransitionRequest, TransitionCellDisposition,
-    TransitionContrastDisposition, TransitionDirection,
+    analyze_glioma_state_transitions, StateTransitionAnalysis, StateTransitionBatchSensitivity,
+    StateTransitionBatchSensitivityDisposition, StateTransitionCell, StateTransitionContrast,
+    StateTransitionDisposition, StateTransitionError, StateTransitionObservation,
+    StateTransitionRequest, TransitionCellDisposition, TransitionContrastDisposition,
+    TransitionDirection, MAX_BATCH_SENSITIVITY_BATCHES,
 };
 
 pub use synthesis::{

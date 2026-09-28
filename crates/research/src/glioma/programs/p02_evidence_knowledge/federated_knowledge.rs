@@ -446,7 +446,9 @@ pub fn analyze_federated_knowledge(
                 FederatedKnowledgeKind::ConsensusNegative => {
                     "independent compilers agree on a negative disposition; preserve the null/negative result for replanning"
                 }
-                FederatedKnowledgeKind::SiteSpecific | FederatedKnowledgeKind::Unresolved => unreachable!(),
+                FederatedKnowledgeKind::SiteSpecific | FederatedKnowledgeKind::Unresolved => {
+                    unreachable!()
+                }
             };
             actions.push(FederatedKnowledgeAction {
                 action_id: format!("federated-knowledge:{claim_id}"),

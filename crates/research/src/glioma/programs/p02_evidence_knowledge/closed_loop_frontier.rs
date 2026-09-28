@@ -14,8 +14,9 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P02-F30";
-pub const OUTPUT_SCHEMA: &str = "GliomaClosedLoopFrontier1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaClosedLoopFrontier1@2";
 pub const MAX_ACTIONS: usize = 16_384;
+const FRONTIER_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -230,6 +231,88 @@ fn candidate_for(
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FrontierState {
+    selected: Vec<String>,
+    selected_kinds: BTreeSet<FrontierPromotionActionKind>,
+    spent_units: u64,
+    utility_milli: u128,
+}
+
+fn state_score(state: &FrontierState) -> u128 {
+    // Utility is priority per cost, while a modest portfolio-diversity term keeps the closed loop
+    // from spending an entire round on one action family when several claim states are actionable.
+    state
+        .utility_milli
+        .saturating_add((state.selected.len() as u128).saturating_mul(100))
+        .saturating_add((state.selected_kinds.len() as u128).saturating_mul(25_000))
+        .saturating_sub(u128::from(state.spent_units))
+}
+
+fn select_frontier_portfolio(
+    candidates: &[FrontierPromotionCandidate],
+    request: &ClosedLoopFrontierRequest,
+) -> (BTreeSet<String>, u64) {
+    let mut states = vec![FrontierState {
+        selected: Vec::new(),
+        selected_kinds: BTreeSet::new(),
+        spent_units: 0,
+        utility_milli: 0,
+    }];
+    for candidate in candidates {
+        if candidate.physical_effect && !request.allow_physical_execution {
+            continue;
+        }
+        let mut next = states.clone();
+        for state in &states {
+            if state.selected.len() >= request.max_actions
+                || state
+                    .spent_units
+                    .saturating_add(candidate.estimated_cost_units)
+                    > request.budget_units
+            {
+                continue;
+            }
+            let mut selected = state.selected.clone();
+            selected.push(candidate.candidate_id.clone());
+            let mut selected_kinds = state.selected_kinds.clone();
+            selected_kinds.insert(candidate.kind);
+            next.push(FrontierState {
+                selected,
+                selected_kinds,
+                spent_units: state
+                    .spent_units
+                    .saturating_add(candidate.estimated_cost_units),
+                utility_milli: state.utility_milli.saturating_add(
+                    u128::from(candidate.priority_milli)
+                        .saturating_mul(1_000)
+                        .checked_div(u128::from(candidate.estimated_cost_units).max(1))
+                        .unwrap_or(0),
+                ),
+            });
+        }
+        next.sort_by(|left, right| {
+            state_score(right)
+                .cmp(&state_score(left))
+                .then_with(|| left.spent_units.cmp(&right.spent_units))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        next.dedup_by(|left, right| left.selected == right.selected);
+        next.truncate(FRONTIER_BEAM_WIDTH);
+        states = next;
+    }
+    let chosen = states
+        .into_iter()
+        .max_by(|left, right| {
+            state_score(left)
+                .cmp(&state_score(right))
+                .then_with(|| right.spent_units.cmp(&left.spent_units))
+                .then_with(|| right.selected.cmp(&left.selected))
+        })
+        .expect("closed-loop frontier beam always retains an empty state");
+    (chosen.selected.into_iter().collect(), chosen.spent_units)
+}
+
 /// Promote reconciled claims into a deterministic, budget-bounded next-work frontier.
 pub fn promote_glioma_closed_loop_frontier(
     request: &ClosedLoopFrontierRequest,
@@ -268,27 +351,35 @@ pub fn promote_glioma_closed_loop_frontier(
             .then_with(|| left.estimated_cost_units.cmp(&right.estimated_cost_units))
             .then_with(|| left.candidate_id.cmp(&right.candidate_id))
     });
-    candidates.truncate(request.max_actions);
+    let (selected_ids, budget_used) = select_frontier_portfolio(&candidates, request);
     let mut selected = Vec::new();
     let mut deferred = Vec::new();
-    let mut budget_used = 0_u64;
     let mut selected_claims = BTreeSet::new();
     let mut uncertainty = BTreeSet::new();
     for candidate in &candidates {
-        if candidate.physical_effect && !request.allow_physical_execution {
+        if selected_ids.contains(&candidate.candidate_id)
+            && candidate.physical_effect
+            && !request.allow_physical_execution
+        {
             deferred.push(candidate.candidate_id.clone());
             uncertainty.insert(format!(
                 "{}:physical-execution-disabled",
                 candidate.claim_id
             ));
-        } else if budget_used.saturating_add(candidate.estimated_cost_units) <= request.budget_units
-        {
-            budget_used += candidate.estimated_cost_units;
+        } else if selected_ids.contains(&candidate.candidate_id) {
             selected.push(candidate.candidate_id.clone());
             selected_claims.insert(candidate.claim_id.clone());
+        } else if candidate.physical_effect && !request.allow_physical_execution {
+            deferred.push(candidate.candidate_id.clone());
+            uncertainty.insert(format!(
+                "{}:physical-execution-disabled",
+                candidate.claim_id
+            ));
         } else {
             deferred.push(candidate.candidate_id.clone());
-            uncertainty.insert(format!("{}:budget-deferred", candidate.claim_id));
+            if !selected_ids.contains(&candidate.candidate_id) {
+                uncertainty.insert(format!("{}:budget-deferred", candidate.claim_id));
+            }
         }
     }
     selected.sort();
@@ -506,6 +597,62 @@ mod tests {
         assert_eq!(
             output.candidates[0].kind,
             FrontierPromotionActionKind::RevalidateNegative
+        );
+    }
+
+    #[test]
+    fn portfolio_search_prefers_complementary_actions_over_one_expensive_claim() {
+        let request = ClosedLoopFrontierRequest {
+            objective: "maximize frontier coverage".into(),
+            reconciliation: reconciliation(ClaimReconciliationDecision::Contradicted),
+            budget_units: 10,
+            max_actions: 2,
+            min_priority_milli: 0,
+            include_stable_claims: true,
+            allow_physical_execution: false,
+        };
+        let candidates = vec![
+            FrontierPromotionCandidate {
+                candidate_id: "expensive-resolution".into(),
+                claim_id: "claim-a".into(),
+                kind: FrontierPromotionActionKind::ResolveContradiction,
+                priority_milli: 1_000,
+                estimated_cost_units: 9,
+                route: "resolve".into(),
+                requires_approval: false,
+                physical_effect: false,
+                rationale: "high-score single action".into(),
+            },
+            FrontierPromotionCandidate {
+                candidate_id: "cheap-gap".into(),
+                claim_id: "claim-b".into(),
+                kind: FrontierPromotionActionKind::CloseEvidenceGap,
+                priority_milli: 760,
+                estimated_cost_units: 5,
+                route: "gap".into(),
+                requires_approval: false,
+                physical_effect: false,
+                rationale: "orthogonal gap".into(),
+            },
+            FrontierPromotionCandidate {
+                candidate_id: "cheap-negative".into(),
+                claim_id: "claim-c".into(),
+                kind: FrontierPromotionActionKind::RevalidateNegative,
+                priority_milli: 760,
+                estimated_cost_units: 5,
+                route: "negative".into(),
+                requires_approval: false,
+                physical_effect: false,
+                rationale: "orthogonal negative".into(),
+            },
+        ];
+        let (selected, spent) = select_frontier_portfolio(&candidates, &request);
+        assert_eq!(spent, 10);
+        assert_eq!(
+            selected,
+            ["cheap-gap".to_string(), "cheap-negative".to_string()]
+                .into_iter()
+                .collect::<BTreeSet<_>>()
         );
     }
 }

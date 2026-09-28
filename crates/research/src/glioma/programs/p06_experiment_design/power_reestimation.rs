@@ -13,10 +13,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F04";
-pub const OUTPUT_SCHEMA: &str = "GliomaPowerReestimation1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaPowerReestimation1@2";
 pub const MAX_ARMS: usize = 256;
 pub const MAX_LOOKS: u16 = 128;
 pub const MAX_REPLICATES_PER_ARM: u32 = 1_000_000;
+const POWER_REESTIMATION_BEAM_WIDTH: usize = 128;
+const MARGINAL_UTILITY_SCALE: u128 = 1_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PowerReestimationRequest {
@@ -152,6 +154,22 @@ fn integer_sqrt(value: u128) -> u128 {
         }
     }
     high
+}
+
+/// Score a batch with diminishing marginal value for repeated replicates on the same arm.
+/// The first replicate receives the full declared information utility, the second half, the
+/// third one third, and so on. This keeps the allocation deterministic while approximating the
+/// variance-reduction curve of repeated measurements and prevents a linear proxy from crowding
+/// out complementary arms.
+fn diminishing_batch_utility(base_utility_milli: u16, replicates: u32) -> u128 {
+    (1..=replicates).fold(0_u128, |total, replicate| {
+        total.saturating_add(
+            u128::from(base_utility_milli)
+                .saturating_mul(MARGINAL_UTILITY_SCALE)
+                .checked_div(u128::from(replicate))
+                .unwrap_or(0),
+        )
+    })
 }
 
 fn digest_input(plan: &PowerReestimationPlan) -> serde_json::Value {
@@ -372,7 +390,7 @@ pub fn plan_glioma_power_reestimation(
     let mut budget_blocked_order = Vec::new();
     let mut negative_evidence = Vec::new();
     let mut uncertainty = Vec::new();
-    let mut planned = Vec::<(String, u32, u32, u16)>::new();
+    let mut planned = Vec::<(String, u32, u32, u16, u16)>::new();
     for arm in &sorted {
         let is_control = arm.arm_id == request.control_arm_id;
         let effect = if is_control {
@@ -465,6 +483,9 @@ pub fn plan_glioma_power_reestimation(
                 requested_new,
                 arm.cost_units,
                 power_proxy,
+                power_proxy
+                    .saturating_add(1_000u16.saturating_sub(arm.risk_milli))
+                    .min(1_000),
             ));
         }
         let rationale = match decision {
@@ -507,18 +528,98 @@ pub fn plan_glioma_power_reestimation(
             rationale,
         });
     }
-    planned.sort_by(|left, right| right.3.cmp(&left.3).then_with(|| left.0.cmp(&right.0)));
-    let mut remaining_budget = request.budget_units;
-    let mut selected_order = Vec::new();
-    let mut selected_ids = BTreeSet::new();
-    for (arm_id, replicates, cost, _) in &planned {
-        let projected = u64::from(*replicates).saturating_mul(u64::from(*cost));
-        if projected <= remaining_budget {
-            remaining_budget -= projected;
-            selected_order.push(arm_id.clone());
-            selected_ids.insert(arm_id.clone());
-        }
+    planned.sort_by(|left, right| {
+        right
+            .4
+            .cmp(&left.4)
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    // Whole-batch greedy ranking can spend the interim budget on one costly arm. Search over
+    // arm inclusion and partial replicate counts so complementary arms remain available when
+    // they provide more total information per declared resource unit.
+    #[derive(Clone)]
+    struct PowerAllocationState {
+        selections: Vec<(String, u32)>,
+        spent: u64,
+        utility: u128,
     }
+    fn state_better(left: &PowerAllocationState, right: &PowerAllocationState) -> bool {
+        left.utility > right.utility
+            || (left.utility == right.utility
+                && (left.selections.len() > right.selections.len()
+                    || (left.selections.len() == right.selections.len()
+                        && (left.spent < right.spent
+                            || (left.spent == right.spent && left.selections < right.selections)))))
+    }
+    let mut beam = vec![PowerAllocationState {
+        selections: Vec::new(),
+        spent: 0,
+        utility: 0,
+    }];
+    for (arm_id, requested, cost, _, utility) in &planned {
+        let mut expanded = beam.clone();
+        let max_affordable =
+            (request.budget_units / u64::from(*cost)).min(u64::from(*requested)) as u32;
+        for state in &beam {
+            for replicates in 1..=max_affordable {
+                let spent = state
+                    .spent
+                    .saturating_add(u64::from(replicates).saturating_mul(u64::from(*cost)));
+                if spent > request.budget_units {
+                    break;
+                }
+                let mut selections = state.selections.clone();
+                selections.push((arm_id.clone(), replicates));
+                expanded.push(PowerAllocationState {
+                    selections,
+                    spent,
+                    utility: state
+                        .utility
+                        .saturating_add(diminishing_batch_utility(*utility, replicates)),
+                });
+            }
+        }
+        expanded.sort_by(|left, right| {
+            right
+                .utility
+                .cmp(&left.utility)
+                .then_with(|| left.spent.cmp(&right.spent))
+                .then_with(|| left.selections.cmp(&right.selections))
+        });
+        let mut seen = BTreeSet::new();
+        expanded.retain(|state| seen.insert(state.selections.clone()));
+        expanded.truncate(POWER_REESTIMATION_BEAM_WIDTH);
+        beam = expanded;
+    }
+    let best = beam
+        .iter()
+        .max_by(|left, right| {
+            if state_better(left, right) {
+                std::cmp::Ordering::Greater
+            } else if state_better(right, left) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .cloned()
+        .unwrap_or_else(|| PowerAllocationState {
+            selections: Vec::new(),
+            spent: 0,
+            utility: 0,
+        });
+    let remaining_budget = request.budget_units.saturating_sub(best.spent);
+    let allocation_by_arm = best.selections.into_iter().collect::<BTreeMap<_, _>>();
+    let selected_order = planned
+        .iter()
+        .filter_map(|(arm_id, _, _, _, _)| allocation_by_arm.get(arm_id).map(|_| arm_id.clone()))
+        .collect::<Vec<_>>();
+    let selected_ids = allocation_by_arm.keys().cloned().collect::<BTreeSet<_>>();
+    let cost_by_arm = planned
+        .iter()
+        .map(|(arm_id, _, cost, _, _)| (arm_id.clone(), u64::from(*cost)))
+        .collect::<BTreeMap<_, _>>();
     for decision in &mut decisions {
         if (matches!(
             decision.decision,
@@ -531,6 +632,14 @@ pub fn plan_glioma_power_reestimation(
                 "the information-bearing batch was ranked below the remaining budget".into();
             decision.planned_replicates = 0;
             decision.projected_cost_units = 0;
+        } else if let Some(allocated) = allocation_by_arm.get(&decision.arm_id).copied() {
+            if allocated < decision.planned_replicates {
+                decision.rationale =
+                    "the bounded interim budget capped this arm's replicate batch".into();
+            }
+            decision.planned_replicates = allocated;
+            decision.projected_cost_units = u64::from(allocated)
+                .saturating_mul(cost_by_arm.get(&decision.arm_id).copied().unwrap_or(0));
         }
         match decision.decision {
             PowerDecisionKind::EfficacyStop => efficacy_stop_order.push(decision.arm_id.clone()),
@@ -710,5 +819,44 @@ mod tests {
         let first = plan_glioma_power_reestimation(&request(100), &arms()).unwrap();
         let second = plan_glioma_power_reestimation(&request(100), &reversed).unwrap();
         assert_eq!(first.digest, second.digest);
+    }
+
+    #[test]
+    fn repeated_replicates_have_diminishing_information_utility() {
+        let repeated_high = diminishing_batch_utility(1_000, 2);
+        let complementary =
+            diminishing_batch_utility(1_000, 1).saturating_add(diminishing_batch_utility(700, 1));
+        assert!(complementary > repeated_high);
+    }
+
+    #[test]
+    fn interim_beam_preserves_two_cheap_follow_up_arms() {
+        let mut expensive = arms()[1].clone();
+        expensive.arm_id = "expensive".into();
+        expensive.label = "expensive perturbation".into();
+        expensive.cost_units = 4;
+        expensive.risk_milli = 0;
+        let mut cheap_a = arms()[1].clone();
+        cheap_a.arm_id = "cheap-a".into();
+        cheap_a.label = "cheap perturbation a".into();
+        cheap_a.cost_units = 2;
+        cheap_a.risk_milli = 250;
+        let mut cheap_b = cheap_a.clone();
+        cheap_b.arm_id = "cheap-b".into();
+        let mut follow_up = request(4);
+        follow_up.max_new_replicates_per_arm = 2;
+        let plan = plan_glioma_power_reestimation(
+            &follow_up,
+            &[arms()[0].clone(), expensive, cheap_a, cheap_b],
+        )
+        .unwrap();
+        assert_eq!(plan.selected_order, vec!["cheap-a", "cheap-b"]);
+        assert_eq!(plan.budget_remaining_units, 0);
+        assert!(plan
+            .decisions
+            .iter()
+            .any(|decision| decision.arm_id == "expensive"
+                && decision.decision == PowerDecisionKind::BudgetBlocked));
+        plan.validate().unwrap();
     }
 }

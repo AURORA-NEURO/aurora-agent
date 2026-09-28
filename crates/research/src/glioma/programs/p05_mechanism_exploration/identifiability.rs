@@ -2,7 +2,7 @@
 //!
 //! A mechanism ranking can look decisive even when several mechanisms make nearly identical
 //! predictions. This feature exposes that ambiguity explicitly: it computes pairwise separation
-//! from typed local feature predictions, then greedily selects the most useful affordable features
+//! from typed local feature predictions, then searches a bounded portfolio of useful affordable features
 //! for unresolved pairs. It is a planning/analysis artifact and never turns model predictions
 //! into observed biology or a clinical recommendation.
 
@@ -13,10 +13,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P05-F02";
-pub const OUTPUT_SCHEMA: &str = "GliomaMechanismIdentifiability1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaMechanismIdentifiability1@2";
 pub const MAX_MECHANISMS: usize = 256;
 pub const MAX_FEATURES: usize = 4_096;
 pub const SCORE_SCALE: u64 = 1_000_000;
+const IDENTIFIABILITY_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdentifiabilityMechanism {
@@ -270,7 +271,51 @@ fn separation(feature: &IdentifiabilityFeature, left: &str, right: &str) -> u64 
         / 1_000
 }
 
-/// Compute unresolved mechanism pairs and greedily select affordable discriminating features.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IdentifiabilityState {
+    selected: Vec<String>,
+    pair_scores: BTreeMap<String, u64>,
+    resolved_pairs: BTreeSet<String>,
+    spent_units: u64,
+}
+
+fn state_score(state: &IdentifiabilityState) -> u128 {
+    let separation = state
+        .pair_scores
+        .values()
+        .copied()
+        .map(u128::from)
+        .sum::<u128>();
+    (state.resolved_pairs.len() as u128)
+        .saturating_mul(1_000_000_000_000)
+        .saturating_add(separation.saturating_mul(1_000_000))
+        .saturating_add((state.selected.len() as u128).saturating_mul(1_000))
+        .saturating_sub(u128::from(state.spent_units))
+}
+
+fn marginal_gain(
+    feature_id: &str,
+    state: &IdentifiabilityState,
+    feature_contributions: &BTreeMap<String, Vec<(String, u64)>>,
+    floor: u64,
+) -> (u64, Vec<String>) {
+    let mut gain = 0_u64;
+    let mut covered = Vec::new();
+    for (pair_id, contribution) in feature_contributions.get(feature_id).into_iter().flatten() {
+        let current = state.pair_scores.get(pair_id).copied().unwrap_or(0);
+        if current >= floor {
+            continue;
+        }
+        let marginal = (*contribution).min(floor.saturating_sub(current));
+        gain = gain.saturating_add(marginal);
+        if marginal > 0 {
+            covered.push(pair_id.clone());
+        }
+    }
+    (gain, covered)
+}
+
+/// Compute unresolved mechanism pairs and select a bounded, budget-aware discriminating portfolio.
 pub fn analyze_glioma_mechanism_identifiability(
     request: &MechanismIdentifiabilityRequest,
 ) -> Result<MechanismIdentifiability, MechanismIdentifiabilityError> {
@@ -329,85 +374,148 @@ pub fn analyze_glioma_mechanism_identifiability(
             ));
         }
     }
-    let mut selected = BTreeSet::new();
-    let mut spent = 0_u64;
-    let mut feature_utilities = Vec::new();
-    let mut budget_blocked_order = Vec::new();
-    loop {
-        let mut best: Option<(u64, u64, String, Vec<String>)> = None;
-        for feature in &eligible {
-            if selected.contains(&feature.feature_id) {
+    let mut feature_contributions = BTreeMap::<String, Vec<(String, u64)>>::new();
+    for (pair_id, _, _, _, contributions) in &pair_records {
+        for (feature_id, contribution) in contributions {
+            feature_contributions
+                .entry(feature_id.clone())
+                .or_default()
+                .push((pair_id.clone(), *contribution));
+        }
+    }
+    for contributions in feature_contributions.values_mut() {
+        contributions.sort_by(|left, right| left.0.cmp(&right.0));
+    }
+    let mut candidates = eligible.clone();
+    candidates.sort_by(|left, right| left.feature_id.cmp(&right.feature_id));
+    let mut states = vec![IdentifiabilityState {
+        selected: Vec::new(),
+        pair_scores: BTreeMap::new(),
+        resolved_pairs: BTreeSet::new(),
+        spent_units: 0,
+    }];
+    for feature in candidates {
+        let mut next = states.clone();
+        for state in &states {
+            if state.selected.len() >= request.max_selected_features
+                || state
+                    .spent_units
+                    .saturating_add(u64::from(feature.cost_units))
+                    > request.budget_units
+            {
                 continue;
             }
-            let projected_cost = spent.saturating_add(u64::from(feature.cost_units));
-            if projected_cost > request.budget_units {
-                budget_blocked_order.push(feature.feature_id.clone());
-                continue;
-            }
-            let mut gain = 0_u64;
-            let mut covered = Vec::new();
-            for (id, _, _, _, contributions) in &pair_records {
-                let current = contributions
-                    .iter()
-                    .filter(|(feature_id, _)| selected.contains(feature_id))
-                    .fold(0_u64, |sum, (_, value)| {
-                        sum.saturating_add(*value).min(SCORE_SCALE)
-                    });
-                if current >= request.identifiability_floor_milli {
-                    continue;
-                }
-                if let Some((_, contribution)) = contributions
-                    .iter()
-                    .find(|(feature_id, _)| feature_id == &feature.feature_id)
-                {
-                    let residual = request.identifiability_floor_milli.saturating_sub(current);
-                    let marginal = (*contribution).min(residual);
-                    gain = gain.saturating_add(marginal);
-                    if marginal > 0 {
-                        covered.push(id.clone());
-                    }
-                }
-            }
+            let (gain, _) = marginal_gain(
+                &feature.feature_id,
+                state,
+                &feature_contributions,
+                request.identifiability_floor_milli,
+            );
             if gain == 0 {
                 continue;
             }
-            let value_per_cost = gain / u64::from(feature.cost_units);
-            let candidate = (value_per_cost, gain, feature.feature_id.clone(), covered);
-            if best
-                .as_ref()
-                .map(|current| {
-                    candidate.0 > current.0
-                        || (candidate.0 == current.0 && candidate.1 > current.1)
-                        || (candidate.0 == current.0
-                            && candidate.1 == current.1
-                            && candidate.2 < current.2)
-                })
-                .unwrap_or(true)
+            let mut selected = state.selected.clone();
+            selected.push(feature.feature_id.clone());
+            let mut pair_scores = state.pair_scores.clone();
+            let mut resolved_pairs = state.resolved_pairs.clone();
+            for (pair_id, contribution) in feature_contributions
+                .get(&feature.feature_id)
+                .into_iter()
+                .flatten()
             {
-                best = Some(candidate);
+                let current = pair_scores.get(pair_id).copied().unwrap_or(0);
+                let next_score = current
+                    .saturating_add(*contribution)
+                    .min(request.identifiability_floor_milli);
+                pair_scores.insert(pair_id.clone(), next_score);
+                if next_score >= request.identifiability_floor_milli {
+                    resolved_pairs.insert(pair_id.clone());
+                }
+            }
+            next.push(IdentifiabilityState {
+                selected,
+                pair_scores,
+                resolved_pairs,
+                spent_units: state
+                    .spent_units
+                    .saturating_add(u64::from(feature.cost_units)),
+            });
+        }
+        next.sort_by(|left, right| {
+            state_score(right)
+                .cmp(&state_score(left))
+                .then_with(|| left.spent_units.cmp(&right.spent_units))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        next.dedup_by(|left, right| left.selected == right.selected);
+        next.truncate(IDENTIFIABILITY_BEAM_WIDTH);
+        states = next;
+    }
+    let chosen = states
+        .into_iter()
+        .max_by(|left, right| {
+            state_score(left)
+                .cmp(&state_score(right))
+                .then_with(|| right.spent_units.cmp(&left.spent_units))
+                .then_with(|| right.selected.cmp(&left.selected))
+        })
+        .expect("identifiability beam always retains an empty state");
+    let selected = chosen.selected.into_iter().collect::<BTreeSet<_>>();
+    let spent = chosen.spent_units;
+    let mut feature_utilities = Vec::new();
+    let mut replay_state = IdentifiabilityState {
+        selected: Vec::new(),
+        pair_scores: BTreeMap::new(),
+        resolved_pairs: BTreeSet::new(),
+        spent_units: 0,
+    };
+    let mut replay_candidates = eligible.clone();
+    replay_candidates.sort_by(|left, right| left.feature_id.cmp(&right.feature_id));
+    for feature in replay_candidates {
+        if !selected.contains(&feature.feature_id) {
+            continue;
+        }
+        let (gain, covered) = marginal_gain(
+            &feature.feature_id,
+            &replay_state,
+            &feature_contributions,
+            request.identifiability_floor_milli,
+        );
+        replay_state.selected.push(feature.feature_id.clone());
+        replay_state.spent_units = replay_state
+            .spent_units
+            .saturating_add(u64::from(feature.cost_units));
+        for (pair_id, contribution) in feature_contributions
+            .get(&feature.feature_id)
+            .into_iter()
+            .flatten()
+        {
+            let current = replay_state.pair_scores.get(pair_id).copied().unwrap_or(0);
+            let next_score = current
+                .saturating_add(*contribution)
+                .min(request.identifiability_floor_milli);
+            replay_state.pair_scores.insert(pair_id.clone(), next_score);
+            if next_score >= request.identifiability_floor_milli {
+                replay_state.resolved_pairs.insert(pair_id.clone());
             }
         }
-        if selected.len() >= request.max_selected_features {
-            break;
-        }
-        let Some((_, gain, feature_id, covered)) = best else {
-            break;
-        };
-        let feature = eligible
-            .iter()
-            .find(|feature| feature.feature_id == feature_id)
-            .expect("eligible feature");
-        selected.insert(feature_id.clone());
-        spent = spent.saturating_add(u64::from(feature.cost_units));
         feature_utilities.push(IdentifiabilityFeatureUtility {
-            feature_id,
+            feature_id: feature.feature_id.clone(),
             label: feature.label.clone(),
             marginal_separation_milli: gain,
             covered_pair_order: covered,
-            projected_cost_units: spent,
+            projected_cost_units: replay_state.spent_units,
             action: "select-for-unresolved-pairs".into(),
         });
     }
+    let mut budget_blocked_order = eligible
+        .iter()
+        .filter(|feature| {
+            !selected.contains(&feature.feature_id)
+                && u64::from(feature.cost_units) > request.budget_units.saturating_sub(spent)
+        })
+        .map(|feature| feature.feature_id.clone())
+        .collect::<Vec<_>>();
     budget_blocked_order.sort();
     budget_blocked_order.dedup();
     feature_utilities.sort_by(|left, right| left.feature_id.cmp(&right.feature_id));
@@ -574,5 +682,70 @@ mod tests {
             .negative_evidence
             .iter()
             .any(|entry| entry == "unresolved-pair:m-a__m-b"));
+    }
+
+    #[test]
+    fn portfolio_beam_prefers_two_complementary_discriminators_over_expensive_hub() {
+        let mut input = request();
+        input.mechanisms = vec![
+            IdentifiabilityMechanism {
+                mechanism_id: "m-a".into(),
+                label: "matrix remodeling".into(),
+                prior_milli: 334,
+            },
+            IdentifiabilityMechanism {
+                mechanism_id: "m-b".into(),
+                label: "immune mimicry".into(),
+                prior_milli: 333,
+            },
+            IdentifiabilityMechanism {
+                mechanism_id: "m-c".into(),
+                label: "vascular co-option".into(),
+                prior_milli: 333,
+            },
+        ];
+        input.features = vec![
+            IdentifiabilityFeature {
+                feature_id: "f-hub".into(),
+                label: "expensive hub assay".into(),
+                value_milli_by_mechanism: BTreeMap::from([
+                    ("m-a".into(), 1_000),
+                    ("m-b".into(), 0),
+                    ("m-c".into(), 1_000),
+                ]),
+                quality_milli: 1_000,
+                cost_units: 5,
+                risk_milli: 100,
+            },
+            IdentifiabilityFeature {
+                feature_id: "f-left".into(),
+                label: "left discriminator".into(),
+                value_milli_by_mechanism: BTreeMap::from([
+                    ("m-a".into(), 1_000),
+                    ("m-b".into(), 0),
+                    ("m-c".into(), 0),
+                ]),
+                quality_milli: 1_000,
+                cost_units: 3,
+                risk_milli: 100,
+            },
+            IdentifiabilityFeature {
+                feature_id: "f-right".into(),
+                label: "right discriminator".into(),
+                value_milli_by_mechanism: BTreeMap::from([
+                    ("m-a".into(), 500),
+                    ("m-b".into(), 500),
+                    ("m-c".into(), 0),
+                ]),
+                quality_milli: 1_000,
+                cost_units: 3,
+                risk_milli: 100,
+            },
+        ];
+        input.budget_units = 6;
+        input.max_selected_features = 2;
+        let output = analyze_glioma_mechanism_identifiability(&input).expect("frontier");
+        assert_eq!(output.selected_feature_order, vec!["f-left", "f-right"]);
+        assert!(output.unresolved_pair_order.is_empty());
     }
 }

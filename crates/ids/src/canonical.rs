@@ -99,7 +99,9 @@ pub fn python_repr_f64(f: f64) -> String {
     let (mantissa, exponent) = exp_form
         .split_once('e')
         .expect("Rust LowerExp always emits an exponent");
-    let exponent: i32 = exponent.parse().expect("Rust LowerExp emits a valid exponent");
+    let exponent: i32 = exponent
+        .parse()
+        .expect("Rust LowerExp emits a valid exponent");
 
     let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
     let digits = digits.trim_end_matches('0');

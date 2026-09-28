@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P07-F23";
-pub const OUTPUT_SCHEMA: &str = "GliomaActiveLearningCampaign1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaActiveLearningCampaign1@2";
 pub const MAX_ROUNDS: u16 = 64;
 pub const MAX_RETRIES: u8 = 8;
 
@@ -359,16 +359,26 @@ pub fn execute_glioma_active_learning_campaign<E: ActiveLearningCampaignExecutor
         let mut round_failed_order = Vec::new();
         for candidate_id in &plan.selected_order {
             let candidate = candidate_map[candidate_id];
-            if candidate.cost_units > budget {
-                uncertainty.insert(format!("{candidate_id}:budget-exhausted-before-execution"));
-                if failed.insert(candidate_id.clone()) {
-                    campaign_failed_order.push(candidate_id.clone());
-                    round_failed_order.push(candidate_id.clone());
-                }
-                continue;
-            }
             let mut accepted = None;
             for attempt in 1..=request.max_retries.saturating_add(1) {
+                // Charge every local worker invocation before dispatch. A retry is a real assay
+                // or compute attempt even when it fails, and must not create unreported budget
+                // headroom for the next adaptive round.
+                if candidate.cost_units > budget {
+                    let reason = if attempt == 1 {
+                        "budget-exhausted-before-execution"
+                    } else {
+                        "retry-budget-exhausted-before-attempt"
+                    };
+                    uncertainty.insert(format!("{candidate_id}:{reason}"));
+                    if failed.insert(candidate_id.clone()) {
+                        campaign_failed_order.push(candidate_id.clone());
+                        round_failed_order.push(candidate_id.clone());
+                    }
+                    break;
+                }
+                budget = budget.saturating_sub(candidate.cost_units);
+                budget_spent = budget_spent.saturating_add(candidate.cost_units);
                 match executor.execute_candidate(candidate, attempt) {
                     Ok(observation) => {
                         if observation.candidate_id != candidate.candidate_id {
@@ -380,7 +390,11 @@ pub fn execute_glioma_active_learning_campaign<E: ActiveLearningCampaignExecutor
                         break;
                     }
                     Err(error) if error.retryable && attempt <= request.max_retries => {
-                        retry_count = retry_count.saturating_add(1);
+                        // Count a retry only when the next invocation can actually be funded;
+                        // the next loop iteration charges it immediately before dispatch.
+                        if candidate.cost_units <= budget {
+                            retry_count = retry_count.saturating_add(1);
+                        }
                     }
                     Err(error) => {
                         if failed.insert(candidate_id.clone()) {
@@ -396,8 +410,6 @@ pub fn execute_glioma_active_learning_campaign<E: ActiveLearningCampaignExecutor
                 }
             }
             if let Some(observation) = accepted {
-                budget = budget.saturating_sub(candidate.cost_units);
-                budget_spent = budget_spent.saturating_add(candidate.cost_units);
                 if completed.insert(candidate_id.clone()) {
                     completed_order.push(candidate_id.clone());
                 }
@@ -548,6 +560,66 @@ mod tests {
         assert!(!campaign.observations.is_empty());
         assert!(!campaign.completed_order.is_empty());
         assert!(campaign.budget_spent_units > 0);
+        campaign.validate().unwrap();
+    }
+
+    #[derive(Default)]
+    struct RetryThenSuccess {
+        attempts: u8,
+    }
+
+    impl ActiveLearningCampaignExecutor for RetryThenSuccess {
+        fn execute_candidate(
+            &mut self,
+            candidate: &ActiveLearningCandidate,
+            attempt: u8,
+        ) -> Result<ActiveLearningObservation, ActiveLearningExecutionFailure> {
+            self.attempts = self.attempts.saturating_add(1);
+            if attempt == 1 {
+                return Err(ActiveLearningExecutionFailure {
+                    reason: "transient assay gateway lock".into(),
+                    retryable: true,
+                });
+            }
+            DryRunActiveLearningCampaignExecutor.execute_candidate(candidate, attempt)
+        }
+    }
+
+    #[test]
+    fn retry_attempts_are_charged_before_dispatch() {
+        let mut campaign_request = request();
+        campaign_request.active_learning.budget_units = 4;
+        campaign_request.max_rounds = 1;
+        let mut executor = RetryThenSuccess::default();
+        let campaign =
+            execute_glioma_active_learning_campaign(&campaign_request, &mut executor).unwrap();
+
+        assert_eq!(executor.attempts, 2);
+        assert_eq!(campaign.retry_count, 1);
+        assert_eq!(campaign.budget_spent_units, 4);
+        assert_eq!(campaign.remaining_budget_units, 0);
+        assert_eq!(campaign.completed_order, vec!["matrix"]);
+        campaign.validate().unwrap();
+    }
+
+    #[test]
+    fn retry_is_not_dispatched_when_remaining_budget_cannot_fund_it() {
+        let mut campaign_request = request();
+        campaign_request.active_learning.budget_units = 3;
+        campaign_request.max_rounds = 1;
+        let mut executor = RetryThenSuccess::default();
+        let campaign =
+            execute_glioma_active_learning_campaign(&campaign_request, &mut executor).unwrap();
+
+        assert_eq!(executor.attempts, 1);
+        assert_eq!(campaign.retry_count, 0);
+        assert_eq!(campaign.budget_spent_units, 2);
+        assert_eq!(campaign.remaining_budget_units, 1);
+        assert_eq!(campaign.failed_order, vec!["matrix"]);
+        assert!(campaign
+            .uncertainty
+            .iter()
+            .any(|item| item == "matrix:retry-budget-exhausted-before-attempt"));
         campaign.validate().unwrap();
     }
 

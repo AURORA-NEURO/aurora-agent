@@ -1,4 +1,4 @@
-//! Replication-closure frontier for autonomous preclinical glioma research.
+//! Replication-closure frontier with bounded portfolio selection for autonomous preclinical glioma research.
 //!
 //! A replication result is not useful if the engine can only label it. This feature converts the
 //! typed P10 validation/replication outcome into a ranked next-action frontier. It scores
@@ -18,9 +18,12 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F27";
-pub const OUTPUT_SCHEMA: &str = "GliomaReplicationClosureFrontier1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaReplicationClosureFrontier1@2";
 pub const MAX_CANDIDATES: usize = 64;
 pub const MAX_SELECTED: usize = 32;
+const CLOSURE_BEAM_WIDTH: usize = 128;
+const TARGET_DIVERSITY_BONUS: u64 = 15_000;
+const MODEL_DIVERSITY_BONUS: u64 = 5_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -223,6 +226,113 @@ fn utility(candidate: &ReplicationClosureCandidate, gap: u32) -> (u32, u32) {
     (value.saturating_sub(cost_penalty), value)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClosurePortfolioOption {
+    action_id: String,
+    target: ReplicationClosureTarget,
+    model_system: GliomaModelSystem,
+    utility_milli: u32,
+    cost_units: u32,
+    risk_milli: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClosurePortfolioState {
+    selected_indices: Vec<usize>,
+    spent_units: u32,
+    risk_milli: u32,
+    utility_milli: u64,
+    targets: BTreeSet<ReplicationClosureTarget>,
+    model_systems: BTreeSet<GliomaModelSystem>,
+}
+
+/// Choose a complementary replication-closure portfolio under cost, risk, action-count, target,
+/// and model-system limits. Greedy utility ordering can spend the entire budget on one expensive
+/// stress test or duplicate the same closure target twice. The bounded beam keeps the search
+/// deterministic and inexpensive while rewarding heterogeneous evidence routes without changing
+/// the caller-declared risk or budget gates.
+fn select_closure_portfolio(
+    options: &[ClosurePortfolioOption],
+    budget_units: u32,
+    max_risk_milli: u32,
+    max_actions: usize,
+) -> BTreeSet<String> {
+    let mut states = vec![ClosurePortfolioState {
+        selected_indices: Vec::new(),
+        spent_units: 0,
+        risk_milli: 0,
+        utility_milli: 0,
+        targets: BTreeSet::new(),
+        model_systems: BTreeSet::new(),
+    }];
+    for (index, option) in options.iter().enumerate() {
+        let mut next = states.clone();
+        for state in &states {
+            if state.selected_indices.len() >= max_actions
+                || state.spent_units.saturating_add(option.cost_units) > budget_units
+                || state.risk_milli.saturating_add(option.risk_milli) > max_risk_milli
+            {
+                continue;
+            }
+            let mut selected_indices = state.selected_indices.clone();
+            selected_indices.push(index);
+            let mut targets = state.targets.clone();
+            let mut model_systems = state.model_systems.clone();
+            let target_is_new = targets.insert(option.target);
+            let model_is_new = model_systems.insert(option.model_system);
+            let diversity_bonus = if target_is_new {
+                TARGET_DIVERSITY_BONUS
+            } else {
+                0
+            }
+            .saturating_add(if model_is_new {
+                MODEL_DIVERSITY_BONUS
+            } else {
+                0
+            });
+            next.push(ClosurePortfolioState {
+                selected_indices,
+                spent_units: state.spent_units.saturating_add(option.cost_units),
+                risk_milli: state.risk_milli.saturating_add(option.risk_milli),
+                utility_milli: state
+                    .utility_milli
+                    .saturating_add(u64::from(option.utility_milli))
+                    .saturating_add(diversity_bonus),
+                targets,
+                model_systems,
+            });
+        }
+        next.sort_by(|left, right| {
+            right
+                .utility_milli
+                .cmp(&left.utility_milli)
+                .then_with(|| left.spent_units.cmp(&right.spent_units))
+                .then_with(|| left.risk_milli.cmp(&right.risk_milli))
+                .then_with(|| {
+                    let left_ids = left
+                        .selected_indices
+                        .iter()
+                        .map(|index| options[*index].action_id.as_str())
+                        .collect::<Vec<_>>();
+                    let right_ids = right
+                        .selected_indices
+                        .iter()
+                        .map(|index| options[*index].action_id.as_str())
+                        .collect::<Vec<_>>();
+                    left_ids.cmp(&right_ids)
+                })
+        });
+        next.truncate(CLOSURE_BEAM_WIDTH);
+        states = next;
+    }
+    states
+        .first()
+        .into_iter()
+        .flat_map(|state| state.selected_indices.iter())
+        .map(|index| options[*index].action_id.clone())
+        .collect()
+}
+
 fn digest_input(frontier: &ReplicationClosureFrontier) -> serde_json::Value {
     serde_json::json!({
         "feature_id": frontier.feature_id,
@@ -347,6 +457,28 @@ pub fn plan_glioma_replication_closure_frontier(
             .then_with(|| left.0.action_id.cmp(&right.0.action_id))
     });
 
+    let options = scores
+        .iter()
+        .filter(|(candidate, _, utility, _)| {
+            target_allowed(&request.replication, candidate.target)
+                && candidate.feasibility_milli > 0
+                && *utility >= request.min_utility_milli
+        })
+        .map(|(candidate, _, utility, _)| ClosurePortfolioOption {
+            action_id: candidate.action_id.clone(),
+            target: candidate.target,
+            model_system: candidate.model_system,
+            utility_milli: *utility,
+            cost_units: candidate.cost_units,
+            risk_milli: u32::from(candidate.risk_milli),
+        })
+        .collect::<Vec<_>>();
+    let selected_ids = select_closure_portfolio(
+        &options,
+        request.budget_units,
+        u32::from(request.max_risk_milli),
+        usize::from(request.max_actions),
+    );
     let mut selected = Vec::new();
     let mut deferred = Vec::new();
     let mut blocked = Vec::new();
@@ -373,14 +505,14 @@ pub fn plan_glioma_replication_closure_frontier(
             } else {
                 "deferred_cost_budget"
             }
-        } else if selected.len() >= usize::from(request.max_actions) {
-            deferred.push(candidate.action_id.clone());
-            "deferred_action_capacity"
-        } else {
+        } else if selected_ids.contains(&candidate.action_id) {
             spent = spent.saturating_add(candidate.cost_units);
             risk = risk.saturating_add(u32::from(candidate.risk_milli));
             selected.push(candidate.action_id.clone());
             "selected"
+        } else {
+            deferred.push(candidate.action_id.clone());
+            "deferred_portfolio_optimization"
         };
         score_output.push(ReplicationClosureScore {
             action_id: candidate.action_id.clone(),
@@ -568,5 +700,86 @@ mod tests {
         assert!(frontier.selected_order.is_empty());
         assert_eq!(frontier.blocked_order, vec!["confirm"]);
         frontier.validate().unwrap();
+    }
+
+    #[test]
+    fn beam_portfolio_keeps_two_complementary_closure_actions() {
+        let selected = select_closure_portfolio(
+            &[
+                ClosurePortfolioOption {
+                    action_id: "expensive-stress-test".into(),
+                    target: ReplicationClosureTarget::StressTestInfluentialStudy,
+                    model_system: GliomaModelSystem::Organoid,
+                    utility_milli: 100,
+                    cost_units: 4,
+                    risk_milli: 100,
+                },
+                ClosurePortfolioOption {
+                    action_id: "independent-site-a".into(),
+                    target: ReplicationClosureTarget::ExtendIndependentSites,
+                    model_system: GliomaModelSystem::CellLine,
+                    utility_milli: 60,
+                    cost_units: 2,
+                    risk_milli: 100,
+                },
+                ClosurePortfolioOption {
+                    action_id: "independent-site-b".into(),
+                    target: ReplicationClosureTarget::ExtendIndependentSites,
+                    model_system: GliomaModelSystem::Organoid,
+                    utility_milli: 60,
+                    cost_units: 2,
+                    risk_milli: 100,
+                },
+            ],
+            4,
+            500,
+            2,
+        );
+        assert_eq!(
+            selected,
+            BTreeSet::from([
+                "independent-site-a".to_string(),
+                "independent-site-b".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn beam_prefers_target_and_model_diversity_over_a_same_target_pair() {
+        let selected = select_closure_portfolio(
+            &[
+                ClosurePortfolioOption {
+                    action_id: "stress-a".into(),
+                    target: ReplicationClosureTarget::StressTestInfluentialStudy,
+                    model_system: GliomaModelSystem::Organoid,
+                    utility_milli: 100,
+                    cost_units: 2,
+                    risk_milli: 100,
+                },
+                ClosurePortfolioOption {
+                    action_id: "stress-b".into(),
+                    target: ReplicationClosureTarget::StressTestInfluentialStudy,
+                    model_system: GliomaModelSystem::Organoid,
+                    utility_milli: 95,
+                    cost_units: 2,
+                    risk_milli: 100,
+                },
+                ClosurePortfolioOption {
+                    action_id: "heterogeneity".into(),
+                    target: ReplicationClosureTarget::ReconcileHeterogeneity,
+                    model_system: GliomaModelSystem::CellLine,
+                    utility_milli: 80,
+                    cost_units: 2,
+                    risk_milli: 100,
+                },
+            ],
+            4,
+            500,
+            2,
+        );
+        assert_eq!(
+            selected,
+            BTreeSet::from(["heterogeneity".to_string(), "stress-a".to_string()])
+        );
     }
 }

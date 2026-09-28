@@ -398,3 +398,226 @@ pub fn execute_glioma_multimodal_mechanism_campaign_with_executor<
     output.validate()?;
     Ok(output)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::p03_multimodal_ingestion_qc::FeatureValue;
+    use super::super::super::p05_mechanism_exploration::{
+        PathwayActivityEdge, PathwayActivityNode,
+    };
+    use super::*;
+    use crate::glioma_engine::{GliomaModality, LocalArtifactRef};
+    use bioprism_foundation::{AutonomyTier, Effect};
+
+    fn artifact(id: &str) -> LocalArtifactRef {
+        LocalArtifactRef {
+            artifact_id: id.into(),
+            content_hash: ContentHash::of_bytes(id.as_bytes()),
+            content_type: "application/json".into(),
+            local_only: true,
+            contains_human_data: false,
+            contains_direct_identifiers: false,
+        }
+    }
+
+    fn graph_request() -> GraphFusionRequest {
+        GraphFusionRequest {
+            study_id: "study:mechanism".into(),
+            model_system: GliomaModelSystem::Organoid,
+            required_modalities: [GliomaModality::Genomics, GliomaModality::Transcriptomics]
+                .into_iter()
+                .collect(),
+            min_samples: 3,
+            min_modalities_per_sample: 2,
+            min_shared_features: 2,
+            neighbours: 2,
+            diffusion_steps: 2,
+            max_distance_milli: 1_000,
+            min_consensus_support_milli: 500,
+            max_disagreement_milli: 200,
+            require_all_modalities: false,
+        }
+    }
+
+    fn graph_vector(sample: &str, modality: GliomaModality) -> GraphFusionVector {
+        GraphFusionVector {
+            observation_id: format!("{sample}:{modality:?}"),
+            study_id: "study:mechanism".into(),
+            sample_lineage: sample.into(),
+            modality,
+            model_system: GliomaModelSystem::Organoid,
+            artifact: artifact(sample),
+            reliability_milli: 900,
+            features: vec![
+                FeatureValue {
+                    feature_id: "x".into(),
+                    value_milli: 10,
+                },
+                FeatureValue {
+                    feature_id: "y".into(),
+                    value_milli: 20,
+                },
+            ],
+        }
+    }
+
+    fn pathway_request() -> PathwayActivityRequest {
+        PathwayActivityRequest {
+            objective: "resolve the invasion mechanism".into(),
+            study_id: "study:mechanism".into(),
+            model_system: GliomaModelSystem::Organoid,
+            min_pathway_nodes: 2,
+            min_observed_nodes: 2,
+            min_modalities: 2,
+            min_confidence_milli: 700,
+            max_pathways: 8,
+            require_cross_modal: true,
+            min_edge_agreement_milli: 700,
+            require_edge_consistency: true,
+        }
+    }
+
+    fn pathway_definition() -> PathwayActivityDefinition {
+        PathwayActivityDefinition {
+            pathway_id: "invasion".into(),
+            label: "invasion programme".into(),
+            nodes: vec![
+                PathwayActivityNode {
+                    node_id: "egfr".into(),
+                    label: "EGFR".into(),
+                    modality: GliomaModality::Genomics,
+                    expected_direction: 1,
+                    weight_milli: 1_000,
+                },
+                PathwayActivityNode {
+                    node_id: "vim".into(),
+                    label: "VIM".into(),
+                    modality: GliomaModality::Transcriptomics,
+                    expected_direction: 1,
+                    weight_milli: 1_000,
+                },
+            ],
+            edges: vec![PathwayActivityEdge {
+                source_node_id: "egfr".into(),
+                target_node_id: "vim".into(),
+                relation: 1,
+                confidence_milli: 900,
+            }],
+        }
+    }
+
+    fn observation(
+        id: &str,
+        modality: GliomaModality,
+        feature_id: &str,
+        value_milli: i64,
+    ) -> PathwayActivityObservation {
+        PathwayActivityObservation {
+            observation_id: id.into(),
+            study_id: "study:mechanism".into(),
+            sample_lineage: "sample:1".into(),
+            modality,
+            model_system: GliomaModelSystem::Organoid,
+            artifact: artifact(id),
+            feature_id: feature_id.into(),
+            value_milli,
+            reliability_milli: 900,
+        }
+    }
+
+    fn candidate() -> GliomaActionCandidate {
+        GliomaActionCandidate {
+            action_id: "assay:invasion-validation".into(),
+            stage_kind: crate::glioma_engine::GliomaStageKind::MechanismExploration,
+            modality: GliomaModality::FunctionalPerturbation,
+            model_system: GliomaModelSystem::Organoid,
+            depends_on: Vec::new(),
+            cost_units: 1,
+            information_gain_milli: 900,
+            frontier_novelty_milli: 800,
+            workflow_leverage_milli: 700,
+            cross_stage_unlock_milli: 600,
+            reproducibility_safety_milli: 900,
+            federation_value_milli: 0,
+            feasibility_milli: 900,
+            autonomy_tier: AutonomyTier::A1,
+            effects: BTreeSet::from([
+                Effect::ReadLocalData,
+                Effect::ExecuteLocalComputation,
+                Effect::WriteLocalArtifact,
+            ]),
+        }
+    }
+
+    fn request() -> MultimodalMechanismCampaignRequest {
+        MultimodalMechanismCampaignRequest {
+            objective: "resolve the invasion mechanism".into(),
+            study_id: "study:mechanism".into(),
+            model_system: GliomaModelSystem::Organoid,
+            graph: graph_request(),
+            pathway: pathway_request(),
+            selection: GliomaSelectionConfig {
+                budget_units: 4,
+                max_actions: 1,
+                ..GliomaSelectionConfig::default()
+            },
+            completed_action_order: Vec::new(),
+        }
+    }
+
+    fn vectors() -> Vec<GraphFusionVector> {
+        ["a", "b", "c"]
+            .into_iter()
+            .flat_map(|sample| {
+                [GliomaModality::Genomics, GliomaModality::Transcriptomics]
+                    .into_iter()
+                    .map(move |modality| graph_vector(sample, modality))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn qualified_multimodal_evidence_compiles_a_dependency_safe_action() {
+        let observations = vec![
+            observation("obs:egfr", GliomaModality::Genomics, "egfr", 700),
+            observation("obs:vim", GliomaModality::Transcriptomics, "vim", 800),
+        ];
+        let output = execute_glioma_multimodal_mechanism_campaign(
+            &request(),
+            &vectors(),
+            &[pathway_definition()],
+            &observations,
+            &[candidate()],
+        )
+        .expect("campaign should compile");
+        assert_eq!(
+            output.disposition,
+            MechanismCampaignDisposition::ReadyForExecution
+        );
+        assert_eq!(output.next_action_order, vec!["assay:invasion-validation"]);
+        output.validate().expect("campaign digest should validate");
+    }
+
+    #[test]
+    fn missing_pathway_node_holds_execution_without_erasing_the_action_frontier() {
+        let output = execute_glioma_multimodal_mechanism_campaign(
+            &request(),
+            &vectors(),
+            &[pathway_definition()],
+            &[observation(
+                "obs:egfr",
+                GliomaModality::Genomics,
+                "egfr",
+                700,
+            )],
+            &[candidate()],
+        )
+        .expect("partial evidence should produce a typed campaign");
+        assert_eq!(output.disposition, MechanismCampaignDisposition::Unresolved);
+        assert_eq!(output.next_action_order, vec!["assay:invasion-validation"]);
+        assert!(!output.uncertainty.is_empty());
+        output
+            .validate()
+            .expect("partial campaign digest should validate");
+    }
+}

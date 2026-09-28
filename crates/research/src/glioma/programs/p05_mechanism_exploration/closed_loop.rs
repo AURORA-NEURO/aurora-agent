@@ -15,6 +15,7 @@ pub const FEATURE_ID: &str = "GAF-GLIOMA-P05-F23";
 pub const OUTPUT_SCHEMA: &str = "GliomaMechanismClosedLoop1@1";
 pub const MAX_CANDIDATES: usize = 1_024;
 pub const MAX_SELECTED: usize = 256;
+const CLOSED_LOOP_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MechanismClosedLoopCandidate {
@@ -372,22 +373,120 @@ pub fn plan_glioma_mechanism_closed_loop(
         .iter()
         .map(|candidate| (candidate.action_id.clone(), candidate))
         .collect::<BTreeMap<_, _>>();
-    let mut selected = Vec::new();
-    let mut deferred = BTreeSet::new();
     let mut blocked = BTreeSet::new();
-    let mut spent = 0_u64;
-    for score in &scores {
+    let eligible_scores = scores
+        .iter()
+        .filter(|score| {
+            if !score.eligible {
+                blocked.insert(score.action_id.clone());
+                false
+            } else {
+                true
+            }
+        })
+        .collect::<Vec<_>>();
+
+    // Greedy priority order is not sufficient for a bounded research portfolio: one expensive
+    // assay can crowd out several cheaper discriminators whose combined information is larger.
+    // Keep a small deterministic beam over include/exclude decisions and apply diminishing
+    // returns when a portfolio repeatedly targets the same mechanism. This is a planner only;
+    // execution and all safety/policy gates remain downstream responsibilities.
+    #[derive(Clone)]
+    struct PortfolioState {
+        selected: Vec<String>,
+        selected_set: BTreeSet<String>,
+        spent: u64,
+        utility: u128,
+    }
+    fn state_better(left: &PortfolioState, right: &PortfolioState) -> bool {
+        left.utility > right.utility
+            || (left.utility == right.utility
+                && (left.selected.len() > right.selected.len()
+                    || (left.selected.len() == right.selected.len()
+                        && (left.spent < right.spent
+                            || (left.spent == right.spent && left.selected < right.selected)))))
+    }
+    let mut beam = vec![PortfolioState {
+        selected: Vec::new(),
+        selected_set: BTreeSet::new(),
+        spent: 0,
+        utility: 0,
+    }];
+    for score in &eligible_scores {
         let candidate = candidate_map
             .get(&score.action_id)
             .expect("validated candidate");
-        if !score.eligible {
-            blocked.insert(score.action_id.clone());
-        } else if selected.len() < request.max_actions
-            && spent.saturating_add(u64::from(candidate.cost_units)) <= request.budget_units
-        {
-            spent = spent.saturating_add(u64::from(candidate.cost_units));
+        let mut expanded = beam.clone();
+        for state in &beam {
+            if state.selected.len() >= request.max_actions
+                || state.spent.saturating_add(u64::from(candidate.cost_units))
+                    > request.budget_units
+            {
+                continue;
+            }
+            let repeated = state
+                .selected
+                .iter()
+                .filter(|action_id| {
+                    candidate_map
+                        .get(*action_id)
+                        .is_some_and(|other| other.mechanism_id == candidate.mechanism_id)
+                })
+                .count() as u64;
+            let diversity_milli = 1_000_u64 / (1 + repeated);
+            let contribution =
+                u128::from(score.priority_milli).saturating_mul(u128::from(diversity_milli));
+            let mut selected = state.selected.clone();
             selected.push(score.action_id.clone());
-        } else {
+            let mut selected_set = state.selected_set.clone();
+            selected_set.insert(score.action_id.clone());
+            expanded.push(PortfolioState {
+                selected,
+                selected_set,
+                spent: state.spent.saturating_add(u64::from(candidate.cost_units)),
+                utility: state.utility.saturating_add(contribution),
+            });
+        }
+        expanded.sort_by(|left, right| {
+            right
+                .utility
+                .cmp(&left.utility)
+                .then_with(|| left.spent.cmp(&right.spent))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        let mut seen = BTreeSet::new();
+        expanded.retain(|state| {
+            let mut key = state.selected.clone();
+            key.sort();
+            seen.insert(key)
+        });
+        expanded.truncate(CLOSED_LOOP_BEAM_WIDTH);
+        beam = expanded;
+    }
+    let best = beam
+        .iter()
+        .max_by(|left, right| {
+            if state_better(left, right) {
+                std::cmp::Ordering::Greater
+            } else if state_better(right, left) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .cloned()
+        .unwrap_or_else(|| PortfolioState {
+            selected: Vec::new(),
+            selected_set: BTreeSet::new(),
+            spent: 0,
+            utility: 0,
+        });
+    let selected = best.selected;
+    let spent = best.spent;
+    let selected_set = best.selected_set;
+    let mut deferred = BTreeSet::new();
+    for score in &eligible_scores {
+        if !selected_set.contains(&score.action_id) {
             deferred.insert(score.action_id.clone());
         }
     }
@@ -599,6 +698,47 @@ mod tests {
         );
         assert!(plan.selected_action_order.is_empty());
         assert_eq!(plan.blocked_action_order.len(), 2);
+        plan.validate().unwrap();
+    }
+
+    #[test]
+    fn closed_loop_beam_prefers_complementary_budgeted_pair_over_expensive_greedy_action() {
+        let mut request = request();
+        request.budget_units = 4;
+        request.max_actions = 2;
+        request.candidates = vec![
+            MechanismClosedLoopCandidate {
+                action_id: "expensive".into(),
+                mechanism_id: "near".into(),
+                expected_information_gain_milli: 1_000,
+                expected_effect_milli: 50,
+                cost_units: 4,
+                risk_milli: 0,
+                reproducibility_milli: 1_000,
+            },
+            MechanismClosedLoopCandidate {
+                action_id: "cheap-near".into(),
+                mechanism_id: "near".into(),
+                expected_information_gain_milli: 800,
+                expected_effect_milli: 50,
+                cost_units: 2,
+                risk_milli: 0,
+                reproducibility_milli: 900,
+            },
+            MechanismClosedLoopCandidate {
+                action_id: "cheap-far".into(),
+                mechanism_id: "far".into(),
+                expected_information_gain_milli: 800,
+                expected_effect_milli: -20,
+                cost_units: 2,
+                risk_milli: 0,
+                reproducibility_milli: 900,
+            },
+        ];
+        let plan = plan_glioma_mechanism_closed_loop(&request).unwrap();
+        assert_eq!(plan.selected_action_order, vec!["cheap-far", "cheap-near"]);
+        assert_eq!(plan.total_cost_units, 4);
+        assert!(plan.deferred_action_order.contains(&"expensive".into()));
         plan.validate().unwrap();
     }
 }

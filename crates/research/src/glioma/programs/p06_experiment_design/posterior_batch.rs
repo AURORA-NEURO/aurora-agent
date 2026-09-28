@@ -448,7 +448,10 @@ pub fn plan_glioma_posterior_batch(
             if !(2..=MAX_OUTCOME_BINS).contains(&probabilities.len())
                 || probabilities.iter().map(|value| *value as u64).sum::<u64>() != PROBABILITY_SCALE
             {
-                return Err(PosteriorBatchError::InvalidPosterior(format!("{} in draw {} must provide 2..={MAX_OUTCOME_BINS} probabilities totaling 1,000,000", candidate.candidate_id, draw.draw_id)));
+                return Err(PosteriorBatchError::InvalidPosterior(format!(
+                    "{} in draw {} must provide 2..={MAX_OUTCOME_BINS} probabilities totaling 1,000,000",
+                    candidate.candidate_id, draw.draw_id
+                )));
             }
             if let Some(previous) = bins_by_candidate.get(&candidate.candidate_id) {
                 if *previous != probabilities.len() {

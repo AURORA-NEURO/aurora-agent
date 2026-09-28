@@ -409,7 +409,7 @@ mod tests {
     fn held_request() -> ReplicationClosureCampaignRequest {
         let mut frontier = super::super::replication_closure_frontier::ReplicationClosureFrontier {
             feature_id: "GAF-GLIOMA-P10-F27".into(),
-            output_schema: "GliomaReplicationClosureFrontier1@1".into(),
+            output_schema: "GliomaReplicationClosureFrontier1@2".into(),
             objective: "replicate organoid invasion".into(),
             model_system: GliomaModelSystem::Organoid,
             source_replication_digest: ContentHash::of_bytes(b"replication"),

@@ -12,9 +12,10 @@ use super::action_execution::{
     GliomaActionExecutor, GliomaActionWorkflowScope,
 };
 use crate::glioma_engine::{
-    compile_glioma_research, select_glioma_actions, GliomaActionCandidate, GliomaActionSelection,
-    GliomaModality, GliomaModelSystem, GliomaResearchIntent, GliomaResearchPlan,
-    GliomaSelectionConfig, GliomaSelectionWeights, GliomaStage, GliomaStageKind, StageReadiness,
+    adapt_glioma_candidates_from_outcomes, compile_glioma_research, select_glioma_actions,
+    GliomaActionCandidate, GliomaActionOutcomeSummary, GliomaActionSelection, GliomaModality,
+    GliomaModelSystem, GliomaResearchIntent, GliomaResearchPlan, GliomaSelectionConfig,
+    GliomaSelectionWeights, GliomaStage, GliomaStageKind, StageReadiness,
 };
 use bioprism_foundation::Effect;
 use bioprism_ids::ContentHash;
@@ -23,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P07-F32";
-pub const OUTPUT_SCHEMA: &str = "GliomaAutonomousResearchDirector1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaAutonomousResearchDirector1@2";
 pub const MAX_COMPLETED_CHECKPOINTS: usize = 32;
 pub const MAX_ACTIONS: usize = 32;
 
@@ -32,6 +33,10 @@ pub const MAX_ACTIONS: usize = 32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GliomaDirectorFocus {
+    /// Choose the next scientific focus from the currently dependency-closed stage frontier.
+    /// The resolved focus is written to the director run, so autonomous choices remain visible
+    /// and replayable rather than hiding behind a generic "auto" flag.
+    Adaptive,
     EvidenceFirst,
     MechanismFirst,
     ExperimentFirst,
@@ -60,6 +65,9 @@ pub struct GliomaResearchDirectorRequest {
     pub selection_weights: GliomaSelectionWeights,
     pub max_retries: u8,
     pub require_artifacts: bool,
+    /// Value-only outcomes from prior bounded rounds. Artifact payloads remain institution-local.
+    #[serde(default)]
+    pub outcome_summaries: BTreeMap<String, GliomaActionOutcomeSummary>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +106,7 @@ pub struct GliomaResearchDirectorRun {
     pub next_stage_order: Vec<String>,
     pub negative_evidence: Vec<String>,
     pub uncertainty: Vec<String>,
+    pub outcome_adjustment_order: Vec<String>,
     pub disposition: GliomaDirectorDisposition,
     pub next_step: String,
     pub digest: ContentHash,
@@ -131,12 +140,167 @@ fn checkpoint_order(checkpoints: &[GliomaDirectorCheckpoint]) -> bool {
 
 fn focus_target(focus: GliomaDirectorFocus) -> Option<GliomaStageKind> {
     match focus {
+        GliomaDirectorFocus::Adaptive => None,
         GliomaDirectorFocus::EvidenceFirst => Some(GliomaStageKind::EvidenceCompilation),
         GliomaDirectorFocus::MechanismFirst => Some(GliomaStageKind::MechanismExploration),
         GliomaDirectorFocus::ExperimentFirst => Some(GliomaStageKind::ExperimentDesign),
         GliomaDirectorFocus::ComputationFirst => Some(GliomaStageKind::ComputationalExecution),
         GliomaDirectorFocus::ReplicationFirst => Some(GliomaStageKind::ReplicationRobustness),
         GliomaDirectorFocus::FullProgram => None,
+    }
+}
+
+/// Resolve an adaptive focus using only the compiled stage graph. A stage is considered visible
+/// only after its typed prerequisites are either starting checkpoints or also dependency-closed
+/// and ready in this plan. Scientific stages are preferred over downstream publication/federation
+/// work; if no specialized branch is currently runnable, the director retains broad full-program
+/// scoring. No evidence values or provider outputs are invented by this classifier.
+fn outcome_pressure(
+    kind: GliomaStageKind,
+    outcomes: &BTreeMap<String, GliomaActionOutcomeSummary>,
+) -> bool {
+    outcomes
+        .get(kind.stage_id())
+        .is_some_and(|summary| summary.negative > 0 || summary.partial > 0 || summary.failed > 0)
+}
+
+fn resolve_focus(
+    focus: GliomaDirectorFocus,
+    plan: &GliomaResearchPlan,
+    completed: &BTreeSet<String>,
+    outcomes: &BTreeMap<String, GliomaActionOutcomeSummary>,
+    weights: GliomaSelectionWeights,
+) -> GliomaDirectorFocus {
+    if focus != GliomaDirectorFocus::Adaptive {
+        return focus;
+    }
+    let ready = plan
+        .stages
+        .iter()
+        .filter(|stage| stage.readiness == StageReadiness::Ready)
+        .map(|stage| (stage.stage_id.as_str(), stage))
+        .collect::<BTreeMap<_, _>>();
+    let mut closed = completed.clone();
+    loop {
+        let mut progress = false;
+        for (stage_id, stage) in &ready {
+            if closed.contains(*stage_id)
+                || stage
+                    .depends_on
+                    .iter()
+                    .any(|dependency| !closed.contains(dependency.as_str()))
+            {
+                continue;
+            }
+            closed.insert((*stage_id).to_string());
+            progress = true;
+        }
+        if !progress {
+            break;
+        }
+    }
+    // Once an upstream scientific branch has returned a negative, partial, or failed result,
+    // prefer a dependency-closed replication branch when one is available. This is a real
+    // strategy change, not a receipt annotation: it turns an autonomous engine away from blindly
+    // repeating a weak arm while preserving the branch for falsification. Evidence pressure is
+    // handled before normal scientific-stage preference so unresolved source quality can repair
+    // the context instead of being buried beneath a mechanism score.
+    let evidence_pressure = outcome_pressure(GliomaStageKind::EvidenceSurveillance, outcomes)
+        || outcome_pressure(GliomaStageKind::EvidenceCompilation, outcomes);
+    let scientific_pressure = [
+        GliomaStageKind::MechanismExploration,
+        GliomaStageKind::ExperimentDesign,
+        GliomaStageKind::ComputationalExecution,
+    ]
+    .iter()
+    .any(|kind| outcome_pressure(*kind, outcomes));
+    if evidence_pressure
+        && (closed.contains(GliomaStageKind::EvidenceSurveillance.stage_id())
+            || closed.contains(GliomaStageKind::EvidenceCompilation.stage_id()))
+    {
+        GliomaDirectorFocus::EvidenceFirst
+    } else if scientific_pressure
+        && closed.contains(GliomaStageKind::ReplicationRobustness.stage_id())
+    {
+        GliomaDirectorFocus::ReplicationFirst
+    } else {
+        let options = [
+            (
+                GliomaDirectorFocus::MechanismFirst,
+                GliomaStageKind::MechanismExploration,
+                5_u8,
+            ),
+            (
+                GliomaDirectorFocus::ExperimentFirst,
+                GliomaStageKind::ExperimentDesign,
+                4_u8,
+            ),
+            (
+                GliomaDirectorFocus::ComputationFirst,
+                GliomaStageKind::ComputationalExecution,
+                3_u8,
+            ),
+            (
+                GliomaDirectorFocus::ReplicationFirst,
+                GliomaStageKind::ReplicationRobustness,
+                2_u8,
+            ),
+            (
+                GliomaDirectorFocus::EvidenceFirst,
+                GliomaStageKind::EvidenceCompilation,
+                1_u8,
+            ),
+        ];
+        options
+            .into_iter()
+            .filter(|(_, kind, _)| {
+                closed.contains(kind.stage_id()) && !completed.contains(kind.stage_id())
+            })
+            .map(|(focus, kind, tie_break)| {
+                let profile = stage_profile(kind);
+                let weighted = u64::from(profile[0]) * u64::from(weights.information_gain)
+                    + u64::from(profile[1]) * u64::from(weights.frontier_novelty)
+                    + u64::from(profile[2]) * u64::from(weights.workflow_leverage)
+                    + u64::from(profile[3]) * u64::from(weights.cross_stage_unlock)
+                    + u64::from(profile[4]) * u64::from(weights.reproducibility_safety)
+                    + u64::from(profile[5]) * u64::from(weights.federation_value)
+                    + u64::from(profile[6]) * u64::from(weights.feasibility);
+                let mut downstream = BTreeSet::new();
+                loop {
+                    let mut progress = false;
+                    for stage in plan.stages.iter().filter(|stage| {
+                        stage.readiness == StageReadiness::Ready
+                            && !completed.contains(stage.stage_id.as_str())
+                            && stage.stage_id != kind.stage_id()
+                    }) {
+                        let connected = stage.depends_on.iter().any(|dependency| {
+                            dependency == kind.stage_id()
+                                || downstream.contains(dependency.as_str())
+                        });
+                        let dependencies_closed = stage.depends_on.iter().all(|dependency| {
+                            closed.contains(dependency.as_str())
+                                || downstream.contains(dependency.as_str())
+                        });
+                        if connected
+                            && dependencies_closed
+                            && downstream.insert(stage.stage_id.clone())
+                        {
+                            progress = true;
+                        }
+                    }
+                    if !progress {
+                        break;
+                    }
+                }
+                (
+                    weighted + (downstream.len() as u64).saturating_mul(2_000),
+                    tie_break,
+                    focus,
+                )
+            })
+            .max_by_key(|(score, tie_break, _)| (*score, *tie_break))
+            .map(|(_, _, focus)| focus)
+            .unwrap_or(GliomaDirectorFocus::FullProgram)
     }
 }
 
@@ -274,6 +438,7 @@ fn digest_input(output: &GliomaResearchDirectorRun) -> serde_json::Value {
         "next_stage_order": output.next_stage_order,
         "negative_evidence": output.negative_evidence,
         "uncertainty": output.uncertainty,
+        "outcome_adjustment_order": output.outcome_adjustment_order,
         "disposition": output.disposition,
         "next_step": output.next_step,
     })
@@ -294,9 +459,19 @@ fn validate_request(
             pair[0].stage_kind == pair[1].stage_kind || pair[0].artifact_id == pair[1].artifact_id
         })
         || request.max_retries > 8
+        || request.outcome_summaries.len() > MAX_ACTIONS
     {
         return Err(GliomaResearchDirectorError::InvalidRequest(
             "bounded budget/actions, canonical checkpoints, intent identity, and retries are required".into(),
+        ));
+    }
+    if request
+        .outcome_summaries
+        .keys()
+        .any(|key| key.trim().is_empty())
+    {
+        return Err(GliomaResearchDirectorError::InvalidRequest(
+            "outcome summary keys must be non-empty".into(),
         ));
     }
     let weights = request.selection_weights;
@@ -345,6 +520,7 @@ fn validate_request(
 fn compile_candidates(
     plan: &GliomaResearchPlan,
     request: &GliomaResearchDirectorRequest,
+    focus: GliomaDirectorFocus,
 ) -> Result<DirectorCandidateCompilation, GliomaResearchDirectorError> {
     let model_system = request
         .intent
@@ -402,9 +578,9 @@ fn compile_candidates(
                 continue;
             }
             actions.push(GliomaDirectorAction {
-                candidate: action_candidate(stage, request.focus, model_system),
+                candidate: action_candidate(stage, focus, model_system),
                 readiness: stage.readiness,
-                rationale: stage_rationale(stage, request.focus),
+                rationale: stage_rationale(stage, focus),
             });
             admitted.insert(stage.stage_id.clone());
             progress = true;
@@ -476,6 +652,7 @@ impl GliomaResearchDirectorRun {
             || !canonical_strings(&self.blocked_order)
             || !canonical_strings(&self.negative_evidence)
             || !canonical_strings(&self.uncertainty)
+            || !canonical_strings(&self.outcome_adjustment_order)
             || self.actions.len() != self.candidate_order.len()
             || self.checkpoint_digest_order.len() != self.completed_stage_order.len()
             || self.next_stage_order.iter().collect::<BTreeSet<_>>().len()
@@ -554,13 +731,41 @@ fn run_director(
     let plan = compile_glioma_research(&request.intent)
         .map_err(|error| GliomaResearchDirectorError::Compilation(error.to_string()))?;
     let plan_admitted = plan.disposition == crate::glioma_engine::GliomaPlanDisposition::Admitted;
+    let completed = request
+        .completed_checkpoints
+        .iter()
+        .map(|checkpoint| checkpoint.stage_kind.stage_id().to_string())
+        .collect::<BTreeSet<_>>();
+    let resolved_focus = resolve_focus(
+        request.focus,
+        &plan,
+        &completed,
+        &request.outcome_summaries,
+        request.selection_weights,
+    );
     let DirectorCandidateCompilation {
-        actions,
+        mut actions,
         hold_order,
         approval_order,
         mut blocked_order,
         disabled_order,
-    } = compile_candidates(&plan, request)?;
+    } = compile_candidates(&plan, request, resolved_focus)?;
+    let base_candidates = actions
+        .iter()
+        .map(|action| action.candidate.clone())
+        .collect::<Vec<_>>();
+    let adapted_candidates =
+        adapt_glioma_candidates_from_outcomes(&base_candidates, &request.outcome_summaries);
+    let mut outcome_adjustment_order = BTreeSet::new();
+    for (action, adapted) in actions.iter_mut().zip(adapted_candidates) {
+        if action.candidate != adapted {
+            outcome_adjustment_order.insert(action.candidate.action_id.clone());
+            action.rationale.push(
+                "candidate utility was conservatively reweighted from prior typed execution outcomes".into(),
+            );
+            action.candidate = adapted;
+        }
+    }
     let candidates = actions
         .iter()
         .map(|action| action.candidate.clone())
@@ -641,6 +846,9 @@ fn run_director(
     }
     let mut uncertainty = BTreeSet::new();
     let mut negative_evidence = BTreeSet::new();
+    if request.focus == GliomaDirectorFocus::Adaptive {
+        uncertainty.insert(format!("director:auto-focus:{resolved_focus:?}"));
+    }
     for omission in &plan.omission_order {
         uncertainty.insert(format!("workflow-omission:{omission}"));
     }
@@ -712,7 +920,7 @@ fn run_director(
         feature_id: FEATURE_ID.into(),
         output_schema: OUTPUT_SCHEMA.into(),
         objective: request.intent.objective.clone(),
-        focus: request.focus,
+        focus: resolved_focus,
         workflow_plan: plan,
         checkpoint_digest_order: request
             .completed_checkpoints
@@ -733,6 +941,7 @@ fn run_director(
         next_stage_order,
         negative_evidence: negative_evidence.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
+        outcome_adjustment_order: outcome_adjustment_order.into_iter().collect(),
         disposition,
         next_step,
         digest: ContentHash::of_bytes(b"unsealed-glioma-research-director"),
@@ -751,9 +960,9 @@ pub fn plan_glioma_research_director(
 }
 
 /// Compile and execute one bounded director batch through a caller-owned local executor.
-pub fn execute_glioma_research_director<E: GliomaActionExecutor>(
+pub fn execute_glioma_research_director(
     request: &GliomaResearchDirectorRequest,
-    executor: &mut E,
+    executor: &mut dyn GliomaActionExecutor,
 ) -> Result<GliomaResearchDirectorRun, GliomaResearchDirectorError> {
     run_director(request, Some(executor))
 }
@@ -762,7 +971,7 @@ pub fn execute_glioma_research_director<E: GliomaActionExecutor>(
 mod tests {
     use super::*;
     use crate::glioma::programs::p07_protocol_simulation::action_execution::DryRunGliomaActionExecutor;
-    use crate::glioma_engine::{GliomaModelSystem, LocalArtifactRef};
+    use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
     use bioprism_foundation::{AutonomyTier, PRECLINICAL_BOUNDARY};
     use bioprism_onco::OutputUse;
 
@@ -812,6 +1021,7 @@ mod tests {
             selection_weights: GliomaSelectionWeights::default(),
             max_retries: 1,
             require_artifacts: true,
+            outcome_summaries: BTreeMap::new(),
         }
     }
 
@@ -850,6 +1060,75 @@ mod tests {
     }
 
     #[test]
+    fn adaptive_focus_selects_the_dependency_closed_scientific_branch() {
+        let mut mechanism_request = request();
+        mechanism_request.focus = GliomaDirectorFocus::Adaptive;
+        mechanism_request
+            .intent
+            .modalities
+            .insert(GliomaModality::Literature);
+        let mechanism = plan_glioma_research_director(&mechanism_request).unwrap();
+        assert_eq!(mechanism.focus, GliomaDirectorFocus::MechanismFirst);
+        assert!(mechanism
+            .uncertainty
+            .iter()
+            .any(|item| item == "director:auto-focus:MechanismFirst"));
+
+        let mut evidence_request = request();
+        evidence_request.focus = GliomaDirectorFocus::Adaptive;
+        evidence_request.intent.modalities = BTreeSet::from([GliomaModality::Literature]);
+        let evidence = plan_glioma_research_director(&evidence_request).unwrap();
+        assert_eq!(evidence.focus, GliomaDirectorFocus::EvidenceFirst);
+        assert!(evidence
+            .uncertainty
+            .iter()
+            .any(|item| item == "director:auto-focus:EvidenceFirst"));
+
+        let mut pressured_intent = mechanism_request.intent.clone();
+        pressured_intent
+            .modalities
+            .extend([GliomaModality::Computational, GliomaModality::Replication]);
+        let pressured_plan = compile_glioma_research(&pressured_intent).unwrap();
+        let outcomes = BTreeMap::from([(
+            GliomaStageKind::MechanismExploration.stage_id().to_string(),
+            GliomaActionOutcomeSummary {
+                negative: 1,
+                ..GliomaActionOutcomeSummary::default()
+            },
+        )]);
+        assert_eq!(
+            resolve_focus(
+                GliomaDirectorFocus::Adaptive,
+                &pressured_plan,
+                &BTreeSet::new(),
+                &outcomes,
+                GliomaSelectionWeights::default(),
+            ),
+            GliomaDirectorFocus::ReplicationFirst
+        );
+
+        let completed = [
+            GliomaStageKind::MechanismExploration,
+            GliomaStageKind::ExperimentDesign,
+            GliomaStageKind::ComputationalExecution,
+            GliomaStageKind::StatisticalInterpretation,
+        ]
+        .into_iter()
+        .map(|kind| kind.stage_id().to_string())
+        .collect::<BTreeSet<_>>();
+        assert_eq!(
+            resolve_focus(
+                GliomaDirectorFocus::Adaptive,
+                &pressured_plan,
+                &completed,
+                &BTreeMap::new(),
+                GliomaSelectionWeights::default(),
+            ),
+            GliomaDirectorFocus::ReplicationFirst
+        );
+    }
+
+    #[test]
     fn director_is_permutation_stable_and_focus_changes_rank_without_bypassing_gates() {
         let first = plan_glioma_research_director(&request()).unwrap();
         let mut alternate = request();
@@ -864,6 +1143,33 @@ mod tests {
             .blocked_order
             .iter()
             .all(|entry| !entry.ends_with("dependency-omitted")));
+    }
+
+    #[test]
+    fn director_reweights_next_portfolio_from_typed_execution_outcomes() {
+        let baseline = plan_glioma_research_director(&request()).unwrap();
+        let target = baseline.actions.first().unwrap().candidate.clone();
+        let baseline_information = target.information_gain_milli;
+        let mut adapted_request = request();
+        adapted_request.outcome_summaries.insert(
+            target.action_id.clone(),
+            GliomaActionOutcomeSummary {
+                failed: 4,
+                ..GliomaActionOutcomeSummary::default()
+            },
+        );
+        let adapted = plan_glioma_research_director(&adapted_request).unwrap();
+        let adapted_action = adapted
+            .actions
+            .iter()
+            .find(|action| action.candidate.action_id == target.action_id)
+            .unwrap();
+        assert!(adapted.outcome_adjustment_order.contains(&target.action_id));
+        assert!(adapted_action.candidate.information_gain_milli < baseline_information);
+        assert!(adapted_action
+            .rationale
+            .iter()
+            .any(|item| item.contains("execution outcomes")));
     }
 
     #[test]

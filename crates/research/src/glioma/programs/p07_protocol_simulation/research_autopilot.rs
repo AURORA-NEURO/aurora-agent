@@ -370,7 +370,7 @@ mod tests {
         };
         let mut context = DecisionContext {
             feature_id: "GAF-GLIOMA-P04-F01".into(),
-            output_schema: "GliomaDecisionContext1@1".into(),
+            output_schema: "GliomaDecisionContext1@2".into(),
             objective: "prioritize invasion assays".into(),
             claim_order: vec!["claim:invasion".into()],
             actions: vec![action],

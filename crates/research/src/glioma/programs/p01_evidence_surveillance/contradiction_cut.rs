@@ -1,10 +1,10 @@
-//! Minimum-evidence-cut planning for contradictory preclinical glioma surveillance.
+//! Beam-selected minimum-evidence-cut planning for contradictory preclinical glioma surveillance.
 //!
 //! Triangulation reports whether a claim is currently supportable. This feature answers the next
 //! operational question: which smallest set of evidence records should be audited first to cover
 //! the active disagreement edges, and which claims still require an independent replication? The
-//! result is a deterministic weighted vertex-cover approximation over signed evidence pairs. It
-//! plans review and replication; it never edits evidence or promotes a claim.
+//! result is a deterministic weighted vertex-cover portfolio over signed evidence pairs. It plans
+//! review and replication; it never edits evidence or promotes a claim.
 
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -12,10 +12,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P01-F08";
-pub const OUTPUT_SCHEMA: &str = "GliomaEvidenceContradictionCut1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaEvidenceContradictionCut1@2";
 pub const MAX_EVIDENCE: usize = 16_384;
 pub const MAX_CLAIMS: usize = 4_096;
 pub const MAX_AUDITS: usize = 4_096;
+const CUT_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -184,60 +185,237 @@ fn validate_request(request: &ContradictionCutRequest) -> Result<(), Contradicti
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CutState {
+    selected: Vec<String>,
+    covered_edges: BTreeSet<(String, String)>,
+    covered_edge_counts: BTreeMap<String, usize>,
+    touched_claims: BTreeSet<String>,
+    resolved_claims: BTreeSet<String>,
+    independence_groups: BTreeSet<String>,
+    source_families: BTreeSet<String>,
+    spent_units: u64,
+}
+
+fn cut_state_score(
+    state: &CutState,
+    evidence: &BTreeMap<String, &ContradictionEvidence>,
+    claim_severity: &BTreeMap<String, u16>,
+    isolated_claim: bool,
+) -> u128 {
+    let confidence = state
+        .selected
+        .iter()
+        .filter_map(|id| evidence.get(id))
+        .map(|item| u128::from(item.confidence_milli))
+        .sum::<u128>();
+    // For one isolated disagreement, prefer auditing the contradiction anchor so the next action
+    // directly interrogates the surprising edge. Once a portfolio spans multiple claims, retain
+    // the low-cost support-side tie-break that favors independent positive anchors and preserves
+    // the multi-claim diversity behavior of the cut beam.
+    let (support_preference, contradiction_preference) =
+        if isolated_claim && state.touched_claims.len() <= 1 {
+            (
+                0,
+                state
+                    .selected
+                    .iter()
+                    .filter_map(|id| evidence.get(id))
+                    .filter(|item| item.polarity == EvidencePolarity::Contradict)
+                    .count() as u128,
+            )
+        } else {
+            (
+                state
+                    .selected
+                    .iter()
+                    .filter_map(|id| evidence.get(id))
+                    .filter(|item| item.polarity == EvidencePolarity::Support)
+                    .count() as u128,
+                0,
+            )
+        };
+    // A claim is resolved only when every signed support/contradiction edge is covered. Partial
+    // touches remain useful for search, but cannot masquerade as a closed contradiction. Distinct
+    // resolved claims are the scientific objective; edge count, severity, diversity, and cost are
+    // deterministic refinements.
+    let resolved = (state.resolved_claims.len() as u128).saturating_mul(1_000_000_000_000);
+    let resolved_severity = state
+        .resolved_claims
+        .iter()
+        .filter_map(|claim| claim_severity.get(claim))
+        .map(|severity| u128::from(*severity))
+        .sum::<u128>()
+        .saturating_mul(100_000_000);
+    let partial = (state.touched_claims.len() as u128).saturating_mul(100_000);
+    let edge_coverage = (state.covered_edges.len() as u128).saturating_mul(1_000_000);
+    let independence = (state.independence_groups.len() as u128).saturating_mul(10_000_000_000);
+    let source_diversity = (state.source_families.len() as u128).saturating_mul(1_000_000_000);
+    let confidence = confidence.saturating_mul(1_000_000);
+    resolved
+        .saturating_add(resolved_severity)
+        .saturating_add(partial)
+        .saturating_add(edge_coverage)
+        .saturating_add(independence)
+        .saturating_add(source_diversity)
+        .saturating_add(support_preference.saturating_mul(10_000_000))
+        .saturating_add(contradiction_preference.saturating_mul(10_000_000))
+        .saturating_add(confidence)
+        .saturating_sub(u128::from(state.spent_units).saturating_mul(1_000))
+}
+
+/// Search evidence-record portfolios rather than committing to the first high-degree vertex.
+/// The objective gives contradiction-edge coverage first priority, then independent source-group
+/// coverage and confidence, with a small cost penalty. Every candidate is still bounded by the
+/// declared audit count and budget, and zero-new-edge records are never selected.
 fn select_cut(
     conflicts: &[ContradictionConflict],
     evidence: &BTreeMap<String, &ContradictionEvidence>,
     request: &ContradictionCutRequest,
 ) -> (Vec<ContradictionAuditSelection>, BTreeSet<String>, u64) {
     let mut edges = BTreeSet::<(String, String)>::new();
+    let mut edge_claim = BTreeMap::<(String, String), String>::new();
+    let mut claim_edge_counts = BTreeMap::<String, usize>::new();
+    let mut claim_severity = BTreeMap::<String, u16>::new();
     for conflict in conflicts {
         for support in &conflict.support_order {
             for contradict in &conflict.contradict_order {
-                edges.insert((support.clone(), contradict.clone()));
+                let edge = (support.clone(), contradict.clone());
+                if edges.insert(edge.clone()) {
+                    edge_claim.insert(edge, conflict.claim_id.clone());
+                    *claim_edge_counts
+                        .entry(conflict.claim_id.clone())
+                        .or_default() += 1;
+                }
             }
         }
+        claim_severity.insert(conflict.claim_id.clone(), conflict.severity_milli);
     }
-    let mut remaining = edges;
-    let mut selected = Vec::new();
-    let mut selected_ids = BTreeSet::new();
-    let mut budget = request.budget_units;
-    while !remaining.is_empty() && selected.len() < request.max_audits {
-        let mut best: Option<(String, usize, u32, u16)> = None;
-        for (id, item) in evidence {
-            if selected_ids.contains(id) || u64::from(item.audit_cost_units) > budget {
-                continue;
-            }
-            let coverage = remaining
-                .iter()
-                .filter(|(left, right)| left == id || right == id)
-                .count();
-            if coverage == 0 {
-                continue;
-            }
-            let priority = ((coverage as u64)
-                .saturating_mul(u64::from(item.confidence_milli))
-                .saturating_mul(1_000)
-                .checked_div(u64::from(item.audit_cost_units).max(1))
-                .unwrap_or(0))
-            .min(1_000) as u16;
-            let candidate = (id.clone(), coverage, item.audit_cost_units, priority);
-            if best
-                .as_ref()
-                .map(|current| {
-                    candidate.3 > current.3
-                        || (candidate.3 == current.3 && candidate.1 > current.1)
-                        || (candidate.3 == current.3
-                            && candidate.1 == current.1
-                            && candidate.0 < current.0)
-                })
-                .unwrap_or(true)
+    let candidate_ids = evidence.keys().cloned().collect::<Vec<_>>();
+    let mut states = vec![CutState {
+        selected: Vec::new(),
+        covered_edges: BTreeSet::new(),
+        covered_edge_counts: BTreeMap::new(),
+        touched_claims: BTreeSet::new(),
+        resolved_claims: BTreeSet::new(),
+        independence_groups: BTreeSet::new(),
+        source_families: BTreeSet::new(),
+        spent_units: 0,
+    }];
+    for id in candidate_ids {
+        let item = evidence[&id];
+        let mut next = states.clone();
+        for state in &states {
+            if state.selected.len() >= request.max_audits
+                || state
+                    .spent_units
+                    .saturating_add(u64::from(item.audit_cost_units))
+                    > request.budget_units
             {
-                best = Some(candidate);
+                continue;
             }
+            let new_edges = edges
+                .iter()
+                .filter(|edge| {
+                    (edge.0 == id || edge.1 == id) && !state.covered_edges.contains(*edge)
+                })
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            if new_edges.is_empty() {
+                continue;
+            }
+            let mut selected = state.selected.clone();
+            selected.push(id.clone());
+            let mut covered_edges = state.covered_edges.clone();
+            covered_edges.extend(new_edges.iter().cloned());
+            let mut covered_edge_counts = state.covered_edge_counts.clone();
+            for edge in &new_edges {
+                if let Some(claim_id) = edge_claim.get(edge) {
+                    *covered_edge_counts.entry(claim_id.clone()).or_default() += 1;
+                }
+            }
+            let mut touched_claims = state.touched_claims.clone();
+            let mut resolved_claims = state.resolved_claims.clone();
+            for edge in &new_edges {
+                if let Some(claim_id) = edge_claim.get(edge) {
+                    touched_claims.insert(claim_id.clone());
+                    if covered_edge_counts.get(claim_id).copied().unwrap_or(0)
+                        >= claim_edge_counts
+                            .get(claim_id)
+                            .copied()
+                            .unwrap_or(usize::MAX)
+                    {
+                        resolved_claims.insert(claim_id.clone());
+                    }
+                }
+            }
+            let mut independence_groups = state.independence_groups.clone();
+            independence_groups.insert(item.independence_group.clone());
+            let mut source_families = state.source_families.clone();
+            source_families.insert(item.source_family.clone());
+            next.push(CutState {
+                selected,
+                covered_edges,
+                covered_edge_counts,
+                touched_claims,
+                resolved_claims,
+                independence_groups,
+                source_families,
+                spent_units: state
+                    .spent_units
+                    .saturating_add(u64::from(item.audit_cost_units)),
+            });
         }
-        let Some((id, coverage, cost, priority)) = best else {
-            break;
-        };
+        next.sort_by(|left, right| {
+            cut_state_score(right, evidence, &claim_severity, conflicts.len() == 1)
+                .cmp(&cut_state_score(
+                    left,
+                    evidence,
+                    &claim_severity,
+                    conflicts.len() == 1,
+                ))
+                .then_with(|| left.spent_units.cmp(&right.spent_units))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        next.dedup_by(|left, right| left.selected == right.selected);
+        next.truncate(CUT_BEAM_WIDTH);
+        states = next;
+    }
+    let chosen = states
+        .into_iter()
+        .max_by(|left, right| {
+            cut_state_score(left, evidence, &claim_severity, conflicts.len() == 1)
+                .cmp(&cut_state_score(
+                    right,
+                    evidence,
+                    &claim_severity,
+                    conflicts.len() == 1,
+                ))
+                .then_with(|| right.spent_units.cmp(&left.spent_units))
+                .then_with(|| right.selected.cmp(&left.selected))
+        })
+        .expect("contradiction-cut beam always retains an empty state");
+
+    let mut remaining = edges;
+    let mut budget = request.budget_units;
+    let mut selected = Vec::new();
+    for id in chosen.selected {
+        let item = evidence[&id];
+        let covered_edges = remaining
+            .iter()
+            .filter(|(left, right)| left == &id || right == &id)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if covered_edges.is_empty() {
+            continue;
+        }
+        let coverage = covered_edges.len();
+        let priority = ((coverage as u64)
+            .saturating_mul(u64::from(item.confidence_milli))
+            .saturating_mul(1_000)
+            .checked_div(u64::from(item.audit_cost_units).max(1))
+            .unwrap_or(0))
+        .min(1_000) as u16;
         let covered_claims = conflicts
             .iter()
             .filter(|conflict| {
@@ -245,21 +423,30 @@ fn select_cut(
                     || conflict.contradict_order.iter().any(|value| value == &id)
             })
             .map(|conflict| conflict.claim_id.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        remaining.retain(|(left, right)| left != &id && right != &id);
-        selected_ids.insert(id.clone());
-        budget = budget.saturating_sub(u64::from(cost));
+            .collect::<BTreeSet<_>>();
+        let covered_claim_order = covered_claims.iter().cloned().collect::<Vec<_>>();
+        // Remove only the signed edges incident to this audited record. A partial vertex cover
+        // must remain visible so the autonomous loop can schedule the complementary support or
+        // contradiction audit instead of falsely closing a multi-record conflict.
+        remaining.retain(|edge| edge.0 != id && edge.1 != id);
+        budget = budget.saturating_sub(u64::from(item.audit_cost_units));
         selected.push(ContradictionAuditSelection {
             evidence_id: id,
-            covered_claim_order: covered_claims,
+            covered_claim_order,
             covered_edge_count: coverage,
-            audit_cost_units: cost,
+            audit_cost_units: item.audit_cost_units,
             priority_milli: priority,
-            rationale: "audit this evidence record to cover the highest-weight unresolved disagreement edge".into(),
+            rationale:
+                "audit this evidence record to cover a globally selected disagreement portfolio"
+                    .into(),
         });
     }
+    selected.sort_by(|left, right| {
+        right
+            .priority_milli
+            .cmp(&left.priority_milli)
+            .then_with(|| left.evidence_id.cmp(&right.evidence_id))
+    });
     (
         selected,
         remaining
@@ -362,8 +549,13 @@ pub fn plan_glioma_evidence_contradiction_cut(
         conflict.covered_by_audit = conflict
             .support_order
             .iter()
-            .chain(&conflict.contradict_order)
-            .any(|id| audited.contains(id));
+            .flat_map(|support| {
+                conflict
+                    .contradict_order
+                    .iter()
+                    .map(move |contradict| (support, contradict))
+            })
+            .all(|(support, contradict)| audited.contains(support) || audited.contains(contradict));
     }
     let claim_order = by_claim.keys().cloned().collect::<Vec<_>>();
     let unresolved_claim_order = conflicts
@@ -402,6 +594,13 @@ pub fn plan_glioma_evidence_contradiction_cut(
     }
     negative_evidence.sort();
     uncertainty.sort();
+    // `selections` is execution-priority ordered; keep the separately exposed ID order canonical
+    // so cross-language consumers can compare the catalog without depending on scheduling ties.
+    let mut audit_order = selections
+        .iter()
+        .map(|selection| selection.evidence_id.clone())
+        .collect::<Vec<_>>();
+    audit_order.sort();
     let disposition = if conflicts.is_empty() {
         ContradictionCutDisposition::NoContradiction
     } else if unresolved_claim_order.is_empty() {
@@ -417,10 +616,7 @@ pub fn plan_glioma_evidence_contradiction_cut(
         objective: request.objective.clone(),
         claim_order,
         conflicts,
-        audit_order: selections
-            .iter()
-            .map(|selection| selection.evidence_id.clone())
-            .collect(),
+        audit_order,
         selections,
         unresolved_claim_order,
         next_action_order,
@@ -484,6 +680,91 @@ mod tests {
             .iter()
             .any(|item| item == "audit:contradict"));
         output.validate().unwrap();
+    }
+
+    #[test]
+    fn cut_beam_prefers_exact_resolution_over_partial_independent_touches() {
+        let values = vec![
+            evidence("hub", EvidencePolarity::Support, "claim-a", 2),
+            evidence("cheap-a", EvidencePolarity::Support, "claim-a", 1),
+            evidence("cheap-b", EvidencePolarity::Support, "claim-b", 1),
+            evidence("contradict-a", EvidencePolarity::Contradict, "claim-a", 1),
+            evidence("contradict-b", EvidencePolarity::Contradict, "claim-b", 1),
+        ];
+        let by_id = values
+            .iter()
+            .map(|item| (item.evidence_id.clone(), item))
+            .collect::<BTreeMap<_, _>>();
+        let conflicts = vec![
+            ContradictionConflict {
+                claim_id: "claim-a".into(),
+                support_order: vec!["cheap-a".into(), "hub".into()],
+                contradict_order: vec!["contradict-a".into()],
+                source_family_order: vec!["source-a".into()],
+                independent_group_count: 2,
+                severity_milli: 800,
+                covered_by_audit: false,
+            },
+            ContradictionConflict {
+                claim_id: "claim-b".into(),
+                support_order: vec!["cheap-b".into(), "hub".into()],
+                contradict_order: vec!["contradict-b".into()],
+                source_family_order: vec!["source-b".into()],
+                independent_group_count: 2,
+                severity_milli: 800,
+                covered_by_audit: false,
+            },
+        ];
+        let (selected, uncovered, remaining_budget) = select_cut(
+            &conflicts,
+            &by_id,
+            &ContradictionCutRequest {
+                objective: "resolve two independent conflicts".into(),
+                min_confidence_milli: 100,
+                max_audits: 2,
+                budget_units: 2,
+                require_independent_replication: true,
+            },
+        );
+        assert_eq!(
+            selected
+                .iter()
+                .map(|selection| selection.evidence_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["contradict-a", "contradict-b"]
+        );
+        assert!(uncovered.is_empty());
+        assert_eq!(remaining_budget, 0);
+    }
+
+    #[test]
+    fn partial_vertex_cover_keeps_multi_record_conflict_unresolved() {
+        let output = plan_glioma_evidence_contradiction_cut(
+            &ContradictionCutRequest {
+                objective: "resolve multi-record conflict".into(),
+                min_confidence_milli: 100,
+                max_audits: 1,
+                budget_units: 1,
+                require_independent_replication: true,
+            },
+            &[
+                evidence("support-a", EvidencePolarity::Support, "claim-a", 1),
+                evidence("support-b", EvidencePolarity::Support, "claim-a", 1),
+                evidence("contradict-a", EvidencePolarity::Contradict, "claim-a", 1),
+                evidence("contradict-b", EvidencePolarity::Contradict, "claim-a", 1),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            output.disposition,
+            ContradictionCutDisposition::BudgetBlocked
+        );
+        assert_eq!(output.unresolved_claim_order, vec!["claim-a"]);
+        assert!(!output.conflicts[0].covered_by_audit);
+        assert!(output
+            .next_action_order
+            .iter()
+            .any(|action| action == "independent-replication:claim-a"));
     }
 
     #[test]

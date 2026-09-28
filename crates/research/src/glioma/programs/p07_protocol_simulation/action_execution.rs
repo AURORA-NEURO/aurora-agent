@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P07-F19";
-pub const OUTPUT_SCHEMA: &str = "GliomaActionPortfolioExecution1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaActionPortfolioExecution1@3";
 pub const MAX_RETRIES: u8 = 8;
 pub const MAX_ACTIONS: usize = 256;
 
@@ -166,6 +166,7 @@ pub enum ActionPortfolioStopReason {
     SelectionBlocked,
     ExecutorFailed,
     DependencyBlocked,
+    BudgetExhausted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,6 +183,12 @@ pub struct ActionPortfolioExecution {
     pub skipped_order: Vec<String>,
     pub deferred_order: Vec<String>,
     pub blocked_order: Vec<String>,
+    /// Budget envelope used by the selector and executor for this portfolio.
+    pub budget_units: u32,
+    /// Declared action cost charged for every worker invocation, including retries. Skipped
+    /// actions consume no budget; replay/cache layers can therefore reconcile this with actual
+    /// local work rather than the nominal selected portfolio.
+    pub budget_spent_units: u32,
     pub retry_count: u32,
     pub uncertainty: Vec<String>,
     pub negative_evidence: Vec<String>,
@@ -218,6 +225,8 @@ fn digest_input(output: &ActionPortfolioExecution) -> serde_json::Value {
         "skipped_order": output.skipped_order,
         "deferred_order": output.deferred_order,
         "blocked_order": output.blocked_order,
+        "budget_units": output.budget_units,
+        "budget_spent_units": output.budget_spent_units,
         "retry_count": output.retry_count,
         "uncertainty": output.uncertainty,
         "negative_evidence": output.negative_evidence,
@@ -246,6 +255,8 @@ impl ActionPortfolioExecution {
             || !canonical(&self.blocked_order)
             || !canonical(&self.uncertainty)
             || !canonical(&self.negative_evidence)
+            || self.budget_units == 0
+            || self.budget_spent_units > self.budget_units
             || self.results.iter().any(|result| {
                 result.action_id.trim().is_empty()
                     || result.note.trim().is_empty()
@@ -405,6 +416,47 @@ pub fn execute_glioma_action_portfolio_with_context<E: GliomaActionExecutor + ?S
     scope: Option<&GliomaActionWorkflowScope>,
     executor: &mut E,
 ) -> Result<ActionPortfolioExecution, ActionPortfolioExecutionError> {
+    execute_glioma_action_portfolio_internal(
+        request,
+        source_artifacts,
+        completed_artifacts,
+        scope,
+        None,
+        executor,
+    )
+}
+
+/// Execute the exact selection produced by an upstream scientific planner. The selector is
+/// recomputed only as an integrity check; dispatch uses the supplied, byte-equivalent selection
+/// and fails closed if the candidate pool or policy configuration has changed since planning.
+pub fn execute_glioma_action_portfolio_with_selection_and_context<
+    E: GliomaActionExecutor + ?Sized,
+>(
+    request: &ActionPortfolioExecutionRequest,
+    planned_selection: &GliomaActionSelection,
+    source_artifacts: &[LocalArtifactRef],
+    completed_artifacts: &[GliomaActionArtifactInput],
+    scope: Option<&GliomaActionWorkflowScope>,
+    executor: &mut E,
+) -> Result<ActionPortfolioExecution, ActionPortfolioExecutionError> {
+    execute_glioma_action_portfolio_internal(
+        request,
+        source_artifacts,
+        completed_artifacts,
+        scope,
+        Some(planned_selection),
+        executor,
+    )
+}
+
+fn execute_glioma_action_portfolio_internal<E: GliomaActionExecutor + ?Sized>(
+    request: &ActionPortfolioExecutionRequest,
+    source_artifacts: &[LocalArtifactRef],
+    completed_artifacts: &[GliomaActionArtifactInput],
+    scope: Option<&GliomaActionWorkflowScope>,
+    planned_selection: Option<&GliomaActionSelection>,
+    executor: &mut E,
+) -> Result<ActionPortfolioExecution, ActionPortfolioExecutionError> {
     validate_request(request)?;
     let mut source_artifacts = source_artifacts.to_vec();
     source_artifacts.sort_by(|left, right| {
@@ -453,12 +505,26 @@ pub fn execute_glioma_action_portfolio_with_context<E: GliomaActionExecutor + ?S
             ));
         }
     }
-    let selection = select_glioma_actions(
+    let computed_selection = select_glioma_actions(
         &request.candidates,
         &request.completed_actions,
         &request.selection,
     )
     .map_err(|error| ActionPortfolioExecutionError::InvalidRequest(error.to_string()))?;
+    let selection = if let Some(planned) = planned_selection {
+        planned
+            .validate()
+            .map_err(|error| ActionPortfolioExecutionError::InvalidRequest(error.to_string()))?;
+        if planned != &computed_selection {
+            return Err(ActionPortfolioExecutionError::InvalidRequest(
+                "planned selection no longer matches the candidate pool and execution policy"
+                    .into(),
+            ));
+        }
+        planned.clone()
+    } else {
+        computed_selection
+    };
     let candidate_map = request
         .candidates
         .iter()
@@ -471,6 +537,7 @@ pub fn execute_glioma_action_portfolio_with_context<E: GliomaActionExecutor + ?S
         .map(|action_id| (action_id.clone(), ActionExecutionDisposition::Completed))
         .collect::<BTreeMap<_, _>>();
     let mut retry_count = 0_u32;
+    let mut budget_spent_units = 0_u32;
     let mut halted = false;
     let mut stop_reason = if selection.selected_order.is_empty() {
         ActionPortfolioStopReason::SelectionBlocked
@@ -537,6 +604,23 @@ pub fn execute_glioma_action_portfolio_with_context<E: GliomaActionExecutor + ?S
         };
         let mut accepted = None;
         for attempt in 1..=request.max_retries.saturating_add(1) {
+            if budget_spent_units.saturating_add(candidate.cost_units)
+                > request.selection.budget_units
+            {
+                accepted = Some(ActionExecutionResult {
+                    action_id: action_id.clone(),
+                    disposition: ActionExecutionDisposition::Failed,
+                    attempt_count: attempt.saturating_sub(1),
+                    artifact: None,
+                    note: "retry suppressed because the next action attempt exceeded the declared portfolio budget".into(),
+                    uncertainty: vec!["action-budget-exhausted-during-retry".into()],
+                    negative_evidence: Vec::new(),
+                });
+                halted = true;
+                stop_reason = ActionPortfolioStopReason::BudgetExhausted;
+                break;
+            }
+            budget_spent_units = budget_spent_units.saturating_add(candidate.cost_units);
             match executor.execute_action_with_context(candidate, &context, attempt) {
                 Ok(result) => {
                     let result =
@@ -557,6 +641,22 @@ pub fn execute_glioma_action_portfolio_with_context<E: GliomaActionExecutor + ?S
                         )));
                     }
                     if failure.retryable && attempt <= request.max_retries {
+                        if budget_spent_units.saturating_add(candidate.cost_units)
+                            > request.selection.budget_units
+                        {
+                            accepted = Some(ActionExecutionResult {
+                                action_id: action_id.clone(),
+                                disposition: ActionExecutionDisposition::Failed,
+                                attempt_count: attempt,
+                                artifact: None,
+                                note: "retry suppressed because the next action attempt exceeded the declared portfolio budget".into(),
+                                uncertainty: vec!["action-budget-exhausted-during-retry".into()],
+                                negative_evidence: Vec::new(),
+                            });
+                            halted = true;
+                            stop_reason = ActionPortfolioStopReason::BudgetExhausted;
+                            break;
+                        }
                         retry_count = retry_count.saturating_add(1);
                         continue;
                     }
@@ -656,6 +756,8 @@ pub fn execute_glioma_action_portfolio_with_context<E: GliomaActionExecutor + ?S
         skipped_order,
         deferred_order: selection.deferred_order.clone(),
         blocked_order: selection.blocked_order.clone(),
+        budget_units: request.selection.budget_units,
+        budget_spent_units,
         retry_count,
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative_evidence.into_iter().collect(),
@@ -863,7 +965,37 @@ mod tests {
                 .unwrap();
         assert_eq!(executor.attempts, 2);
         assert_eq!(output.retry_count, 1);
+        assert_eq!(output.budget_spent_units, 4);
         assert_eq!(output.results[0].attempt_count, 2);
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn over_budget_retry_is_suppressed_and_skipped_dependents_are_not_billed() {
+        let first = candidate("expensive", 6, 800);
+        let mut dependent = candidate("dependent", 2, 700);
+        dependent.depends_on = vec![first.action_id.clone()];
+        let mut executor = RetryOnce { attempts: 0 };
+        let output = execute_glioma_action_portfolio(
+            &request(vec![dependent, first.clone()]),
+            &mut executor,
+        )
+        .unwrap();
+
+        assert_eq!(executor.attempts, 1);
+        assert_eq!(output.budget_spent_units, first.cost_units);
+        assert_eq!(output.retry_count, 0);
+        assert_eq!(output.failed_order, vec!["expensive"]);
+        assert_eq!(output.skipped_order, vec!["dependent"]);
+        assert_eq!(output.results[0].attempt_count, 1);
+        assert_eq!(
+            output.stop_reason,
+            ActionPortfolioStopReason::BudgetExhausted
+        );
+        assert!(output
+            .uncertainty
+            .iter()
+            .any(|item| item == "action-budget-exhausted-during-retry"));
         output.validate().unwrap();
     }
 

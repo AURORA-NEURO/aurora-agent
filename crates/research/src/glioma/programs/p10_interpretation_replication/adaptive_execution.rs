@@ -322,7 +322,7 @@ mod tests {
         InterpretationSynthesisRequest,
     };
     use crate::glioma_engine::{GliomaModelSystem, GliomaSelectionWeights, LocalArtifactRef};
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn request(
         disposition: InterpretationSynthesisDisposition,
@@ -388,6 +388,7 @@ mod tests {
             frontier: AdaptiveFrontierRequest {
                 synthesis,
                 completed_actions: BTreeSet::new(),
+                outcome_summaries: BTreeMap::new(),
                 budget_units: 80,
                 max_actions: 3,
                 approval_granted: true,

@@ -300,6 +300,7 @@ pub fn execute_glioma_computation_recovery<
             require_local_artifacts: request.initial.require_local_artifacts,
             cache,
             replay_identity: recovery_identity.clone(),
+            outcome_summaries: initial.outcome_summaries.clone(),
         };
         let recovery = execute_glioma_computation_campaign(&recovery_request, planner, executor)?;
         let stop_reason = match recovery.disposition {
@@ -474,6 +475,7 @@ mod tests {
                 require_local_artifacts: true,
                 cache: Vec::new(),
                 replay_identity: ContentHash::of_bytes(b"initial-recovery-replay"),
+                outcome_summaries: BTreeMap::new(),
             },
             recovery_budget_units: 4,
             recovery_duration_ticks: 2,

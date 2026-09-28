@@ -8,21 +8,50 @@
 //! No dry-run result is treated as biological evidence and no clinical decision is produced.
 
 use super::action_execution::{
-    ActionExecutionDisposition, ActionPortfolioExecutionDisposition, GliomaActionExecutor,
+    ActionExecutionDisposition, ActionPortfolioExecutionDisposition, ActionPortfolioStopReason,
+    GliomaActionExecutor,
 };
 use super::director::{
     execute_glioma_research_director, GliomaDirectorCheckpoint, GliomaDirectorFocus,
     GliomaResearchDirectorError, GliomaResearchDirectorRequest, GliomaResearchDirectorRun,
 };
-use crate::glioma_engine::{GliomaResearchIntent, GliomaSelectionWeights, GliomaStageKind};
+use crate::glioma_engine::{
+    glioma_action_outcome_key, GliomaActionOutcomeSummary, GliomaResearchIntent,
+    GliomaSelectionWeights, GliomaStageKind,
+};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P07-F11";
-pub const OUTPUT_SCHEMA: &str = "GliomaAutonomousResearchEngine1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaAutonomousResearchEngine1@3";
 pub const MAX_CYCLES: u16 = 32;
+
+/// Enables outcome-aware reweighting between bounded engine cycles. The policy never changes
+/// permissions or stage dependencies; it only reallocates the caller's declared utility budget
+/// when a branch is stagnant, uncertain, or produces a negative result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GliomaAdaptiveReplanningPolicy {
+    pub enabled: bool,
+    pub stagnation_limit_cycles: u16,
+    pub information_gain_shift: u16,
+    pub safety_shift: u16,
+    pub feasibility_shift: u16,
+}
+
+impl Default for GliomaAdaptiveReplanningPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            stagnation_limit_cycles: 1,
+            information_gain_shift: 8,
+            safety_shift: 6,
+            feasibility_shift: 4,
+        }
+    }
+}
 
 /// High-level request for a complete local research program. The intent remains the scientific
 /// source of truth; all other fields bound how far this invocation may proceed.
@@ -41,6 +70,12 @@ pub struct GliomaAutonomousResearchEngineRequest {
     pub selection_weights: GliomaSelectionWeights,
     pub max_retries: u8,
     pub require_artifacts: bool,
+    /// Value-only empirical outcomes to seed a resumed or externally checkpointed mission.
+    /// Artifact payloads remain in the institution-local store.
+    #[serde(default)]
+    pub outcome_summaries: BTreeMap<String, GliomaActionOutcomeSummary>,
+    #[serde(default)]
+    pub adaptive_policy: GliomaAdaptiveReplanningPolicy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,7 +122,8 @@ pub struct GliomaAutonomousResearchEngineRun {
     pub cycles: Vec<GliomaAutonomousResearchEngineCycle>,
     pub completed_checkpoints: Vec<GliomaDirectorCheckpoint>,
     pub completed_stage_order: Vec<String>,
-    pub pending_stage_order: Vec<String>,
+    /// Action IDs still deferred or uncheckpointed after the latest planning/execution cycle.
+    pub pending_action_order: Vec<String>,
     pub hold_order: Vec<String>,
     pub approval_order: Vec<String>,
     pub blocked_order: Vec<String>,
@@ -95,6 +131,11 @@ pub struct GliomaAutonomousResearchEngineRun {
     pub remaining_budget_units: u32,
     pub negative_evidence: Vec<String>,
     pub uncertainty: Vec<String>,
+    pub adaptation_order: Vec<String>,
+    /// Value-only execution outcomes retained for the next continuation or audit. Artifact
+    /// payloads remain in the institution-local store.
+    pub outcome_summaries: BTreeMap<String, GliomaActionOutcomeSummary>,
+    pub final_selection_weights: GliomaSelectionWeights,
     pub disposition: GliomaAutonomousResearchEngineDisposition,
     pub stop_reason: GliomaAutonomousResearchEngineStopReason,
     pub next_step: String,
@@ -132,7 +173,7 @@ fn digest_input(run: &GliomaAutonomousResearchEngineRun) -> serde_json::Value {
         "cycles": run.cycles,
         "completed_checkpoints": run.completed_checkpoints,
         "completed_stage_order": run.completed_stage_order,
-        "pending_stage_order": run.pending_stage_order,
+        "pending_action_order": run.pending_action_order,
         "hold_order": run.hold_order,
         "approval_order": run.approval_order,
         "blocked_order": run.blocked_order,
@@ -140,10 +181,78 @@ fn digest_input(run: &GliomaAutonomousResearchEngineRun) -> serde_json::Value {
         "remaining_budget_units": run.remaining_budget_units,
         "negative_evidence": run.negative_evidence,
         "uncertainty": run.uncertainty,
+        "adaptation_order": run.adaptation_order,
+        "outcome_summaries": run.outcome_summaries,
+        "final_selection_weights": run.final_selection_weights,
         "disposition": run.disposition,
         "stop_reason": run.stop_reason,
         "next_step": run.next_step,
     })
+}
+
+fn rebalance_weights(
+    mut weights: GliomaSelectionWeights,
+    progress: bool,
+    negative: bool,
+    uncertain: bool,
+    policy: GliomaAdaptiveReplanningPolicy,
+) -> (GliomaSelectionWeights, String) {
+    let shift = |value: &mut u16, source: &mut u16, amount: u16| {
+        let moved = (*source).min(amount);
+        *source -= moved;
+        *value = value.saturating_add(moved);
+    };
+    if negative || uncertain {
+        if negative {
+            shift(
+                &mut weights.reproducibility_safety,
+                &mut weights.frontier_novelty,
+                policy.safety_shift,
+            );
+        }
+        if uncertain {
+            shift(
+                &mut weights.information_gain,
+                &mut weights.federation_value,
+                policy.information_gain_shift,
+            );
+        }
+        shift(
+            &mut weights.feasibility,
+            &mut weights.frontier_novelty,
+            policy.feasibility_shift,
+        );
+        return (
+            weights,
+            "negative-or-uncertain-result:increase-safety-information-and-feasibility".into(),
+        );
+    }
+    if progress {
+        shift(
+            &mut weights.cross_stage_unlock,
+            &mut weights.frontier_novelty,
+            3,
+        );
+        shift(&mut weights.feasibility, &mut weights.information_gain, 2);
+        return (
+            weights,
+            "checkpoint-progress:increase-cross-stage-unlock-and-feasibility".into(),
+        );
+    }
+    shift(
+        &mut weights.information_gain,
+        &mut weights.frontier_novelty,
+        policy.information_gain_shift,
+    );
+    shift(
+        &mut weights.reproducibility_safety,
+        &mut weights.federation_value,
+        policy.safety_shift,
+    );
+    (
+        weights,
+        "stagnation:increase-information-and-reproducibility".into(),
+    )
 }
 
 fn validate_request(
@@ -155,6 +264,12 @@ fn validate_request(
         || request.max_cycles == 0
         || request.max_cycles > MAX_CYCLES
         || request.max_retries > super::action_execution::MAX_RETRIES
+        || request.adaptive_policy.stagnation_limit_cycles == 0
+        || request.adaptive_policy.stagnation_limit_cycles > request.max_cycles
+        || request.adaptive_policy.information_gain_shift > 50
+        || request.adaptive_policy.safety_shift > 50
+        || request.adaptive_policy.feasibility_shift > 50
+        || request.outcome_summaries.len() > super::action_execution::MAX_ACTIONS
         || !checkpoint_order(&request.completed_checkpoints)
         || request
             .completed_checkpoints
@@ -163,6 +278,15 @@ fn validate_request(
     {
         return Err(GliomaAutonomousResearchEngineError::InvalidRequest(
             "mission identity, positive budget/actions/cycles, bounded retries, and canonical checkpoints are required".into(),
+        ));
+    }
+    if request
+        .outcome_summaries
+        .keys()
+        .any(|key| key.trim().is_empty())
+    {
+        return Err(GliomaAutonomousResearchEngineError::InvalidRequest(
+            "outcome summary keys must be non-empty".into(),
         ));
     }
     if request
@@ -230,9 +354,9 @@ fn add_checkpoints(
             let Some(artifact) = &result.artifact else {
                 continue;
             };
-            if matches!(
+            if !matches!(
                 disposition,
-                ActionExecutionDisposition::Skipped | ActionExecutionDisposition::Failed
+                ActionExecutionDisposition::Completed | ActionExecutionDisposition::Negative
             ) {
                 continue;
             }
@@ -260,12 +384,17 @@ impl GliomaAutonomousResearchEngineRun {
             || self.mission_id.trim().is_empty()
             || self.objective.trim().is_empty()
             || !canonical(&self.completed_stage_order)
-            || !canonical(&self.pending_stage_order)
+            || !canonical(&self.pending_action_order)
             || !canonical(&self.hold_order)
             || !canonical(&self.approval_order)
             || !canonical(&self.blocked_order)
             || !canonical(&self.negative_evidence)
             || !canonical(&self.uncertainty)
+            || !canonical(&self.adaptation_order)
+            || self
+                .outcome_summaries
+                .keys()
+                .any(|key| key.trim().is_empty())
             || !checkpoint_order(&self.completed_checkpoints)
             || self
                 .remaining_budget_units
@@ -276,6 +405,7 @@ impl GliomaAutonomousResearchEngineRun {
                 .iter()
                 .any(|checkpoint| checkpoint.artifact.validate().is_err())
             || self.next_step.trim().is_empty()
+            || self.final_selection_weights.validate().is_err()
         {
             return Err(GliomaAutonomousResearchEngineError::InvalidOutput(
                 "identity, ordering, checkpoint, budget, artifact, or next-step invariants are invalid".into(),
@@ -313,9 +443,9 @@ impl GliomaAutonomousResearchEngineRun {
 /// Compile and execute a complete bounded glioma program. Each cycle is recompiled from the
 /// artifacts returned by the previous cycle, so stale plans cannot silently dispatch downstream
 /// work. A production caller supplies its institution-local executor; MCP uses the dry-run seam.
-pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
+pub fn execute_glioma_autonomous_research_engine(
     request: &GliomaAutonomousResearchEngineRequest,
-    executor: &mut E,
+    executor: &mut dyn GliomaActionExecutor,
 ) -> Result<GliomaAutonomousResearchEngineRun, GliomaAutonomousResearchEngineError> {
     validate_request(request)?;
     let mut checkpoints = request.completed_checkpoints.clone();
@@ -323,12 +453,22 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
     let mut spent = 0_u32;
     let mut negative_evidence = BTreeSet::new();
     let mut uncertainty = BTreeSet::new();
-    let mut pending = BTreeSet::new();
+    let mut adaptive_weights = request.selection_weights;
+    let mut outcome_summaries = request.outcome_summaries.clone();
+    let mut adaptation_order = Vec::new();
+    let mut stagnant_cycles = 0_u16;
+    let mut pending_actions = BTreeSet::new();
     let mut hold = BTreeSet::new();
     let mut approval = BTreeSet::new();
     let mut blocked = BTreeSet::new();
     let mut disposition = GliomaAutonomousResearchEngineDisposition::Partial;
     let mut stop_reason = GliomaAutonomousResearchEngineStopReason::MaxCycles;
+    // A partial provider result can otherwise make a bounded engine replay the exact same
+    // frontier until the global cycle limit. Keep the adaptive reweighting opportunity, but
+    // terminate once the frontier is unchanged for the configured stagnation window. The caller
+    // can resume with a repaired executor or new artifact without silently spending more budget.
+    let mut previous_frontier: Option<BTreeSet<String>> = None;
+    let mut repeated_frontier_cycles = 0_u16;
 
     for cycle_number in 1..=request.max_cycles {
         let budget_before = request.budget_units.saturating_sub(spent);
@@ -346,15 +486,52 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
             approval_granted: request.approval_granted,
             allow_instrument_execution: request.allow_instrument_execution,
             allow_federation: request.allow_federation,
-            selection_weights: request.selection_weights,
+            selection_weights: adaptive_weights,
             max_retries: request.max_retries,
             require_artifacts: request.require_artifacts,
+            outcome_summaries: outcome_summaries.clone(),
         };
         let director = execute_glioma_research_director(&director_request, executor).map_err(
             |error: GliomaResearchDirectorError| {
                 GliomaAutonomousResearchEngineError::Director(error.to_string())
             },
         )?;
+        let candidate_by_id = director
+            .actions
+            .iter()
+            .map(|action| (action.candidate.action_id.clone(), action.candidate.clone()))
+            .collect::<HashMap<_, _>>();
+        if let Some(execution) = &director.execution {
+            for result in &execution.results {
+                let Some(candidate) = candidate_by_id.get(&result.action_id) else {
+                    continue;
+                };
+                let increment = |summary: &mut GliomaActionOutcomeSummary| match result.disposition
+                {
+                    ActionExecutionDisposition::Completed => {
+                        summary.completed = summary.completed.saturating_add(1)
+                    }
+                    ActionExecutionDisposition::Negative => {
+                        summary.negative = summary.negative.saturating_add(1)
+                    }
+                    ActionExecutionDisposition::Partial => {
+                        summary.partial = summary.partial.saturating_add(1)
+                    }
+                    ActionExecutionDisposition::Failed | ActionExecutionDisposition::Skipped => {
+                        summary.failed = summary.failed.saturating_add(1)
+                    }
+                };
+                increment(
+                    outcome_summaries
+                        .entry(result.action_id.clone())
+                        .or_default(),
+                );
+                let cohort_key = glioma_action_outcome_key(candidate);
+                if cohort_key != result.action_id {
+                    increment(outcome_summaries.entry(cohort_key).or_default());
+                }
+            }
+        }
         let cost_by_action = director
             .actions
             .iter()
@@ -365,12 +542,21 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
                 )
             })
             .collect::<HashMap<_, _>>();
-        let round_cost = director
+        // Charge only worker invocations that actually happened. A failed action may have
+        // consumed one or more retry attempts, while actions skipped behind that failure consumed
+        // nothing; charging the nominal selection would make a resumed mission overstate spend
+        // and hide the budget available for a repaired executor.
+        let planned_round_cost = director
             .next_stage_order
             .iter()
             .filter_map(|action| cost_by_action.get(action))
             .copied()
-            .sum::<u32>()
+            .sum::<u32>();
+        let round_cost = director
+            .execution
+            .as_ref()
+            .map(|execution| execution.budget_spent_units)
+            .unwrap_or(planned_round_cost)
             .min(budget_before);
         spent = spent.saturating_add(round_cost);
         for item in &director.negative_evidence {
@@ -379,11 +565,66 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
         for item in &director.uncertainty {
             uncertainty.insert(item.clone());
         }
-        pending.extend(director.next_stage_order.iter().cloned());
         hold.extend(director.hold_order.iter().cloned());
         approval.extend(director.approval_order.iter().cloned());
         blocked.extend(director.blocked_order.iter().cloned());
         let (admitted, negative) = add_checkpoints(&mut checkpoints, &director);
+        let progress = !admitted.is_empty();
+        if progress {
+            stagnant_cycles = 0;
+        } else {
+            stagnant_cycles = stagnant_cycles.saturating_add(1);
+        }
+        if request.adaptive_policy.enabled
+            && (progress
+                || !negative.is_empty()
+                || !director.uncertainty.is_empty()
+                || stagnant_cycles >= request.adaptive_policy.stagnation_limit_cycles)
+        {
+            let (next_weights, reason) = rebalance_weights(
+                adaptive_weights,
+                progress,
+                !negative.is_empty(),
+                !director.uncertainty.is_empty(),
+                request.adaptive_policy,
+            );
+            adaptive_weights = next_weights;
+            adaptation_order.push(format!("cycle-{cycle_number}:{reason}"));
+        }
+        let completed_stages = checkpoints
+            .iter()
+            .map(|checkpoint| checkpoint.stage_kind)
+            .collect::<BTreeSet<_>>();
+        let stage_by_action = director
+            .actions
+            .iter()
+            .map(|action| {
+                (
+                    action.candidate.action_id.as_str(),
+                    action.candidate.stage_kind,
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let mut current_pending_actions: BTreeSet<String> = director
+            .selection
+            .as_ref()
+            .map(|selection| selection.deferred_order.iter().cloned().collect())
+            .unwrap_or_default();
+        current_pending_actions.extend(director.next_stage_order.iter().cloned());
+        current_pending_actions.retain(|action_id| match stage_by_action.get(action_id.as_str()) {
+            Some(stage_kind) => !completed_stages.contains(stage_kind),
+            None => true,
+        });
+        let frontier_repeated = previous_frontier
+            .as_ref()
+            .is_some_and(|frontier| frontier == &current_pending_actions);
+        if !frontier_repeated || progress {
+            repeated_frontier_cycles = 0;
+        } else {
+            repeated_frontier_cycles = repeated_frontier_cycles.saturating_add(1);
+        }
+        previous_frontier = Some(current_pending_actions.clone());
+        pending_actions = current_pending_actions;
         let cycle_uncertainty = director.uncertainty.clone();
         cycles.push(GliomaAutonomousResearchEngineCycle {
             cycle: cycle_number,
@@ -404,6 +645,17 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
         if qualified {
             disposition = GliomaAutonomousResearchEngineDisposition::Completed;
             stop_reason = GliomaAutonomousResearchEngineStopReason::Qualified;
+            break;
+        }
+        if matches!(
+            director
+                .execution
+                .as_ref()
+                .map(|execution| execution.stop_reason),
+            Some(ActionPortfolioStopReason::BudgetExhausted)
+        ) {
+            disposition = GliomaAutonomousResearchEngineDisposition::BudgetExhausted;
+            stop_reason = GliomaAutonomousResearchEngineStopReason::BudgetExhausted;
             break;
         }
         if matches!(
@@ -437,6 +689,14 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
             };
             break;
         }
+        if !progress
+            && frontier_repeated
+            && repeated_frontier_cycles >= request.adaptive_policy.stagnation_limit_cycles
+        {
+            disposition = GliomaAutonomousResearchEngineDisposition::NoRunnableActions;
+            stop_reason = GliomaAutonomousResearchEngineStopReason::NoProgress;
+            break;
+        }
         if round_cost == 0 {
             disposition = GliomaAutonomousResearchEngineDisposition::NoRunnableActions;
             stop_reason = GliomaAutonomousResearchEngineStopReason::NoProgress;
@@ -453,11 +713,6 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
         .iter()
         .map(|checkpoint| checkpoint.stage_kind.stage_id().to_string())
         .collect::<Vec<_>>();
-    let completed_stage_set = completed_stage_order
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    pending.retain(|stage| !completed_stage_set.contains(stage));
     completed_stage_order.sort();
     let next_step = match stop_reason {
         GliomaAutonomousResearchEngineStopReason::Qualified => {
@@ -479,6 +734,7 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
         }
     }
     .to_string();
+    adaptation_order.sort();
     let mut output = GliomaAutonomousResearchEngineRun {
         feature_id: FEATURE_ID.into(),
         output_schema: OUTPUT_SCHEMA.into(),
@@ -487,7 +743,7 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
         cycles,
         completed_checkpoints: checkpoints,
         completed_stage_order,
-        pending_stage_order: pending.into_iter().collect(),
+        pending_action_order: pending_actions.into_iter().collect(),
         hold_order: hold.into_iter().collect(),
         approval_order: approval.into_iter().collect(),
         blocked_order: blocked.into_iter().collect(),
@@ -495,6 +751,9 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
         remaining_budget_units: request.budget_units.saturating_sub(spent),
         negative_evidence: negative_evidence.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
+        adaptation_order,
+        outcome_summaries,
+        final_selection_weights: adaptive_weights,
         disposition,
         stop_reason,
         next_step,
@@ -506,8 +765,50 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
     Ok(output)
 }
 
+/// Resume a bounded engine run without asking the caller to rebuild checkpoint state by hand.
+///
+/// Only checkpoints that the previous run admitted as complete or explicit negative scientific
+/// results are carried forward. Partial, failed, and deferred actions remain absent from the
+/// continuation frontier. The helper keeps the original mission identity and replay scope, but
+/// spends only the returned remaining budget; a qualified or exhausted run is not silently
+/// restarted.
+pub fn resume_glioma_autonomous_research_engine(
+    request: &GliomaAutonomousResearchEngineRequest,
+    previous: &GliomaAutonomousResearchEngineRun,
+    executor: &mut dyn GliomaActionExecutor,
+) -> Result<GliomaAutonomousResearchEngineRun, GliomaAutonomousResearchEngineError> {
+    previous.validate()?;
+    if previous.mission_id != request.mission_id || previous.objective != request.intent.objective {
+        return Err(GliomaAutonomousResearchEngineError::InvalidRequest(
+            "continuation request must match the previous mission identity and objective".into(),
+        ));
+    }
+    if matches!(
+        previous.stop_reason,
+        GliomaAutonomousResearchEngineStopReason::Qualified
+    ) {
+        return Err(GliomaAutonomousResearchEngineError::InvalidRequest(
+            "a qualified engine run has no continuation frontier".into(),
+        ));
+    }
+    if previous.remaining_budget_units == 0 {
+        return Err(GliomaAutonomousResearchEngineError::InvalidRequest(
+            "the previous engine run exhausted its continuation budget".into(),
+        ));
+    }
+    let mut continuation = request.clone();
+    continuation.completed_checkpoints = previous.completed_checkpoints.clone();
+    continuation.budget_units = previous.remaining_budget_units;
+    continuation.outcome_summaries = previous.outcome_summaries.clone();
+    // A continuation is a scientific continuation, not a fresh prior. Preserve the learned
+    // multi-objective policy so a negative or uncertain frontier cannot silently reset to the
+    // original weights and replay the same selection decision.
+    continuation.selection_weights = previous.final_selection_weights;
+    execute_glioma_autonomous_research_engine(&continuation, executor)
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::glioma::programs::p07_protocol_simulation::action_execution::{
         ActionExecutionFailure, ActionExecutionResult, DryRunGliomaActionExecutor,
@@ -516,9 +817,9 @@ mod tests {
     use crate::glioma_engine::{GliomaModality, GliomaModelSystem, LocalArtifactRef};
     use bioprism_foundation::{AutonomyTier, PRECLINICAL_BOUNDARY};
     use bioprism_onco::OutputUse;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
-    fn request() -> GliomaAutonomousResearchEngineRequest {
+    pub(crate) fn request() -> GliomaAutonomousResearchEngineRequest {
         let hash = ContentHash::of_bytes(b"engine-input");
         GliomaAutonomousResearchEngineRequest {
             mission_id: "engine-test".into(),
@@ -566,7 +867,71 @@ mod tests {
             selection_weights: GliomaSelectionWeights::default(),
             max_retries: 1,
             require_artifacts: true,
+            outcome_summaries: BTreeMap::new(),
+            adaptive_policy: Default::default(),
         }
+    }
+
+    #[derive(Default)]
+    struct RetryBudgetExecutor {
+        attempts: u8,
+    }
+
+    impl GliomaActionExecutor for RetryBudgetExecutor {
+        fn execute_action(
+            &mut self,
+            candidate: &crate::glioma_engine::GliomaActionCandidate,
+            attempt: u8,
+        ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+            self.attempts = self.attempts.saturating_add(1);
+            if attempt == 1 {
+                return Err(ActionExecutionFailure {
+                    reason: "transient local worker lock".into(),
+                    retryable: true,
+                });
+            }
+            DryRunGliomaActionExecutor.execute_action(candidate, attempt)
+        }
+    }
+
+    #[test]
+    fn engine_bills_only_attempted_actions_and_stops_on_an_over_budget_retry() {
+        let mut request = request();
+        request.completed_checkpoints = vec![GliomaDirectorCheckpoint {
+            stage_kind: GliomaStageKind::IntentNormalization,
+            artifact_id: "intent-checkpoint".into(),
+            artifact: LocalArtifactRef {
+                artifact_id: "intent-checkpoint".into(),
+                content_hash: ContentHash::of_bytes(b"intent-checkpoint"),
+                content_type: "application/json".into(),
+                local_only: true,
+                contains_human_data: false,
+                contains_direct_identifiers: false,
+            },
+        }];
+        request.budget_units = 12;
+        request.max_actions = 1;
+        request.max_cycles = 4;
+        let mut executor = RetryBudgetExecutor::default();
+        let run = execute_glioma_autonomous_research_engine(&request, &mut executor).unwrap();
+
+        assert_eq!(executor.attempts, 1);
+        assert_eq!(run.cycles.len(), 1);
+        assert_eq!(run.budget_spent_units, 12);
+        assert_eq!(run.remaining_budget_units, 0);
+        assert_eq!(
+            run.stop_reason,
+            GliomaAutonomousResearchEngineStopReason::BudgetExhausted
+        );
+        assert_eq!(
+            run.disposition,
+            GliomaAutonomousResearchEngineDisposition::BudgetExhausted
+        );
+        assert!(run
+            .uncertainty
+            .iter()
+            .any(|item| item == "execution:action-budget-exhausted-during-retry"));
+        run.validate().unwrap();
     }
 
     #[test]
@@ -583,6 +948,268 @@ mod tests {
             .negative_evidence
             .iter()
             .any(|item| item.contains("synthetic-dry-run")));
+        assert!(run.pending_action_order.iter().all(|action_id| {
+            let stage = run
+                .cycles
+                .iter()
+                .flat_map(|cycle| &cycle.director.actions)
+                .find(|action| action.candidate.action_id == *action_id)
+                .map(|action| action.candidate.stage_kind);
+            match stage {
+                Some(stage) => !run
+                    .completed_checkpoints
+                    .iter()
+                    .any(|checkpoint| checkpoint.stage_kind == stage),
+                None => true,
+            }
+        }));
+        run.validate().unwrap();
+    }
+
+    #[test]
+    fn engine_adapts_selection_policy_after_progress_and_negative_outcomes() {
+        let mut request = request();
+        request.max_actions = 1;
+        request.max_cycles = 2;
+        let mut executor = FixedOutcomeArtifactExecutor {
+            disposition: ActionExecutionDisposition::Negative,
+            contexts: Vec::new(),
+        };
+        let run = execute_glioma_autonomous_research_engine(&request, &mut executor).unwrap();
+        assert!(!run.adaptation_order.is_empty());
+        assert!(run
+            .adaptation_order
+            .iter()
+            .any(|item| item.contains("negative-or-uncertain-result")));
+        assert!(run
+            .outcome_summaries
+            .values()
+            .any(|summary| summary.negative > 0));
+        assert_ne!(run.final_selection_weights, request.selection_weights);
+        run.validate().unwrap();
+    }
+
+    struct FixedOutcomeArtifactExecutor {
+        disposition: ActionExecutionDisposition,
+        contexts: Vec<GliomaActionExecutionContext>,
+    }
+
+    impl GliomaActionExecutor for FixedOutcomeArtifactExecutor {
+        fn execute_action(
+            &mut self,
+            candidate: &crate::glioma_engine::GliomaActionCandidate,
+            attempt: u8,
+        ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+            let (note, uncertainty, negative_evidence) = match self.disposition {
+                ActionExecutionDisposition::Partial => (
+                    "partial workflow output; prerequisite evidence is incomplete",
+                    vec!["partial-result".into()],
+                    Vec::new(),
+                ),
+                ActionExecutionDisposition::Negative => (
+                    "prespecified negative research result",
+                    Vec::new(),
+                    vec!["prespecified-endpoint-not-observed".into()],
+                ),
+                _ => unreachable!("test executor only models partial and negative outcomes"),
+            };
+            Ok(ActionExecutionResult {
+                action_id: candidate.action_id.clone(),
+                disposition: self.disposition,
+                attempt_count: attempt,
+                artifact: Some(LocalArtifactRef {
+                    artifact_id: format!("outcome-{}", candidate.action_id),
+                    content_hash: ContentHash::of_bytes(candidate.action_id.as_bytes()),
+                    content_type: "application/json".into(),
+                    local_only: true,
+                    contains_human_data: false,
+                    contains_direct_identifiers: false,
+                }),
+                note: note.into(),
+                uncertainty,
+                negative_evidence,
+            })
+        }
+
+        fn execute_action_with_context(
+            &mut self,
+            candidate: &crate::glioma_engine::GliomaActionCandidate,
+            context: &GliomaActionExecutionContext,
+            attempt: u8,
+        ) -> Result<ActionExecutionResult, ActionExecutionFailure> {
+            self.contexts.push(context.clone());
+            self.execute_action(candidate, attempt)
+        }
+    }
+
+    #[test]
+    fn partial_artifact_never_becomes_a_downstream_stage_checkpoint() {
+        let mut request = request();
+        request.max_actions = 1;
+        request.max_cycles = 2;
+        let mut executor = FixedOutcomeArtifactExecutor {
+            disposition: ActionExecutionDisposition::Partial,
+            contexts: Vec::new(),
+        };
+        let run = execute_glioma_autonomous_research_engine(&request, &mut executor).unwrap();
+
+        assert_eq!(run.cycles.len(), 2);
+        assert!(run.completed_checkpoints.is_empty());
+        assert!(run
+            .cycles
+            .iter()
+            .all(|cycle| cycle.admitted_checkpoint_order.is_empty()));
+        assert!(!run.pending_action_order.is_empty());
+        assert!(executor.contexts.iter().all(|context| context
+            .dependency_artifacts
+            .iter()
+            .all(|input| !input.artifact.artifact_id.starts_with("outcome-"))));
+        run.validate().unwrap();
+    }
+
+    #[test]
+    fn repeated_partial_frontier_stops_before_burning_the_cycle_budget() {
+        let mut request = request();
+        request.max_actions = 1;
+        request.max_cycles = 8;
+        request.adaptive_policy.stagnation_limit_cycles = 1;
+        let mut executor = FixedOutcomeArtifactExecutor {
+            disposition: ActionExecutionDisposition::Partial,
+            contexts: Vec::new(),
+        };
+        let run = execute_glioma_autonomous_research_engine(&request, &mut executor).unwrap();
+
+        assert_eq!(run.cycles.len(), 2);
+        assert_eq!(
+            run.stop_reason,
+            GliomaAutonomousResearchEngineStopReason::NoProgress
+        );
+        assert_eq!(
+            run.disposition,
+            GliomaAutonomousResearchEngineDisposition::NoRunnableActions
+        );
+        assert!(run.budget_spent_units < request.budget_units);
+        run.validate().unwrap();
+    }
+
+    #[test]
+    fn continuation_reuses_only_validated_checkpoints_and_remaining_budget() {
+        let mut request = request();
+        request.max_actions = 1;
+        request.max_cycles = 8;
+        let mut partial_executor = FixedOutcomeArtifactExecutor {
+            disposition: ActionExecutionDisposition::Partial,
+            contexts: Vec::new(),
+        };
+        let previous =
+            execute_glioma_autonomous_research_engine(&request, &mut partial_executor).unwrap();
+        assert!(previous.remaining_budget_units > 0);
+        assert!(previous.completed_checkpoints.is_empty());
+
+        let mut repaired_executor = DryRunGliomaActionExecutor;
+        let continuation =
+            resume_glioma_autonomous_research_engine(&request, &previous, &mut repaired_executor)
+                .unwrap();
+        assert_eq!(continuation.mission_id, request.mission_id);
+        assert!(continuation.budget_spent_units <= previous.remaining_budget_units);
+        assert!(continuation
+            .cycles
+            .first()
+            .is_some_and(|cycle| cycle.budget_before_units == previous.remaining_budget_units));
+        for (key, summary) in &previous.outcome_summaries {
+            assert!(continuation
+                .outcome_summaries
+                .get(key)
+                .is_some_and(|continued| continued.total() >= summary.total()));
+        }
+        continuation.validate().unwrap();
+    }
+
+    #[test]
+    fn continuation_preserves_the_adapted_selection_policy() {
+        let mut request = request();
+        request.max_actions = 1;
+        request.max_cycles = 2;
+        let mut negative_executor = FixedOutcomeArtifactExecutor {
+            disposition: ActionExecutionDisposition::Negative,
+            contexts: Vec::new(),
+        };
+        let previous =
+            execute_glioma_autonomous_research_engine(&request, &mut negative_executor).unwrap();
+        assert_ne!(previous.final_selection_weights, request.selection_weights);
+        assert!(previous.remaining_budget_units > 0);
+
+        let mut repaired_executor = DryRunGliomaActionExecutor;
+        let continuation =
+            resume_glioma_autonomous_research_engine(&request, &previous, &mut repaired_executor)
+                .unwrap();
+        let expected =
+            super::super::director::plan_glioma_research_director(&GliomaResearchDirectorRequest {
+                intent: request.intent.clone(),
+                focus: request.focus,
+                completed_checkpoints: previous.completed_checkpoints.clone(),
+                budget_units: previous.remaining_budget_units,
+                max_actions: request.max_actions,
+                approval_granted: request.approval_granted,
+                allow_instrument_execution: request.allow_instrument_execution,
+                allow_federation: request.allow_federation,
+                selection_weights: previous.final_selection_weights,
+                max_retries: request.max_retries,
+                require_artifacts: request.require_artifacts,
+                outcome_summaries: previous.outcome_summaries.clone(),
+            })
+            .unwrap();
+        assert_eq!(
+            continuation
+                .cycles
+                .first()
+                .and_then(|cycle| cycle.director.selection.as_ref())
+                .map(|selection| selection.selection_digest.clone()),
+            expected
+                .selection
+                .as_ref()
+                .map(|selection| selection.selection_digest.clone())
+        );
+        continuation.validate().unwrap();
+    }
+
+    #[test]
+    fn continuation_refuses_a_different_mission() {
+        let mut request = request();
+        request.max_cycles = 1;
+        let mut executor = DryRunGliomaActionExecutor;
+        let previous = execute_glioma_autonomous_research_engine(&request, &mut executor).unwrap();
+        let mut mismatched = request.clone();
+        mismatched.mission_id = "different-mission".into();
+        let mut next_executor = DryRunGliomaActionExecutor;
+        assert!(matches!(
+            resume_glioma_autonomous_research_engine(&mismatched, &previous, &mut next_executor),
+            Err(GliomaAutonomousResearchEngineError::InvalidRequest(_))
+        ));
+    }
+
+    #[test]
+    fn complete_negative_result_remains_a_checkpoint_and_negative_evidence() {
+        let mut request = request();
+        request.max_actions = 1;
+        request.max_cycles = 1;
+        let mut executor = FixedOutcomeArtifactExecutor {
+            disposition: ActionExecutionDisposition::Negative,
+            contexts: Vec::new(),
+        };
+        let run = execute_glioma_autonomous_research_engine(&request, &mut executor).unwrap();
+
+        assert_eq!(run.completed_checkpoints.len(), 1);
+        assert!(run
+            .completed_checkpoints
+            .iter()
+            .all(|checkpoint| checkpoint.artifact.artifact_id.starts_with("outcome-")));
+        assert_eq!(run.cycles.len(), 1);
+        assert_eq!(run.cycles[0].negative_action_order.len(), 1);
+        assert!(run
+            .negative_evidence
+            .iter()
+            .any(|item| item.contains("prespecified-endpoint-not-observed")));
         run.validate().unwrap();
     }
 

@@ -13,13 +13,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F11";
-pub const OUTPUT_SCHEMA: &str = "GliomaClosedLoopCampaign1@1";
-pub const EXECUTION_OUTPUT_SCHEMA: &str = "GliomaClosedLoopCampaignExecution1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaClosedLoopCampaign1@2";
+pub const EXECUTION_OUTPUT_SCHEMA: &str = "GliomaClosedLoopCampaignExecution1@2";
 pub const MAX_MECHANISMS: usize = 256;
 pub const MAX_ACTIONS: usize = 4_096;
 pub const MAX_OBSERVATIONS: usize = 16_384;
 pub const MAX_ROUNDS: u16 = 128;
 pub const SCORE_SCALE: u64 = 1_000_000;
+const CAMPAIGN_BEAM_WIDTH: usize = 64;
 /// Pseudo-likelihood regularizer that prevents one exact observation from collapsing the
 /// mechanism posterior to a false certainty before an independent assay can be run.
 pub const POSTERIOR_REGULARIZATION_MILLI: u64 = 10_000;
@@ -584,6 +585,136 @@ fn action_score(
     }
 }
 
+#[derive(Debug, Clone)]
+struct CampaignBatchState {
+    action_ids: Vec<String>,
+    spent: u64,
+    information: u64,
+    utility: u64,
+}
+
+fn prediction_distance(left: &CampaignAction, right: &CampaignAction) -> u64 {
+    let keys = left
+        .predicted_milli_by_mechanism
+        .keys()
+        .chain(right.predicted_milli_by_mechanism.keys())
+        .collect::<BTreeSet<_>>();
+    if keys.is_empty() {
+        return 0;
+    }
+    let total = keys
+        .iter()
+        .map(|key| {
+            let left_value = left
+                .predicted_milli_by_mechanism
+                .get(*key)
+                .copied()
+                .unwrap_or(0);
+            let right_value = right
+                .predicted_milli_by_mechanism
+                .get(*key)
+                .copied()
+                .unwrap_or(0);
+            left_value.abs_diff(right_value) as u64
+        })
+        .sum::<u64>();
+    (total / keys.len() as u64).min(1_000)
+}
+
+fn campaign_batch_state_better(left: &CampaignBatchState, right: &CampaignBatchState) -> bool {
+    left.utility > right.utility
+        || (left.utility == right.utility
+            && (left.information > right.information
+                || (left.information == right.information
+                    && (left.spent < right.spent
+                        || (left.spent == right.spent && left.action_ids < right.action_ids)))))
+}
+
+fn select_campaign_batch(
+    request: &ClosedLoopCampaignRequest,
+    actions: &[CampaignAction],
+    scores: &[CampaignActionScore],
+    remaining_budget: u64,
+) -> CampaignBatchState {
+    let action_map = actions
+        .iter()
+        .map(|action| (action.action_id.as_str(), action))
+        .collect::<BTreeMap<_, _>>();
+    let score_map = scores
+        .iter()
+        .map(|score| (score.action_id.as_str(), score))
+        .collect::<BTreeMap<_, _>>();
+    let initial = CampaignBatchState {
+        action_ids: Vec::new(),
+        spent: 0,
+        information: 0,
+        utility: 0,
+    };
+    let mut beam = vec![initial.clone()];
+    let mut best = initial;
+    for _ in 0..request.max_actions_per_round {
+        let mut expanded = Vec::new();
+        for state in &beam {
+            for action in actions {
+                if state.action_ids.binary_search(&action.action_id).is_ok()
+                    || state
+                        .action_ids
+                        .last()
+                        .is_some_and(|last| action.action_id <= *last)
+                    || state.spent.saturating_add(u64::from(action.cost_units)) > remaining_budget
+                {
+                    continue;
+                }
+                let Some(score) = score_map.get(action.action_id.as_str()) else {
+                    continue;
+                };
+                let diversity_bonus = state
+                    .action_ids
+                    .iter()
+                    .filter_map(|selected_id| action_map.get(selected_id.as_str()))
+                    .map(|selected| prediction_distance(action, selected).saturating_mul(1_000))
+                    .sum::<u64>()
+                    .checked_div(state.action_ids.len().max(1) as u64)
+                    .unwrap_or(0);
+                let mut action_ids = state.action_ids.clone();
+                action_ids.push(action.action_id.clone());
+                action_ids.sort();
+                expanded.push(CampaignBatchState {
+                    action_ids,
+                    spent: state.spent.saturating_add(u64::from(action.cost_units)),
+                    information: state
+                        .information
+                        .saturating_add(score.expected_information_milli),
+                    utility: state
+                        .utility
+                        .saturating_add(score.risk_adjusted_utility_milli)
+                        .saturating_add(diversity_bonus),
+                });
+            }
+        }
+        if expanded.is_empty() {
+            break;
+        }
+        expanded.sort_by(|left, right| {
+            if campaign_batch_state_better(left, right) {
+                std::cmp::Ordering::Less
+            } else if campaign_batch_state_better(right, left) {
+                std::cmp::Ordering::Greater
+            } else {
+                left.action_ids.cmp(&right.action_ids)
+            }
+        });
+        expanded.truncate(CAMPAIGN_BEAM_WIDTH);
+        for candidate in &expanded {
+            if campaign_batch_state_better(candidate, &best) {
+                best = candidate.clone();
+            }
+        }
+        beam = expanded;
+    }
+    best
+}
+
 /// Select a bounded sequence of mechanism-discriminating assay batches.
 pub fn plan_glioma_closed_loop_campaign(
     request: &ClosedLoopCampaignRequest,
@@ -634,7 +765,7 @@ pub fn plan_glioma_closed_loop_campaign(
     };
     if concentration < request.stop_concentration_milli {
         for round in 1..=request.max_rounds {
-            let mut candidates = sorted_actions
+            let candidates = sorted_actions
                 .iter()
                 .filter_map(|action| {
                     let observed = observed_counts.get(&action.action_id).copied().unwrap_or(0);
@@ -657,30 +788,14 @@ pub fn plan_glioma_closed_loop_campaign(
                     score.expected_information_milli >= request.min_information_gain_milli
                 })
                 .collect::<Vec<_>>();
-            candidates.sort_by(|left, right| {
-                right
-                    .risk_adjusted_utility_milli
-                    .cmp(&left.risk_adjusted_utility_milli)
-                    .then_with(|| left.action_id.cmp(&right.action_id))
-            });
-            let mut chosen = Vec::new();
-            let mut round_spend = 0_u64;
-            let mut round_information = 0_u64;
-            for candidate in candidates {
-                if chosen.len() >= request.max_actions_per_round
-                    || round_spend.saturating_add(u64::from(candidate.cost_units))
-                        > remaining_budget
-                {
-                    continue;
-                }
-                round_spend = round_spend.saturating_add(u64::from(candidate.cost_units));
-                round_information =
-                    round_information.saturating_add(candidate.expected_information_milli);
-                *planned_counts
-                    .entry(candidate.action_id.clone())
-                    .or_default() += 1;
-                selected_action_order.push(candidate.action_id.clone());
-                chosen.push(candidate.action_id);
+            let batch =
+                select_campaign_batch(request, &sorted_actions, &candidates, remaining_budget);
+            let chosen = batch.action_ids.clone();
+            let round_spend = batch.spent;
+            let round_information = batch.information;
+            for action_id in &chosen {
+                *planned_counts.entry(action_id.clone()).or_default() += 1;
+                selected_action_order.push(action_id.clone());
             }
             if chosen.is_empty() {
                 let has_informative = sorted_actions.iter().any(|action| {
@@ -1051,6 +1166,26 @@ mod tests {
         assert_eq!(
             output.negative_evidence,
             vec!["negative-observation:assay-invasion:replicate-1"]
+        );
+    }
+
+    #[test]
+    fn same_round_beam_prefers_predictive_complementarity_over_redundant_score_tie() {
+        let mut batch_request = request();
+        batch_request.max_actions_per_round = 2;
+        batch_request.max_rounds = 1;
+        let mut batch_actions = actions();
+        let mut redundant = batch_actions[0].clone();
+        redundant.action_id = "assay-invasion-repeat".into();
+        redundant.feature_id = "invasion-score-repeat".into();
+        batch_actions.push(redundant);
+        let output =
+            plan_glioma_closed_loop_campaign(&batch_request, &mechanisms(), &batch_actions, &[])
+                .unwrap();
+        assert_eq!(output.rounds.len(), 1);
+        assert_eq!(
+            output.rounds[0].selected_action_order,
+            vec!["assay-invasion", "assay-oxygen"]
         );
     }
 

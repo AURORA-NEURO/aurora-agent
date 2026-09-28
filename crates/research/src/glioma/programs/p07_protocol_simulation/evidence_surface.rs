@@ -387,7 +387,9 @@ pub fn compile_glioma_protocol_evidence_surface(
             unresolved.push(endpoint_id.clone());
             (
                 ProtocolEvidenceDisposition::Unresolved,
-                format!("restore a completed local task result before interpreting endpoint {endpoint_id}"),
+                format!(
+                    "restore a completed local task result before interpreting endpoint {endpoint_id}"
+                ),
             )
         } else if has_partial_execution
             || replicate_count < request.min_replicates
@@ -403,13 +405,17 @@ pub fn compile_glioma_protocol_evidence_surface(
             negative.push(endpoint_id.clone());
             (
                 ProtocolEvidenceDisposition::Negative,
-                format!("publish the null or negative endpoint {endpoint_id} and test a competing explanation"),
+                format!(
+                    "publish the null or negative endpoint {endpoint_id} and test a competing explanation"
+                ),
             )
         } else {
             qualified.push(endpoint_id.clone());
             (
                 ProtocolEvidenceDisposition::Qualified,
-                format!("handoff endpoint {endpoint_id} to downstream mechanism or interpretation analysis"),
+                format!(
+                    "handoff endpoint {endpoint_id} to downstream mechanism or interpretation analysis"
+                ),
             )
         };
         let replicate_factor = (u32::from(replicate_count).saturating_mul(1_000)

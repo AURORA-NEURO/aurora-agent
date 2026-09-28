@@ -1030,6 +1030,7 @@ mod tests {
             selection_weights: GliomaSelectionWeights::default(),
             max_retries: 1,
             require_artifacts: true,
+            outcome_summaries: BTreeMap::new(),
         }
     }
 

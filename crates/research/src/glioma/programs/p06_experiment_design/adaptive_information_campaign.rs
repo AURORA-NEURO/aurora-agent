@@ -7,8 +7,9 @@
 //! decision.
 
 use super::information_design::{
-    plan_glioma_information_design, DesignAction, DesignMechanism, InformationDesignActionScore,
-    InformationDesignDisposition, InformationDesignRequest,
+    plan_glioma_information_design_with_objective, DesignAction, DesignMechanism,
+    InformationAcquisitionObjective, InformationDesignActionScore, InformationDesignDisposition,
+    InformationDesignRequest,
 };
 use crate::glioma_engine::{GliomaModelSystem, LocalArtifactRef};
 use bioprism_ids::ContentHash;
@@ -17,8 +18,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F19";
-pub const OUTPUT_SCHEMA: &str = "GliomaAdaptiveInformationCampaign1@1";
-pub const EXECUTION_OUTPUT_SCHEMA: &str = "GliomaAdaptiveInformationCampaignExecution1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaAdaptiveInformationCampaign1@2";
+pub const EXECUTION_OUTPUT_SCHEMA: &str = "GliomaAdaptiveInformationCampaignExecution1@2";
 pub const MAX_ROUNDS: u16 = 128;
 pub const MAX_ACTIONS_PER_ROUND: usize = 64;
 pub const SCORE_SCALE: u64 = 1_000;
@@ -235,6 +236,15 @@ fn normalized_posterior(
             "posterior and likelihood vectors must have equal non-zero length".into(),
         ));
     }
+    // Smoothing protects against a single zero likelihood eliminating a mechanism because of
+    // finite milli-unit calibration. It must not turn an outcome that every declared mechanism
+    // assigns zero probability into evidence: that is an out-of-model observation and requires
+    // an explicit recalibration/interpretation path.
+    if likelihood.iter().all(|value| *value == 0) {
+        return Err(AdaptiveInformationCampaignError::InvalidInput(
+            "observed outcome has zero probability under every declared mechanism".into(),
+        ));
+    }
     let masses = prior
         .iter()
         .zip(likelihood.iter())
@@ -377,7 +387,13 @@ fn validate_inputs(
         cost_penalty_milli: 0,
         risk_ceiling_milli: 1_000,
     };
-    plan_glioma_information_design(&probe, mechanisms, actions).map_err(|error| {
+    plan_glioma_information_design_with_objective(
+        &probe,
+        InformationAcquisitionObjective::PanelPredictiveDiameter,
+        mechanisms,
+        actions,
+    )
+    .map_err(|error| {
         AdaptiveInformationCampaignError::InvalidInput(format!("invalid action portfolio: {error}"))
     })?;
     let map = action_map(actions);
@@ -709,8 +725,9 @@ pub fn plan_glioma_adaptive_information_campaign(
                 cost_penalty_milli: request.cost_penalty_milli,
                 risk_ceiling_milli: request.risk_ceiling_milli,
             };
-            let design = plan_glioma_information_design(
+            let design = plan_glioma_information_design_with_objective(
                 &design_request,
+                InformationAcquisitionObjective::PanelPredictiveDiameter,
                 &posterior_as_mechanisms(&posterior),
                 &eligible_actions,
             )
@@ -1070,6 +1087,39 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("unknown outcome"));
+    }
+
+    #[test]
+    fn declared_zero_probability_outcome_is_rejected_as_out_of_model() {
+        let mut impossible_action = action("declared-zero", true);
+        for probability in impossible_action.outcomes[0]
+            .probability_milli_by_mechanism
+            .values_mut()
+        {
+            *probability = 0;
+        }
+        for probability in impossible_action.outcomes[1]
+            .probability_milli_by_mechanism
+            .values_mut()
+        {
+            *probability = 1_000;
+        }
+        let observation = AdaptiveInformationObservation {
+            action_id: "declared-zero".into(),
+            outcome_id: "low".into(),
+            replicate_index: 1,
+            artifact: artifact("declared-zero-outcome"),
+        };
+        let error = plan_glioma_adaptive_information_campaign(
+            &request(),
+            &mechanisms(),
+            &[impossible_action],
+            &[observation],
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("zero probability under every declared mechanism"));
     }
 
     #[test]

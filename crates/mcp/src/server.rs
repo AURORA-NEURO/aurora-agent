@@ -494,14 +494,17 @@ use bioprism_research::{
     adjudicate_glioma_multimodal_contradictions, admit_glioma_decision_actions,
     admit_glioma_research_workflow, aggregate_glioma_federated_decision_context,
     align_glioma_multi_study_context_artifacts, allocate_glioma_assays, analyze_causal_sensitivity,
-    analyze_federated_benchmark, analyze_federated_benchmark_power,
-    analyze_federated_continual_knowledge, analyze_federated_evidence_shifts,
-    analyze_federated_knowledge, analyze_federated_mechanism_transport,
-    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
-    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
-    analyze_glioma_computation_reproducibility, analyze_glioma_dose_response,
-    analyze_glioma_federated_instrument_consensus, analyze_glioma_instrument_batch_stability,
-    analyze_glioma_instrument_multichannel_concordance, analyze_glioma_latent_factors,
+    analyze_federated_aggregate_anomalies, analyze_federated_benchmark,
+    analyze_federated_benchmark_power, analyze_federated_continual_knowledge,
+    analyze_federated_evidence_shifts, analyze_federated_knowledge,
+    analyze_federated_mechanism_transport, analyze_glioma_causal_contrast,
+    analyze_glioma_clonal_evolution, analyze_glioma_clone_panel_outcomes,
+    analyze_glioma_combination_synergy, analyze_glioma_computation_reproducibility,
+    analyze_glioma_cross_model_claim_envelope, analyze_glioma_cross_study_context_difference,
+    analyze_glioma_dose_response, analyze_glioma_federated_instrument_consensus,
+    analyze_glioma_instrument_batch_stability, analyze_glioma_instrument_multichannel_concordance,
+    analyze_glioma_latent_factors, analyze_glioma_lineage_propagation,
+    analyze_glioma_lineage_response_decomposition, analyze_glioma_lineage_transport,
     analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_intervention_value,
     analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
     analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
@@ -514,37 +517,58 @@ use bioprism_research::{
     analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
-    assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
-    assimilate_glioma_acquisition_feedback, assimilate_glioma_decision_branch_evidence,
-    assimilate_glioma_knowledge_action_outcomes, assimilate_glioma_mechanism_evidence,
-    assure_glioma_mechanism_workflow, attribute_glioma_multimodal_quality_root_cause,
-    bridge_glioma_evidence_to_knowledge, bridge_glioma_knowledge_actions,
-    bridge_glioma_mechanism_fidelity, build_glioma_multimodal_ingestion_manifest,
-    build_research_object_manifest, calibrate_glioma_beliefs_prospectively,
-    calibrate_glioma_decision_value, calibrate_glioma_evidence,
-    calibrate_glioma_evidence_long_horizon, calibrate_glioma_mechanisms,
+    approve_glioma_instrument_action, assess_glioma_cross_site_protocol_conformance,
+    assess_glioma_quorum_admission, assess_glioma_robustness, assess_glioma_validation_batch,
+    assess_replication, assimilate_glioma_acquisition_feedback,
+    assimilate_glioma_decision_branch_evidence, assimilate_glioma_knowledge_action_outcomes,
+    assimilate_glioma_mechanism_evidence, assure_glioma_mechanism_workflow, attest_glioma_release,
+    attest_glioma_site_contribution, attribute_glioma_multimodal_quality_root_cause,
+    audit_glioma_assay_provenance, audit_glioma_qualification_preservation,
+    audit_glioma_release_dependency_leakage, bridge_glioma_evidence_to_knowledge,
+    bridge_glioma_knowledge_actions, bridge_glioma_mechanism_fidelity,
+    build_glioma_benchmark_director_snapshot, build_glioma_federation_operations_snapshot,
+    build_glioma_multimodal_ingestion_manifest, build_research_object_manifest,
+    calibrate_glioma_beliefs_prospectively, calibrate_glioma_decision_value,
+    calibrate_glioma_evidence, calibrate_glioma_evidence_long_horizon, calibrate_glioma_mechanisms,
     calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
     certify_decision_omissions, close_glioma_claims_to_experiments, cluster_glioma_evidence,
     compile_decision_action_graph, compile_decision_context,
-    compile_federated_glioma_execution_handoff, compile_glioma_computation_interpretation_frontier,
-    compile_glioma_computation_workflow, compile_glioma_federated_evidence_operating_cycle,
-    compile_glioma_federated_outcome_transport, compile_glioma_knowledge_actions,
+    compile_federated_glioma_execution_handoff, compile_glioma_aggregate_phenotype_summary,
+    compile_glioma_benchmark_governance_cycle, compile_glioma_computation_interpretation_frontier,
+    compile_glioma_computation_workflow, compile_glioma_continuous_release,
+    compile_glioma_decision_budget_snapshot, compile_glioma_federated_evidence_operating_cycle,
+    compile_glioma_federated_outcome_transport, compile_glioma_federated_release,
+    compile_glioma_high_throughput_compute_timeline, compile_glioma_knowledge_actions,
     compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
     compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
     compile_glioma_mechanism_validation_protocol, compile_glioma_mechanism_workflow,
     compile_glioma_multi_study_mechanism_workflow, compile_glioma_multimodal_research_object,
-    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
+    compile_glioma_partial_result_bundle, compile_glioma_protocol_evidence_surface,
+    compile_glioma_replication_protocol, compile_glioma_reproducibility_bundle,
+    compile_glioma_site_capability_envelope, compile_glioma_stage_worker_routes,
     compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
-    compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
+    compile_multimodal_knowledge_workflow, compile_typed_knowledge,
+    compose_glioma_multistudy_release, compose_knowledge_graph,
     control_glioma_mechanism_prospective_batch, design_glioma_contrast_panel,
     design_glioma_robust_experiment, design_preclinical_experiment,
     detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
     dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
+    dry_run_glioma_computation_stage_worker, dry_run_glioma_federation_stage_worker,
+    dry_run_glioma_instrument_stage_worker, dry_run_glioma_interpretation_stage_worker,
+    dry_run_glioma_release_stage_worker, dry_run_glioma_replication_stage_worker,
     dry_run_glioma_research, dry_run_instrument_executor_from_request,
-    dry_run_robustness_guided_computation_executor, evaluate_glioma_continual_promotion,
-    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    dry_run_robustness_guided_computation_executor, evaluate_glioma_active_learning,
+    evaluate_glioma_autonomous_research_engine,
+    evaluate_glioma_autonomous_research_engine_scenarios,
+    evaluate_glioma_autonomous_research_engine_traces,
+    evaluate_glioma_computation_placement_stress, evaluate_glioma_continual_promotion,
+    evaluate_glioma_distributed_archive_mirror, evaluate_glioma_dynamic_policies,
+    evaluate_glioma_federated_release_sharing, evaluate_glioma_release_gate,
+    evaluate_glioma_release_shareability, evaluate_glioma_research_object_conformance,
+    exchange_glioma_compute_capacity, exchange_glioma_federated_instrument_operations,
+    exchange_glioma_federated_workflow_template,
     execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
-    execute_federated_benchmark_operating_cycle_dry_run,
+    execute_federated_benchmark_dry_run, execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -555,136 +579,181 @@ use bioprism_research::{
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
     execute_glioma_autonomous_protocol, execute_glioma_autonomous_research_engine,
+    execute_glioma_autonomous_research_engine_with_stage_workers,
     execute_glioma_autonomous_research_mission,
+    execute_glioma_autonomous_research_workflow_dry_run, execute_glioma_benchmark_job,
     execute_glioma_calibrated_mechanism_campaign_dry_run, execute_glioma_causal_claim_adjudication,
     execute_glioma_computation, execute_glioma_computation_campaign,
     execute_glioma_computation_interpretation_evidence_gate,
     execute_glioma_computation_interpretation_frontier,
     execute_glioma_computation_operating_cycle_dry_run, execute_glioma_computation_portfolio,
-    execute_glioma_computation_recovery, execute_glioma_decision_branch_campaign,
-    execute_glioma_decision_context_campaign, execute_glioma_decision_mission,
-    execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
-    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
+    execute_glioma_computation_recovery, execute_glioma_cross_model_replication_mission_dry_run,
+    execute_glioma_decision_branch_campaign, execute_glioma_decision_context_campaign,
+    execute_glioma_decision_mission, execute_glioma_decision_operating_cycle,
+    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
+    execute_glioma_evidence_gated_research, execute_glioma_evidence_gated_stage_engine,
     execute_glioma_evidence_operating_cycle_dry_run, execute_glioma_evidence_refresh_campaign,
     execute_glioma_experiment_frontier_controller, execute_glioma_experiment_operating_cycle,
-    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
-    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
-    execute_glioma_instrument_research_frontier, execute_glioma_instrument_science_loop,
-    execute_glioma_intent_mission, execute_glioma_interpretation_operating_cycle,
-    execute_glioma_knowledge_action_dispatch, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_knowledge_selection_cycle, execute_glioma_knowledge_synthesis_operating_cycle,
-    execute_glioma_mechanism_autopilot, execute_glioma_mechanism_discovery_engine,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
-    execute_glioma_mechanism_validation_protocol, execute_glioma_mission_recovery,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_federated_benchmark_record, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
+    execute_glioma_instrument_plan, execute_glioma_instrument_research_frontier,
+    execute_glioma_instrument_science_loop, execute_glioma_intent_mission,
+    execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_action_dispatch,
+    execute_glioma_knowledge_resolution_campaign, execute_glioma_knowledge_selection_cycle,
+    execute_glioma_knowledge_synthesis_operating_cycle, execute_glioma_mechanism_autopilot,
+    execute_glioma_mechanism_discovery_engine, execute_glioma_mechanism_discrimination_campaign,
+    execute_glioma_mechanism_operating_cycle, execute_glioma_mechanism_validation_protocol,
+    execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_multimodal_mission,
     execute_glioma_multimodal_operating_cycle_dry_run,
     execute_glioma_multimodal_quality_adaptive_campaign,
     execute_glioma_multimodal_quality_schedule, execute_glioma_multimodal_readiness_gate,
-    execute_glioma_program_scheduler_dry_run, execute_glioma_protocol,
-    execute_glioma_release_operating_cycle_dry_run, execute_glioma_replay_campaign,
-    execute_glioma_replication_campaign, execute_glioma_replication_closure,
-    execute_glioma_replication_closure_campaign, execute_glioma_research_autopilot,
-    execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
-    execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
-    execute_glioma_sequential_campaign, execute_glioma_validation_campaign,
+    execute_glioma_multisite_benchmark_workflow, execute_glioma_participant_exchange,
+    execute_glioma_program_scheduler_dry_run, execute_glioma_prospective_replay_fidelity,
+    execute_glioma_protocol, execute_glioma_release_operating_cycle_dry_run,
+    execute_glioma_replay_campaign, execute_glioma_replication_campaign,
+    execute_glioma_replication_closure, execute_glioma_replication_closure_campaign,
+    execute_glioma_research_autopilot, execute_glioma_research_director,
+    execute_glioma_robust_active_learning_campaign, execute_glioma_robustness_guided_computation,
+    execute_glioma_scientific_frontier, execute_glioma_sequential_campaign,
+    execute_glioma_temporal_multimodal_mechanism_fusion, execute_glioma_validation_campaign,
     execute_glioma_validation_replication_campaign, execute_validation_replication_transport,
-    explore_mechanisms, extract_glioma_instrument_signal, filter_glioma_mechanism_states,
-    forecast_glioma_multimodal_quality, fuse_glioma_protocol_evidence,
-    gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
+    explore_glioma_comparative_release, explore_glioma_cross_site_evidence,
+    explore_glioma_uncertain_branches, explore_mechanisms, extract_glioma_instrument_signal,
+    filter_glioma_mechanism_states, forecast_glioma_multimodal_quality,
+    fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
+    glioma_program_catalog, govern_federated_context_access, govern_glioma_compute_cache,
     govern_glioma_decision_loop, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    index_glioma_artifact_lineage, inspect_glioma_computation_run,
     interpret_glioma_federated_closure, interpret_glioma_replication_closure,
     join_glioma_computation_lineage, join_glioma_evidence_frontier,
-    materialize_glioma_decision_context_artifact, monitor_prospective_knowledge,
-    negotiate_glioma_knowledge_protocol, negotiate_glioma_multimodal_knowledge_protocol,
+    lock_glioma_compute_environment, materialize_glioma_cross_model_replication_actions,
+    materialize_glioma_decision_context_artifact, migrate_glioma_archive_object,
+    monitor_glioma_federated_benchmark_continuity, monitor_glioma_instrument_fleet_health,
+    monitor_prospective_knowledge, negotiate_glioma_knowledge_protocol,
+    negotiate_glioma_multimodal_knowledge_protocol, normalize_glioma_release_metadata,
     optimize_glioma_decision_value, optimize_glioma_protocol_branches,
+    package_glioma_federated_decision_capsule, partition_glioma_multistudy_cache,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_federated_continual_agent, plan_federated_glioma_evidence_acquisition,
-    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
-    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_panel,
-    plan_glioma_adaptive_research_frontier, plan_glioma_adaptive_workflow,
-    plan_glioma_blocked_randomization, plan_glioma_carryover_sequence,
-    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
-    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
+    plan_federated_glioma_sites, plan_federation_capacity, plan_glioma_acquisition_capacity,
+    plan_glioma_acquisition_operations, plan_glioma_active_learning,
+    plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
+    plan_glioma_adaptive_panel, plan_glioma_adaptive_research_frontier,
+    plan_glioma_adaptive_workflow, plan_glioma_blocked_randomization,
+    plan_glioma_carryover_sequence, plan_glioma_clone_continuation,
+    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
+    plan_glioma_computation_portfolio, plan_glioma_compute_capacity,
+    plan_glioma_cross_model_replication_frontier, plan_glioma_cross_model_replication_mission,
     plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
-    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
-    plan_glioma_instrument_recovery, plan_glioma_mechanism_closed_loop,
-    plan_glioma_mechanism_multi_fidelity_control, plan_glioma_mechanism_validation,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_multi_study_workflow,
-    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
-    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
-    plan_glioma_power_stress_surface, plan_glioma_prospective_evidence_triage,
-    plan_glioma_protocol_compensation, plan_glioma_replication,
-    plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
+    plan_glioma_evidence_contradiction_cut, plan_glioma_heterogeneity_adaptive_benchmark_power,
+    plan_glioma_heterogeneity_aware_experiment_portfolio,
+    plan_glioma_heterogeneity_portfolio_mission, plan_glioma_information_design_with_objective,
+    plan_glioma_instrument_maintenance, plan_glioma_instrument_recovery,
+    plan_glioma_mechanism_closed_loop, plan_glioma_mechanism_multi_fidelity_control,
+    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_multi_study_workflow, plan_glioma_multimodal_portfolio,
+    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
+    plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
+    plan_glioma_prospective_evidence_triage, plan_glioma_protocol_compensation,
+    plan_glioma_replication, plan_glioma_replication_closure_frontier,
+    plan_glioma_replication_continuation, plan_glioma_research_object_exchange,
     plan_glioma_research_object_migration, plan_glioma_robust_active_learning,
     plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
-    plan_glioma_sequential_design, plan_glioma_validation_replication_gate, plan_glioma_workflow,
-    plan_glioma_workflow_recovery, preflight_glioma_instrument, prioritize_glioma_evidence,
+    plan_glioma_sequential_design, plan_glioma_validation_replication_gate,
+    plan_glioma_version_retention, plan_glioma_workflow, plan_glioma_workflow_recovery,
+    preflight_glioma_instrument, preview_glioma_release_audience, prioritize_glioma_evidence,
     prioritize_knowledge_frontier, promote_glioma_closed_loop_frontier,
-    propagate_glioma_mechanism_graph, qualify_evidence, query_glioma_evidence_workbench,
+    propagate_glioma_mechanism_graph, publish_glioma_federated_device_capability_manifest,
+    qualify_evidence, query_glioma_decision_context, query_glioma_evidence_workbench,
     query_glioma_multimodal_researcher_workbench, rank_glioma_evidence_novelty,
     reconcile_glioma_claim_evidence, reconcile_glioma_multisite_outcomes,
-    register_glioma_spatial_samples, replan_glioma_mechanism_feedback,
-    replay_glioma_decision_context, revise_glioma_beliefs, route_glioma_multimodal_evidence_gaps,
-    schedule_glioma_computation_placement, schedule_glioma_federated_evidence_batch,
-    schedule_glioma_frontier_campaign, schedule_glioma_instrument_fleet, select_glioma_actions,
+    reconcile_partition_resilient_context_checkpoint, register_glioma_spatial_samples,
+    replan_glioma_mechanism_feedback, replay_glioma_decision_context,
+    replay_glioma_release_event_protocol, resolve_glioma_compute_environment,
+    resolve_glioma_registry_artifact, review_glioma_site_participation, revise_glioma_beliefs,
+    route_glioma_multimodal_evidence_gaps, scan_glioma_artifact_integrity,
+    scan_glioma_federated_replay_discrepancy, schedule_glioma_computation_placement,
+    schedule_glioma_federated_evidence_batch, schedule_glioma_frontier_campaign,
+    schedule_glioma_instrument_fleet, schedule_glioma_release_queue,
+    score_glioma_reproducibility_completeness, select_glioma_actions,
     simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
     simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
-    snapshot_glioma_evidence_stream, stress_glioma_mechanism_robustness, surveil_glioma_evidence,
-    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
-    update_glioma_mechanism_posterior, validate_feature_catalog, verify_glioma_evidence,
-    verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
-    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
-    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveCloneCampaignRequest,
-    AdaptiveDecisionBranchCampaignRequest, AdaptiveDecisionControllerRequest,
-    AdaptiveDoseSurfaceRequest, AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest,
-    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
-    AdaptiveInstrumentCampaignRequest, AdaptiveInterpretationCampaignRequest,
-    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AdaptivePanelRequest,
-    AnalysisDataset, AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest,
-    AutonomousGapCycleRequest, AutonomousProgramCycleRequest, AutonomousProtocolControllerRequest,
+    snapshot_glioma_evidence_stream, snapshot_glioma_release_queue,
+    steward_glioma_consortium_publication, store_glioma_decision_context_snapshots,
+    stream_glioma_computation_events, stress_glioma_mechanism_robustness,
+    submit_glioma_reproducible_task, submit_glioma_signed_aggregate, surveil_glioma_evidence,
+    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation,
+    test_glioma_cross_study_context_invariance, triangulate_glioma_evidence,
+    update_glioma_decision_context, update_glioma_mechanism_posterior, validate_feature_catalog,
+    verify_glioma_contribution_integrity, verify_glioma_evidence,
+    verify_glioma_federated_replay_conformance, verify_glioma_multimodal_quality_recovery,
+    verify_glioma_release_signature, AcquisitionCapacityRequest, AcquisitionFeedbackRequest,
+    AcquisitionOperationsRequest, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
+    ActiveLearningCandidate, ActiveLearningObservation, ActiveLearningRequest,
+    AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
+    AdaptiveCloneCampaignRequest, AdaptiveDecisionBranchCampaignRequest,
+    AdaptiveDecisionControllerRequest, AdaptiveDoseSurfaceRequest,
+    AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
+    AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
+    AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
+    AdaptiveMechanismPolicyRequest, AdaptivePanelRequest, AggregatePhenotypeRequest,
+    AnalysisDataset, AnalysisRequest, ArchiveMigrationRequest, ArtifactIntegrityRequest,
+    ArtifactLineageRequest, ArtifactRegistryResolutionRequest, AssayEvidenceObservation,
+    AssayEvidenceRequest, AssayProvenanceAuditRequest, AutonomousGapCycleRequest,
+    AutonomousProgramCycleRequest, AutonomousProtocolControllerRequest,
     BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
-    BeliefRevisionRequest, BlockedRandomizationRequest, CalibratedMechanismCampaignRequest,
-    CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
+    BeliefRevisionRequest, BenchmarkDirectorRequest, BenchmarkJobRequest,
+    BlockedRandomizationRequest, CalibratedMechanismCampaignRequest, CalibrationRequest,
+    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
     CarryoverSequenceRequest, CausalContrastRequest, ClaimEvidenceReconciliationRequest,
     ClaimExperimentClosureRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
     CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
     ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
     ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
     ClosedLoopFrontierRequest, ClosureInterpretationRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
-    ComputationExecutionRequest, ComputationInterpretationEvidenceGateRequest,
-    ComputationInterpretationFrontierRequest, ComputationLineageRequest,
-    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
-    ComputationRecoveryRequest, ComputationReproducibilityRequest, ComputationReproducibilityRun,
-    ConcordanceRequest, ConsensusRequest, ContinualPromotionRequest,
-    ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
-    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
-    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
-    DecisionActionPlanRequest, DecisionAdmissionRequest, DecisionBranchCampaignRequest,
-    DecisionBranchEvidenceRequest, DecisionBranchPlannerRequest, DecisionContext,
-    DecisionContextArtifactRequest, DecisionContextCampaignRequest, DecisionContextReplayRequest,
-    DecisionContextRequest, DecisionLoopGovernorRequest, DecisionMissionBridgeRequest,
-    DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
-    DecisionValueCalibrationRequest, DecisionValueRequest, DependencyClosureRequest, DesignAction,
-    DesignMechanism, DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest,
-    DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
-    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
-    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
-    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
-    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
-    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
-    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
-    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
-    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
+    CombinationSynergyRequest, ComparativeReleaseExplorerRequest, ComparativeReleaseRequest,
+    ComputationCampaignTimelineRequest, ComputationCandidate, ComputationEventStreamRequest,
+    ComputationExecutionMode, ComputationExecutionRequest,
+    ComputationInterpretationEvidenceGateRequest, ComputationInterpretationFrontierRequest,
+    ComputationLineageRequest, ComputationPlacementRequest,
+    ComputationPlacementStressEvaluationRequest, ComputationPortfolioExecutionRequest,
+    ComputationPortfolioRequest, ComputationRecoveryRequest, ComputationReproducibilityRequest,
+    ComputationReproducibilityRun, ComputationRunInspectionRequest, ComputeCacheGovernorRequest,
+    ComputeCapacityRequest, ComputeEnvironmentLockRequest, ConcordanceRequest, ConformanceRequest,
+    ConsensusRequest, ConsortiumPublicationRequest, ContinualBenchmarkMonitorRequest,
+    ContinualPromotionRequest, ContinuousReleaseRequest, ContradictionAdjudicationRequest,
+    ContradictionCutRequest, ContradictionEvidence, ContrastDesignRequest,
+    ContributionIntegrityRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
+    CounterfactualModel, CounterfactualRequest, CrossModelClaimEnvelopeRequest,
+    CrossModelReplicationFrontierRequest, CrossModelReplicationMissionExecutionRequest,
+    CrossModelReplicationMissionRequest, CrossSiteEvidenceExplorerRequest,
+    CrossStudyContextDifferenceRequest, CrossStudyContextInvarianceRequest,
+    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionAdmissionRequest,
+    DecisionBranchCampaignRequest, DecisionBranchEvidenceRequest, DecisionBranchPlannerRequest,
+    DecisionBudgetRequest, DecisionContext, DecisionContextArtifactRequest,
+    DecisionContextCampaignRequest, DecisionContextQueryRequest, DecisionContextReplayRequest,
+    DecisionContextRequest, DecisionContextSnapshotStoreRequest, DecisionContextUpdateRequest,
+    DecisionLoopGovernorRequest, DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
+    DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
+    DependencyClosureRequest, DesignAction, DesignMechanism, DistributedMirrorRequest,
+    DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
+    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
+    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
+    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
+    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunFederatedMechanismTransportExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
+    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor, DryRunGliomaStageWorker,
+    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
+    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
+    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
+    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor, DryRunReplayFidelityExecutor,
+    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
+    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
+    EnvironmentResolutionRequest, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
     EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
     EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFrontierJoinRequest,
     EvidenceFusionRequest, EvidenceKnowledgeBridgeRequest, EvidenceNoveltyRadarRequest,
@@ -693,22 +762,32 @@ use bioprism_research::{
     EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
     EvidenceVerificationRequest, EvidenceWorkbenchRequest, ExperimentArm,
     ExperimentOperatingCycleRequest, ExperimentRequest, FederatedAcquisitionPolicyRequest,
-    FederatedBatchSchedulerRequest, FederatedBenchmarkAdaptiveCampaignRequest,
-    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
-    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
+    FederatedAggregateAnomalyRequest, FederatedBatchSchedulerRequest,
+    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
+    FederatedBenchmarkDryRunRequest, FederatedBenchmarkExecutionMode,
+    FederatedBenchmarkExecutionRequest, FederatedBenchmarkOperatingCycleRequest,
+    FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedBenchmarkWorkflowRequest,
+    FederatedComputeCostExchangeRequest, FederatedContextAccessRequest,
     FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
-    FederatedDecisionContextRequest, FederatedEvidenceOperatingCycleRequest,
+    FederatedDecisionCapsuleRequest, FederatedDecisionContextRequest,
+    FederatedDeviceCapabilityRequest, FederatedEvidenceOperatingCycleRequest,
     FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
-    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
-    FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
+    FederatedInstrumentConsensusRequest, FederatedInstrumentOperationsRequest,
+    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedKnowledgeRequest,
+    FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
-    FederatedOutcomeTransportRequest, FidelityCandidate, FidelityObservation,
-    FrontierCampaignRequest, GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest,
+    FederatedOutcomeTransportRequest, FederatedReleaseRequest, FederatedReleaseSharingRequest,
+    FederatedReplayConformanceRequest, FederatedReplayDiscrepancyScanRequest,
+    FederatedSiteSelectionRequest, FederatedWorkflowTemplateExchangeRequest,
+    FederationCapacityRequest, FederationOperationsRequest, FederationParticipantRequest,
+    FidelityCandidate, FidelityObservation, FleetHealthMonitorRequest, FrontierCampaignRequest,
+    GliomaActionCandidate, GliomaActionExecutor, GliomaAdaptiveWorkflowSchedulerRequest,
     GliomaAutonomousCampaignRequest, GliomaAutonomousResearchEngineRequest,
-    GliomaCausalClaimAdjudicationRequest, GliomaComputationCampaignRequest,
-    GliomaComputationOperatingCycleRequest, GliomaComputationWorkflowRequest,
-    GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest,
+    GliomaAutonomousResearchWorkflowRequest, GliomaCausalClaimAdjudicationRequest,
+    GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
+    GliomaComputationWorkflowRequest, GliomaEngineTraceOutcome, GliomaEvidenceCampaignRequest,
+    GliomaEvidenceGatedResearchRequest, GliomaEvidenceGatedStageExecutionRequest,
     GliomaEvidenceOperatingCycleRequest, GliomaExperimentFrontierRequest,
     GliomaIntentMissionRequest, GliomaInterpretationOperatingCycleRequest,
     GliomaMechanismAutopilotRequest, GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest,
@@ -716,8 +795,11 @@ use bioprism_research::{
     GliomaMultimodalSensitivityRequest, GliomaProgramSchedulerRequest,
     GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
-    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
-    HarmonizationVector, IdentifiabilityFeature, IdentifiabilityMechanism,
+    GliomaStageKind, GliomaStageWorkerProfile, GliomaStageWorkerRouteRequest,
+    GliomaWorkflowRequest, GovernanceCycleRequest, GraphFusionRequest, GraphFusionVector,
+    HarmonizationRequest, HarmonizationVector, HeterogeneityAdaptivePowerRequest,
+    HeterogeneityAwareExperimentPortfolioRequest, HeterogeneityPortfolioMissionRequest,
+    IdentifiabilityFeature, IdentifiabilityMechanism, InformationAcquisitionObjective,
     InformationDesignRequest, InstrumentCampaignRequest, InstrumentExecutionMode,
     InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetExecutionRequest,
     InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest,
@@ -731,15 +813,18 @@ use bioprism_research::{
     KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest,
     KnowledgeProtocolRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
-    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, LocalWorkflowRequest,
-    LongHorizonCalibrationRequest, MechanismActionPlannerConfig, MechanismCalibration,
-    MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
-    MechanismClosedLoopRequest, MechanismConsensusRequest, MechanismDiscrimination,
-    MechanismDiscriminationCampaignRequest, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismDynamicsEdge, MechanismDynamicsIntervention,
-    MechanismDynamicsNode, MechanismDynamicsRequest, MechanismEvidenceAssimilationRequest,
-    MechanismFeatureObservation, MechanismFeedbackReplanRequest, MechanismFidelityBridgeRequest,
-    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, LineagePropagationAnalysis,
+    LineagePropagationRequest, LineagePropagationSnapshot, LineageResponseDecompositionRequest,
+    LineageTransportRequest, LineageTransportStudy, LocalWorkflowRequest,
+    LongHorizonCalibrationRequest, MaintenanceWindowRequest, MechanismActionPlannerConfig,
+    MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
+    MechanismCandidate, MechanismClosedLoopRequest, MechanismConsensusRequest,
+    MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
+    MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
+    MechanismEvidenceAssimilationRequest, MechanismFeatureObservation,
+    MechanismFeedbackReplanRequest, MechanismFidelityBridgeRequest, MechanismGraphEdge,
+    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
     MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
     MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
     MechanismMultiStudyWorkflowRequest, MechanismOperatingCycleRequest,
@@ -750,40 +835,50 @@ use bioprism_research::{
     MechanismWorkflowRequest, MediationObservation, MediationRequest, MetaAnalysisRequest,
     MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
     MultiFidelityCampaignRequest, MultiFidelityControlRequest, MultiFidelityOptimizationRequest,
-    MultiSiteOutcomeReconciliationRequest, MultiStudyContextRequest, MultiStudyKnowledgeRequest,
-    MultiStudyWorkflowRequest, MultichannelConcordanceRequest, MultichannelInput,
-    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalGapRouterRequest,
-    MultimodalIngestionCampaignRequest, MultimodalIngestionManifestRequest,
-    MultimodalKnowledgeProtocolRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
-    MultimodalReadinessRequest, MultimodalRequest, MultimodalResearchObjectRequest,
-    MultimodalWorkbenchRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
+    MultiSiteOutcomeReconciliationRequest, MultiStudyCachePartitionRequest,
+    MultiStudyContextRequest, MultiStudyKnowledgeRequest, MultiStudyWorkflowRequest,
+    MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
+    MultimodalExecutionMode, MultimodalGapRouterRequest, MultimodalIngestionCampaignRequest,
+    MultimodalIngestionManifestRequest, MultimodalKnowledgeProtocolRequest,
+    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
+    MultimodalRequest, MultimodalResearchObjectRequest, MultimodalWorkbenchRequest,
+    MultimodalWorkflowRequest, NoveltyAdjudicationRequest, OperatorApprovalRequest,
+    PartialResultBundleRequest, PartitionResilientContextCheckpointRequest,
     PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
     PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
     ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
-    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
-    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
-    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolConformanceRequest,
+    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
+    ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest, ProtocolTransportGateRequest,
+    QualificationPreservationRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
+    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
+    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest,
+    QuorumAdmissionRequest, ReleaseDependencyLeakageRequest, ReleaseEventProtocolRequest,
+    ReleaseExecutionMode, ReleaseGateRequest, ReleaseMetadataNormalizationRequest,
+    ReleasePreviewRequest, ReleaseQueueRequest, ReleaseQueueScheduleRequest,
+    ReleaseShareabilityRequest, ReleaseSignatureVerificationRequest, ReliabilityCalibrationRequest,
+    ReplayCampaign, ReplayCampaignRequest, ReplayFidelityRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectMigrationRequest, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
-    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
-    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
-    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
-    SequentialCampaignRequest, SequentialDesignRequest, SignalBatchStabilityRequest,
-    SignalExtractionRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
-    SpatialNicheRequest, SpatialPropagationRequest, SpatialRegistrationCell,
-    SpatialRegistrationRequest, StateTransitionObservation, StateTransitionRequest,
-    StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
-    StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
+    ReplicationStudy, ReproducibilityBundleRequest, ReproducibilityCompletenessRequest,
+    ReproducibleTaskSubmission, ResearchObjectExchangeRequest, ResearchObjectMigrationRequest,
+    ResearchObjectRequest, RetentionGovernorRequest, RobustActiveLearningCampaignRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
+    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
+    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest,
+    SignalBatchStabilityRequest, SignalExtractionRequest, SignedAggregateSubmissionRequest,
+    SignedReleaseAttestationRequest, SiteCapabilityRequest, SiteParticipationRequest,
+    SiteProvenanceAttestationRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
+    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
+    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
+    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest,
+    TemporalMultimodalMechanismFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge, UncertaintyBranchExplorerRequest, ValidationBatchAssessmentRequest,
     ValidationCampaignRequest, ValidationReplicationCampaignRequest,
     ValidationReplicationGateRequest, ValidationReplicationTransportRequest,
     WorkflowAdmissionRequest, WorkflowRecoveryRequest,
@@ -1075,6 +1170,7 @@ pub struct Server {
     ci_provider_evidence_registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
     artifact_registry: Arc<Mutex<ArtifactRegistry>>,
     brain_control_state: Arc<Mutex<BrainControlState>>,
+    glioma_action_executor: Option<Arc<Mutex<Box<dyn GliomaActionExecutor + Send>>>>,
 }
 
 enum ParallelPending<'a> {
@@ -1821,7 +1917,20 @@ impl Server {
             ci_provider_evidence_registry,
             artifact_registry,
             brain_control_state: Arc::new(Mutex::new(BrainControlState::default())),
+            glioma_action_executor: None,
         }
+    }
+
+    /// Bind the autonomous glioma workflow to a trusted institution-local worker.
+    ///
+    /// The default server deliberately retains its synthetic executor. Hosts opt into real local
+    /// computation or authorized gateways by constructing and injecting their own implementation.
+    pub fn with_glioma_action_executor<E: GliomaActionExecutor + Send + 'static>(
+        mut self,
+        executor: E,
+    ) -> Self {
+        self.glioma_action_executor = Some(Arc::new(Mutex::new(Box::new(executor))));
+        self
     }
 
     /// Clone the server with an in-process observer for live mission trace projection.
@@ -1936,7 +2045,7 @@ impl Server {
                 _ => {
                     return Err(format!(
                         "path escapes the server root and is refused: {relative:?}"
-                    ))
+                    ));
                 }
             }
         }
@@ -2109,7 +2218,7 @@ impl Server {
                     code::INVALID_PARAMS,
                     format!("unknown resource uri {other:?}"),
                     None,
-                )
+                );
             }
         };
 
@@ -2380,10 +2489,35 @@ impl Server {
             "glioma_computation_reproducibility" => {
                 self.glioma_computation_reproducibility(&arguments)
             }
+            "glioma_federated_replay_discrepancy_scan" => {
+                self.glioma_federated_replay_discrepancy_scan(&arguments)
+            }
+            "glioma_compute_environment_lock" => self.glioma_compute_environment_lock(&arguments),
+            "glioma_environment_resolution" => self.glioma_environment_resolution(&arguments),
+            "glioma_reproducible_task_submit" => self.glioma_reproducible_task_submit(&arguments),
+            "glioma_computation_event_stream" => self.glioma_computation_event_stream(&arguments),
+            "glioma_federated_workflow_template_exchange" => {
+                self.glioma_federated_workflow_template_exchange(&arguments)
+            }
+            "glioma_registry_artifact_resolve" => self.glioma_registry_artifact_resolve(&arguments),
+            "glioma_federated_replay_conformance" => {
+                self.glioma_federated_replay_conformance(&arguments)
+            }
+            "glioma_compute_cache_govern" => self.glioma_compute_cache_govern(&arguments),
+            "glioma_multistudy_cache_partition" => {
+                self.glioma_multistudy_cache_partition(&arguments)
+            }
+            "glioma_compute_capacity_plan" => self.glioma_compute_capacity_plan(&arguments),
+            "glioma_federated_compute_capacity_exchange" => {
+                self.glioma_federated_compute_capacity_exchange(&arguments)
+            }
             "glioma_computation_portfolio_plan" => {
                 self.glioma_computation_portfolio_plan(&arguments)
             }
             "glioma_computation_placement" => self.glioma_computation_placement(&arguments),
+            "glioma_computation_placement_stress_evaluate" => {
+                self.glioma_computation_placement_stress_evaluate(&arguments)
+            }
             "glioma_computation_portfolio_execute" => {
                 self.glioma_computation_portfolio_execute(&arguments)
             }
@@ -2401,6 +2535,12 @@ impl Server {
             }
             "glioma_computation_operating_cycle" => {
                 self.glioma_computation_operating_cycle(&arguments)
+            }
+            "glioma_partial_result_semantics" => self.glioma_partial_result_semantics(&arguments),
+            "glioma_artifact_lineage_index" => self.glioma_artifact_lineage_index(&arguments),
+            "glioma_computation_run_inspector" => self.glioma_computation_run_inspector(&arguments),
+            "glioma_high_throughput_compute_timeline" => {
+                self.glioma_high_throughput_compute_timeline(&arguments)
             }
             "glioma_computation_interpretation_frontier_compile" => {
                 self.glioma_computation_interpretation_frontier_compile(&arguments)
@@ -2427,6 +2567,45 @@ impl Server {
             }
             "glioma_autonomous_research_engine_execute" => {
                 self.glioma_autonomous_research_engine_execute(&arguments)
+            }
+            "glioma_autonomous_research_engine_evaluate" => {
+                self.glioma_autonomous_research_engine_evaluate(&arguments)
+            }
+            "glioma_autonomous_research_engine_stress_evaluate" => {
+                self.glioma_autonomous_research_engine_stress_evaluate(&arguments)
+            }
+            "glioma_autonomous_research_engine_trace_evaluate" => {
+                self.glioma_autonomous_research_engine_trace_evaluate(&arguments)
+            }
+            "glioma_stage_worker_routes_compile" => {
+                self.glioma_stage_worker_routes_compile(&arguments)
+            }
+            "glioma_autonomous_research_engine_stage_execute" => {
+                self.glioma_autonomous_research_engine_stage_execute(&arguments)
+            }
+            "glioma_autonomous_research_workflow_execute" => {
+                self.glioma_autonomous_research_workflow_execute(&arguments)
+            }
+            "glioma_evidence_gated_stage_engine_execute" => {
+                self.glioma_evidence_gated_stage_engine_execute(&arguments)
+            }
+            "glioma_evidence_gated_stage_engine_instrument_execute" => {
+                self.glioma_evidence_gated_stage_engine_instrument_execute(&arguments)
+            }
+            "glioma_evidence_gated_stage_engine_computation_execute" => {
+                self.glioma_evidence_gated_stage_engine_computation_execute(&arguments)
+            }
+            "glioma_evidence_gated_stage_engine_interpretation_execute" => {
+                self.glioma_evidence_gated_stage_engine_interpretation_execute(&arguments)
+            }
+            "glioma_evidence_gated_stage_engine_replication_execute" => {
+                self.glioma_evidence_gated_stage_engine_replication_execute(&arguments)
+            }
+            "glioma_evidence_gated_stage_engine_release_execute" => {
+                self.glioma_evidence_gated_stage_engine_release_execute(&arguments)
+            }
+            "glioma_evidence_gated_stage_engine_federation_execute" => {
+                self.glioma_evidence_gated_stage_engine_federation_execute(&arguments)
             }
             "glioma_autonomous_program_cycle" => self.glioma_autonomous_program_cycle(&arguments),
             "glioma_adaptive_workflow" => self.glioma_adaptive_workflow(&arguments),
@@ -2457,8 +2636,27 @@ impl Server {
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
+            "glioma_lineage_propagation_analyze" => {
+                self.glioma_lineage_propagation_analyze(&arguments)
+            }
+            "glioma_lineage_response_decompose" => {
+                self.glioma_lineage_response_decompose(&arguments)
+            }
+            "glioma_lineage_transport_analyze" => self.glioma_lineage_transport_analyze(&arguments),
             "glioma_transportability_analyze" => self.glioma_transportability_analyze(&arguments),
             "glioma_causal_contrast" => self.glioma_causal_contrast(&arguments),
+            "glioma_cross_model_claim_envelope" => {
+                self.glioma_cross_model_claim_envelope(&arguments)
+            }
+            "glioma_cross_model_replication_frontier" => {
+                self.glioma_cross_model_replication_frontier(&arguments)
+            }
+            "glioma_cross_model_replication_mission" => {
+                self.glioma_cross_model_replication_mission(&arguments)
+            }
+            "glioma_cross_model_replication_mission_execute" => {
+                self.glioma_cross_model_replication_mission_execute(&arguments)
+            }
             "glioma_causal_mediation" => self.glioma_causal_mediation(&arguments),
             "glioma_stratified_causal_adjustment" => {
                 self.glioma_stratified_causal_adjustment(&arguments)
@@ -2658,13 +2856,34 @@ impl Server {
             }
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_context_artifact" => self.glioma_decision_context_artifact(&arguments),
+            "glioma_decision_context_snapshot_store" => {
+                self.glioma_decision_context_snapshot_store(&arguments)
+            }
+            "glioma_partition_resilient_context_checkpoint" => {
+                self.glioma_partition_resilient_context_checkpoint(&arguments)
+            }
+            "glioma_federated_context_access_govern" => {
+                self.glioma_federated_context_access_govern(&arguments)
+            }
             "glioma_multi_study_context_artifact" => {
                 self.glioma_multi_study_context_artifact(&arguments)
+            }
+            "glioma_cross_study_context_difference" => {
+                self.glioma_cross_study_context_difference(&arguments)
+            }
+            "glioma_cross_study_context_invariance" => {
+                self.glioma_cross_study_context_invariance(&arguments)
             }
             "glioma_multi_study_workflow_plan" => self.glioma_multi_study_workflow_plan(&arguments),
             "glioma_federated_decision_context" => {
                 self.glioma_federated_decision_context(&arguments)
             }
+            "glioma_federated_decision_capsule" => {
+                self.glioma_federated_decision_capsule(&arguments)
+            }
+            "glioma_decision_budget_snapshot" => self.glioma_decision_budget_snapshot(&arguments),
+            "glioma_decision_context_query" => self.glioma_decision_context_query(&arguments),
+            "glioma_decision_context_update" => self.glioma_decision_context_update(&arguments),
             "glioma_decision_context_replay" => self.glioma_decision_context_replay(&arguments),
             "glioma_decision_branch_evidence" => self.glioma_decision_branch_evidence(&arguments),
             "glioma_decision_admission_gate" => self.glioma_decision_admission_gate(&arguments),
@@ -2680,11 +2899,17 @@ impl Server {
                 self.glioma_decision_omission_certificate(&arguments)
             }
             "glioma_decision_branch_plan" => self.glioma_decision_branch_plan(&arguments),
+            "glioma_uncertainty_branch_explorer" => {
+                self.glioma_uncertainty_branch_explorer(&arguments)
+            }
             "glioma_decision_action_plan" => self.glioma_decision_action_plan(&arguments),
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_mechanism_dynamics" => self.glioma_mechanism_dynamics(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
+            "glioma_temporal_multimodal_mechanism_fusion" => {
+                self.glioma_temporal_multimodal_mechanism_fusion(&arguments)
+            }
             "glioma_mechanism_identifiability" => self.glioma_mechanism_identifiability(&arguments),
             "glioma_mechanism_invariance" => self.glioma_mechanism_invariance(&arguments),
             "glioma_mechanism_intervention_value" => {
@@ -2777,6 +3002,12 @@ impl Server {
                 self.glioma_replication_protocol_compile(&arguments)
             }
             "glioma_robust_experiment_design" => self.glioma_robust_experiment_design(&arguments),
+            "glioma_heterogeneity_aware_experiment_portfolio" => {
+                self.glioma_heterogeneity_aware_experiment_portfolio(&arguments)
+            }
+            "glioma_heterogeneity_portfolio_mission" => {
+                self.glioma_heterogeneity_portfolio_mission(&arguments)
+            }
             "glioma_blocked_randomization_design" => {
                 self.glioma_blocked_randomization_design(&arguments)
             }
@@ -2790,6 +3021,7 @@ impl Server {
                 self.glioma_sequential_campaign_execute(&arguments)
             }
             "glioma_active_learning" => self.glioma_active_learning(&arguments),
+            "glioma_active_learning_evaluate" => self.glioma_active_learning_evaluate(&arguments),
             "glioma_active_learning_campaign_execute" => {
                 self.glioma_active_learning_campaign_execute(&arguments)
             }
@@ -2811,6 +3043,27 @@ impl Server {
             }
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_instrument_fleet_schedule" => self.glioma_instrument_fleet_schedule(&arguments),
+            "glioma_instrument_fleet_health" => self.glioma_instrument_fleet_health(&arguments),
+            "glioma_acquisition_capacity_plan" => self.glioma_acquisition_capacity_plan(&arguments),
+            "glioma_cross_site_protocol_conformance" => {
+                self.glioma_cross_site_protocol_conformance(&arguments)
+            }
+            "glioma_instrument_maintenance_plan" => {
+                self.glioma_instrument_maintenance_plan(&arguments)
+            }
+            "glioma_assay_provenance_audit" => self.glioma_assay_provenance_audit(&arguments),
+            "glioma_acquisition_operations_snapshot" => {
+                self.glioma_acquisition_operations_snapshot(&arguments)
+            }
+            "glioma_instrument_operator_approval" => {
+                self.glioma_instrument_operator_approval(&arguments)
+            }
+            "glioma_federated_device_capability_manifest" => {
+                self.glioma_federated_device_capability_manifest(&arguments)
+            }
+            "glioma_federated_instrument_operations" => {
+                self.glioma_federated_instrument_operations(&arguments)
+            }
             "glioma_instrument_fleet_execute" => self.glioma_instrument_fleet_execute(&arguments),
             "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
             "glioma_instrument_recovery_plan" => self.glioma_instrument_recovery_plan(&arguments),
@@ -2857,6 +3110,22 @@ impl Server {
                 self.glioma_federated_benchmark_consensus(&arguments)
             }
             "glioma_federated_benchmark_power" => self.glioma_federated_benchmark_power(&arguments),
+            "glioma_heterogeneity_adaptive_benchmark_power" => {
+                self.glioma_heterogeneity_adaptive_benchmark_power(&arguments)
+            }
+            "glioma_federated_aggregate_anomaly_detect" => {
+                self.glioma_federated_aggregate_anomaly_detect(&arguments)
+            }
+            "glioma_federated_site_selection_plan" => {
+                self.glioma_federated_site_selection_plan(&arguments)
+            }
+            "glioma_continual_benchmark_monitor" => {
+                self.glioma_continual_benchmark_monitor(&arguments)
+            }
+            "glioma_federation_capacity_plan" => self.glioma_federation_capacity_plan(&arguments),
+            "glioma_federated_benchmark_dry_run" => {
+                self.glioma_federated_benchmark_dry_run(&arguments)
+            }
             "glioma_federated_interpretation" => self.glioma_federated_interpretation(&arguments),
             "glioma_federated_benchmark_site_plan" => {
                 self.glioma_federated_benchmark_site_plan(&arguments)
@@ -2873,12 +3142,80 @@ impl Server {
             "glioma_federated_benchmark_operating_cycle" => {
                 self.glioma_federated_benchmark_operating_cycle(&arguments)
             }
+            "glioma_multisite_benchmark_workflow" => {
+                self.glioma_multisite_benchmark_workflow(&arguments)
+            }
+            "glioma_benchmark_director_snapshot" => {
+                self.glioma_benchmark_director_snapshot(&arguments)
+            }
+            "glioma_benchmark_job_execute" => self.glioma_benchmark_job_execute(&arguments),
+            "glioma_cross_site_evidence_explore" => {
+                self.glioma_cross_site_evidence_explore(&arguments)
+            }
+            "glioma_quorum_admission_assess" => self.glioma_quorum_admission_assess(&arguments),
+            "glioma_site_participation_review" => self.glioma_site_participation_review(&arguments),
+            "glioma_contribution_integrity_verify" => {
+                self.glioma_contribution_integrity_verify(&arguments)
+            }
+            "glioma_federation_operations_snapshot" => {
+                self.glioma_federation_operations_snapshot(&arguments)
+            }
+            "glioma_participant_exchange_execute" => {
+                self.glioma_participant_exchange_execute(&arguments)
+            }
+            "glioma_signed_aggregate_submit" => self.glioma_signed_aggregate_submit(&arguments),
             "glioma_federated_adaptive_campaign_execute" => {
                 self.glioma_federated_adaptive_campaign_execute(&arguments)
             }
             "glioma_replay_campaign_execute" => self.glioma_replay_campaign_execute(&arguments),
+            "glioma_replay_fidelity_execute" => self.glioma_replay_fidelity_execute(&arguments),
             "glioma_research_object_release_gate" => {
                 self.glioma_research_object_release_gate(&arguments)
+            }
+            "glioma_reproducibility_completeness_score" => {
+                self.glioma_reproducibility_completeness_score(&arguments)
+            }
+            "glioma_qualification_preservation_audit" => {
+                self.glioma_qualification_preservation_audit(&arguments)
+            }
+            "glioma_release_metadata_normalize" => {
+                self.glioma_release_metadata_normalize(&arguments)
+            }
+            "glioma_release_attestation_issue" => self.glioma_release_attestation_issue(&arguments),
+            "glioma_artifact_integrity_scan" => self.glioma_artifact_integrity_scan(&arguments),
+            "glioma_release_preview" => self.glioma_release_preview(&arguments),
+            "glioma_release_queue_snapshot" => self.glioma_release_queue_snapshot(&arguments),
+            "glioma_release_shareability_check" => {
+                self.glioma_release_shareability_check(&arguments)
+            }
+            "glioma_reproducibility_bundle_compile" => {
+                self.glioma_reproducibility_bundle_compile(&arguments)
+            }
+            "glioma_multistudy_release_compose" => {
+                self.glioma_multistudy_release_compose(&arguments)
+            }
+            "glioma_comparative_release_explore" => {
+                self.glioma_comparative_release_explore(&arguments)
+            }
+            "glioma_continuous_release_compile" => {
+                self.glioma_continuous_release_compile(&arguments)
+            }
+            "glioma_federated_release_compile" => self.glioma_federated_release_compile(&arguments),
+            "glioma_site_capability_envelope_compile" => {
+                self.glioma_site_capability_envelope_compile(&arguments)
+            }
+            "glioma_site_provenance_attest" => self.glioma_site_provenance_attest(&arguments),
+            "glioma_federated_benchmark_record_execute" => {
+                self.glioma_federated_benchmark_record_execute(&arguments)
+            }
+            "glioma_benchmark_governance_cycle_compile" => {
+                self.glioma_benchmark_governance_cycle_compile(&arguments)
+            }
+            "glioma_aggregate_phenotype_summary_compile" => {
+                self.glioma_aggregate_phenotype_summary_compile(&arguments)
+            }
+            "glioma_research_object_dependency_leakage_audit" => {
+                self.glioma_research_object_dependency_leakage_audit(&arguments)
             }
             "glioma_release_operating_cycle" => self.glioma_release_operating_cycle(&arguments),
             "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
@@ -2887,6 +3224,28 @@ impl Server {
             }
             "glioma_research_object_migration_plan" => {
                 self.glioma_research_object_migration_plan(&arguments)
+            }
+            "glioma_archive_migration_execute" => self.glioma_archive_migration_execute(&arguments),
+            "glioma_release_signature_verify" => self.glioma_release_signature_verify(&arguments),
+            "glioma_research_object_conformance_check" => {
+                self.glioma_research_object_conformance_check(&arguments)
+            }
+            "glioma_federated_release_sharing_check" => {
+                self.glioma_federated_release_sharing_check(&arguments)
+            }
+            "glioma_release_event_protocol_replay" => {
+                self.glioma_release_event_protocol_replay(&arguments)
+            }
+            "glioma_version_retention_plan" => self.glioma_version_retention_plan(&arguments),
+            "glioma_distributed_archive_mirror" => {
+                self.glioma_distributed_archive_mirror(&arguments)
+            }
+            "glioma_release_queue_schedule" => self.glioma_release_queue_schedule(&arguments),
+            "glioma_consortium_publication_steward" => {
+                self.glioma_consortium_publication_steward(&arguments)
+            }
+            "glioma_research_object_exchange_plan" => {
+                self.glioma_research_object_exchange_plan(&arguments)
             }
             "glioma_research_object_dependency_closure" => {
                 self.glioma_research_object_dependency_closure(&arguments)
@@ -5736,22 +6095,23 @@ impl Server {
         let agent = NeurosurgicalAgent::default();
         let value = match operation {
             "start" => if let Some(literature) = public_literature.as_ref() {
-                agent
-                    .start_session_with_public_literature(&request, literature)
+                agent.start_session_with_public_literature(&request, literature)
             } else {
                 agent.start_session(&request, real_data.as_ref())
             }
-                .map_err(|error| format!("neurosurgical session start refused: {error}"))
-                .and_then(|session| {
-                    serde_json::to_value(session)
-                        .map_err(|error| format!("cannot encode session start: {error}"))
-                })?,
+            .map_err(|error| format!("neurosurgical session start refused: {error}"))
+            .and_then(|session| {
+                serde_json::to_value(session)
+                    .map_err(|error| format!("cannot encode session start: {error}"))
+            })?,
             "advance" => {
                 let session_value = arguments
                     .get("session")
                     .ok_or_else(|| "advance requires session".to_string())?;
                 let session: NeurosurgicalSession = serde_json::from_value(session_value.clone())
-                    .map_err(|error| format!("invalid neurosurgical session checkpoint: {error}"))?;
+                    .map_err(|error| {
+                    format!("invalid neurosurgical session checkpoint: {error}")
+                })?;
                 let result = if let Some(literature) = public_literature.as_ref() {
                     agent.advance_session_with_public_literature(&session, &request, literature)
                 } else {
@@ -5760,8 +6120,8 @@ impl Server {
                 result
                     .map_err(|error| format!("neurosurgical session advance refused: {error}"))
                     .and_then(|session| {
-                    serde_json::to_value(session)
-                        .map_err(|error| format!("cannot encode session advance: {error}"))
+                        serde_json::to_value(session)
+                            .map_err(|error| format!("cannot encode session advance: {error}"))
                     })?
             }
             "run" => {
@@ -5773,7 +6133,9 @@ impl Server {
                         .ok_or_else(|| "max_steps must be an integer".to_string())?,
                 };
                 let result = if let Some(literature) = public_literature.as_ref() {
-                    agent.run_session_to_review_with_public_literature(&request, literature, max_steps)
+                    agent.run_session_to_review_with_public_literature(
+                        &request, literature, max_steps,
+                    )
                 } else {
                     agent.run_session_to_review(&request, real_data.as_ref(), max_steps)
                 };
@@ -5789,7 +6151,9 @@ impl Server {
                     .get("session")
                     .ok_or_else(|| "finish requires session".to_string())?;
                 let session: NeurosurgicalSession = serde_json::from_value(session_value.clone())
-                    .map_err(|error| format!("invalid neurosurgical session checkpoint: {error}"))?;
+                    .map_err(|error| {
+                    format!("invalid neurosurgical session checkpoint: {error}")
+                })?;
                 let result = if let Some(literature) = public_literature.as_ref() {
                     agent.finish_session_with_public_literature(&session, &request, literature)
                 } else {
@@ -5805,7 +6169,7 @@ impl Server {
             other => {
                 return Err(format!(
                     "unknown neurosurgery_session operation {other:?}; expected start, advance, run, or finish"
-                ))
+                ));
             }
         };
         serde_json::to_value(value)
@@ -7055,6 +7419,342 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma computation reproducibility: {error}"))
     }
 
+    /// Localize cross-site replay divergence from signed aggregate summaries only. The
+    /// scanner never dispatches diagnostics, moves raw inputs, or turns a replay mismatch
+    /// into a biological or clinical conclusion.
+    fn glioma_federated_replay_discrepancy_scan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedReplayDiscrepancyScanRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_replay_discrepancy_scan requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated replay discrepancy request: {error}")
+            })?;
+        let report = scan_glioma_federated_replay_discrepancy(&request).map_err(|error| {
+            format!("glioma federated replay discrepancy scan refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_computation_reproducibility",
+                "glioma_computation_recovery_execute",
+                "glioma_federated_replay_conformance"
+            ],
+            "guarantees": [
+                "only signed permitted aggregate summaries cross the federation boundary",
+                "workflow, data-version, environment, dependency, numeric-kernel, seed, and output divergence remain separately classified",
+                "missing evidence stays unresolved and produces site-local non-dispatchable diagnostics",
+                "the MCP route performs no worker execution, raw-data movement, clinical decision, or treatment recommendation"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated replay discrepancy report: {error}"))
+    }
+
+    /// Resolve an exact local compute environment before autonomous workflow dispatch. The
+    /// route only evaluates declared metadata; it never installs packages, invokes a worker,
+    /// moves raw data, or turns environment qualification into a scientific conclusion.
+    fn glioma_compute_environment_lock(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputeEnvironmentLockRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_compute_environment_lock requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma compute-environment lock request: {error}"))?;
+        let lock = lock_glioma_compute_environment(&request)
+            .map_err(|error| format!("glioma compute-environment lock refused: {error}"))?;
+        serde_json::to_value(json!({
+            "lock": lock,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_computation_workflow_execute",
+                "glioma_computation_execute",
+                "glioma_federated_replay_discrepancy_scan"
+            ],
+            "guarantees": [
+                "exact versions, source digests, build digests, runtime ABI, and architecture compatibility are content-addressed",
+                "mutable, compromised, untrusted, unavailable, and non-portable dependencies remain explicit",
+                "blocked or unresolved locks stop autonomous dispatch before a worker is called",
+                "the MCP route performs no package installation, raw-data movement, clinical decision, or treatment recommendation"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma compute-environment lock: {error}"))
+    }
+
+    /// Propose a deterministic, approval-aware repair for a blocked local environment. This
+    /// route is an agentic planning seam only: it does not mutate package state or dispatch work.
+    fn glioma_environment_resolution(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EnvironmentResolutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_environment_resolution requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma environment-resolution request: {error}"))?;
+        let proposal = resolve_glioma_compute_environment(&request)
+            .map_err(|error| format!("glioma environment resolution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "proposal": proposal,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_compute_environment_lock",
+                "glioma_computation_workflow_execute",
+                "glioma_computation_execute"
+            ],
+            "guarantees": [
+                "pinned scientific versions and sources never change without explicit approval",
+                "poisoned, mutable, unsigned, unavailable, and architecture-incompatible candidates are rejected",
+                "equal inputs produce a stable proposal and resulting lock identity",
+                "the MCP route performs no installation, worker execution, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma environment-resolution proposal: {error}"))
+    }
+
+    /// Admit one bounded local computation task and return an idempotent replay handle. The
+    /// production executor remains institution-owned; this route performs pre-dispatch only.
+    fn glioma_reproducible_task_submit(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReproducibleTaskSubmission = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_reproducible_task_submit requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma reproducible-task submission: {error}"))?;
+        let exchange = submit_glioma_reproducible_task(&request)
+            .map_err(|error| format!("glioma reproducible-task admission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "exchange": exchange,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_computation_execute",
+                "glioma_computation_reproducibility",
+                "glioma_computation_recovery_execute"
+            ],
+            "guarantees": [
+                "qualified environment, local policy, typed artifacts, idempotency, replay identity, and resource budgets are checked before dispatch",
+                "duplicate submissions reuse the prior handle while conflicting key reuse fails closed",
+                "unauthorized artifacts and over-budget work are rejected before a worker is called",
+                "the MCP route performs no worker execution, package installation, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma reproducible-task exchange: {error}"))
+    }
+
+    /// Page a local computation event log with durable cursors and explicit recovery gaps.
+    fn glioma_computation_event_stream(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationEventStreamRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_computation_event_stream requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma computation event-stream request: {error}"))?;
+        let batch = stream_glioma_computation_events(&request)
+            .map_err(|error| format!("glioma computation event stream refused: {error}"))?;
+        serde_json::to_value(json!({
+            "batch": batch,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "event identity and durable cursors survive retries and network loss",
+                "missing sequence ranges are explicit recovery gaps and never imply completion",
+                "payload redaction preserves event identity and content digests",
+                "the MCP route reads only institution-local telemetry and performs no raw-data movement or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation event batch: {error}"))
+    }
+
+    /// Exchange a pinned workflow contract and aggregate site conformance without raw-data export.
+    fn glioma_federated_workflow_template_exchange(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedWorkflowTemplateExchangeRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_workflow_template_exchange requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma federated-template request: {error}"))?;
+        let package = exchange_glioma_federated_workflow_template(&request)
+            .map_err(|error| format!("glioma federated-template exchange refused: {error}"))?;
+        serde_json::to_value(json!({
+            "package": package,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "workflow task, schema, effect, and environment identities remain pinned",
+                "raw inputs, credentials, and raw site outputs remain institution-local",
+                "failed or missing site conformance prevents a portability claim",
+                "adaptations are explicit and require revalidation before reuse",
+                "the MCP route performs no remote execution, data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated-template package: {error}"))
+    }
+
+    /// Resolve a content-addressed local artifact handle before computation admission.
+    fn glioma_registry_artifact_resolve(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ArtifactRegistryResolutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_registry_artifact_resolve requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma artifact-registry request: {error}"))?;
+        let resolution = resolve_glioma_registry_artifact(&request)
+            .map_err(|error| format!("glioma artifact resolution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "resolution": resolution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "content hash, schema, license, source trust, signature, availability, freshness, and locality are checked",
+                "registry failures and policy mismatches remain unresolved or denied rather than substituted",
+                "human data, direct identifiers, and clinical-decision artifacts are rejected",
+                "the MCP route resolves handles only and never moves raw bytes or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma artifact resolution: {error}"))
+    }
+
+    /// Verify signed aggregate replay summaries against a versioned federated tolerance profile.
+    fn glioma_federated_replay_conformance(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedReplayConformanceRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_replay_conformance requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma replay-conformance request: {error}"))?;
+        let report = verify_glioma_federated_replay_conformance(&request)
+            .map_err(|error| format!("glioma replay conformance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "workflow and tolerance profile identities are exact and versioned",
+                "missing, stale, revoked, tampered, and out-of-tolerance sites never pass",
+                "only signed aggregate summaries are consumed; protected inputs and raw outputs remain local",
+                "portability claims require every required site to pass",
+                "the MCP route performs no remote diagnostics, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replay-conformance report: {error}"))
+    }
+
+    /// Govern deterministic local intermediate reuse and retention under explicit quota policy.
+    fn glioma_compute_cache_govern(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputeCacheGovernorRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_compute_cache_govern requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma compute-cache request: {error}"))?;
+        let decision = govern_glioma_compute_cache(&request)
+            .map_err(|error| format!("glioma compute-cache governance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "decision": decision,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "cache reuse requires exact input, code, environment, policy, semantic-version, and output identities",
+                "changed dependencies or policies invalidate reuse instead of silently substituting an artifact",
+                "quota eviction removes only unpinned local intermediates and records every eviction",
+                "pinned research inputs can block admission rather than being evicted",
+                "the MCP route moves no raw data and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma compute-cache decision: {error}"))
+    }
+
+    /// Partition shared local cache access by study, de-identification scope, and sensitivity.
+    fn glioma_multistudy_cache_partition(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultiStudyCachePartitionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multistudy_cache_partition requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multi-study cache request: {error}"))?;
+        let decision = partition_glioma_multistudy_cache(&request)
+            .map_err(|error| format!("glioma multi-study cache partition refused: {error}"))?;
+        serde_json::to_value(json!({
+            "decision": decision,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "same-study reuse requires matching study and de-identification scope",
+                "only explicitly public reference assets may cross study boundaries by default",
+                "protected and restricted cross-study reads are denied and recorded",
+                "cache-key or policy changes invalidate reuse immediately",
+                "human data, direct identifiers, clinical-decision artifacts, and raw bytes remain out of scope"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-study cache decision: {error}"))
+    }
+
+    /// Plan fair high-throughput local computation admission from measured queue and capacity data.
+    fn glioma_compute_capacity_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputeCapacityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_compute_capacity_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma compute-capacity request: {error}"))?;
+        let plan = plan_glioma_compute_capacity(&request)
+            .map_err(|error| format!("glioma compute-capacity planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "fairness-aware admission prevents one workflow group from monopolizing bounded capacity",
+                "runtime observations produce explicit duration and throughput uncertainty",
+                "stale telemetry, exhausted resources, age limits, and budget limits remain visible",
+                "required unschedulable jobs block the plan instead of being silently dropped",
+                "the MCP route performs no external execution, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma compute-capacity plan: {error}"))
+    }
+
+    /// Exchange signed aggregate compute capacity and cost intervals across permitted sites.
+    fn glioma_federated_compute_capacity_exchange(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedComputeCostExchangeRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_compute_capacity_exchange requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated compute-capacity request: {error}")
+            })?;
+        let envelope = exchange_glioma_compute_capacity(&request).map_err(|error| {
+            format!("glioma federated compute-capacity exchange refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "envelope": envelope,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "only signed aggregate capacity classes and cost intervals leave a site",
+                "stale, expired, revoked, incompatible, and reconstruction-risky summaries are excluded",
+                "workflow locality, aggregate-only policy, and site membership are checked before ranking",
+                "missing site summaries remain unresolved instead of being treated as available",
+                "the MCP route moves no raw data or credentials and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated compute-capacity envelope: {error}"))
+    }
+
     /// Compile a resource-bounded, dependency-closed multimodal computation portfolio. The
     /// planner only emits an execution-ready order; it never invokes external code or moves raw
     /// data. Institution-local workers can pass the selected tasks to the computation executor.
@@ -7079,6 +7779,7 @@ impl Server {
             "simulation_only": true,
             "guarantees": [
                 "prerequisite closure and deterministic task order are explicit",
+                "optional work is selected by a bounded beam over complete portfolios rather than a single greedy pass",
                 "budget, duration, task-count, modality, and deterministic-policy gates are fail-closed",
                 "missing dependencies, cycles, deferred work, and negative evidence remain visible",
                 "the route does not execute external code, move raw data, or make a clinical decision"
@@ -7113,6 +7814,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation placement: {error}"))
+    }
+
+    /// Stress-evaluate the deterministic P09 placement planner against worker loss, transfer
+    /// inflation, and contracted compute envelopes. This is evaluation-only and never dispatches
+    /// a computation worker.
+    fn glioma_computation_placement_stress_evaluate(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ComputationPlacementStressEvaluationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_placement_stress_evaluate requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma placement stress request: {error}"))?;
+        let evaluation = evaluate_glioma_computation_placement_stress(&request)
+            .map_err(|error| format!("glioma placement stress evaluation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "evaluation": evaluation,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "worker loss, transfer inflation, and compute-window contraction are replayed against the same typed placement contract",
+                "the constrained fastest-single-worker baseline is reported separately from the proposed placement",
+                "coverage degradation, blocked scenarios, transfer cost, makespan, and uncertainty remain explicit",
+                "the route evaluates scheduling utility only and never executes code, moves raw data, dispatches workers, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma placement stress evaluation: {error}"))
     }
 
     /// Plan and execute a selected computation portfolio through the deterministic sandbox
@@ -7294,6 +8023,125 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation operating cycle: {error}"))
+    }
+
+    /// Compile computation outcomes into missingness-safe typed fields and conservative
+    /// downstream operation gates. This route never imputes, executes, or publishes results.
+    fn glioma_partial_result_semantics(&self, arguments: &Value) -> Result<Value, String> {
+        let request: PartialResultBundleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_partial_result_semantics requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma partial-result request: {error}"))?;
+        let bundle = compile_glioma_partial_result_bundle(&request)
+            .map_err(|error| format!("glioma partial-result semantics refused: {error}"))?;
+        serde_json::to_value(json!({
+            "bundle": bundle,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "measured nulls remain distinct from unavailable, censored, failed, redacted, and invalid fields",
+                "downstream model-fitting, mechanism-inference, and publication gates are computed from required-field state",
+                "missingness causes and negative evidence remain explicit and replay-bound",
+                "MCP performs no imputation, raw-data movement, external computation, or clinical decision"
+            ],
+            "next_routes": [
+                "glioma_computation_interpretation_frontier_compile",
+                "glioma_computation_lineage"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma partial-result bundle: {error}"))
+    }
+
+    /// Index local computation artifacts and verify every declared derivation path without
+    /// opening payloads or turning lineage completeness into a scientific conclusion.
+    fn glioma_artifact_lineage_index(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ArtifactLineageRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_artifact_lineage_index requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma artifact-lineage request: {error}"))?;
+        let index = index_glioma_artifact_lineage(&request)
+            .map_err(|error| format!("glioma artifact-lineage indexing refused: {error}"))?;
+        serde_json::to_value(json!({
+            "index": index,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "artifact identity remains distinct from declared derivation and semantic loss",
+                "tampered, unauthorized, missing, cyclic, and orphan paths remain explicit",
+                "lineage traversal is deterministic and metadata-only; raw payloads stay local",
+                "a complete path is not promoted into a biological or clinical conclusion"
+            ],
+            "next_routes": [
+                "glioma_partial_result_semantics",
+                "glioma_computation_interpretation_frontier_compile"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma artifact-lineage index: {error}"))
+    }
+
+    /// Inspect a local computation timeline and emit task-level recovery and reproducibility
+    /// issues without rerunning code or opening raw artifacts.
+    fn glioma_computation_run_inspector(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationRunInspectionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_computation_run_inspector requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma computation-inspection request: {error}"))?;
+        let inspection = inspect_glioma_computation_run(&request)
+            .map_err(|error| format!("glioma computation run inspection refused: {error}"))?;
+        serde_json::to_value(json!({
+            "inspection": inspection,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "task counts and terminal outcomes reconcile to the immutable execution record",
+                "stale telemetry, partial results, lineage gaps, and recovery tasks remain visible",
+                "the timeline is replay-bound and metadata-only; no code is rerun and no payload is opened",
+                "inspection state is operational evidence, not a biological or clinical conclusion"
+            ],
+            "next_routes": [
+                "glioma_artifact_lineage_index",
+                "glioma_partial_result_semantics",
+                "glioma_computation_interpretation_frontier_compile"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation inspection: {error}"))
+    }
+
+    /// Aggregate metadata-only run inspections into a held-out-evaluated campaign timeline.
+    fn glioma_high_throughput_compute_timeline(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationCampaignTimelineRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_high_throughput_compute_timeline requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma high-throughput timeline request: {error}"))?;
+        let timeline = compile_glioma_high_throughput_compute_timeline(&request)
+            .map_err(|error| format!("glioma high-throughput timeline refused: {error}"))?;
+        serde_json::to_value(json!({
+            "timeline": timeline,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "failed, partial, unresolved, and stale runs remain distinct from successful throughput",
+                "queue, compute, retry, resource, and telemetry bottlenecks are derived from typed run metadata",
+                "forecast calibration is reported only against explicitly held-out runs",
+                "the timeline contains no raw scientific payload and makes no biological or clinical conclusion"
+            ],
+            "next_routes": [
+                "glioma_computation_run_inspector",
+                "glioma_computation_placement",
+                "glioma_computation_operating_cycle"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma high-throughput timeline: {error}"))
     }
 
     /// Compile computation campaign outcomes into interpretation, replication, and recovery
@@ -7876,9 +8724,8 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma evidence-gated research run: {error}"))
     }
 
-    /// Run the end-to-end autonomous glioma engine. The MCP adapter uses a deterministic local
-    /// worker for rehearsal; an institution-owned caller can provide an approved executor to the
-    /// same research-crate function for real preclinical computation or instrument gateways.
+    /// Run the end-to-end autonomous glioma engine. A trusted host may inject an institution-local
+    /// worker; unconfigured servers use the clearly marked deterministic synthetic worker.
     fn glioma_autonomous_research_engine_execute(
         &self,
         arguments: &Value,
@@ -7890,22 +8737,752 @@ impl Server {
             .map_err(|error| {
                 format!("invalid glioma autonomous research engine request: {error}")
             })?;
-        let mut executor = DryRunGliomaActionExecutor;
-        let engine = execute_glioma_autonomous_research_engine(&request, &mut executor)
-            .map_err(|error| format!("glioma autonomous research engine refused: {error}"))?;
+        let (engine, dispatch, simulation_only) = if let Some(executor) =
+            &self.glioma_action_executor
+        {
+            let mut executor = executor
+                .lock()
+                .map_err(|_| "configured glioma action executor lock is poisoned".to_string())?;
+            let engine = execute_glioma_autonomous_research_engine(&request, &mut **executor)
+                .map_err(|error| format!("glioma autonomous research engine refused: {error}"))?;
+            (engine, "institution_local", false)
+        } else {
+            let mut executor = DryRunGliomaActionExecutor;
+            let engine = execute_glioma_autonomous_research_engine(&request, &mut executor)
+                .map_err(|error| format!("glioma autonomous research engine refused: {error}"))?;
+            (engine, "dry_run", true)
+        };
         serde_json::to_value(json!({
             "engine": engine,
-            "dispatch": "dry_run",
-            "simulation_only": true,
+            "dispatch": dispatch,
+            "simulation_only": simulation_only,
             "guarantees": [
                 "the engine compiles the high-level glioma intent into the closed dependency graph before each cycle",
                 "only returned typed local artifacts become downstream checkpoints; stale or missing artifacts cannot unlock work",
                 "each cycle preserves selected actions, execution outcomes, negative evidence, uncertainty, budget, and policy holds",
+                "adaptive policy changes are bounded, content-addressed, and explicit in the returned trace",
                 "bounded retries, instrument and federation permissions, and preclinical data-locality constraints remain active",
-                "the MCP route performs no real assay, instrument effect, clinical decision, or raw-data movement"
+                if simulation_only { "the server used a synthetic worker; no assay, instrument effect, raw-data movement, or clinical decision occurred" } else { "the configured trusted institution-local worker was invoked; instrument and federation effects remain governed by the request and the worker's own authorization controls" }
             ]
         }))
         .map_err(|error| format!("cannot encode glioma autonomous research engine run: {error}"))
+    }
+
+    /// Evaluate autonomous glioma action selection on held-out utilities without invoking a
+    /// provider. The same compiled frontier and dependency rules are used by execution; only the
+    /// supplied evaluation values are kept outside the planner.
+    fn glioma_autonomous_research_engine_evaluate(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaAutonomousResearchEngineRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_engine_evaluate requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma autonomous research engine evaluation request: {error}")
+            })?;
+        let held_out = arguments
+            .get("held_out_utility_milli")
+            .cloned()
+            .ok_or_else(|| {
+                "glioma_autonomous_research_engine_evaluate requires held_out_utility_milli"
+                    .to_string()
+            })?;
+        let held_out: std::collections::BTreeMap<String, i64> = serde_json::from_value(held_out)
+            .map_err(|error| format!("invalid held-out engine utility map: {error}"))?;
+        let evaluation =
+            evaluate_glioma_autonomous_research_engine(&request, &held_out).map_err(|error| {
+                format!("glioma autonomous research engine evaluation refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "evaluation": evaluation,
+            "dispatch": "not_started",
+            "evaluation_only": true,
+            "guarantees": [
+                "held-out utility is never passed to the autonomous planner and is not biological evidence",
+                "AURORA, greedy, coverage-first, and bounded oracle policies share the same compiled dependency graph and budgets",
+                "the oracle is a bounded upper-bound reference, not a global optimum",
+                "the route invokes no provider, assay, instrument, federation export, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous research engine evaluation: {error}"))
+    }
+
+    /// Evaluate policy robustness over named held-out scenarios without invoking a provider.
+    /// Scenario utilities remain outside planning and are never biological evidence.
+    fn glioma_autonomous_research_engine_stress_evaluate(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaAutonomousResearchEngineRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_engine_stress_evaluate requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma autonomous research engine stress request: {error}")
+            })?;
+        let scenarios = arguments
+            .get("held_out_scenarios")
+            .cloned()
+            .ok_or_else(|| {
+                "glioma_autonomous_research_engine_stress_evaluate requires held_out_scenarios"
+                    .to_string()
+            })?;
+        let scenarios: std::collections::BTreeMap<String, std::collections::BTreeMap<String, i64>> =
+            serde_json::from_value(scenarios)
+                .map_err(|error| format!("invalid held-out engine scenario map: {error}"))?;
+        let evaluation = evaluate_glioma_autonomous_research_engine_scenarios(&request, &scenarios)
+            .map_err(|error| {
+                format!("glioma autonomous research engine stress evaluation refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "evaluation": evaluation,
+            "dispatch": "not_started",
+            "evaluation_only": true,
+            "guarantees": [
+                "named held-out scenarios are evaluated against one compiled frontier and never enter planning",
+                "mean, lower-quartile, worst-case, regret, and selection-stability metrics retain negative outcomes",
+                "scenario truth is not biological evidence and no provider, assay, instrument, federation, or raw-data movement occurs",
+                "the bounded dependency-aware oracle is an evaluation reference, not a global optimum"
+            ]
+        }))
+        .map_err(|error| {
+            format!("cannot encode glioma autonomous research engine stress evaluation: {error}")
+        })
+    }
+
+    /// Replay the real adaptive engine loop across synthetic provider-outcome traces. Missing
+    /// action outcomes fail closed; the route never invokes a provider or external effect.
+    fn glioma_autonomous_research_engine_trace_evaluate(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaAutonomousResearchEngineRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_engine_trace_evaluate requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma autonomous research engine trace request: {error}")
+            })?;
+        let traces = arguments.get("outcome_traces").cloned().ok_or_else(|| {
+            "glioma_autonomous_research_engine_trace_evaluate requires outcome_traces".to_string()
+        })?;
+        let traces: std::collections::BTreeMap<
+            String,
+            std::collections::BTreeMap<String, GliomaEngineTraceOutcome>,
+        > = serde_json::from_value(traces)
+            .map_err(|error| format!("invalid glioma engine outcome traces: {error}"))?;
+        let evaluation = evaluate_glioma_autonomous_research_engine_traces(&request, &traces)
+            .map_err(|error| {
+                format!("glioma autonomous research engine trace evaluation refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "evaluation": evaluation,
+            "dispatch": "not_started",
+            "evaluation_only": true,
+            "guarantees": [
+                "the route replays the actual bounded adaptive engine loop across every closed focus policy",
+                "missing action outcomes fail closed and negative, partial, failed, and skipped work remains visible",
+                "trace outcomes are synthetic evaluation inputs, not biological evidence",
+                "no provider, assay, instrument, federation export, raw-data movement, or clinical decision occurs"
+            ]
+        }))
+        .map_err(|error| {
+            format!("cannot encode glioma autonomous research engine trace evaluation: {error}")
+        })
+    }
+
+    /// Compile capability-aware institution-local stage routes for a typed glioma workflow.
+    /// This is a planning/dispatch-admission operation: it never invokes a worker or performs an
+    /// assay, instrument effect, federation export, raw-data movement, or clinical decision.
+    fn glioma_stage_worker_routes_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaStageWorkerRouteRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_stage_worker_routes_compile requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma stage worker route request: {error}"))?;
+        let plan = compile_glioma_stage_worker_routes(&request)
+            .map_err(|error| format!("glioma stage worker routing refused: {error}"))?;
+        serde_json::to_value(json!({
+            "route_plan": plan,
+            "dispatch": "not_started",
+            "evaluation_only": true,
+            "guarantees": [
+                "every stage is represented, including not-ready and missing-capability stages",
+                "selected workers satisfy declared stage, schema, autonomy, locality, modality, model, availability, and determinism gates",
+                "priority, deterministic preference, and worker identifier tie-breaks are reproducible",
+                "capability declarations are not scientific evidence and do not authorize physical or external effects",
+                "no worker, assay, instrument, federation export, raw-data movement, or clinical decision occurs"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma stage worker route plan: {error}"))
+    }
+
+    /// Execute the autonomous engine through the capability-aware stage registry using bounded
+    /// synthetic local workers. This proves the route-to-execution seam without granting MCP any
+    /// institution, instrument, federation, or clinical authority; production hosts call the
+    /// typed Rust API with their own worker implementations.
+    fn glioma_autonomous_research_engine_stage_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaAutonomousResearchEngineRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_engine_stage_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma autonomous stage-engine request: {error}"))?;
+        let workers = serde_json::from_value::<Vec<GliomaStageWorkerProfile>>(
+            arguments.get("workers").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_engine_stage_execute requires workers".to_string()
+            })?,
+        )
+        .map_err(|error| format!("invalid glioma stage worker profiles: {error}"))?;
+        let route_request = GliomaStageWorkerRouteRequest {
+            intent: request.intent.clone(),
+            workers: workers.clone(),
+            require_deterministic: arguments
+                .get("require_deterministic")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            require_all_ready: arguments
+                .get("require_all_ready")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        };
+        let route_plan = compile_glioma_stage_worker_routes(&route_request)
+            .map_err(|error| format!("glioma stage worker routing refused: {error}"))?;
+        let mut worker_map = BTreeMap::new();
+        for worker in &workers {
+            if route_plan.worker_order.contains(&worker.worker_id) {
+                worker_map.insert(
+                    worker.worker_id.clone(),
+                    Box::new(DryRunGliomaStageWorker)
+                        as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            }
+        }
+        let execution = execute_glioma_autonomous_research_engine_with_stage_workers(
+            &request,
+            &route_plan,
+            worker_map,
+        )
+        .map_err(|error| format!("glioma autonomous stage-worker engine refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the autonomous engine executes through the declared capability route and typed stage/action adapter",
+                "synthetic workers emit schema-correct local artifacts only and never biological evidence",
+                "missing routes, prerequisites, approvals, budgets, and worker failures remain explicit in the engine run",
+                "production callers must replace the synthetic workers through the typed Rust host seam",
+                "no assay, instrument, federation export, raw-data movement, or clinical decision occurs"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous stage execution: {error}"))
+    }
+
+    /// Execute one bounded autonomous glioma workflow across the typed stage engine. The
+    /// workflow seam injects the existing P08-P12 operating-cycle implementations when their
+    /// cycle requests are supplied, while preserving deterministic synthetic fallback workers
+    /// for omitted cycles. MCP remains a local rehearsal surface: it cannot contact instruments,
+    /// move raw data, publish/sign objects, export federation data, or make a clinical decision.
+    fn glioma_autonomous_research_workflow_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaAutonomousResearchWorkflowRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_workflow_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma autonomous workflow request: {error}"))?;
+        let execution = execute_glioma_autonomous_research_workflow_dry_run(&request)
+            .map_err(|error| format!("glioma autonomous workflow refused: {error}"))?;
+        let dispatch = if execution.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "one typed workflow request binds evidence qualification and stage admission to the P08 instrument, P09 computation, P10 interpretation/replication, P11 release, and P12 federation operating cycles",
+                "omitted domain-cycle requests use only deterministic synthetic workers and remain explicitly simulation-only",
+                "negative, partial, contradictory, unresolved, held, blocked, retry, locality, and budget outcomes remain explicit",
+                "production hosts replace dry-run workers through the typed Rust API and retain institutional authority locally",
+                "MCP never contacts instruments, moves raw data, exports federation data, publishes or signs research objects, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous workflow execution: {error}"))
+    }
+
+    /// Admit the routed autonomous stage engine only after P01 triangulation qualification. The
+    /// MCP surface uses deterministic synthetic workers; institution hosts inject real workers
+    /// through the typed Rust API and retain all instrument/federation authority locally.
+    fn glioma_evidence_gated_stage_engine_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedStageExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma evidence-gated stage request: {error}"))?;
+        let mut workers = BTreeMap::new();
+        for worker in &request.workers {
+            workers.insert(
+                worker.worker_id.clone(),
+                Box::new(DryRunGliomaStageWorker)
+                    as Box<dyn bioprism_research::GliomaStageExecutor>,
+            );
+        }
+        let execution = execute_glioma_evidence_gated_stage_engine(&request, workers)
+            .map_err(|error| format!("glioma evidence-gated stage engine refused: {error}"))?;
+        let dispatch = if execution.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "partial, negative, contradictory, unresolved, and insufficient evidence holds before worker routing",
+                "ready stages without an eligible deterministic local worker hold before engine execution",
+                "only qualified evidence and complete capability coverage admit the bounded autonomous loop",
+                "synthetic workers emit local schema-correct artifacts and mark results simulation-only",
+                "no assay, instrument, federation export, raw-data movement, or clinical decision occurs"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-gated stage execution: {error}"))
+    }
+
+    /// Rehearse the cross-program P07→P08 physical-research handoff. A dedicated
+    /// instrument-preflight worker profile is backed by the existing deterministic P08 gateway;
+    /// all other profiles remain generic synthetic stage workers. This route never contacts
+    /// hardware and never promotes instrument completion into biological evidence.
+    fn glioma_evidence_gated_stage_engine_instrument_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedStageExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_instrument_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma evidence-gated instrument request: {error}")
+            })?;
+        let instrument_cycle: InstrumentOperatingCycleRequest = serde_json::from_value(
+            arguments.get("instrument_cycle").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_instrument_execute requires instrument_cycle"
+                    .to_string()
+            })?,
+        )
+        .map_err(|error| format!("invalid glioma instrument operating-cycle request: {error}"))?;
+        let mut workers = BTreeMap::new();
+        for profile in &request.workers {
+            let dedicated_instrument_worker = profile.stage_kinds.len() == 1
+                && profile
+                    .stage_kinds
+                    .contains(&GliomaStageKind::InstrumentPreflight)
+                && profile.output_schemas.contains(
+                    &GliomaStageKind::InstrumentPreflight
+                        .output_schema()
+                        .to_string(),
+                );
+            if dedicated_instrument_worker {
+                let worker = dry_run_glioma_instrument_stage_worker(instrument_cycle.clone())
+                    .map_err(|error| format!("glioma instrument stage worker refused: {error}"))?;
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(worker) as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            } else {
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(DryRunGliomaStageWorker)
+                        as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            }
+        }
+        let execution = execute_glioma_evidence_gated_stage_engine(&request, workers)
+            .map_err(|error| format!("glioma evidence-gated instrument engine refused: {error}"))?;
+        let dispatch = if execution.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "P01 evidence qualification and P07 capability admission remain mandatory before the P08 worker can run",
+                "P08 preflight, authorization, live interlock, retry, emergency-stop, and campaign barriers remain active",
+                "instrument completion is wrapped as a typed stage artifact with biological_evidence_promoted=false",
+                "assay evidence adjudication and QC remain required before scientific interpretation",
+                "the MCP worker is deterministic and local-simulation only; no hardware, raw-data movement, federation export, or clinical decision occurs"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-gated instrument execution: {error}"))
+    }
+
+    /// Rehearse the cross-program P01→P07→P09 computational handoff. A dedicated
+    /// computational-execution worker invokes P09's workflow compiler, resource gate, replay-keyed
+    /// campaign, and deterministic local executor; all other profiles remain generic synthetic
+    /// stage workers. Computation artifacts are not interpretation or biological evidence.
+    fn glioma_evidence_gated_stage_engine_computation_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedStageExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_computation_execute requires request"
+                    .to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma evidence-gated computation request: {error}")
+            })?;
+        let computation_cycle: GliomaComputationOperatingCycleRequest = serde_json::from_value(
+            arguments.get("computation_cycle").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_computation_execute requires computation_cycle"
+                    .to_string()
+            })?,
+        )
+        .map_err(|error| format!("invalid glioma computation operating-cycle request: {error}"))?;
+        let mut workers = BTreeMap::new();
+        for profile in &request.workers {
+            let dedicated_computation_worker = profile.stage_kinds.len() == 1
+                && profile
+                    .stage_kinds
+                    .contains(&GliomaStageKind::ComputationalExecution)
+                && profile.output_schemas.contains(
+                    &GliomaStageKind::ComputationalExecution
+                        .output_schema()
+                        .to_string(),
+                );
+            if dedicated_computation_worker {
+                let worker = dry_run_glioma_computation_stage_worker(computation_cycle.clone())
+                    .map_err(|error| format!("glioma computation stage worker refused: {error}"))?;
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(worker) as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            } else {
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(DryRunGliomaStageWorker)
+                        as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            }
+        }
+        let execution =
+            execute_glioma_evidence_gated_stage_engine(&request, workers).map_err(|error| {
+                format!("glioma evidence-gated computation engine refused: {error}")
+            })?;
+        let dispatch = if execution.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "P01 evidence qualification and P07 capability admission remain mandatory before the P09 worker can run",
+                "P09 workflow compilation, resource admission, replay identity, bounded retries, and local artifact requirements remain active",
+                "partial, negative, skipped, failed, and budget-blocked computation outcomes remain explicit",
+                "computation output is wrapped with biological_evidence_promoted=false and requires statistical interpretation and reproducibility adjudication",
+                "the MCP worker is deterministic and local-simulation only; no raw-data movement, federation export, instrument effect, or clinical decision occurs"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-gated computation execution: {error}"))
+    }
+
+    /// Rehearse the P01→P07→P10 statistical-interpretation handoff. The dedicated worker runs
+    /// the existing cross-family synthesis and adaptive frontier, but its artifact remains a
+    /// preclinical research result that still requires replication and release review.
+    fn glioma_evidence_gated_stage_engine_interpretation_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedStageExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_interpretation_execute requires request"
+                    .to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma evidence-gated interpretation request: {error}")
+            })?;
+        let interpretation_cycle: GliomaInterpretationOperatingCycleRequest =
+            serde_json::from_value(arguments.get("interpretation_cycle").cloned().ok_or_else(
+                || {
+                    "glioma_evidence_gated_stage_engine_interpretation_execute requires interpretation_cycle"
+                        .to_string()
+                },
+            )?)
+            .map_err(|error| {
+                format!("invalid glioma interpretation operating-cycle request: {error}")
+            })?;
+        let mut workers = BTreeMap::new();
+        for profile in &request.workers {
+            let dedicated = profile.stage_kinds.len() == 1
+                && profile
+                    .stage_kinds
+                    .contains(&GliomaStageKind::StatisticalInterpretation)
+                && profile.output_schemas.contains(
+                    &GliomaStageKind::StatisticalInterpretation
+                        .output_schema()
+                        .to_string(),
+                );
+            if dedicated {
+                let worker =
+                    dry_run_glioma_interpretation_stage_worker(interpretation_cycle.clone())
+                        .map_err(|error| {
+                            format!("glioma interpretation stage worker refused: {error}")
+                        })?;
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(worker) as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            } else {
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(DryRunGliomaStageWorker)
+                        as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            }
+        }
+        let execution =
+            execute_glioma_evidence_gated_stage_engine(&request, workers).map_err(|error| {
+                format!("glioma evidence-gated interpretation engine refused: {error}")
+            })?;
+        let dispatch = if execution.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "P01 evidence qualification and P07 capability admission remain mandatory before the P10 worker can run",
+                "P10 cross-family synthesis, contradiction, negative-evidence, stability, and adaptive-frontier gates remain active",
+                "interpretation output is marked biological_evidence_promoted=false and requires independent replication and release review",
+                "the MCP worker is deterministic and local-simulation only; no instrument, federation export, raw-data movement, or clinical decision occurs"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-gated interpretation execution: {error}"))
+    }
+
+    /// Rehearse the P01→P07→P10 replication handoff. The dedicated worker runs the existing
+    /// multi-round replication/meta-analysis/transportability campaign with a deterministic local
+    /// executor; unresolved, negative, and heterogeneous results remain explicit.
+    fn glioma_evidence_gated_stage_engine_replication_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedStageExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_replication_execute requires request"
+                    .to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma evidence-gated replication request: {error}")
+            })?;
+        let replication_campaign: GliomaReplicationCampaignRequest =
+            serde_json::from_value(arguments.get("replication_campaign").cloned().ok_or_else(
+                || {
+                    "glioma_evidence_gated_stage_engine_replication_execute requires replication_campaign"
+                        .to_string()
+                },
+            )?)
+            .map_err(|error| format!("invalid glioma replication campaign request: {error}"))?;
+        let mut workers = BTreeMap::new();
+        for profile in &request.workers {
+            let dedicated = profile.stage_kinds.len() == 1
+                && profile
+                    .stage_kinds
+                    .contains(&GliomaStageKind::ReplicationRobustness)
+                && profile.output_schemas.contains(
+                    &GliomaStageKind::ReplicationRobustness
+                        .output_schema()
+                        .to_string(),
+                );
+            if dedicated {
+                let worker = dry_run_glioma_replication_stage_worker(replication_campaign.clone())
+                    .map_err(|error| format!("glioma replication stage worker refused: {error}"))?;
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(worker) as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            } else {
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(DryRunGliomaStageWorker)
+                        as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            }
+        }
+        let execution =
+            execute_glioma_evidence_gated_stage_engine(&request, workers).map_err(|error| {
+                format!("glioma evidence-gated replication engine refused: {error}")
+            })?;
+        let dispatch = if execution.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "P01 evidence qualification and P07 capability admission remain mandatory before the P10 replication worker can run",
+                "P10 replication, meta-analysis, transportability, heterogeneity, retry, and budget gates remain active",
+                "replication output is marked biological_evidence_promoted=false and requires research-object release and federated review",
+                "the MCP worker is deterministic and local-simulation only; no instrument, federation export, raw-data movement, or clinical decision occurs"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-gated replication execution: {error}"))
+    }
+
+    /// Rehearse the P01→P07→P11 research-object release handoff. The dedicated worker replays
+    /// the exact local manifest and evaluates the accountable release gate; publication and
+    /// signing remain separate governed operations.
+    fn glioma_evidence_gated_stage_engine_release_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedStageExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_release_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma evidence-gated release request: {error}"))?;
+        let release_cycle: GliomaReleaseOperatingCycleRequest =
+            serde_json::from_value(arguments.get("release_cycle").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_release_execute requires release_cycle"
+                    .to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma release operating-cycle request: {error}"))?;
+        let mut workers = BTreeMap::new();
+        for profile in &request.workers {
+            let dedicated = profile.stage_kinds.len() == 1
+                && profile
+                    .stage_kinds
+                    .contains(&GliomaStageKind::ResearchObjectRelease)
+                && profile.output_schemas.contains(
+                    &GliomaStageKind::ResearchObjectRelease
+                        .output_schema()
+                        .to_string(),
+                );
+            if dedicated {
+                let worker = dry_run_glioma_release_stage_worker(release_cycle.clone())
+                    .map_err(|error| format!("glioma release stage worker refused: {error}"))?;
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(worker) as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            } else {
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(DryRunGliomaStageWorker)
+                        as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            }
+        }
+        let execution = execute_glioma_evidence_gated_stage_engine(&request, workers)
+            .map_err(|error| format!("glioma evidence-gated release engine refused: {error}"))?;
+        let dispatch = if execution.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "P01 evidence qualification and P07 capability admission remain mandatory before the P11 worker can run",
+                "P11 exact-manifest replay, coverage, reproducibility, accountable-review, and uncertainty gates remain active",
+                "release output is a candidate research object only; biological_evidence_promoted=false",
+                "the MCP worker never signs, publishes, uploads, moves raw data, exports federation data, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-gated release execution: {error}"))
+    }
+
+    /// Rehearse the P01→P07→P12 aggregate-only federation handoff. The worker runs the existing
+    /// consensus and bounded follow-up campaign while preserving site-local raw-data ownership.
+    fn glioma_evidence_gated_stage_engine_federation_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedStageExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_federation_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma evidence-gated federation request: {error}")
+            })?;
+        let federation_cycle: FederatedBenchmarkOperatingCycleRequest = serde_json::from_value(
+            arguments.get("federation_cycle").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_stage_engine_federation_execute requires federation_cycle"
+                    .to_string()
+            })?,
+        )
+        .map_err(|error| format!("invalid glioma federation operating-cycle request: {error}"))?;
+        let mut workers = BTreeMap::new();
+        for profile in &request.workers {
+            let dedicated = profile.stage_kinds.len() == 1
+                && profile
+                    .stage_kinds
+                    .contains(&GliomaStageKind::FederationBenchmarking)
+                && profile.output_schemas.contains(
+                    &GliomaStageKind::FederationBenchmarking
+                        .output_schema()
+                        .to_string(),
+                );
+            if dedicated {
+                let worker = dry_run_glioma_federation_stage_worker(federation_cycle.clone())
+                    .map_err(|error| format!("glioma federation stage worker refused: {error}"))?;
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(worker) as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            } else {
+                workers.insert(
+                    profile.worker_id.clone(),
+                    Box::new(DryRunGliomaStageWorker)
+                        as Box<dyn bioprism_research::GliomaStageExecutor>,
+                );
+            }
+        }
+        let execution = execute_glioma_evidence_gated_stage_engine(&request, workers)
+            .map_err(|error| format!("glioma evidence-gated federation engine refused: {error}"))?;
+        let dispatch = if execution.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "P01 evidence qualification and P07 capability admission remain mandatory before the P12 worker can run",
+                "P12 aggregate-boundary, consensus, heterogeneity, budget, retry, and governance handoff gates remain active",
+                "federated output is aggregate-only and marked biological_evidence_promoted=false",
+                "the MCP worker never moves raw data, exports unauthorized fields, controls instruments, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-gated federation execution: {error}"))
     }
 
     /// Run the autonomous engine and return a stage-gated program handoff for a researcher or
@@ -8042,6 +9619,7 @@ impl Server {
             "guarantees": [
                 "each round resynthesizes only the typed evidence request supplied by the caller",
                 "the adaptive frontier is recompiled and selection-bound before every local action batch",
+                "value-only prior outcomes are carried into frontier scoring so repeated failures discount a branch while bounded novelty remains eligible",
                 "dry-run artifacts are retained as limitations and cannot become biological evidence",
                 "budget, approval, effect, artifact, negative, partial, failure, hold, and no-progress stops remain explicit",
                 "institution-local planner and executor seams can feed validated aggregate artifacts into later rounds"
@@ -8148,6 +9726,100 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma state-transition analysis: {error}"))
     }
 
+    /// Fit lineage-resolved finite-interval state propagation, not cell-switch rates.
+    fn glioma_lineage_propagation_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let request: LineagePropagationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_lineage_propagation_analyze requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma lineage-propagation request: {error}"))?;
+        let snapshots: Vec<LineagePropagationSnapshot> =
+            serde_json::from_value(arguments.get("snapshots").cloned().ok_or_else(|| {
+                "glioma_lineage_propagation_analyze requires snapshots".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma lineage-propagation snapshots: {error}"))?;
+        let output = analyze_glioma_lineage_propagation(&request, &snapshots)
+            .map_err(|error| format!("glioma lineage-propagation analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "coefficients are effective finite-interval descendant propagation, not direct cell-switch rates",
+                "bootstrap resampling is clustered by independent experimental unit, not barcode or cell",
+                "the final time interval is held out for prediction scoring",
+                "incomplete barcode trajectories are excluded, never treated as extinction; explicit zero-count snapshots remain distinct",
+                "rank-deficient designs and failed predictions cannot qualify mechanistic interpretation",
+                "local preclinical analysis only; no raw-data transfer or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma lineage-propagation analysis: {error}"))
+    }
+
+    /// Standardize paired lineage operators to one pretreatment mixture and separate net yield
+    /// from aggregate destination-state composition for preclinical assay planning.
+    fn glioma_lineage_response_decompose(&self, arguments: &Value) -> Result<Value, String> {
+        let request: LineageResponseDecompositionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_lineage_response_decompose requires request".to_string())?,
+        )
+        .map_err(|error| {
+            format!("invalid glioma lineage-response decomposition request: {error}")
+        })?;
+        let analysis: LineagePropagationAnalysis =
+            serde_json::from_value(arguments.get("analysis").cloned().ok_or_else(|| {
+                "glioma_lineage_response_decompose requires analysis".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma lineage-propagation analysis: {error}"))?;
+        let decomposition = analyze_glioma_lineage_response_decomposition(&request, &analysis)
+            .map_err(|error| format!("glioma lineage-response decomposition refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": decomposition,
+            "dispatch": "not_started",
+            "guarantees": [
+                "both arms are standardized to the same investigator-declared baseline state mixture",
+                "net-yield and state-composition components sum to the standardized contrast up to reported fixed-point rounding",
+                "paired independent-unit bootstrap draws are reused; zero-yield draws withhold component intervals",
+                "component effects are descriptive lineage-level quantities, not causal effects, cell-switch probabilities, or clinical guidance",
+                "follow-up focus is a research-assay priority only; no assay or instrument is dispatched"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma lineage-response decomposition: {error}"))
+    }
+
+    /// Compare validated lineage-propagation contrasts across declared preclinical systems.
+    fn glioma_lineage_transport_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let request: LineageTransportRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_lineage_transport_analyze requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma lineage-transport request: {error}"))?;
+        let studies: Vec<LineageTransportStudy> = serde_json::from_value(
+            arguments
+                .get("studies")
+                .cloned()
+                .ok_or_else(|| "glioma_lineage_transport_analyze requires studies".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma lineage-transport studies: {error}"))?;
+        let analysis = analyze_glioma_lineage_transport(&request, &studies)
+            .map_err(|error| format!("glioma lineage transport analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "guarantees": [
+                "biological units remain nested within studies and are not treated as independent model systems",
+                "model systems receive equal weight and material direction reversals remain explicit",
+                "negative, incomplete, and unresolved studies are not silently discarded",
+                "follow-up targets identify discordant systems or missing independent studies",
+                "only local preclinical summaries are analyzed; no experiment is dispatched and no clinical decision is made"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma lineage-transport analysis: {error}"))
+    }
+
     /// Estimate whether a preclinical glioma effect transports to a declared target model system.
     /// Similarity, heterogeneity, and leave-one-study-out sensitivity stay visible; this route
     /// never turns transportability into a clinical or treatment recommendation.
@@ -8211,6 +9883,122 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma causal contrast: {error}"))
+    }
+
+    /// Compile a partially identified cross-model claim envelope from independent preclinical
+    /// study intervals. This is analysis-only: it never promotes a model-dependent claim or
+    /// dispatches an experiment.
+    fn glioma_cross_model_claim_envelope(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CrossModelClaimEnvelopeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_cross_model_claim_envelope requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma cross-model claim-envelope request: {error}"))?;
+        let envelope = analyze_glioma_cross_model_claim_envelope(&request).map_err(|error| {
+            format!("glioma cross-model claim-envelope analysis refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "envelope": envelope,
+            "dispatch": "analysis_only",
+            "simulation_only": true,
+            "guarantees": [
+                "represented model systems receive equal weight and hidden-bias expansion remains explicit",
+                "undercovered, model-dependent, negative, and unresolved dispositions are never promoted",
+                "leave-one-study-out fragility, omitted estimates, and next actions remain inspectable",
+                "no raw data, instrument, federation, or clinical decision is produced"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma cross-model claim envelope: {error}"))
+    }
+
+    /// Compile a bounded, model-diverse follow-up portfolio from a cross-model claim envelope.
+    /// This remains a planning result until the P07 authority and local execution gates admit it.
+    fn glioma_cross_model_replication_frontier(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CrossModelReplicationFrontierRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_cross_model_replication_frontier requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma cross-model replication-frontier request: {error}")
+            })?;
+        let frontier = plan_glioma_cross_model_replication_frontier(&request)
+            .map_err(|error| format!("glioma cross-model replication frontier refused: {error}"))?;
+        let action_candidates = materialize_glioma_cross_model_replication_actions(
+            &request, &frontier,
+        )
+        .map_err(|error| format!("glioma cross-model action materialization refused: {error}"))?;
+        serde_json::to_value(json!({
+            "frontier": frontier,
+            "action_candidates": action_candidates,
+            "dispatch": "planning_only",
+            "simulation_only": true,
+            "guarantees": [
+                "candidate studies are budget-, risk-, dependency-, and action-bound",
+                "model-system diversity and expected heterogeneity reduction influence selection",
+                "negative, model-dependent, partial, and unresolved claims remain holds",
+                "selected work still requires P07 authority and local execution gates",
+                "no raw data, instrument, federation, or clinical decision is produced"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma cross-model replication frontier: {error}"))
+    }
+
+    /// Compile a cross-model replication frontier into the P07 adaptive workflow scheduler. The
+    /// result is still a bounded plan: no instrument, federation, or physical research effect is
+    /// dispatched by this route.
+    fn glioma_cross_model_replication_mission(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CrossModelReplicationMissionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_cross_model_replication_mission requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma cross-model replication-mission request: {error}")
+            })?;
+        let mission = plan_glioma_cross_model_replication_mission(&request)
+            .map_err(|error| format!("glioma cross-model replication mission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "mission": mission,
+            "dispatch": "planning_only",
+            "simulation_only": true,
+            "guarantees": [
+                "P10 model-system follow-ups are materialized into typed P07 replication actions",
+                "dependency, budget, risk, autonomy, instrument, and federation gates are applied",
+                "frontier negative, partial, unresolved, and blocked states remain explicit holds",
+                "the route never executes an experiment, moves raw data, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma cross-model replication mission: {error}"))
+    }
+
+    /// Execute a selected cross-model replication mission against the synthetic local-only
+    /// executor. This is a workbench preview and never represents biological evidence.
+    fn glioma_cross_model_replication_mission_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: CrossModelReplicationMissionExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_cross_model_replication_mission_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma cross-model replication execution request: {error}")
+            })?;
+        let run = execute_glioma_cross_model_replication_mission_dry_run(&request)
+            .map_err(|error| format!("glioma cross-model replication dry-run refused: {error}"))?;
+        serde_json::to_value(json!({
+            "run": run,
+            "dispatch": "dry_run_only",
+            "simulation_only": true,
+            "guarantees": [
+                "only synthetic local artifacts are produced",
+                "the same P10 frontier and P07 scheduler gates are applied before execution",
+                "no instrument, federation, raw-data, or clinical effect can occur",
+                "synthetic outputs are explicitly marked as non-biological evidence"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma cross-model replication dry-run: {error}"))
     }
 
     /// Decompose a preclinical treatment contrast into mediator, direct, and indirect effects.
@@ -11800,6 +13588,100 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma decision-context artifact: {error}"))
     }
 
+    /// Index site-local immutable decision-context snapshots for crash recovery. The MCP route
+    /// accepts metadata and typed context digests only; persistence remains in the institution's
+    /// local store and no raw evidence or execution authority crosses the boundary.
+    fn glioma_decision_context_snapshot_store(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionContextSnapshotStoreRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_decision_context_snapshot_store requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma decision-context snapshot request: {error}")
+            })?;
+        let index = store_glioma_decision_context_snapshots(&request).map_err(|error| {
+            format!("glioma decision-context snapshot indexing refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "index": index,
+            "dispatch": "not_started",
+            "local_only": true,
+            "next_routes": [
+                "glioma_decision_context_replay",
+                "glioma_decision_operating_cycle",
+                "glioma_decision_context_update"
+            ],
+            "guarantees": [
+                "accepted snapshots are immutable, content-addressed, and parent-chain checked",
+                "pinned and referenced snapshots plus recovery ancestors cannot be evicted by retention",
+                "corruption and missing restore points remain explicit negative evidence or omissions",
+                "the route performs no network retrieval, raw-data movement, instrument execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-context snapshot index: {error}"))
+    }
+
+    /// Reconcile site-local context deltas after a partition without exporting their payloads.
+    /// Conflicting fields remain explicit and a partitioned checkpoint cannot be promoted.
+    fn glioma_partition_resilient_context_checkpoint(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: PartitionResilientContextCheckpointRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_partition_resilient_context_checkpoint requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid partition-resilient checkpoint request: {error}"))?;
+        let checkpoint = reconcile_partition_resilient_context_checkpoint(&request)
+            .map_err(|error| format!("partition-resilient checkpoint refused: {error}"))?;
+        serde_json::to_value(json!({
+            "checkpoint": checkpoint,
+            "dispatch": "not_started",
+            "local_only": true,
+            "next_routes": [
+                "glioma_decision_context_snapshot_store",
+                "glioma_decision_context_replay",
+                "glioma_federated_decision_context"
+            ],
+            "guarantees": [
+                "site-local deltas are content-addressed and current-epoch checked",
+                "identical retries are acknowledged while conflicting retries and field values remain explicit",
+                "partitioned or non-converged checkpoints cannot be promoted as a shared context",
+                "the route exports metadata and digests only; no raw payload, instrument action, or clinical decision crosses MCP"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode partition-resilient context checkpoint: {error}"))
+    }
+
+    /// Grant or deny purpose-bound field access to a local federated context. This route emits
+    /// only field names and digests; the institution-local context payload is never returned.
+    fn glioma_federated_context_access_govern(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedContextAccessRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_context_access_govern requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid federated context access request: {error}"))?;
+        let decision = govern_federated_context_access(&request)
+            .map_err(|error| format!("federated context access refused: {error}"))?;
+        serde_json::to_value(json!({
+            "decision": decision,
+            "dispatch": "not_started",
+            "local_only": true,
+            "next_routes": [
+                "glioma_partition_resilient_context_checkpoint",
+                "glioma_federated_decision_context",
+                "glioma_decision_context_snapshot_store"
+            ],
+            "guarantees": [
+                "membership, policy, purpose, approval, scope, expiry, locality, and revocation are checked before granting",
+                "field-level redaction is explicit and no unauthorized field is implicitly widened",
+                "revoked or inactive capabilities fail closed on the next call",
+                "the route returns metadata and digests only; it performs no raw-data movement, instrument execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode federated context access decision: {error}"))
+    }
+
     /// Align compatible local context artifacts from independent preclinical studies into a
     /// typed support/conflict frontier. Only action contracts and namespaced negative/unknown
     /// partitions are combined; raw evidence and execution authority remain local.
@@ -11827,6 +13709,62 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multi-study context artifact: {error}"))
+    }
+
+    /// Compare typed study contexts field-by-field before cross-study transport or pooling.
+    fn glioma_cross_study_context_difference(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CrossStudyContextDifferenceRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_cross_study_context_difference requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma cross-study context request: {error}"))?;
+        let report = analyze_glioma_cross_study_context_difference(&request)
+            .map_err(|error| format!("glioma cross-study context comparison refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "measured differences, explicit missingness, unmeasured fields, unit mismatches, and context-version drift remain distinct",
+                "declared value and unit harmonization is the only normalization applied",
+                "transport warnings and modality acquisition gaps are retained for P06/P10 follow-up",
+                "the route handles typed metadata only and makes no biological or clinical decision"
+            ],
+            "next_routes": [
+                "glioma_multi_study_context_artifact",
+                "glioma_cross_study_computation_comparator",
+                "glioma_decision_context"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma cross-study context report: {error}"))
+    }
+
+    /// Test whether a typed decision rule survives declared nuisance changes and held-out studies.
+    fn glioma_cross_study_context_invariance(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CrossStudyContextInvarianceRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_cross_study_context_invariance requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma context invariance request: {error}"))?;
+        let report = test_glioma_cross_study_context_invariance(&request)
+            .map_err(|error| format!("glioma context invariance test refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "nuisance perturbation and leave-one-study-out flips remain explicit",
+                "unsupported strata and independent-group floors never become invariance claims",
+                "counterexamples are named and replay-bound",
+                "metadata-only, preclinical, no clinical decision"
+            ],
+            "next_routes": [
+                "glioma_cross_study_context_difference",
+                "glioma_multi_study_context_artifact",
+                "glioma_decision_context"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma context invariance report: {error}"))
     }
 
     /// Compile a validated multi-study frontier into dependency-closed local research tasks.
@@ -11892,6 +13830,131 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated decision context: {error}"))
+    }
+
+    /// Package a site-local decision context for bounded downstream federation.
+    fn glioma_federated_decision_capsule(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedDecisionCapsuleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_decision_capsule requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated decision-capsule request: {error}"))?;
+        let capsule = package_glioma_federated_decision_capsule(&request).map_err(|error| {
+            format!("glioma federated decision-capsule packaging refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "capsule": capsule,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_federated_decision_context",
+                "glioma_decision_branch_plan",
+                "glioma_decision_operating_cycle"
+            ],
+            "guarantees": [
+                "question scope, claims, evidence coverage, omissions, uncertainty, and downstream action identifiers are content-addressed",
+                "stale, revoked, over-scoped, tampered, and protected-payload capsules are rejected",
+                "only explicitly policy-allowed downstream action identifiers survive import",
+                "the route exports no raw study payload, direct identifier, credential, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated decision capsule: {error}"))
+    }
+
+    /// Reconcile actual, in-flight, and forecast research resource use before local dispatch.
+    fn glioma_decision_budget_snapshot(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionBudgetRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_budget_snapshot requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-budget request: {error}"))?;
+        let snapshot = compile_glioma_decision_budget_snapshot(&request)
+            .map_err(|error| format!("glioma decision-budget accounting refused: {error}"))?;
+        serde_json::to_value(json!({
+            "snapshot": snapshot,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_decision_admission_gate",
+                "glioma_decision_operating_cycle",
+                "glioma_computation_portfolio_plan"
+            ],
+            "guarantees": [
+                "actual, running, and forecast resource use are reconciled by typed resource class",
+                "hard-cap crossings stop or require explicit approval rather than silently overspending",
+                "low-confidence forecasts and negative budget evidence remain visible",
+                "reallocation proposals are approval-bound and never authorize spending themselves",
+                "the route performs no assay, instrument, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-budget snapshot: {error}"))
+    }
+
+    /// Query a bounded local decision-context index without exposing raw evidence payloads.
+    fn glioma_decision_context_query(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionContextQueryRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_context_query requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-context query request: {error}"))?;
+        let result = query_glioma_decision_context(&request)
+            .map_err(|error| format!("glioma decision-context query refused: {error}"))?;
+        serde_json::to_value(json!({
+            "result": result,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_decision_context_replay",
+                "glioma_decision_admission_gate",
+                "glioma_decision_operating_cycle"
+            ],
+            "guarantees": [
+                "scope, schema identity, capability expiry/revocation, and content-addressed cursor integrity are validated",
+                "result and compute budgets are bounded before a page is emitted",
+                "omitted, uncertain, negative, and unavailable context states remain explicit",
+                "the route returns typed digests and metadata only; raw evidence remains institution-local",
+                "the route performs no assay, instrument, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-context query result: {error}"))
+    }
+
+    /// Apply ordered local evidence/QC/resource events to an active context with idempotent
+    /// retries, stale-context rejection, and immutable epoch emission.
+    fn glioma_decision_context_update(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionContextUpdateRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_context_update requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-context update request: {error}"))?;
+        let result = update_glioma_decision_context(&request)
+            .map_err(|error| format!("glioma decision-context update refused: {error}"))?;
+        serde_json::to_value(json!({
+            "result": result,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_decision_context_query",
+                "glioma_decision_context_replay",
+                "glioma_decision_admission_gate"
+            ],
+            "guarantees": [
+                "events are verified against a content-addressed context anchor and event body",
+                "out-of-order input is deterministically ordered and duplicate retries are idempotent",
+                "stale sequences and conflicting retries remain explicit rather than silently mutating state",
+                "contradictions, QC failures, resource exhaustion, and negative outcomes invalidate executable branches without deleting history",
+                "the route performs no assay, instrument, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-context update result: {error}"))
     }
 
     /// Replay successive decision contexts against explicit local action outcomes so stale plans
@@ -12220,6 +14283,37 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma decision branch plan: {error}"))
     }
 
+    /// Compare competing preclinical research branches for a scientist without turning forecasts
+    /// or incomplete evidence into a confirmed direction.
+    fn glioma_uncertainty_branch_explorer(&self, arguments: &Value) -> Result<Value, String> {
+        let request: UncertaintyBranchExplorerRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_uncertainty_branch_explorer requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma uncertainty branch explorer request: {error}")
+            })?;
+        let explorer = explore_glioma_uncertain_branches(&request)
+            .map_err(|error| format!("glioma uncertainty branch exploration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "explorer": explorer,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_decision_admission_gate",
+                "glioma_decision_branch_campaign_execute",
+                "glioma_decision_operating_cycle"
+            ],
+            "guarantees": [
+                "forecast score, evidence state, coverage, disagreement, information gain, cost, and failure risk remain separate",
+                "unobserved, contradicted, blocked, and unresolved branches remain visible and cannot become confirmed by ranking",
+                "annotations are bound to the immutable decision-context digest and replay deterministically",
+                "the route performs no assay, instrument, computation, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma uncertainty branch explorer: {error}"))
+    }
+
     /// Select the next executable portfolio from a compiled glioma decision context. This keeps
     /// evidence compilation and action selection composable while preserving a planning-only MCP
     /// boundary; the returned ids can be submitted to a caller-owned local executor.
@@ -12386,6 +14480,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism discrimination: {error}"))
+    }
+
+    /// Fuse temporal and multimodal local observations against competing glioma mechanisms and
+    /// return the next-measurement frontier. This is analysis-only: raw artifacts stay local and
+    /// no assay, instrument, federation export, or clinical decision is dispatched.
+    fn glioma_temporal_multimodal_mechanism_fusion(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: TemporalMultimodalMechanismFusionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_temporal_multimodal_mechanism_fusion requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma temporal multimodal fusion request: {error}")
+            })?;
+        let fusion = execute_glioma_temporal_multimodal_mechanism_fusion(&request)
+            .map_err(|error| format!("glioma temporal multimodal fusion refused: {error}"))?;
+        serde_json::to_value(json!({
+            "fusion": fusion,
+            "dispatch": "analysis_only",
+            "simulation_only": true,
+            "guarantees": [
+                "mechanism support combines residual agreement, quality, source independence, modality coverage, and temporal coverage",
+                "contradiction and missingness are retained as explicit negative evidence or uncertainty",
+                "next-measurement candidates are ranked only from declared unmeasured predictions",
+                "raw artifact bytes remain in the institution-local store and no causal or clinical conclusion is produced"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma temporal multimodal fusion: {error}"))
     }
 
     /// Compute which declared mechanism pairs remain indistinguishable and select affordable
@@ -13746,10 +15870,15 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma mechanism validation execution: {error}"))
     }
 
-    /// Select a bounded local glioma assay batch by expected reduction in mechanism uncertainty.
+    /// Select a bounded local glioma assay using mechanism Gini or panel predictive diameter.
     /// The route is an information-design planner only: it does not execute biology, dispatch
     /// instruments, or turn a model declaration into a clinical conclusion.
     fn glioma_information_design(&self, arguments: &Value) -> Result<Value, String> {
+        let acquisition_objective = match arguments.get("acquisition_objective") {
+            None => InformationAcquisitionObjective::MechanismGini,
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|error| format!("invalid glioma acquisition objective: {error}"))?,
+        };
         let request: InformationDesignRequest = serde_json::from_value(
             arguments
                 .get("request")
@@ -13771,13 +15900,27 @@ impl Server {
                 .ok_or_else(|| "glioma_information_design requires actions".to_string())?,
         )
         .map_err(|error| format!("invalid glioma information-design actions: {error}"))?;
-        let output = plan_glioma_information_design(&request, &mechanisms, &actions)
-            .map_err(|error| format!("glioma information design refused: {error}"))?;
+        let output = plan_glioma_information_design_with_objective(
+            &request,
+            acquisition_objective,
+            &mechanisms,
+            &actions,
+        )
+        .map_err(|error| format!("glioma information design refused: {error}"))?;
+        let objective_guarantee = match acquisition_objective {
+            InformationAcquisitionObjective::MechanismGini => {
+                "selection uses integer-only expected mechanism-Gini reduction"
+            }
+            InformationAcquisitionObjective::PanelPredictiveDiameter => {
+                "selection uses expected pairwise predictive-disagreement reduction over the declared assay panel; milli-unit truncation is surfaced and this is not the published PDBAL algorithm"
+            }
+        };
         serde_json::to_value(json!({
             "design": output,
+            "acquisition_objective": acquisition_objective,
             "dispatch": "not_started",
             "guarantees": [
-                "information gain is integer-only expected Gini reduction over caller-declared outcome distributions",
+                objective_guarantee,
                 "selection is bounded by feasibility, risk, cost, budget, and replicate limits",
                 "the plan keeps unresolved and risk-blocked assays explicit for researcher review",
                 "the route prioritizes local preclinical assays but never executes biology or makes a clinical decision"
@@ -13930,6 +16073,72 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma robust experiment design: {error}"))
     }
 
+    /// Allocate a diverse preclinical glioma experiment portfolio while protecting a declared
+    /// replication reserve. The planner is deterministic and analysis-only; institution-local
+    /// protocol simulation and instrument gates remain downstream.
+    fn glioma_heterogeneity_aware_experiment_portfolio(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: HeterogeneityAwareExperimentPortfolioRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_heterogeneity_aware_experiment_portfolio requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma heterogeneity-aware portfolio request: {error}")
+            })?;
+        let portfolio = plan_glioma_heterogeneity_aware_experiment_portfolio(&request)
+            .map_err(|error| format!("glioma heterogeneity-aware portfolio refused: {error}"))?;
+        serde_json::to_value(json!({
+            "portfolio": portfolio,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_protocol_simulate", "glioma_power_reestimate", "glioma_replication_plan"],
+            "guarantees": [
+                "a bounded deterministic beam allocates replicate counts under a discovery budget and protected replication reserve",
+                "model-system and stratum diversity are rewarded while independence-group duplication is constrained",
+                "heterogeneity stress power, underpowered states, unavailable/risk-blocked candidates, and budget deferrals remain explicit",
+                "the route produces no assay, instrument, federation, raw-data, causal, or clinical effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma heterogeneity-aware portfolio: {error}"))
+    }
+
+    /// Compile a selected heterogeneity-aware experiment portfolio into a dependency-safe P07
+    /// mission plan. The bridge is non-dispatching: evidence, authority, protocol, and instrument
+    /// gates remain downstream and institution-local.
+    fn glioma_heterogeneity_portfolio_mission(&self, arguments: &Value) -> Result<Value, String> {
+        let request: HeterogeneityPortfolioMissionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_heterogeneity_portfolio_mission requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma portfolio mission request: {error}"))?;
+        let plan = plan_glioma_heterogeneity_portfolio_mission(&request)
+            .map_err(|error| format!("glioma portfolio mission refused: {error}"))?;
+        let dispatch = if plan.scheduler.is_some() {
+            "not_started"
+        } else {
+            "held"
+        };
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_evidence_gated_stage_engine_execute",
+                "glioma_autonomous_research_workflow_execute",
+                "glioma_protocol_simulate"
+            ],
+            "guarantees": [
+                "selected portfolio arms must have typed action bindings before they enter the P07 scheduler",
+                "dependency closure, authority, risk, budget, and prior negative outcomes remain explicit",
+                "underpowered or blocked portfolios and missing action bindings hold before autonomous routing",
+                "the bridge plans only and never invokes an assay, instrument, federation export, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma heterogeneity portfolio mission: {error}"))
+    }
+
     /// Compile a confounding-aware blocked randomization matrix for a preclinical glioma study.
     /// The planner balances declared nuisance strata and spends residual capacity on the highest
     /// variance-aware information gain; it never randomizes specimens or dispatches a protocol.
@@ -14075,6 +16284,65 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma active-learning plan: {error}"))
+    }
+
+    /// Evaluate the active-learning policy against caller-supplied held-out utilities. This is a
+    /// benchmark route only: held-out truth never enters planning and no biological conclusion is
+    /// produced.
+    fn glioma_active_learning_evaluate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ActiveLearningRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_active_learning_evaluate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma active-learning evaluation request: {error}"))?;
+        let candidates: Vec<ActiveLearningCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_active_learning_evaluate requires candidates".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma active-learning evaluation candidates: {error}")
+            })?;
+        let observations: Vec<ActiveLearningObservation> = arguments
+            .get("observations")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| {
+                format!("invalid glioma active-learning evaluation observations: {error}")
+            })?
+            .unwrap_or_default();
+        let held_out_utility_milli: std::collections::BTreeMap<String, i64> =
+            serde_json::from_value(
+                arguments
+                    .get("held_out_utility_milli")
+                    .cloned()
+                    .ok_or_else(|| {
+                        "glioma_active_learning_evaluate requires held_out_utility_milli"
+                            .to_string()
+                    })?,
+            )
+            .map_err(|error| format!("invalid glioma active-learning held-out utility: {error}"))?;
+        let evaluation = evaluate_glioma_active_learning(
+            &request,
+            &candidates,
+            &observations,
+            &held_out_utility_milli,
+        )
+        .map_err(|error| format!("glioma active-learning evaluation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "evaluation": evaluation,
+            "dispatch": "not_started",
+            "evaluation_only": true,
+            "guarantees": [
+                "held-out utility is not passed into the active-learning planner",
+                "greedy, fixed-coverage, and bounded oracle comparators share the same safety and budget gates",
+                "regret and realized utility are reported with deterministic policy ordering",
+                "MCP never contacts hardware, moves raw biology, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma active-learning evaluation: {error}"))
     }
 
     /// Execute a bounded active-learning campaign through the deterministic local sandbox
@@ -14438,6 +16706,283 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma instrument fleet schedule: {error}"))
     }
 
+    /// Detect drift, repeated QC failures, downtime clusters, and calibration instability from
+    /// local aggregate instrument summaries before a campaign is admitted.
+    fn glioma_instrument_fleet_health(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FleetHealthMonitorRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_fleet_health requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma fleet health request: {error}"))?;
+        let assessment = monitor_glioma_instrument_fleet_health(&request)
+            .map_err(|error| format!("glioma fleet health monitoring refused: {error}"))?;
+        serde_json::to_value(json!({
+            "assessment": assessment,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_instrument_fleet_schedule",
+                "glioma_instrument_preflight",
+                "glioma_instrument_recovery_plan"
+            ],
+            "guarantees": [
+                "drift, QC failure, downtime clusters, and calibration instability are scored from bounded local summaries",
+                "confidence reflects effective baseline/recent observation count and no single noisy metric silently blocks a device",
+                "masked-site operation emits no site identity and raw events never cross the gateway",
+                "the route proposes investigation tasks only and performs no instrument action or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma fleet health assessment: {error}"))
+    }
+
+    /// Allocate approved high-throughput acquisition demand across local instrument capacity
+    /// with fairness, maintenance, operator, deadline, and budget bounds.
+    fn glioma_acquisition_capacity_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AcquisitionCapacityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_acquisition_capacity_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma acquisition-capacity request: {error}"))?;
+        let plan = plan_glioma_acquisition_capacity(&request)
+            .map_err(|error| format!("glioma acquisition-capacity planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_instrument_fleet_health",
+                "glioma_instrument_fleet_schedule",
+                "glioma_instrument_preflight"
+            ],
+            "guarantees": [
+                "maintenance and operator reserves are removed before allocation",
+                "minimum campaign demand is attempted before priority-weighted target fill",
+                "fairness, budget, deadline, approval, and disabled-resource deferrals remain explicit",
+                "the route emits a plan only and never dispatches hardware or consumes material"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma acquisition-capacity plan: {error}"))
+    }
+
+    /// Compare version-pinned assay semantics and calibration/capability summaries before
+    /// allowing a multi-site glioma result to enter a pooled analysis.
+    fn glioma_cross_site_protocol_conformance(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolConformanceRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_cross_site_protocol_conformance requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma protocol-conformance request: {error}"))?;
+        let matrix = assess_glioma_cross_site_protocol_conformance(&request)
+            .map_err(|error| format!("glioma protocol conformance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "matrix": matrix,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_instrument_fleet_health",
+                "glioma_federated_instrument_consensus",
+                "glioma_multisite_benchmark_workflow"
+            ],
+            "guarantees": [
+                "semantic roles, ordered steps, units, bounded tolerances, capabilities, versions, and calibration freshness are compared explicitly",
+                "stale, blocked, and unknown sites are excluded from pooling with named negative evidence",
+                "bounded adaptations are distinguishable from semantic deviations and never widen the reference protocol",
+                "only digest-bound metadata crosses sites; no raw samples, credentials, or hardware command is exchanged"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol-conformance matrix: {error}"))
+    }
+
+    /// Find safe local maintenance intervals before service or calibration deadlines and expose
+    /// reservation conflicts without mutating the instrument schedule.
+    fn glioma_instrument_maintenance_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MaintenanceWindowRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_instrument_maintenance_plan requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma maintenance-window request: {error}"))?;
+        let plan = plan_glioma_instrument_maintenance(&request)
+            .map_err(|error| format!("glioma maintenance-window planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_instrument_fleet_health",
+                "glioma_acquisition_capacity_plan",
+                "glioma_instrument_fleet_schedule"
+            ],
+            "guarantees": [
+                "service windows are searched before calibration expiry and around active reservations",
+                "overdue, low-health, disabled, and no-gap devices are explicitly blocked or locked",
+                "the route mutates no bookings and contacts no hardware",
+                "the plan is a preflight input and never a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma maintenance-window plan: {error}"))
+    }
+
+    /// Audit assay provenance before a run can enter multimodal analysis or a verified release.
+    /// The route evaluates only digest-bound metadata and never moves samples or dispatches
+    /// hardware.
+    fn glioma_assay_provenance_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AssayProvenanceAuditRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_assay_provenance_audit requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma assay-provenance request: {error}"))?;
+        let audit = audit_glioma_assay_provenance(&request)
+            .map_err(|error| format!("glioma assay-provenance audit refused: {error}"))?;
+        serde_json::to_value(json!({
+            "audit": audit,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_multimodal_ingestion_campaign",
+                "glioma_multimodal_readiness_gate",
+                "glioma_research_object_manifest"
+            ],
+            "guarantees": [
+                "sample lineage, approved scope, protocol identity, calibration freshness, operator authority, clock state, lifecycle, and artifact continuity are checked separately",
+                "only verified runs enter analysis admission or verified release; warning, blocked, and unresolved runs remain explicit negative evidence",
+                "the audit exchanges digest-bound metadata only and never moves raw samples, credentials, or hardware commands",
+                "MCP performs no physical dispatch and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma assay-provenance audit: {error}"))
+    }
+
+    /// Build a read-only high-throughput acquisition operations snapshot. It forecasts queue and
+    /// deadline risk but never mutates signed schedules or dispatches hardware.
+    fn glioma_acquisition_operations_snapshot(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AcquisitionOperationsRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_acquisition_operations_snapshot requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma acquisition-operations request: {error}"))?;
+        let snapshot = plan_glioma_acquisition_operations(&request)
+            .map_err(|error| format!("glioma acquisition-operations planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "snapshot": snapshot,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_acquisition_capacity_plan",
+                "glioma_instrument_fleet_health",
+                "glioma_instrument_preflight"
+            ],
+            "guarantees": [
+                "queue backlog, assignment projection, deadline risk, calibration windows, preflight state, telemetry freshness, and operator load remain explicit",
+                "reorder proposals are deterministic and read-only; they cannot bypass approval, fairness, calibration, or signed schedule constraints",
+                "stale or incomplete telemetry limits autonomous reordering and is surfaced as unresolved operational risk",
+                "MCP performs no hardware dispatch, sample movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma acquisition-operations snapshot: {error}"))
+    }
+
+    /// Evaluate a single-use operator approval bound to the exact instrument plan, device, scope,
+    /// interlocks, uncertainty budget, expiry, and emergency-stop path.
+    fn glioma_instrument_operator_approval(&self, arguments: &Value) -> Result<Value, String> {
+        let request: OperatorApprovalRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_instrument_operator_approval requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma operator-approval request: {error}"))?;
+        let approval = approve_glioma_instrument_action(&request)
+            .map_err(|error| format!("glioma operator approval refused: {error}"))?;
+        serde_json::to_value(json!({
+            "approval": approval,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_instrument_preflight",
+                "glioma_instrument_execute",
+                "glioma_instrument_fleet_execute"
+            ],
+            "guarantees": [
+                "approval is bound to plan digest, device, opaque sample scope, operator, expiry, and single-use consumption state",
+                "failed, stale, unmeasured, or changed interlocks never become a pass and all denials remain explicit",
+                "uncertainty and emergency-stop paths are visible before any local gateway handoff",
+                "MCP performs no hardware dispatch, raw sample movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma operator approval: {error}"))
+    }
+
+    /// Publish a signed, revocable, metadata-only device capability declaration for federated
+    /// scheduling. Expired, revoked, calibration-stale, unavailable, or locality-unsafe manifests
+    /// remain visible but cannot schedule work.
+    fn glioma_federated_device_capability_manifest(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedDeviceCapabilityRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_device_capability_manifest requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated-device manifest request: {error}")
+            })?;
+        let manifest = publish_glioma_federated_device_capability_manifest(&request)
+            .map_err(|error| format!("glioma federated-device manifest refused: {error}"))?;
+        serde_json::to_value(json!({
+            "manifest": manifest,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_instrument_fleet_schedule",
+                "glioma_cross_site_protocol_conformance",
+                "glioma_federated_instrument_consensus"
+            ],
+            "guarantees": [
+                "device capability, calibration, availability, policy, revocation, and expiry are content-bound and scheduler-visible",
+                "expired, revoked, stale, unavailable, or locality-unsafe manifests are excluded from scheduling",
+                "the federated payload contains metadata and digests only; credentials, raw samples, and raw device traces remain local",
+                "MCP performs no hardware dispatch or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated-device manifest: {error}"))
+    }
+
+    /// Exchange privacy-bounded instrument availability and service-capacity aggregates across
+    /// approved sites. Per-site capacity, credentials, raw samples, and device traces remain
+    /// local; only the aggregate snapshot is eligible for consortium scheduling.
+    fn glioma_federated_instrument_operations(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedInstrumentOperationsRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_instrument_operations requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated-instrument-operations request: {error}")
+            })?;
+        let snapshot = exchange_glioma_federated_instrument_operations(&request)
+            .map_err(|error| format!("glioma federated-instrument operations refused: {error}"))?;
+        serde_json::to_value(json!({
+            "snapshot": snapshot,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_federated_device_capability_manifest",
+                "glioma_instrument_fleet_schedule",
+                "glioma_acquisition_operations_snapshot"
+            ],
+            "guarantees": [
+                "revocation, freshness, privacy floor, sharing policy, credential exclusion, and raw-data locality are evaluated per site",
+                "capacity is aggregated only across eligible sites and quorum; excluded sites remain named negative evidence without exposing their local values",
+                "tampered site summaries are rejected before aggregation",
+                "MCP performs no hardware dispatch, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated instrument operations: {error}"))
+    }
+
     /// Execute a validated fleet schedule through the deterministic local gateway. Every run
     /// remains bound to its scheduled instrument and admitted preflight plan; MCP uses a dry-run
     /// executor while institution-local callers can supply a hardware gateway through Rust.
@@ -14600,7 +17145,8 @@ impl Server {
             "simulation_only": true,
             "guarantees": [
                 "integer scoring combines expected information, frontier novelty, reproducibility, instrument cost, and physical risk",
-                "selected work is dependency-closed, endpoint-diverse, and bounded by explicit time and risk budgets",
+                "a bounded deterministic beam compares complete dependency-closed portfolios rather than only local candidate scores",
+                "selected work is endpoint-diverse, instrument-aware, dependency-closed, and bounded by explicit time and risk budgets",
                 "only selected admitted plans enter the existing guarded instrument campaign executor",
                 "information and endpoint floors remain explicit no-feasible-plan holds rather than being fabricated",
                 "MCP emits synthetic local artifacts only; no hardware, raw-data, or clinical effect occurs"
@@ -15114,6 +17660,197 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma federated benchmark power: {error}"))
     }
 
+    /// Plan federated benchmark power under site heterogeneity, attrition, modality coverage, and
+    /// privacy-noise stress. The bounded sensitivity surface proposes a qualified portfolio or a
+    /// narrower claim without requesting raw site observations.
+    fn glioma_heterogeneity_adaptive_benchmark_power(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: HeterogeneityAdaptivePowerRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_heterogeneity_adaptive_benchmark_power requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma heterogeneity-adaptive power request: {error}")
+            })?;
+        let plan = plan_glioma_heterogeneity_adaptive_benchmark_power(&request)
+            .map_err(|error| format!("glioma heterogeneity-adaptive power refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_federated_benchmark_power",
+                "glioma_federated_benchmark_site_plan",
+                "glioma_federated_benchmark_campaign_execute"
+            ],
+            "guarantees": [
+                "site heterogeneity, attrition, modality coverage, privacy noise, cost, and replicate multipliers are stress-tested on a deterministic bounded surface",
+                "underpowered, heterogeneous, privacy-limited, binding-mismatched, and budget-capped states remain explicit negative evidence",
+                "recommended portfolios are aggregate-only and do not request raw observations or dispatch consortium sites",
+                "claim width is widened or a narrower claim is recommended when information is insufficient"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma heterogeneity-adaptive power plan: {error}"))
+    }
+
+    /// Detect aggregate benchmark anomalies without inferring a hidden site cause. Every flag is
+    /// routed to local review; this MCP route never excludes a site, moves raw data, or dispatches
+    /// an instrument.
+    fn glioma_federated_aggregate_anomaly_detect(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedAggregateAnomalyRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_aggregate_anomaly_detect requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated aggregate anomaly request: {error}")
+            })?;
+        let assessment = analyze_federated_aggregate_anomalies(&request).map_err(|error| {
+            format!("glioma federated aggregate anomaly detection refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "assessment": assessment,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_federated_benchmark_consensus",
+                "glioma_federated_benchmark_power",
+                "glioma_federated_benchmark_campaign_execute"
+            ],
+            "guarantees": [
+                "robust median/MAD, range, temporal, protocol, uncertainty, and suppression signals are deterministic",
+                "anomalies become explainable site-local review requests and are never silently excluded",
+                "only bounded aggregate summaries cross the route; raw observations and hidden causes remain local",
+                "the route performs no instrument execution, clinical decision, or automatic evidence promotion"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated aggregate anomaly assessment: {error}"))
+    }
+
+    /// Rank aggregate capability advertisements into an explainable preclinical consortium plan.
+    /// The MCP route only plans; it never invites a site, transfers data, or starts an assay.
+    fn glioma_federated_site_selection_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedSiteSelectionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_site_selection_plan requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma federated site selection request: {error}"))?;
+        let plan = plan_federated_glioma_sites(&request)
+            .map_err(|error| format!("glioma federated site selection refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_heterogeneity_adaptive_benchmark_power",
+                "glioma_federated_benchmark_power",
+                "glioma_multisite_benchmark_workflow"
+            ],
+            "guarantees": [
+                "capability, model-system, freshness, privacy, capacity, cost, representation, and independence gates are explicit",
+                "ranking is deterministic and explainable; deferred and excluded sites remain visible",
+                "the route exchanges capability metadata only and performs no site invitation, raw-data movement, instrument execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated site selection plan: {error}"))
+    }
+
+    /// Monitor immutable aggregate benchmark windows for temporal drift and calibration loss.
+    /// Historical snapshots remain untouched; MCP only returns a planning assessment.
+    fn glioma_continual_benchmark_monitor(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ContinualBenchmarkMonitorRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_continual_benchmark_monitor requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma continual benchmark monitor request: {error}")
+            })?;
+        let assessment = monitor_glioma_federated_benchmark_continuity(&request)
+            .map_err(|error| format!("glioma continual benchmark monitor refused: {error}"))?;
+        serde_json::to_value(json!({
+            "assessment": assessment,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_federated_aggregate_anomaly_detect",
+                "glioma_heterogeneity_adaptive_benchmark_power",
+                "glioma_federated_benchmark_campaign_execute"
+            ],
+            "guarantees": [
+                "immutable aggregate windows are compared in deterministic epoch order",
+                "under-observed, stale-gap, uncertain, and change-point windows remain explicit",
+                "calibration loss produces a rerun/recalibration signal rather than rewriting historical evidence",
+                "the route performs no raw-data movement, instrument execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma continual benchmark assessment: {error}"))
+    }
+
+    /// Forecast bounded federated capacity and quorum risk before proposing a benchmark schedule.
+    /// This remains a simulation/planning route and cannot create or dispatch a job.
+    fn glioma_federation_capacity_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederationCapacityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federation_capacity_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federation capacity request: {error}"))?;
+        let plan = plan_federation_capacity(&request)
+            .map_err(|error| format!("glioma federation capacity planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_federated_site_selection_plan",
+                "glioma_heterogeneity_adaptive_benchmark_power",
+                "glioma_multisite_benchmark_workflow"
+            ],
+            "guarantees": [
+                "capacity, commitment, privacy, latency, availability, and quorum constraints are forecast explicitly",
+                "at-risk sites and demand shortfalls remain visible before any commitment",
+                "predicted capacity cannot create a job, contact a site, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federation capacity plan: {error}"))
+    }
+
+    /// Validate a synthetic/site-local federated benchmark contract before any live query.
+    /// The report is a non-evidence simulation: it cannot contact a site, move raw data, or
+    /// create a benchmark job.
+    fn glioma_federated_benchmark_dry_run(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedBenchmarkDryRunRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_dry_run requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated benchmark dry-run request: {error}")
+            })?;
+        let report = execute_federated_benchmark_dry_run(&request)
+            .map_err(|error| format!("glioma federated benchmark dry-run refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_federation_capacity_plan",
+                "glioma_federated_site_selection_plan",
+                "glioma_multisite_benchmark_workflow"
+            ],
+            "guarantees": [
+                "binding, schema, fixture, approval, locality, declared-failure, budget, and quorum checks are per-site and deterministic",
+                "synthetic passes are explicitly non-evidence and omissions remain visible",
+                "the route performs no external query, raw-data movement, instrument execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated benchmark dry-run report: {error}"))
+    }
+
     /// Join a local P10 closure interpretation with aggregate-only P12 consortium consensus.
     /// Alignment is required for qualification; heterogeneity, negative evidence, and model
     /// disagreement remain explicit and no raw data or physical effect crosses MCP.
@@ -15313,6 +18050,301 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma federated benchmark operating cycle: {error}"))
     }
 
+    /// Apply a resumable aggregate-only multi-site workflow event stream. The route is a
+    /// deterministic coordinator: institution-local validation, approvals, queries, reviews,
+    /// and release evidence must arrive as typed events; MCP does not dispatch a site or move
+    /// raw data.
+    fn glioma_multisite_benchmark_workflow(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedBenchmarkWorkflowRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multisite_benchmark_workflow requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma multi-site benchmark workflow request: {error}")
+            })?;
+        let workflow = execute_glioma_multisite_benchmark_workflow(&request)
+            .map_err(|error| format!("glioma multi-site benchmark workflow refused: {error}"))?;
+        serde_json::to_value(json!({
+            "workflow": workflow,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "local validation, approval, aggregate query, reconciliation, review, and release stages remain resumable and per-site",
+                "duplicate event identities are idempotent while conflicting duplicates fail closed",
+                "sequence gaps, retries, denied approvals, incomplete stages, and late withdrawals remain explicit",
+                "only local-only non-human aggregate artifacts can enter consensus; no raw data, instrument command, or clinical decision is produced"
+            ],
+            "next_routes": [
+                "glioma_federated_benchmark_consensus",
+                "glioma_federated_benchmark_operating_cycle",
+                "glioma_research_object_release_gate"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-site benchmark workflow: {error}"))
+    }
+
+    /// Build a read-only director snapshot across concurrent aggregate-only benchmarks. The
+    /// result distinguishes operational completion from scientific success and emits only bounded
+    /// proposals that still require local approval.
+    fn glioma_benchmark_director_snapshot(&self, arguments: &Value) -> Result<Value, String> {
+        let request: BenchmarkDirectorRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_benchmark_director_snapshot requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma benchmark director request: {error}"))?;
+        let snapshot = build_glioma_benchmark_director_snapshot(&request)
+            .map_err(|error| format!("glioma benchmark director snapshot refused: {error}"))?;
+        serde_json::to_value(json!({
+            "snapshot": snapshot,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_multisite_benchmark_workflow",
+                "glioma_federated_benchmark_operating_cycle",
+                "glioma_federated_benchmark_campaign_execute"
+            ],
+            "guarantees": [
+                "budget, privacy, quorum, workload, anomaly, freshness, and uncertainty remain separate dimensions",
+                "operational completion never implies scientific success or release readiness",
+                "proposals cannot expand declared scope, bypass local approval, dispatch sites, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma benchmark director snapshot: {error}"))
+    }
+
+    /// Reconcile a resumable aggregate-only federated benchmark job event stream. The MCP route
+    /// is a deterministic simulator; institution-local adapters retain execution authority.
+    fn glioma_benchmark_job_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: BenchmarkJobRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_benchmark_job_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma benchmark job request: {error}"))?;
+        let job = execute_glioma_benchmark_job(&request)
+            .map_err(|error| format!("glioma benchmark job refused: {error}"))?;
+        serde_json::to_value(json!({
+            "job": job,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_benchmark_director_snapshot",
+                "glioma_multisite_benchmark_workflow",
+                "glioma_federated_benchmark_operating_cycle"
+            ],
+            "guarantees": [
+                "event identities are idempotent and conflicting retries block the job",
+                "checkpoints, sequence gaps, retries, cancellations, quorum loss, budget stops, and privacy stops remain explicit",
+                "the route performs no site dispatch, raw-data movement, credential exchange, upload, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma benchmark job: {error}"))
+    }
+
+    /// Explore harmonized aggregate-only glioma evidence while retaining suppression,
+    /// non-comparability, revocation, and uncertainty as first-class cell states.
+    fn glioma_cross_site_evidence_explore(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CrossSiteEvidenceExplorerRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_cross_site_evidence_explore requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma cross-site evidence request: {error}"))?;
+        let view = explore_glioma_cross_site_evidence(&request)
+            .map_err(|error| format!("glioma cross-site evidence exploration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "view": view,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_benchmark_director_snapshot",
+                "glioma_benchmark_job_execute",
+                "glioma_federated_benchmark_operating_cycle"
+            ],
+            "guarantees": [
+                "suppressed, revoked, non-comparable, and low-confidence cells never become pooled values",
+                "weighted aggregate values retain uncertainty and heterogeneity bounds",
+                "the route returns aggregate metadata only and performs no raw-data movement, site query, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma cross-site evidence view: {error}"))
+    }
+
+    /// Verify federated contribution eligibility and independent-site quorum before any query
+    /// admission. The MCP route is metadata-only and never contacts sites or moves raw data.
+    fn glioma_quorum_admission_assess(&self, arguments: &Value) -> Result<Value, String> {
+        let request: QuorumAdmissionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_quorum_admission_assess requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma quorum admission request: {error}"))?;
+        let decision = assess_glioma_quorum_admission(&request)
+            .map_err(|error| format!("glioma quorum admission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "decision": decision,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_benchmark_job_execute",
+                "glioma_cross_site_evidence_explore",
+                "glioma_federated_benchmark_operating_cycle"
+            ],
+            "guarantees": [
+                "revoked, stale, unsigned, schema-mismatched, privacy-unsafe, duplicate, and non-conformant contributions cannot admit a query",
+                "correlated sites remain visible but never inflate independent quorum",
+                "the route performs no site query, raw-data movement, credential exchange, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma quorum admission decision: {error}"))
+    }
+
+    /// Render the local site participation contract before federation admission. Approval is
+    /// explicit and reversible; the MCP route never dispatches a query or moves raw data.
+    fn glioma_site_participation_review(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SiteParticipationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_site_participation_review requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma site participation request: {error}"))?;
+        let review = review_glioma_site_participation(&request)
+            .map_err(|error| format!("glioma site participation review refused: {error}"))?;
+        serde_json::to_value(json!({
+            "review": review,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_quorum_admission_assess",
+                "glioma_benchmark_job_execute",
+                "glioma_federated_benchmark_operating_cycle"
+            ],
+            "guarantees": [
+                "requested purpose, aggregate fields, model coverage, assay, protocol, workload, privacy cost, approval, and withdrawal state remain inspectable",
+                "missing approval, incompatibility, over-capacity, withdrawal, and boundary violations cannot become participation permission",
+                "the route performs no site query, raw-data movement, credential exchange, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma site participation review: {error}"))
+    }
+
+    /// Verify aggregate contribution declarations before they reach quorum or statistics. The
+    /// route preserves stable rejection reasons and trust-snapshot identity; it never moves data.
+    fn glioma_contribution_integrity_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ContributionIntegrityRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_contribution_integrity_verify requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma contribution-integrity request: {error}"))?;
+        let integrity = verify_glioma_contribution_integrity(&request).map_err(|error| {
+            format!("glioma contribution-integrity verification refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "integrity": integrity,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_quorum_admission_assess",
+                "glioma_benchmark_job_execute",
+                "glioma_cross_site_evidence_explore"
+            ],
+            "guarantees": [
+                "identity, signature, policy, schema, freshness, revocation, locality, aggregate-only, and duplicate-artifact checks run before aggregate consumption",
+                "unverified contributions cannot affect metrics and every rejection retains a stable reason",
+                "the route performs no upload, query, raw-data movement, credential exchange, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma contribution-integrity result: {error}"))
+    }
+
+    /// Build an operations-only consortium snapshot for the glioma research director. It reports
+    /// availability and failover candidates but never bypasses local policy or dispatches work.
+    fn glioma_federation_operations_snapshot(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederationOperationsRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federation_operations_snapshot requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma federation operations request: {error}"))?;
+        let snapshot = build_glioma_federation_operations_snapshot(&request)
+            .map_err(|error| format!("glioma federation operations snapshot refused: {error}"))?;
+        serde_json::to_value(json!({
+            "snapshot": snapshot,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_site_participation_review",
+                "glioma_contribution_integrity_verify",
+                "glioma_quorum_admission_assess"
+            ],
+            "guarantees": [
+                "availability, heartbeat freshness, standards gaps, maintenance, incidents, queue pressure, and revocation remain explicit",
+                "failover candidates are only advisory and remain subject to local policy approval",
+                "the route exchanges no research payloads or credentials and performs no query or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federation operations snapshot: {error}"))
+    }
+
+    /// Evaluate one versioned institution-local participant exchange. The result is a typed
+    /// protocol response; MCP performs no transport, credential exchange, or raw-data movement.
+    fn glioma_participant_exchange_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederationParticipantRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_participant_exchange_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma participant exchange request: {error}"))?;
+        let exchange = execute_glioma_participant_exchange(&request)
+            .map_err(|error| format!("glioma participant exchange refused: {error}"))?;
+        serde_json::to_value(json!({
+            "exchange": exchange,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_site_participation_review",
+                "glioma_contribution_integrity_verify",
+                "glioma_quorum_admission_assess"
+            ],
+            "guarantees": [
+                "API version, idempotency, policy scope, revocation, and action-specific local approval remain explicit",
+                "duplicate exchanges do not create new participant operations",
+                "the route returns metadata and digests only and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma participant exchange: {error}"))
+    }
+
+    /// Validate one signed aggregate contribution before integrity/quorum consumption. The MCP
+    /// route only simulates the boundary and never signs, uploads, or moves raw data.
+    fn glioma_signed_aggregate_submit(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SignedAggregateSubmissionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_signed_aggregate_submit requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma signed aggregate request: {error}"))?;
+        let contribution = submit_glioma_signed_aggregate(&request)
+            .map_err(|error| format!("glioma signed aggregate submission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "contribution": contribution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_contribution_integrity_verify",
+                "glioma_quorum_admission_assess",
+                "glioma_benchmark_job_execute"
+            ],
+            "guarantees": [
+                "signature, benchmark/schema/policy binding, approval, revocation, calibration, provenance, privacy, locality, and duplicate checks remain explicit",
+                "only accepted aggregate contributions can be presented to downstream integrity gates",
+                "the route performs no signing, upload, raw-data movement, credential exchange, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma signed aggregate contribution: {error}"))
+    }
+
     /// Compile a conservative federated site projection directly into an aggregate-only
     /// benchmark campaign. The MCP worker remains synthetic; institutions own execution.
     fn glioma_federated_adaptive_campaign_execute(
@@ -15369,6 +18401,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma replay campaign: {error}"))
+    }
+
+    /// Run a pinned clean-room replay-fidelity gate for a preclinical glioma release candidate.
+    /// The MCP worker is synthetic; production hosts provide an institution-local executor.
+    fn glioma_replay_fidelity_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReplayFidelityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replay_fidelity_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replay-fidelity request: {error}"))?;
+        let mut executor = DryRunReplayFidelityExecutor;
+        let report = execute_glioma_prospective_replay_fidelity(&request, &mut executor)
+            .map_err(|error| format!("glioma replay-fidelity gate refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the replay environment must match the bundle-pinned environment digest",
+                "content, lineage, uncertainty, negative findings, and numeric tolerances are compared independently",
+                "unexplained divergence, dependency blockage, and resource exhaustion never become a pass",
+                "raw experimental payloads and production credentials remain institution-local",
+                "a passing report is release evidence for human review, not an unsigned publication or clinical conclusion"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replay-fidelity report: {error}"))
     }
 
     fn glioma_research_object_prepare(&self, arguments: &Value) -> Result<Value, String> {
@@ -15448,6 +18508,247 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma research-object migration plan: {error}"))
     }
 
+    /// Apply an explicit metadata-only archive migration for a preclinical glioma research
+    /// object. Artifact bytes remain untouched and unknown mandatory fields fail closed.
+    fn glioma_archive_migration_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ArchiveMigrationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_archive_migration_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma archive migration request: {error}"))?;
+        let report = migrate_glioma_archive_object(&request)
+            .map_err(|error| format!("glioma archive migration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "only caller-declared version-pinned field transforms are applied",
+                "artifact bytes, content hashes, provenance, uncertainty, and negative evidence remain unchanged",
+                "unknown mandatory fields, undeclared drops, semantic-loss budget violations, and non-reversible rollback paths fail closed",
+                "the route performs no archive write, upload, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma archive migration report: {error}"))
+    }
+
+    /// Verify a signed preclinical glioma research object against caller-provided offline trust
+    /// roots. The route performs no network fetch, import, publication, or clinical decision.
+    fn glioma_release_signature_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReleaseSignatureVerificationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_release_signature_verify requires request".to_string())?,
+        )
+        .map_err(|error| {
+            format!("invalid glioma release signature verification request: {error}")
+        })?;
+        let report = verify_glioma_release_signature(&request)
+            .map_err(|error| format!("glioma release signature verification refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "manifest, build provenance, release-gate, policy, signature-payload, key, freshness, and release-readiness checks remain separate",
+                "missing offline trust roots are unverifiable rather than verified",
+                "tampering, revoked keys, expired attestations, and incomplete provenance fail closed",
+                "the route performs no network fetch, artifact import, upload, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma release verification report: {error}"))
+    }
+
+    /// Check a local glioma research object against one frozen standards and qualification profile.
+    fn glioma_research_object_conformance_check(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ConformanceRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_research_object_conformance_check requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma research-object conformance request: {error}")
+            })?;
+        let report = evaluate_glioma_research_object_conformance(&request)
+            .map_err(|error| format!("glioma research-object conformance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "pinned schema identity/version, required and forbidden fields, artifact coverage, and scientific qualification checks remain separate",
+                "unsupported extensions block while declared local extensions remain warnings",
+                "missing provenance, uncertainty, negative evidence, or required verified signatures never become a conformance pass",
+                "the route performs no artifact rewrite, upload, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma research-object conformance report: {error}"))
+    }
+
+    /// Evaluate field-level consortium sharing for an aggregate-only glioma research object.
+    fn glioma_federated_release_sharing_check(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedReleaseSharingRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_release_sharing_check requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated release-sharing request: {error}")
+            })?;
+        let decision = evaluate_glioma_federated_release_sharing(&request)
+            .map_err(|error| format!("glioma federated release sharing refused: {error}"))?;
+        serde_json::to_value(json!({
+            "decision": decision,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "recipient scope, quorum, site membership, revocation, locality, human-data, and field policy gates remain independent",
+                "share, redact, deny, and unresolved outcomes are field-level and content-addressed",
+                "revoked sites and policy-denied fields cannot be overridden by permissive global defaults",
+                "the route performs no upload, raw-data movement, signing, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated release-sharing decision: {error}"))
+    }
+
+    /// Replay a signed glioma research-release lifecycle without publishing or moving data.
+    fn glioma_release_event_protocol_replay(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReleaseEventProtocolRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_release_event_protocol_replay requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma release-event protocol request: {error}"))?;
+        let report = replay_glioma_release_event_protocol(&request)
+            .map_err(|error| format!("glioma release-event protocol refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "ordered lifecycle transitions, predecessor chains, duplicate idempotence, revoked authority, corrections, withdrawals, and supersession remain explicit",
+                "the route performs no publication, upload, raw-data movement, signing, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma release-event protocol report: {error}"))
+    }
+
+    /// Plan safe retention and archival transitions for immutable glioma release versions.
+    fn glioma_version_retention_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: RetentionGovernorRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_version_retention_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma retention-governor request: {error}"))?;
+        let plan = plan_glioma_version_retention(&request)
+            .map_err(|error| format!("glioma retention governor refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "pins, legal holds, immutable lineage, replica health, and digest verification remain independent gates",
+                "archive transitions are plans only; deletion and restoration remain explicitly blocked when unverified",
+                "the route performs no byte deletion, rewrite, upload, raw-data movement, signing, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma retention plan: {error}"))
+    }
+
+    /// Assess locality-constrained archival replicas and emit bounded repair work.
+    fn glioma_distributed_archive_mirror(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DistributedMirrorRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_distributed_archive_mirror requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma distributed-mirror request: {error}"))?;
+        let status = evaluate_glioma_distributed_archive_mirror(&request)
+            .map_err(|error| format!("glioma distributed archive mirror refused: {error}"))?;
+        serde_json::to_value(json!({
+            "status": status,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "source digests, replica availability, freshness, locality, and policy authorization remain independent gates",
+                "repair work is bounded and content-addressed; unauthorized or corrupt replicas never count toward health",
+                "the route performs no copy, upload, deletion, raw-data movement, signing, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma distributed-mirror status: {error}"))
+    }
+
+    /// Build a gate-preserving, capacity-bounded release queue schedule.
+    fn glioma_release_queue_schedule(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReleaseQueueScheduleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_release_queue_schedule requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma release-queue request: {error}"))?;
+        let schedule = schedule_glioma_release_queue(&request)
+            .map_err(|error| format!("glioma release queue scheduler refused: {error}"))?;
+        serde_json::to_value(json!({
+            "schedule": schedule,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "scientific and provenance gates, reviewer readiness, compute capacity, fairness credits, risk, deadlines, and horizon remain explicit",
+                "unready candidates are blocked or deferred rather than silently scheduled",
+                "the route performs no publication, signing, upload, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma release-queue schedule: {error}"))
+    }
+
+    /// Reconcile independent consortium publication decisions with quorum and dissent evidence.
+    fn glioma_consortium_publication_steward(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ConsortiumPublicationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_consortium_publication_steward requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma consortium publication request: {error}"))?;
+        let state = steward_glioma_consortium_publication(&request)
+            .map_err(|error| format!("glioma consortium publication steward refused: {error}"))?;
+        serde_json::to_value(json!({
+            "state": state,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "site authority, signatures, object digests, quorum, pending responses, rejection, abstention, dissent, and correction lineage remain explicit",
+                "one institution cannot overwrite another site's signed result or turn non-response into approval",
+                "the route performs no publication, upload, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma consortium publication state: {error}"))
+    }
+
+    /// Reconcile a resumable, policy-bounded exchange cursor for a signed research object.
+    fn glioma_research_object_exchange_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ResearchObjectExchangeRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_research_object_exchange_plan requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma exchange request: {error}"))?;
+        let record = plan_glioma_research_object_exchange(&request)
+            .map_err(|error| format!("glioma research-object exchange refused: {error}"))?;
+        serde_json::to_value(json!({
+            "record": record,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "audience, locality, grant, signature, size, range, duplicate, cursor, and missing-chunk gates remain explicit",
+                "retrying an acknowledged chunk is idempotent and incomplete transfers remain resumable",
+                "the route performs no network transfer, upload, publication, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma exchange record: {error}"))
+    }
+
     /// Analyze transitive research-object artifact and program closure without fetching or
     /// rewriting any artifact.
     fn glioma_research_object_dependency_closure(
@@ -15507,6 +18808,507 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma research-object release gate: {error}"))
+    }
+
+    /// Score explicit reproducibility components for a preclinical research object. Missing
+    /// evidence scores zero and remains a blocker; the MCP route performs no release or upload.
+    fn glioma_reproducibility_completeness_score(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ReproducibilityCompletenessRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_reproducibility_completeness_score requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid reproducibility completeness request: {error}"))?;
+        let profile = score_glioma_reproducibility_completeness(&request).map_err(|error| {
+            format!("glioma reproducibility completeness scoring refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "profile": profile,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_research_object_dependency_closure",
+                "glioma_replay_campaign_execute",
+                "glioma_research_object_release_gate"
+            ],
+            "guarantees": [
+                "missing components score zero and cannot be imputed from a manifest claim",
+                "leave-one-component-out sensitivity and hard blockers remain explicit",
+                "replay mismatch, uncertainty, null outcomes, and lineage gaps cannot be hidden by a high aggregate score",
+                "the route performs no upload, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode reproducibility completeness profile: {error}"))
+    }
+
+    /// Verify that scientific qualifications survive transformation into a release object.
+    /// The route compares typed source/release declarations only; it never publishes, signs,
+    /// uploads, moves raw data, or makes a clinical decision.
+    fn glioma_qualification_preservation_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let request: QualificationPreservationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_qualification_preservation_audit requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid qualification preservation request: {error}"))?;
+        let audit = audit_glioma_qualification_preservation(&request)
+            .map_err(|error| format!("glioma qualification preservation audit refused: {error}"))?;
+        serde_json::to_value(json!({
+            "audit": audit,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_reproducibility_completeness_score",
+                "glioma_research_object_release_gate",
+                "glioma_research_object_dependency_leakage_audit"
+            ],
+            "guarantees": [
+                "uncertainty, null, failed-replication, contradiction, omission, limitation, and negative-result qualifications cannot be silently dropped or weakened",
+                "release claims cannot exceed explicit source evidence or unbound lineage",
+                "the route performs no upload, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode qualification preservation audit: {error}"))
+    }
+
+    /// Normalize release metadata through an explicit, reversible mapping policy. The MCP
+    /// surface is proposal-only: it never overwrites a source field, resolves a conflict by
+    /// preference, transmits metadata, or makes a clinical decision.
+    fn glioma_release_metadata_normalize(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReleaseMetadataNormalizationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_release_metadata_normalize requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid release metadata normalization request: {error}"))?;
+        let normalization = normalize_glioma_release_metadata(&request)
+            .map_err(|error| format!("glioma release metadata normalization refused: {error}"))?;
+        serde_json::to_value(json!({
+            "normalization": normalization,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "source values and field links remain preserved for exact reversal",
+                "conflicting candidates remain unresolved and no source wins implicitly",
+                "inferred mappings remain marked until an explicit rule confirmation is supplied",
+                "protected human or clinical metadata is rejected",
+                "the route performs no upload, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma release metadata normalization: {error}"))
+    }
+
+    /// Bind a release manifest to build and gate evidence through an institution-owned signing
+    /// authority. The route only emits a deterministic attestation envelope; it never creates a
+    /// private key, publishes bytes, moves raw data, or makes a clinical decision.
+    fn glioma_release_attestation_issue(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SignedReleaseAttestationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_release_attestation_issue requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid signed release attestation request: {error}"))?;
+        let attestation = attest_glioma_release(&request)
+            .map_err(|error| format!("glioma release attestation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "attestation": attestation,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "manifest, build provenance, gate evidence, signer scope, key status, and verifier results are content-bound",
+                "inactive or revoked authorities and failed release gates cannot produce a signed status",
+                "post-sign mutation fails attestation digest validation",
+                "the route does not create private keys, upload, publish, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma signed release attestation: {error}"))
+    }
+
+    /// Reduce local artifact scanner observations into a deterministic release integrity report.
+    /// This route never reads or moves payload bytes and never treats a declaration as verified.
+    fn glioma_artifact_integrity_scan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ArtifactIntegrityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_artifact_integrity_scan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid artifact integrity request: {error}"))?;
+        let report = scan_glioma_artifact_integrity(&request)
+            .map_err(|error| format!("glioma artifact integrity scan refused: {error}"))?;
+        serde_json::to_value(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "digest, truncation, format, metadata, executable, link, missing-member, and budget failures remain explicit",
+                "quarantined candidates can never appear in the verified partition",
+                "streaming memory ceilings are validated before scanning",
+                "the route reads no raw payload, performs no upload, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma artifact integrity report: {error}"))
+    }
+
+    /// Render the exact audience-specific release preview without exposing protected payloads.
+    fn glioma_release_preview(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReleasePreviewRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_release_preview requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid release preview request: {error}"))?;
+        let preview = preview_glioma_release_audience(&request)
+            .map_err(|error| format!("glioma release preview refused: {error}"))?;
+        serde_json::to_value(json!({
+            "preview": preview,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "rendered sections and artifacts are the exact audience-allowed selection",
+                "redacted sections and omitted artifacts are explicit and no protected payload is rendered",
+                "prior-version diffs and preview digest are deterministic; the route never signs or uploads"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma release audience preview: {error}"))
+    }
+
+    /// Reconcile release candidate telemetry and propose a gate-preserving queue order.
+    fn glioma_release_queue_snapshot(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReleaseQueueRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_release_queue_snapshot requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid release queue request: {error}"))?;
+        let snapshot = snapshot_glioma_release_queue(&request)
+            .map_err(|error| format!("glioma release queue snapshot refused: {error}"))?;
+        serde_json::to_value(json!({
+            "snapshot": snapshot,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "candidate counts reconcile to the supplied ledger",
+                "stale telemetry, failed checks, reviewer capacity, and blocked candidates remain explicit",
+                "reorder proposals cannot bypass a release gate or mutate candidate state",
+                "the route is an operations view and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma release queue snapshot: {error}"))
+    }
+
+    /// Evaluate transitive license, locality, embargo, and audience rights before export. The
+    /// route emits field-level allow/redact/deny/unresolved decisions and never exports payloads.
+    fn glioma_release_shareability_check(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReleaseShareabilityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_release_shareability_check requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid release shareability request: {error}"))?;
+        let decision = evaluate_glioma_release_shareability(&request)
+            .map_err(|error| format!("glioma release shareability check refused: {error}"))?;
+        serde_json::to_value(json!({
+            "decision": decision,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "transitive dependencies and field-level rights are evaluated before export",
+                "unknown or incompatible licenses never become allowed by inference",
+                "raw data, direct identifiers, secrets, local-only and embargoed fields remain denied or redacted",
+                "the route moves no payloads and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma release shareability decision: {error}"))
+    }
+
+    /// Compile a dependency-closed offline reproducibility bundle plan from local metadata. The
+    /// route never copies bytes or fetches undeclared dependencies.
+    fn glioma_reproducibility_bundle_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReproducibilityBundleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_reproducibility_bundle_compile requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid reproducibility bundle request: {error}"))?;
+        let bundle = compile_glioma_reproducibility_bundle(&request).map_err(|error| {
+            format!("glioma reproducibility bundle compilation refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "bundle": bundle,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "only supplied, authorized, content-addressed members enter the bundle plan",
+                "missing dependencies and cycles block completion rather than being fetched or hidden",
+                "excluded local inputs retain an explicit replay boundary and limitations",
+                "the route copies no bytes, uses no network, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma reproducibility bundle: {error}"))
+    }
+
+    /// Compose study-scoped comparative metadata while refusing silent pooling of non-equivalent
+    /// assays. This is a planning/release operation only; it moves no raw research data.
+    fn glioma_multistudy_release_compose(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComparativeReleaseRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multistudy_release_compose requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid comparative release request: {error}"))?;
+        let comparative = compose_glioma_multistudy_release(&request)
+            .map_err(|error| format!("glioma comparative release composition refused: {error}"))?;
+        serde_json::to_value(json!({
+            "comparative": comparative,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "study methods, model systems, limitations, and provenance remain recoverable",
+                "non-equivalent measures are never pooled",
+                "missing or ambiguous fields are explicit omissions",
+                "the route moves no raw data and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma comparative release: {error}"))
+    }
+
+    /// Explore an already released comparative object through source-linked, access-bound cells.
+    fn glioma_comparative_release_explore(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComparativeReleaseExplorerRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_comparative_release_explore requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid comparative release explorer request: {error}"))?;
+        let view = explore_glioma_comparative_release(&request)
+            .map_err(|error| format!("glioma comparative release exploration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "view": view,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "every visible value retains study, field, source digest, model-system, and mapping relation",
+                "missing and non-equivalent mappings are unavailable or blocked rather than coerced",
+                "cache keys bind audience, scope, epoch, and comparative digest so access changes evict prior views",
+                "the route is read-only and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma comparative release view: {error}"))
+    }
+
+    /// Compile an event-sourced continuous release candidate. The route detects evidence and
+    /// policy regressions but never signs, publishes, uploads, or moves raw research data.
+    fn glioma_continuous_release_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ContinuousReleaseRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_continuous_release_compile requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid continuous release request: {error}"))?;
+        let candidate = compile_glioma_continuous_release(&request)
+            .map_err(|error| format!("glioma continuous release compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "candidate": candidate,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "negative evidence and explicit omissions remain in the candidate",
+                "schema, policy, staleness, version, and required-closure regressions block promotion",
+                "semantic diffs and review requirements are content-addressed",
+                "the route performs no signing, publication, upload, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma continuous release candidate: {error}"))
+    }
+
+    /// Compile a quorum-gated aggregate-only federated research object. Raw site data and
+    /// credentials remain local; this route only combines already-approved metadata.
+    fn glioma_federated_release_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedReleaseRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_release_compile requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid federated release request: {error}"))?;
+        let object = compile_glioma_federated_release(&request)
+            .map_err(|error| format!("glioma federated release compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "object": object,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "only permitted aggregate-only contributions meeting quorum are admitted",
+                "stale, revoked-by-policy, schema-mismatched, uncertain, heterogeneous, human, and non-local-safe sites remain omitted",
+                "site localization and limitations remain explicit in the object",
+                "the route moves no raw data, exchanges no credentials, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated research object: {error}"))
+    }
+
+    /// Compile a privacy-preserving site capability envelope for autonomous federation planning.
+    /// Only approved capability metadata leaves the site-local registry boundary.
+    fn glioma_site_capability_envelope_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SiteCapabilityRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_site_capability_envelope_compile requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid site capability request: {error}"))?;
+        let envelope = compile_glioma_site_capability_envelope(&request)
+            .map_err(|error| format!("glioma site capability compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "envelope": envelope,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "expired, unapproved, low-confidence, non-local, and standards-incompatible capabilities are explicit omissions",
+                "the envelope contains no raw samples, credentials, or protected source identifiers",
+                "the route only informs federation planning and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma site capability envelope: {error}"))
+    }
+
+    /// Bind a permitted aggregate contribution to site-local provenance and a signer chain.
+    /// The attestation is a deterministic verifier seam and never exports raw source identity.
+    fn glioma_site_provenance_attest(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SiteProvenanceAttestationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_site_provenance_attest requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid site provenance attestation request: {error}"))?;
+        let attestation = attest_glioma_site_contribution(&request)
+            .map_err(|error| format!("glioma site provenance attestation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "attestation": attestation,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "aggregate, lineage, calibration, environment, policy, freshness, and signer-chain bindings are content-addressed",
+                "inactive, revoked, invalid-chain, stale, protected, non-local, or non-aggregate contributions cannot be signed",
+                "only digests and bounded metadata leave the site; raw source identifiers, credentials, and clinical decisions remain excluded"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma site provenance attestation: {error}"))
+    }
+
+    /// Compile an immutable, replayable aggregate-only federated benchmark execution record.
+    /// Inclusion and omission decisions remain explicit and no remote execution is dispatched.
+    fn glioma_federated_benchmark_record_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedBenchmarkExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_record_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid federated benchmark execution request: {error}"))?;
+        let record = execute_glioma_federated_benchmark_record(&request)
+            .map_err(|error| format!("glioma federated benchmark record refused: {error}"))?;
+        serde_json::to_value(json!({
+            "record": record,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "benchmark version, executor, policy, replay identity, aggregate inputs, metrics, uncertainty, quorum, and omissions are content-addressed",
+                "unsigned, revoked, stale, mismatched, non-local, protected, or non-aggregate site contributions are omitted with reason codes",
+                "replay preserves the exact inclusion partition and no raw data, credentials, or clinical decisions are involved"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated benchmark record: {error}"))
+    }
+
+    /// Compile a typed consortium governance-cycle record with explicit local votes and dissent.
+    fn glioma_benchmark_governance_cycle_compile(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GovernanceCycleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_benchmark_governance_cycle_compile requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid benchmark governance cycle request: {error}"))?;
+        let cycle = compile_glioma_benchmark_governance_cycle(&request)
+            .map_err(|error| format!("glioma benchmark governance cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "proposal, site review, privacy, analysis, dissent, release, and correction transitions require an authorized actor and matching policy version",
+                "absent, abstained, unauthorized, rejected, and invalidated votes remain explicit and never become approvals",
+                "the route preserves local decision rights and never moves raw data, executes instruments, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma benchmark governance cycle: {error}"))
+    }
+
+    /// Harmonize one site-local phenotype dictionary into an aggregate-only summary while
+    /// preserving suppression, uncertainty, unit conflicts, and non-comparability.
+    fn glioma_aggregate_phenotype_summary_compile(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: AggregatePhenotypeRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_aggregate_phenotype_summary_compile requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid aggregate phenotype request: {error}"))?;
+        let summary = compile_glioma_aggregate_phenotype_summary(&request)
+            .map_err(|error| format!("glioma aggregate phenotype compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "summary": summary,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "suppressed, missing, unmapped, non-comparable, uncertain, and unit-conflicted concepts never become zero",
+                "comparable mappings require explicit pooling policy",
+                "the route emits aggregate metadata only and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma aggregate phenotype summary: {error}"))
+    }
+
+    /// Audit the transitive dependency closure of a candidate release before any serialization.
+    /// Critical leakage findings are a hard stop; the route returns metadata only and never
+    /// moves protected or local-only payloads.
+    fn glioma_research_object_dependency_leakage_audit(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ReleaseDependencyLeakageRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_research_object_dependency_leakage_audit requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid release dependency leakage request: {error}"))?;
+        let audit = audit_glioma_release_dependency_leakage(&request)
+            .map_err(|error| format!("glioma release dependency leakage audit refused: {error}"))?;
+        serde_json::to_value(json!({
+            "audit": audit,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_reproducibility_completeness_score",
+                "glioma_research_object_dependency_closure",
+                "glioma_research_object_release_gate"
+            ],
+            "guarantees": [
+                "transitive paths, protected payloads, local-only references, secrets, path escapes, cycles, and missing dependencies remain explicit",
+                "critical findings block export and no export bytes are produced",
+                "the route returns metadata and digests only; it performs no upload, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode release dependency leakage audit: {error}"))
     }
 
     /// Run the complete replay-to-release handoff in the deterministic local sandbox. A
@@ -16043,7 +19845,7 @@ impl Server {
                     "fail_closed": true,
                     "world": Value::Null,
                     "query": Value::Null,
-                }))
+                }));
             }
         };
         let query = match Query::from_json(query_document.clone()) {
@@ -16056,7 +19858,7 @@ impl Server {
                     "fail_closed": true,
                     "world": Value::Null,
                     "query": Value::Null,
-                }))
+                }));
             }
         };
         let report = validate(&world, &DimensionRegistry::default());
@@ -16570,13 +20372,13 @@ impl Server {
                 return Err(format!(
                     "criteria {relative:?} declares schema_version {other:?}, expected \
                      {REPAIR_DECLARATIONS_SCHEMA_VERSION:?}"
-                ))
+                ));
             }
             None => {
                 return Err(format!(
                     "criteria {relative:?} needs a string \"schema_version\" of \
                      {REPAIR_DECLARATIONS_SCHEMA_VERSION:?}"
-                ))
+                ));
             }
         }
 
@@ -17296,11 +21098,13 @@ impl Server {
                     .lineage(digest)
                     .map_err(|error| format!("artifact registry lineage refused: {error}"))
             }
-            "domain_evidence_lineage" => registry
-                .domain_evidence_lineage(arguments)
-                .map_err(|error| {
-                    format!("artifact registry domain evidence lineage refused: {error}")
-                }),
+            "domain_evidence_lineage" => {
+                registry
+                    .domain_evidence_lineage(arguments)
+                    .map_err(|error| {
+                        format!("artifact registry domain evidence lineage refused: {error}")
+                    })
+            }
             "verify_snapshot" => {
                 let snapshot = arguments
                     .get("snapshot")
@@ -19367,9 +23171,13 @@ impl Server {
             "unchanged"
         };
         let next_action = match after_state {
-            "ready_for_human_review" => "obtain the separate human or domain-authority review; this projection is not authorization",
+            "ready_for_human_review" => {
+                "obtain the separate human or domain-authority review; this projection is not authorization"
+            }
             "review_required" => "inspect optional evidence and obtain the required human review",
-            "incomplete" => "supply the missing required evidence components or revise the explicit policy",
+            "incomplete" => {
+                "supply the missing required evidence components or revise the explicit policy"
+            }
             "blocked" => "resolve structural integrity errors and re-run the non-executing audit",
             _ => "inspect the invalid control-plane state",
         };
@@ -22308,7 +26116,7 @@ impl Server {
             other => {
                 return Err(format!(
                     "unknown registry policy {other:?}; choose default or experimental"
-                ))
+                ));
             }
         };
         let outcome = gate_document(&self.read_json(&path)?, &policy);
@@ -22484,11 +26292,13 @@ impl Server {
                     match (pack, tier) {
                         (Ok(pack), Ok(tier)) => index
                             .publish(pack, tier, &policy)
-                            .map(|digest| json!({
-                                "digest": digest,
-                                "tier": tier,
-                                "status": "active",
-                            }))
+                            .map(|digest| {
+                                json!({
+                                    "digest": digest,
+                                    "tier": tier,
+                                    "status": "active",
+                                })
+                            })
                             .map_err(|error| error.to_string()),
                         (Err(error), _) | (_, Err(error)) => Err(error),
                     }
@@ -22496,22 +26306,26 @@ impl Server {
                 "promote" => match (digest(), tier()) {
                     (Ok(digest), Ok(tier)) => index
                         .promote(digest, tier, &policy)
-                        .map(|promotion| json!({
-                            "promotion": promotion,
-                            "digest": digest,
-                            "tier": tier,
-                        }))
+                        .map(|promotion| {
+                            json!({
+                                "promotion": promotion,
+                                "digest": digest,
+                                "tier": tier,
+                            })
+                        })
                         .map_err(|error| error.to_string()),
                     (Err(error), _) | (_, Err(error)) => Err(error),
                 },
                 "reassess" => match digest() {
                     Ok(digest) => index
                         .reassess(digest, &policy)
-                        .map(|verdict| json!({
-                            "digest": digest,
-                            "verdict": verdict,
-                            "tier_after": index.tier_of(digest),
-                        }))
+                        .map(|verdict| {
+                            json!({
+                                "digest": digest,
+                                "verdict": verdict,
+                                "tier_after": index.tier_of(digest),
+                            })
+                        })
                         .map_err(|error| error.to_string()),
                     Err(error) => Err(error),
                 },
@@ -22523,11 +26337,13 @@ impl Server {
                     match (superseded, replacement, tier, reason) {
                         (Ok(superseded), Ok(replacement), Ok(tier), Ok(reason)) => index
                             .supersede(superseded, replacement, tier, reason, &policy)
-                            .map(|replacement_digest| json!({
-                                "superseded": superseded,
-                                "replacement": replacement_digest,
-                                "tier": tier,
-                            }))
+                            .map(|replacement_digest| {
+                                json!({
+                                    "superseded": superseded,
+                                    "replacement": replacement_digest,
+                                    "tier": tier,
+                                })
+                            })
                             .map_err(|error| error.to_string()),
                         (Err(error), _, _, _)
                         | (_, Err(error), _, _)
@@ -22538,10 +26354,12 @@ impl Server {
                 "withdraw" => match (digest(), reason()) {
                     (Ok(digest), Ok(reason)) => index
                         .withdraw(digest, reason)
-                        .map(|()| json!({
-                            "digest": digest,
-                            "status": index.status(digest),
-                        }))
+                        .map(|()| {
+                            json!({
+                                "digest": digest,
+                                "status": index.status(digest),
+                            })
+                        })
                         .map_err(|error| error.to_string()),
                     (Err(error), _) | (_, Err(error)) => Err(error),
                 },
@@ -22718,7 +26536,7 @@ impl Server {
             other => {
                 return Err(format!(
                     "unknown schema.reuse {other:?}; choose same_build_only or across_builds"
-                ))
+                ));
             }
         };
         let schema = KeySchema::declare(schema_name, component_names, reuse)
@@ -23853,7 +27671,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "unbounded traversals and over-ceiling materialised artifacts are refused before a capacity number is produced",
-                }))
+                }));
             }
         };
 
@@ -23918,7 +27736,7 @@ impl Server {
             arguments.get("result").cloned(),
         ) {
             (Some(_), Some(_)) => {
-                return Err("provide either document or inline result, not both".into())
+                return Err("provide either document or inline result, not both".into());
             }
             (Some(relative), None) => {
                 let path = self.resolve(relative)?;
@@ -23931,7 +27749,7 @@ impl Server {
             }
             (None, Some(result)) => result,
             (None, None) => {
-                return Err("research_ci_check requires document or inline result".into())
+                return Err("research_ci_check requires document or inline result".into());
             }
         };
         let result: ResultUnderReview = serde_json::from_value(raw)
@@ -25993,7 +29811,7 @@ impl Server {
                     "stage": "pose",
                     "refusal": error.to_string(),
                     "fail_closed": true,
-                }))
+                }));
             }
         };
         let mut hypothesis_set = HypothesisSet::new();
@@ -26018,7 +29836,7 @@ impl Server {
                     "stage": "validation",
                     "refusal": error.to_string(),
                     "fail_closed": true,
-                }))
+                }));
             }
         };
         let validation_intent = validated.intent_check().clone();
@@ -26037,7 +29855,7 @@ impl Server {
                         "refusal": error.to_string(),
                         "state": examined_program.state(),
                         "fail_closed": true,
-                    }))
+                    }));
                 }
             }
         }
@@ -26168,7 +29986,7 @@ impl Server {
                         "refusal": error.to_string(),
                         "fail_closed": true,
                         "guarantee": "a lab plan never treats an unseparated hypothesis set as settled"
-                    }))
+                    }));
                 }
             }
         } else if arguments.get("observations").is_some() {
@@ -26195,7 +30013,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "privacy boundaries, obligation reachability, budget, and marginal value are enforced by the in-tree lab contract"
-                }))
+                }));
             }
         };
 
@@ -28020,7 +31838,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "a family split cannot be verified when lineage is cyclic or dangling"
-                }))
+                }));
             }
         };
         match verify_item_assignment(&corpus, &assignment) {
@@ -28123,7 +31941,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "a malformed state space or initial state never becomes a simulated oracle"
-                }))
+                }));
             }
         };
         let intervened = match reference.run(&initial, steps as usize, Some(&intervention)) {
@@ -28135,7 +31953,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "an invalid intervention never produces a partial counterfactual"
-                }))
+                }));
             }
         };
         let probe = match DiscrepancyProbe::run(
@@ -28154,7 +31972,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "a counterfactual is not usable until every plausible model shares the state space and the probe runs"
-                }))
+                }));
             }
         };
 
@@ -28233,7 +32051,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "capability, attestation, oracle independence, and enclave transfer checks run before any commit ledger is touched"
-                }))
+                }));
             }
         };
 
@@ -28904,7 +32722,7 @@ impl Server {
                         "selection never proceeds when the full observed context contradicts every supplied model",
                         "regret reduction remains decision-relative and does not become a causal or clinical claim",
                     ],
-                }))
+                }));
             }
         };
 
@@ -28922,7 +32740,7 @@ impl Server {
                             "the exhaustive check never degrades to sampling",
                             "no approximation factor is attached when the objective cannot be tabulated safely",
                         ],
-                    }))
+                    }));
                 }
             }
         } else {
@@ -28967,7 +32785,7 @@ impl Server {
                         "protected closure is validated before any marginal is evaluated",
                         "non-positive marginal steps are not forced merely to fill a quota",
                     ],
-                }))
+                }));
             }
         };
 
@@ -29023,7 +32841,7 @@ impl Server {
                         "fail_closed": true,
                         "submodularity": submodularity,
                         "greedy": project_selection(&selection),
-                    }))
+                    }));
                 }
             }
         } else {
@@ -29056,7 +32874,7 @@ impl Server {
                             "submodularity": submodularity,
                             "greedy": project_selection(&selection),
                             "lazy": lazy_selection.as_ref().map(project_selection),
-                        }))
+                        }));
                     }
                 };
             let selected_value = selection.value;
@@ -29256,7 +33074,7 @@ impl Server {
                     "guarantees": [
                         "decision identification is not inferred from a compressed context when full evidence is invalid"
                     ]
-                }))
+                }));
             }
         };
         let sufficiency = match epistemic_minimal_sufficient_context(
@@ -29278,7 +33096,7 @@ impl Server {
                     "guarantees": [
                         "insufficient or contradictory evidence is not converted into a cheapest context"
                     ]
-                }))
+                }));
             }
         };
         let frontier = if include_frontier {
@@ -29294,7 +33112,7 @@ impl Server {
                         "guarantees": [
                             "frontier output is exhaustive or withheld; it is never a sampled approximation wearing a minimum label"
                         ]
-                    }))
+                    }));
                 }
             }
         } else {
@@ -29327,7 +33145,10 @@ impl Server {
                     format!("subsets[{index}][{position}] is outside the supported range")
                 })?;
                 if evidence_index >= pool.len() {
-                    refusal = Some(format!("subsets[{index}] names evidence index {evidence_index}, outside pool size {}", pool.len()));
+                    refusal = Some(format!(
+                        "subsets[{index}] names evidence index {evidence_index}, outside pool size {}",
+                        pool.len()
+                    ));
                     break;
                 }
                 if !subset.insert(evidence_index) {
@@ -29496,7 +33317,7 @@ impl Server {
                     "limitations": [
                         "the quotient is decision-relative to the supplied loss table and permitted action names",
                     ],
-                }))
+                }));
             }
         };
         Ok(json!({
@@ -29646,7 +33467,7 @@ impl Server {
                         "improper likelihood partitions, non-finite values, contradictory beliefs, and exhaustive outcome explosions remain refusals",
                         "gross value is not reported as net value; declared acquisition cost remains separate",
                     ],
-                }))
+                }));
             }
         };
         let action_after = value
@@ -30580,7 +34401,7 @@ impl Server {
                         "empty or non-decision-bearing trajectories do not produce a fabricated cell",
                         "environment divergences are not relocated to a nearby agent step",
                     ],
-                }))
+                }));
             }
         };
         let boundaries = benchmark_boundaries(&failing, analysis.first_causal_step());
@@ -30706,7 +34527,7 @@ impl Server {
                         "a decision audit never manufactures a causal trajectory from an empty or non-decision-bearing trace",
                         "causal refusal is preserved instead of being converted into agent blame",
                     ],
-                }))
+                }));
             }
         };
 
@@ -30738,7 +34559,7 @@ impl Server {
                             "observations and results are never silently replaced by their nearest decision",
                             "an explicit decision step is checked against the actual trace before reconstruction",
                         ],
-                    }))
+                    }));
                 }
             },
             None => match analysis.first_causal_step() {
@@ -30759,7 +34580,7 @@ impl Server {
                             "environment divergences, no-divergence results, and unlocalizable evidence do not become fabricated cells",
                             "a caller may still request an explicit decision-bearing step for a structural audit",
                         ],
-                    }))
+                    }));
                 }
             },
         };
@@ -30779,7 +34600,7 @@ impl Server {
                         "only choice and action events can host a candidate action set",
                         "the server does not infer alternatives from a neighboring observation",
                     ],
-                }))
+                }));
             }
         };
         for action in candidate_actions.drain(..) {
@@ -31258,7 +35079,7 @@ impl Server {
                         "every changed cell field must be declared by the intervention",
                         "absence of a runtime/domain realism validator is represented as an explicit limitation, never as a realism pass",
                     ],
-                }))
+                }));
             }
         };
         let outcome = benchmark_contrast(&pair, source_verdict, followup_verdict);
@@ -31333,7 +35154,7 @@ impl Server {
                         "an unreviewed proposal cannot grade or package a DecisionCell",
                         "unattributed review, empty acceptance, missing gap analysis, successful exploits, and weak-oracle-alone proposals remain blocking findings",
                     ],
-                }))
+                }));
             }
         };
 
@@ -31932,7 +35753,7 @@ impl Server {
                         "required provenance, scope, licence, evidence scale, conflict, and nonclaim fields are checked before any moderation state exists",
                         "a refused draft is never represented as submitted or publishable",
                     ],
-                }))
+                }));
             }
         };
         let submission_value = serde_json::to_value(&submission)
@@ -32550,7 +36371,11 @@ impl Server {
                 let (eligible, blockers, notes): (bool, Vec<&str>, Vec<&str>) = match target {
                     "atlas_profile" => (
                         atlas_ok,
-                        if atlas_ok { vec![] } else { vec!["atlas_audit_failed"] },
+                        if atlas_ok {
+                            vec![]
+                        } else {
+                            vec!["atlas_audit_failed"]
+                        },
                         vec!["atlas coverage and holes remain visible in the atlas result"],
                     ),
                     "atlas_aggregation" => (
@@ -32603,7 +36428,9 @@ impl Server {
                             }
                             blockers
                         },
-                        vec!["numeric score release additionally requires an evidence-conditioned claim audit"],
+                        vec![
+                            "numeric score release additionally requires an evidence-conditioned claim audit",
+                        ],
                     ),
                     "leaderboard" => (
                         leaderboard_ok && ranked_count > 0,
@@ -32761,7 +36588,7 @@ impl Server {
                         "digest, calibration, oracle, contamination, degeneracy, and materialization checks fail closed",
                         "assessment errors are not converted to a zero score",
                     ],
-                }))
+                }));
             }
         };
         let score_gate = match assessment.reportable_score(&pack) {
@@ -33110,7 +36937,7 @@ impl Server {
                         "a contract without falsifiers, actions, claim schema, reference standard, or terminal states never becomes a checked contract",
                         "partial contract fields are not presented as an evaluable result",
                     ],
-                }))
+                }));
             }
         };
 
@@ -33401,7 +37228,7 @@ impl Server {
                 return Ok(refusal(
                     "grid_deserialization",
                     format!("grid is not a valid CapabilityGrid: {error}"),
-                ))
+                ));
             }
         };
         let debt = AtlasxDebtStatement::of(&grid);
@@ -33418,7 +37245,7 @@ impl Server {
                         return Ok(refusal(
                             "later_grid_deserialization",
                             format!("later_grid is not a valid CapabilityGrid: {error}"),
-                        ))
+                        ));
                     }
                 };
                 let later_debt = AtlasxDebtStatement::of(&later);
@@ -33428,7 +37255,7 @@ impl Server {
                         return Ok(refusal(
                             "debt_discharge",
                             format!("cannot compare grid coverage: {error}"),
-                        ))
+                        ));
                     }
                 };
                 let bounded = |values: &[String]| {
@@ -33485,7 +37312,7 @@ impl Server {
                     return Ok(refusal(
                         "failure_deserialization",
                         format!("failures[{index}] is not a valid FailureRecord: {error}"),
-                    ))
+                    ));
                 }
             }
         }
@@ -33497,7 +37324,7 @@ impl Server {
                     return Ok(refusal(
                         "facet_deserialization",
                         format!("facet is not a valid atlasx Facet: {error}"),
-                    ))
+                    ));
                 }
             },
         };
@@ -33519,7 +37346,7 @@ impl Server {
                     return Ok(refusal(
                         "visibility_deserialization",
                         format!("visibility[{index}] is not valid: {error}"),
-                    ))
+                    ));
                 }
             }
         }
@@ -33537,7 +37364,7 @@ impl Server {
                     return Ok(refusal(
                         "failure_browse",
                         format!("cannot construct failure browse: {error}"),
-                    ))
+                    ));
                 }
             };
         if require_no_withheld && browse.withheld() > 0 {
@@ -33579,7 +37406,7 @@ impl Server {
                     return Ok(refusal(
                         "rate_capability_deserialization",
                         format!("rate_capabilities[{index}] is not valid: {error}"),
-                    ))
+                    ));
                 }
             };
             let answer = browse.rate_against(&grid, &capability);
@@ -33931,7 +37758,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "coverage floors and stopping uncertainty are never converted into a reportable estimate"
-                }))
+                }));
             }
         };
         let audit_digest = audit
@@ -34110,7 +37937,7 @@ impl Server {
                     "stage": "posterior",
                     "refusal": error.to_string(),
                     "fail_closed": true
-                }))
+                }));
             }
         };
         if posterior.capabilities.len() > 1_000 {
@@ -34158,7 +37985,7 @@ impl Server {
                         "stage": "comparison_posterior",
                         "refusal": error.to_string(),
                         "fail_closed": true
-                    }))
+                    }));
                 }
             };
             let tolerance = arguments
@@ -34243,7 +38070,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "an empty independent panel never becomes a reference by default",
-                }))
+                }));
             }
         };
         let model_call = arguments.get("model_call").and_then(Value::as_str);
@@ -34485,7 +38312,9 @@ impl Server {
                             _ => {
                                 return Ok(refusal(
                                     "evidence_validation",
-                                    format!("evidence[{index}].lineage[{lineage_index}] must be a non-empty string of at most {MAX_ID_BYTES} bytes"),
+                                    format!(
+                                        "evidence[{index}].lineage[{lineage_index}] must be a non-empty string of at most {MAX_ID_BYTES} bytes"
+                                    ),
                                 ));
                             }
                         };
@@ -35046,7 +38875,9 @@ impl Server {
             {
                 return Ok(refusal(
                     "corroboration_validation",
-                    format!("corroborations[{index}] source and detail must contain 1 to {MAX_TEXT_BYTES} bytes"),
+                    format!(
+                        "corroborations[{index}] source and detail must contain 1 to {MAX_TEXT_BYTES} bytes"
+                    ),
                 ));
             }
             corroborations.push(corroboration);
@@ -35099,7 +38930,9 @@ impl Server {
             if target.trim().is_empty() || target.len() > MAX_TEXT_BYTES {
                 return Ok(refusal(
                     "transport_validation",
-                    format!("transport_requests[{index}].target must contain 1 to {MAX_TEXT_BYTES} bytes"),
+                    format!(
+                        "transport_requests[{index}].target must contain 1 to {MAX_TEXT_BYTES} bytes"
+                    ),
                 ));
             }
             if !transport_targets.insert(target.to_string()) {
@@ -35575,7 +39408,10 @@ impl Server {
                 if trial.id.trim().is_empty() || trial.id.len() > MAX_ID_BYTES {
                     return Ok(refusal(
                         "trial_validation",
-                        format!("family {:?} contains a trial id outside the 1 to {MAX_ID_BYTES}-byte bound", parsed.id),
+                        format!(
+                            "family {:?} contains a trial id outside the 1 to {MAX_ID_BYTES}-byte bound",
+                            parsed.id
+                        ),
                     ));
                 }
                 if let Err(error) = normalized.record(trial.clone()) {
@@ -35685,7 +39521,9 @@ impl Server {
         {
             return Ok(refusal(
                 "oracle_quality",
-                format!("fail_on_undetermined refused {undetermined_count} trial(s) without comparable responses"),
+                format!(
+                    "fail_on_undetermined refused {undetermined_count} trial(s) without comparable responses"
+                ),
             ));
         }
         Ok(json!({
@@ -35786,7 +39624,7 @@ impl Server {
                 return Ok(refusal(
                     "release_validation",
                     format!("at is not a valid RFC-3339 timestamp: {error}"),
-                ))
+                ));
             }
         };
         let raw_gates = arguments
@@ -35822,7 +39660,7 @@ impl Server {
                     return Ok(refusal(
                         "gate_deserialization",
                         format!("gates[{index}] is not a valid Gate: {error}"),
-                    ))
+                    ));
                 }
             };
             if gate.id.trim().is_empty() || gate.id.len() > MAX_ID_BYTES {
@@ -35854,7 +39692,7 @@ impl Server {
                     return Ok(refusal(
                         "waiver_deserialization",
                         format!("waivers[{index}] must be an object"),
-                    ))
+                    ));
                 }
             };
             let gate = object
@@ -35893,7 +39731,7 @@ impl Server {
                         format!(
                             "waivers[{index}].expiry is not a valid RFC-3339 timestamp: {error}"
                         ),
-                    ))
+                    ));
                 }
             };
             let affected_versions = object
@@ -35921,7 +39759,7 @@ impl Server {
                     return Ok(refusal(
                         "waiver_validation",
                         format!("waivers[{index}] is incomplete: {error}"),
-                    ))
+                    ));
                 }
             };
             if let Err(error) = decision.waive(waiver, at) {
@@ -36187,7 +40025,7 @@ impl Server {
                     return Ok(refusal(
                         "arm_deserialization",
                         format!("arms[{index}] is not a valid Arm: {error}"),
-                    ))
+                    ));
                 }
             };
             if arm.id.trim().is_empty() || arm.id.len() > MAX_ID_BYTES {
@@ -36203,7 +40041,9 @@ impl Server {
                 {
                     return Ok(refusal(
                         "arm_validation",
-                        format!("arms[{index}] has a factor or level outside the {MAX_ID_BYTES}-byte bound"),
+                        format!(
+                            "arms[{index}] has a factor or level outside the {MAX_ID_BYTES}-byte bound"
+                        ),
                     ));
                 }
             }
@@ -36489,7 +40329,7 @@ impl Server {
                     return Ok(refusal(
                         "evaluator_deserialization",
                         format!("evaluators[{index}] is not a valid EvaluatorDecl: {error}"),
-                    ))
+                    ));
                 }
             };
             if evaluator.id.trim().is_empty() || evaluator.id.len() > MAX_ID_BYTES {
@@ -36515,7 +40355,9 @@ impl Server {
             {
                 return Ok(refusal(
                     "evaluator_validation",
-                    format!("evaluators[{index}] contains an artifact outside the {MAX_ID_BYTES}-byte bound"),
+                    format!(
+                        "evaluators[{index}] contains an artifact outside the {MAX_ID_BYTES}-byte bound"
+                    ),
                 ));
             }
             if let Err(error) = mesh.admit(evaluator) {
@@ -36532,7 +40374,7 @@ impl Server {
                     return Ok(refusal(
                         "verdict_deserialization",
                         format!("verdicts[{index}] is not a valid EvaluatorVerdict: {error}"),
-                    ))
+                    ));
                 }
             };
             if verdict.evaluator.trim().is_empty() || verdict.evaluator.len() > MAX_ID_BYTES {
@@ -36555,7 +40397,9 @@ impl Server {
             {
                 return Ok(refusal(
                     "verdict_validation",
-                    format!("verdicts[{index}].position must contain 1 to {MAX_ID_BYTES} bytes for a called evaluator"),
+                    format!(
+                        "verdicts[{index}].position must contain 1 to {MAX_ID_BYTES} bytes for a called evaluator"
+                    ),
                 ));
             }
             verdicts.push(verdict);
@@ -36854,7 +40698,7 @@ impl Server {
                     return Ok(refusal(
                         "resource_deserialization",
                         format!("resources[{index}] is not a valid Resource: {error}"),
-                    ))
+                    ));
                 }
             };
             if resource.id.trim().is_empty()
@@ -36938,7 +40782,7 @@ impl Server {
                     return Ok(refusal(
                         "draw_deserialization",
                         format!("draws[{index}] is not a valid Draw: {error}"),
-                    ))
+                    ));
                 }
             };
             if draw.action.trim().is_empty()
@@ -37243,7 +41087,7 @@ impl Server {
                 return Ok(refusal(
                     "timestamp_validation",
                     format!("sealed_at is not a valid timestamp: {error}"),
-                ))
+                ));
             }
         };
         let rubric = arguments
@@ -37294,7 +41138,7 @@ impl Server {
                     return Ok(refusal(
                         "commitment_deserialization",
                         format!("commitments[{index}] is not a valid Commitment: {error}"),
-                    ))
+                    ));
                 }
             };
             if commitment.target.trim().is_empty()
@@ -37334,7 +41178,7 @@ impl Server {
                     return Ok(refusal(
                         "outcome_deserialization",
                         format!("outcomes[{index}] is not a valid Outcome: {error}"),
-                    ))
+                    ));
                 }
             };
             if outcome.target.trim().is_empty() || outcome.target.len() > MAX_ID_BYTES {
@@ -37582,7 +41426,7 @@ impl Server {
                     return Ok(refusal(
                         "policy_deserialization",
                         format!("policies[{index}] is not a valid Policy: {error}"),
-                    ))
+                    ));
                 }
             };
             if policy.id.trim().is_empty()
@@ -37617,7 +41461,7 @@ impl Server {
                     return Ok(refusal(
                         "flow_deserialization",
                         format!("flows[{index}] is not a valid Flow: {error}"),
-                    ))
+                    ));
                 }
             };
             let fields = [
@@ -38481,7 +42325,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "an empty or malformed comparison set never becomes a reproducibility certificate"
-                }))
+                }));
             }
         };
         let verdicts: Vec<Value> = certificate
@@ -43866,7 +47710,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "undeclared, disallowed, non-canonical, and network-denied effects never become executable through this inspection tool"
-                }))
+                }));
             }
         };
         let simulated = matches!(authorization, bioprism_runtime::Authorization::Simulate)
@@ -44373,7 +48217,7 @@ impl Server {
                     "requested_use_count": request.requested_uses.len(),
                     "identifier_fields_present": true,
                     "guarantee": "direct identifier presence is refused before the request is echoed or analysed"
-                }))
+                }));
             }
         };
         let disposition_value =
@@ -44510,7 +48354,7 @@ impl Server {
                     "treatment": treatment,
                     "evidence_present": arguments.get("evidence").is_some(),
                     "guarantee": "invalid or unsupported measurements never become stable, response, or progression calls"
-                }))
+                }));
             }
         };
         let assessment_value =
@@ -46475,7 +50319,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "a clinical use refuses the complete plan before physical or in-silico steps are separated"
-                }))
+                }));
             }
         };
 
@@ -46551,7 +50395,7 @@ impl Server {
                 "reason": "provide both consent and at to check every declared purpose",
             }),
             (Some(_), None) | (None, Some(_)) => {
-                return Err("consent and at must be supplied together".into())
+                return Err("consent and at must be supplied together".into());
             }
             (Some(raw_consent), Some(raw_at)) => {
                 let consent: bioprism_policy::Consent = serde_json::from_value(raw_consent.clone())
@@ -46627,7 +50471,7 @@ impl Server {
                     "refusal": error.to_string(),
                     "fail_closed": true,
                     "guarantee": "unassessed misuse, subject mismatch, missing category, or unrated safety dimensions do not release"
-                }))
+                }));
             }
         };
 
@@ -46737,7 +50581,7 @@ impl Server {
                     "stage": "representation_partition",
                     "refusal": error.to_string(),
                     "fail_closed": true,
-                }))
+                }));
             }
         };
 
@@ -47508,7 +51352,7 @@ impl Server {
                         "projection failures are returned before model checking",
                         "no protocol repair is inferred or silently applied",
                     ],
-                }))
+                }));
             }
         };
         let digest = checked.digest().map_err(|error| error.to_string())?;
@@ -47807,7 +51651,7 @@ impl Server {
                         "registration order is normalized before conflict reporting",
                         "a refused set is never projected as a resolved capability map",
                     ],
-                }))
+                }));
             }
         };
         let resolution = registry
@@ -49424,8 +53268,7 @@ impl Server {
                 }));
             }
         }
-        let evidence_scope =
-            "selected_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries";
+        let evidence_scope = "selected_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries";
         let evidence_document = json!({
             "scope": evidence_scope,
             "artifact_registry_generation": artifact_registry_generation,
@@ -49615,8 +53458,7 @@ impl Server {
                 .collect::<BTreeMap<_, _>>();
             (registry.generation(), registry.len(), postures)
         };
-        let evidence_scope =
-            "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries";
+        let evidence_scope = "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries";
         let mut groups_with_artifact_evidence = 0usize;
         let mut artifact_evidence_records = 0usize;
         let mut groups_with_workflow_reconciliation = 0usize;
@@ -54272,7 +58114,7 @@ impl Server {
                         "unclassified fields cannot be emitted",
                         "no telemetry record is returned for an incomplete or invalid projection policy",
                     ],
-                }))
+                }));
             }
         };
         let metric_result = match (
@@ -54304,10 +58146,10 @@ impl Server {
                 }
             }
             (Some(_), None) => {
-                return Err("observations is required when metric is supplied".into())
+                return Err("observations is required when metric is supplied".into());
             }
             (None, Some(_)) => {
-                return Err("metric is required when observations is supplied".into())
+                return Err("metric is required when observations is supplied".into());
             }
         };
         Ok(json!({
@@ -55613,14 +59455,31 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_execute",
                 "glioma_computation_lineage",
                 "glioma_computation_reproducibility",
+                "glioma_federated_replay_discrepancy_scan",
+                "glioma_compute_environment_lock",
+                "glioma_environment_resolution",
+                "glioma_reproducible_task_submit",
+                "glioma_computation_event_stream",
+                "glioma_federated_workflow_template_exchange",
+                "glioma_registry_artifact_resolve",
+                "glioma_federated_replay_conformance",
+                "glioma_compute_cache_govern",
+                "glioma_multistudy_cache_partition",
+                "glioma_compute_capacity_plan",
+                "glioma_federated_compute_capacity_exchange",
                 "glioma_computation_portfolio_plan",
                 "glioma_computation_placement",
+                "glioma_computation_placement_stress_evaluate",
                 "glioma_computation_portfolio_execute",
                 "glioma_computation_campaign_execute",
                 "glioma_computation_recovery_execute",
                 "glioma_robustness_guided_computation_execute",
                 "glioma_computation_workflow_execute",
                 "glioma_computation_operating_cycle",
+                "glioma_partial_result_semantics",
+                "glioma_artifact_lineage_index",
+                "glioma_computation_run_inspector",
+                "glioma_high_throughput_compute_timeline",
                 "glioma_computation_interpretation_frontier_compile",
                 "glioma_computation_interpretation_frontier_execute",
                 "glioma_computation_interpretation_evidence_gate",
@@ -55631,6 +59490,19 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_discovery_engine_execute",
                 "glioma_evidence_gated_research_execute",
                 "glioma_autonomous_research_engine_execute",
+                "glioma_autonomous_research_engine_evaluate",
+                "glioma_autonomous_research_engine_stress_evaluate",
+                "glioma_autonomous_research_engine_trace_evaluate",
+                "glioma_stage_worker_routes_compile",
+                "glioma_autonomous_research_engine_stage_execute",
+                "glioma_autonomous_research_workflow_execute",
+                "glioma_evidence_gated_stage_engine_execute",
+                "glioma_evidence_gated_stage_engine_instrument_execute",
+                "glioma_evidence_gated_stage_engine_computation_execute",
+                "glioma_evidence_gated_stage_engine_interpretation_execute",
+                "glioma_evidence_gated_stage_engine_replication_execute",
+                "glioma_evidence_gated_stage_engine_release_execute",
+                "glioma_evidence_gated_stage_engine_federation_execute",
                 "glioma_autonomous_program_cycle",
                 "glioma_adaptive_workflow",
                 "glioma_interpretation_synthesize",
@@ -55641,8 +59513,15 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
+                "glioma_lineage_propagation_analyze",
+                "glioma_lineage_response_decompose",
+                "glioma_lineage_transport_analyze",
                 "glioma_transportability_analyze",
                 "glioma_causal_contrast",
+                "glioma_cross_model_claim_envelope",
+                "glioma_cross_model_replication_frontier",
+                "glioma_cross_model_replication_mission",
+                "glioma_cross_model_replication_mission_execute",
                 "glioma_causal_mediation",
                 "glioma_stratified_causal_adjustment",
                 "glioma_dynamic_policy_evaluate",
@@ -55761,9 +59640,18 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
                 "glioma_decision_context_artifact",
+                "glioma_decision_context_snapshot_store",
+                "glioma_partition_resilient_context_checkpoint",
+                "glioma_federated_context_access_govern",
                 "glioma_multi_study_context_artifact",
+                "glioma_cross_study_context_difference",
+                "glioma_cross_study_context_invariance",
                 "glioma_multi_study_workflow_plan",
                 "glioma_federated_decision_context",
+                "glioma_federated_decision_capsule",
+                "glioma_decision_budget_snapshot",
+                "glioma_decision_context_query",
+                "glioma_decision_context_update",
                 "glioma_decision_context_replay",
                 "glioma_decision_branch_evidence",
                 "glioma_decision_admission_gate",
@@ -55775,10 +59663,12 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_decision_mission_execute",
                 "glioma_decision_omission_certificate",
                 "glioma_decision_branch_plan",
+                "glioma_uncertainty_branch_explorer",
                 "glioma_decision_action_plan",
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
+                "glioma_temporal_multimodal_mechanism_fusion",
                 "glioma_mechanism_identifiability",
                 "glioma_mechanism_invariance",
                 "glioma_mechanism_intervention_value",
@@ -55830,9 +59720,12 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_replication_continuation",
                 "glioma_replication_protocol_compile",
                 "glioma_robust_experiment_design",
+                "glioma_heterogeneity_aware_experiment_portfolio",
+                "glioma_heterogeneity_portfolio_mission",
                 "glioma_blocked_randomization_design",
                 "glioma_adaptive_information_campaign",
                 "glioma_active_learning",
+                "glioma_active_learning_evaluate",
                 "glioma_active_learning_campaign_execute",
                 "glioma_robust_active_learning",
                 "glioma_robust_active_learning_campaign_execute",
@@ -55844,6 +59737,15 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_instrument_consensus",
                 "glioma_instrument_preflight",
                 "glioma_instrument_fleet_schedule",
+                "glioma_instrument_fleet_health",
+                "glioma_acquisition_capacity_plan",
+                "glioma_cross_site_protocol_conformance",
+                "glioma_instrument_maintenance_plan",
+                "glioma_assay_provenance_audit",
+                "glioma_acquisition_operations_snapshot",
+                "glioma_instrument_operator_approval",
+                "glioma_federated_device_capability_manifest",
+                "glioma_federated_instrument_operations",
                 "glioma_instrument_fleet_execute",
                 "glioma_instrument_execute",
                 "glioma_instrument_recovery_plan",
@@ -55866,19 +59768,65 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multi_fidelity_campaign_execute",
                 "glioma_federated_benchmark_consensus",
                 "glioma_federated_benchmark_power",
+                "glioma_heterogeneity_adaptive_benchmark_power",
+                "glioma_federated_aggregate_anomaly_detect",
+                "glioma_federated_site_selection_plan",
+                "glioma_continual_benchmark_monitor",
+                "glioma_federation_capacity_plan",
+                "glioma_federated_benchmark_dry_run",
                 "glioma_federated_interpretation",
                 "glioma_federated_benchmark_site_plan",
                 "glioma_federated_mechanism_transport",
                 "glioma_federated_mechanism_transport_campaign_execute",
                 "glioma_federated_benchmark_campaign_execute",
                 "glioma_federated_benchmark_operating_cycle",
+                "glioma_multisite_benchmark_workflow",
+                "glioma_benchmark_director_snapshot",
+                "glioma_benchmark_job_execute",
+                "glioma_cross_site_evidence_explore",
+                "glioma_quorum_admission_assess",
+                "glioma_site_participation_review",
+                "glioma_contribution_integrity_verify",
+                "glioma_federation_operations_snapshot",
+                "glioma_participant_exchange_execute",
+                "glioma_signed_aggregate_submit",
                 "glioma_federated_adaptive_campaign_execute",
                 "glioma_replay_campaign_execute",
+                "glioma_replay_fidelity_execute",
                 "glioma_research_object_release_gate",
+                "glioma_reproducibility_completeness_score",
+                "glioma_qualification_preservation_audit",
+                "glioma_release_metadata_normalize",
+                "glioma_release_attestation_issue",
+                "glioma_artifact_integrity_scan",
+                "glioma_release_preview",
+                "glioma_release_queue_snapshot",
+                "glioma_release_shareability_check",
+                "glioma_reproducibility_bundle_compile",
+                "glioma_multistudy_release_compose",
+                "glioma_comparative_release_explore",
+                "glioma_continuous_release_compile",
+                "glioma_federated_release_compile",
+                "glioma_site_capability_envelope_compile",
+                "glioma_site_provenance_attest",
+                "glioma_federated_benchmark_record_execute",
+                "glioma_benchmark_governance_cycle_compile",
+                "glioma_aggregate_phenotype_summary_compile",
+                "glioma_research_object_dependency_leakage_audit",
                 "glioma_release_operating_cycle",
                 "glioma_research_object_prepare",
                 "glioma_multimodal_research_object_prepare",
                 "glioma_research_object_migration_plan",
+                "glioma_archive_migration_execute",
+                "glioma_release_signature_verify",
+                "glioma_research_object_conformance_check",
+                "glioma_federated_release_sharing_check",
+                "glioma_release_event_protocol_replay",
+                "glioma_version_retention_plan",
+                "glioma_distributed_archive_mirror",
+                "glioma_release_queue_schedule",
+                "glioma_consortium_publication_steward",
+                "glioma_research_object_exchange_plan",
                 "glioma_research_object_dependency_closure"
             ],
             "cli_entrypoints": [],
@@ -64731,7 +68679,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "GliomaResearchAutopilotRequest1@1 with DecisionContext1@1, matching objective, completed action ids, selection policy, retry bound, and artifact requirement."}
+                "request": {"type": "object", "description": "GliomaResearchAutopilotRequest1@1 with DecisionContext1@2, matching objective, completed action ids, selection policy, retry bound, and artifact requirement."}
             },
             "required": ["request"]
         }
@@ -64749,7 +68697,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_evidence_refresh_campaign_execute",
-        "description": "Run a bounded autonomous P01 evidence-refresh campaign for preclinical glioma research. It consumes typed surveillance deltas, dispatches stale, unknown, contradictory, negative, and coverage actions through a local executor, replans after every round, and preserves explicit budget, retry, failure, and unresolved states. MCP is a deterministic dry run with no source fetch, raw data movement, or clinical decision; production adapters remain institution-local.",
+        "description": "Run a bounded autonomous P01 evidence-refresh campaign for preclinical glioma research. It consumes typed surveillance deltas, selects each refresh round with a deterministic beam over joint priority and modality/model coverage, dispatches stale, unknown, contradictory, negative, and coverage actions through a local executor, replans after every round, and preserves explicit budget, retry, failure, and unresolved states. MCP is a deterministic dry run with no source fetch, raw data movement, or clinical decision; production adapters remain institution-local.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -64771,7 +68719,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_multimodal_ingestion_campaign_execute",
-        "description": "Run a bounded autonomous P03 multimodal-ingestion and QC campaign for preclinical glioma research. It turns missing modality/model coverage, excluded observations, coordinate/unit defects, and missingness into typed local ingestion actions, recomputes QC after each returned observation, and preserves unresolved, retry, budget, and no-progress states. MCP is a deterministic dry run with no raw-data movement, instrument effect, or clinical decision; production adapters remain institution-local.",
+        "description": "Run a bounded autonomous P03 multimodal-ingestion and QC campaign for preclinical glioma research. It turns missing modality/model coverage, excluded observations, coordinate/unit defects, and missingness into typed local ingestion actions, selects each round with a deterministic beam over joint modality/model/defect coverage, recomputes QC after each returned observation, and preserves unresolved, retry, budget, and no-progress states. MCP is a deterministic dry run with no raw-data movement, instrument effect, or clinical decision; production adapters remain institution-local.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -64859,12 +68807,144 @@ pub fn tool_definitions() -> Vec<Value> {
         }
     }));
     definitions.push(json!({
-        "name": "glioma_computation_portfolio_plan",
-        "description": "Compile an execution-ready portfolio of multimodal preclinical glioma computation tasks under declared cost, time, task-count, modality, and determinism budgets. Closes prerequisites in stable topological order, preserves required work, and reports deferred, blocked, unresolved, contradictory, and insufficient-coverage states. The route plans only: it does not execute external code, move raw data, or make a clinical decision.",
+        "name": "glioma_federated_replay_discrepancy_scan",
+        "description": "Compare signed permitted aggregate replay attestations across preclinical glioma sites and localize workflow, data-version, environment, dependency, numeric-kernel, seed, or output divergence. Missing evidence remains unresolved and yields bounded site-local diagnostic tasks; the route never moves raw inputs, dispatches diagnostics, or makes a clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "ComputationPortfolioRequest1@1 with objective, model system, bounded resources, utility weights, modality coverage, deterministic policy, and completed replay order."},
+                "request": {"type": "object", "description": "FederatedReplayDiscrepancyScanRequest1@1 containing a replay group, reference site, canonical stages, signed aggregate-only attestations, federation policy digest, and diagnostic bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_compute_environment_lock",
+        "description": "Resolve a content-addressed compute-environment lock for an autonomous preclinical glioma workflow. Checks exact versions, source and build digests, runtime ABI, architecture/accelerator compatibility, signed metadata, availability, portability, and compromise indicators before dispatch; never installs packages, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputeEnvironmentLockRequest1@1 containing workflow-manifest identity, canonical task order, architecture profile, dependency constraints, trusted sources, and portability policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_environment_resolution",
+        "description": "Propose an approval-aware repair for a blocked preclinical glioma compute environment. Evaluates trusted package candidates and hardware compatibility, rejects poisoned or mutable sources, preserves pinned scientific versions without approval, and emits an exact resulting lock when qualified; never installs packages, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EnvironmentResolutionRequest1@1 containing a base ComputeEnvironmentLockRequest1@1, trusted candidates, approval and change policy, and bounded cost/change budgets."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_reproducible_task_submit",
+        "description": "Admit one typed local preclinical glioma computation task and return a replayable idempotent execution handle. Requires a qualified environment lock, authorized local artifacts, expiring local policy, explicit replay identity, and bounded resources; duplicate keys converge, conflicting reuse fails closed, and no worker or raw data is touched.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReproducibleTaskSubmission1@1 containing a typed task contract, local artifact bindings, qualified ComputeEnvironmentLock1@1, policy grant, resource budget, current tick, and prior exchange records."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_event_stream",
+        "description": "Page a local preclinical glioma computation event log with deterministic ordering, durable replay cursors, exact retry deduplication, explicit sequence gaps, access-aware omission, and payload redaction that preserves event identity. The route never treats missing telemetry as completed work, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationEventStreamRequest1@1 containing a run/replay identity, local event log, optional cursor, canonical subscription filter, and authorized local access scope."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_workflow_template_exchange",
+        "description": "Exchange a pinned, deterministic preclinical glioma workflow template with permitted consortium sites using aggregate conformance evidence. Shares schemas, task order, environment identity, and explicit adaptations while keeping inputs, credentials, and raw outputs local; failed site conformance blocks portability claims and the route never executes work or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedWorkflowTemplateExchangeRequest1@1 containing a local-only manifest, qualified ComputeEnvironmentLock1@1, validation card, expiry-bounded sharing policy, and signed aggregate site attestations."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_registry_artifact_resolve",
+        "description": "Resolve a content-addressed local preclinical glioma artifact handle against approved registries before autonomous computation. Verifies schema, license, source trust, signatures, freshness, availability, locality, and protected-data boundaries; stale, corrupt, unauthorized, or ambiguous candidates remain denied or unresolved and raw bytes never move through MCP.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ArtifactRegistryResolutionRequest1@1 containing an ArtifactRef, bounded registry candidates, trust configuration, expiring local access grant, and current tick."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_replay_conformance",
+        "description": "Verify signed aggregate-only site replay summaries against a versioned preclinical glioma workflow and metric-tolerance profile. Missing, stale, revoked, tampered, and out-of-tolerance evidence remains explicit and blocks portability; protected inputs and raw outputs stay local and the route performs no remote execution or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedReplayConformanceRequest1@1 containing a workflow/tolerance reference, required sites, signed aggregate replay attestations, federation policy version, freshness window, and current tick."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_compute_cache_govern",
+        "description": "Govern deterministic local intermediate reuse for a preclinical glioma task under explicit retention, locality, pinning, entry-count, and size quotas. Exact input/code/environment/policy/version/schema identity is required; changed dependencies invalidate reuse, unpinned entries may be evicted deterministically, pinned research inputs can block admission, and the route never moves raw data or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputeCacheGovernorRequest1@1 containing a typed cache key, existing local entries, optional incoming entry, retention policy, and current tick."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multistudy_cache_partition",
+        "description": "Partition local preclinical glioma cache access by study, de-identification scope, sensitivity, and policy identity. Same-study reuse is allowed only within scope; explicitly public reference assets may cross studies, while protected/restricted entries are denied, policy changes invalidate reuse, and no human data, direct identifiers, clinical-decision artifacts, or raw bytes move through the route.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultiStudyCachePartitionRequest1@1 containing requesting study/scope, a content-addressed cache key, local cache entries with sensitivity labels, and an expiry-bounded sharing policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_compute_capacity_plan",
+        "description": "Plan fair, resource-bounded high-throughput preclinical glioma computation admission from queued jobs, runtime observations, telemetry, quotas, and policy. The deterministic scheduler predicts duration intervals, reserves bounded CPU/memory/accelerator/budget capacity, exposes saturation and fairness diagnostics, and retains explicit stale, deferred, blocked, and negative states without executing workloads or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputeCapacityRequest1@1 containing typed queue jobs, runtime observations, capacity telemetry, fairness and budget policy, current tick, and forecast horizon."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_compute_capacity_exchange",
+        "description": "Exchange signed aggregate compute capacity classes, cost intervals, and freshness evidence across permitted preclinical glioma research sites. The coordinator ranks workflow-compatible options while excluding stale, revoked, incompatible, reconstruction-risky, and policy-violating summaries; site data, credentials, and raw workflow payloads remain local and no clinical decision is made.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedComputeCostExchangeRequest1@1 containing the workflow envelope identity, bounded resource/time demand, permitted sites, signed local summaries, and federation policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_portfolio_plan",
+        "description": "Compile an execution-ready portfolio of multimodal preclinical glioma computation tasks under declared cost, time, task-count, modality, and determinism budgets. Admits required work first, then uses a bounded deterministic beam over complete prerequisite closures to compare information, uncertainty reduction, coverage, modality/redundancy diversity, cost, and duration. It reports deferred, blocked, unresolved, contradictory, and insufficient-coverage states. The route plans only: it does not execute external code, move raw data, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationPortfolioRequest1@1 with objective, model system, bounded resources, utility weights, modality coverage, deterministic policy, and completed replay order. The resulting GliomaComputationPortfolioPlan1@2 uses bounded beam portfolio selection with deterministic redundancy-group and modality coverage scoring."},
                 "candidates": {"type": "array", "items": {"type": "object"}, "description": "ComputationCandidate1@1 records wrapping typed ComputationTask1@1 DAG nodes with modality, information gain, uncertainty reduction, coverage debt, redundancy group, and required flag."}
             },
             "required": ["request", "candidates"]
@@ -64882,6 +68962,17 @@ pub fn tool_definitions() -> Vec<Value> {
         }
     }));
     definitions.push(json!({
+        "name": "glioma_computation_placement_stress_evaluate",
+        "description": "Stress-evaluate deterministic P09 computation placement under worker loss, transfer-cost inflation, and contracted compute windows. Compares the proposed multi-worker schedule with a constrained fastest-single-worker baseline and reports coverage, makespan, transfer cost, negative scheduling evidence, and uncertainty. This is evaluation-only and never executes code, moves raw data, dispatches workers, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationPlacementStressEvaluationRequest1@1 containing a typed ComputationPlacementRequest1@1 and bounded named stress scenarios with disabled workers and resource multipliers."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
         "name": "glioma_computation_portfolio_execute",
         "description": "Plan and execute a selected multimodal preclinical glioma computation portfolio through the typed local computation worker. The bridge reuses the portfolio dependency closure and replay identity, enforces the same resource and determinism gates, and preserves partial, failed, blocked, unresolved, deferred, and negative results. MCP uses a synthetic worker; production containers, GPUs, schedulers, and raw-data access remain caller-owned.",
         "inputSchema": {
@@ -64894,7 +68985,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_computation_campaign_execute",
-        "description": "Run a bounded multi-round autonomous preclinical glioma computation campaign. Each round may replan from typed local task outcomes, while hard cost/time, dependency, deterministic-task, retry, cache, and artifact gates remain active. MCP uses a synthetic planner and worker; production planners, containers, GPUs, schedulers, and raw-data access remain caller-owned.",
+        "description": "Run a bounded multi-round autonomous preclinical glioma computation campaign. Each round may replan from typed local task outcomes, including recovery or replacement work after partial/skipped computation, while hard cost/time, dependency, deterministic-task, retry, cache, and artifact gates remain active. MCP uses a synthetic planner and worker; production planners, containers, GPUs, schedulers, and raw-data access remain caller-owned.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -64948,12 +69039,56 @@ pub fn tool_definitions() -> Vec<Value> {
         }
     }));
     definitions.push(json!({
+        "name": "glioma_partial_result_semantics",
+        "description": "Compile a preclinical glioma computation run into a typed partial-result bundle. The route distinguishes measured values, measured nulls, censored, interrupted, failed, unavailable, redacted, and invalid fields; computes conservative gates for descriptive summaries, model fitting, mechanism inference, and publication; preserves negative evidence and missingness causes; and never imputes, executes, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "PartialResultBundleRequest1@1 containing a validated ComputationExecution1@1, expected typed fields, explicit observations, termination state, and downstream policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_artifact_lineage_index",
+        "description": "Index a local preclinical glioma computation's artifact lineage without opening payloads. The route verifies declared edge digests, traces every requested output to bounded roots, distinguishes exact, transformed, sampled, and semantically lossy derivations, and preserves missing, unauthorized, cyclic, tampered, and orphan paths. It never moves raw data or promotes lineage completeness into a scientific or clinical conclusion.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ArtifactLineageRequest1@1 containing a validated ComputationExecution1@1, local artifact metadata, derivation edges, requested outputs, root-depth bound, and semantic-loss policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_run_inspector",
+        "description": "Inspect a long-running preclinical glioma computation run as a deterministic researcher timeline. The route reconciles task terminal events and resource counts, links artifacts to lineage and partial-result states, marks stale telemetry, and emits an exportable recovery/reproducibility issue bundle. It never reruns code, opens raw payloads, or makes a biological or clinical conclusion.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationRunInspectionRequest1@1 containing a validated ComputationExecution1@1, ordered local telemetry events, optional ArtifactLineageIndex1@1 and PartialResultBundle1@1, and a staleness window."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_high_throughput_compute_timeline",
+        "description": "Compile metadata-only preclinical glioma run inspections into a high-throughput campaign timeline. The route separates successful, failed, incomplete, and unresolved task counts; attributes queue, compute, retry, resource, and telemetry bottlenecks; and evaluates throughput forecasts only on explicitly held-out runs. It never opens raw scientific payloads, dispatches work, or makes a biological or clinical conclusion.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationCampaignTimelineRequest1@1 containing bounded run inspections, scientific scopes, workflow classes, capacities, explicit holdout run IDs, and a forecast horizon."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
         "name": "glioma_computation_interpretation_frontier_compile",
         "description": "Compile a completed preclinical glioma computation campaign into a typed interpretation, replication/falsification, and recovery frontier. Completed or cached tasks become interpretation candidates, negative tasks become replication/falsification work, and partial, failed, or skipped tasks become bounded recovery work. Replay identity, baseline comparison, uncertainty, and negative-result evaluation obligations remain explicit; MCP performs no raw-data movement or clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "ComputationInterpretationFrontierRequest1@1 containing a validated GliomaComputationCampaign1@1, matching objective, modality, bounded action/mission policy, and optional resumption order."}
+                "request": {"type": "object", "description": "ComputationInterpretationFrontierRequest1@1 containing a validated GliomaComputationCampaign1@2, matching objective, modality, bounded action/mission policy, and optional resumption order."}
             },
             "required": ["request"]
         }
@@ -64964,7 +69099,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "ComputationInterpretationFrontierRequest1@1 containing a validated GliomaComputationCampaign1@1, matching objective, modality, bounded action/mission policy, and optional resumption order."}
+                "request": {"type": "object", "description": "ComputationInterpretationFrontierRequest1@1 containing a validated GliomaComputationCampaign1@2, matching objective, modality, bounded action/mission policy, and optional resumption order."}
             },
             "required": ["request"]
         }
@@ -65004,7 +69139,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_experiment_frontier_controller_execute",
-        "description": "Run the autonomous preclinical glioma experiment frontier in a deterministic local sandbox. It jointly optimizes mechanism information gain, power, clone and modality coverage, fidelity escalation, prerequisites, risk, cost, replication value, and bounded local observations, then replans from posterior updates. Null, negative, failed, retryable, unresolved, and budget outcomes remain explicit. MCP performs no real assay, instrument effect, raw-data movement, federation export, or clinical decision.",
+        "description": "Run the autonomous preclinical glioma experiment frontier in a deterministic local sandbox. It jointly optimizes mechanism information gain, power, clone and modality coverage, same-round marginal diversity, outcome-profile complementarity, fidelity escalation, prerequisites, risk, cost, replication value, and bounded local observations, then replans from posterior updates. Null, negative, failed, retryable, unresolved, and budget outcomes remain explicit. MCP performs no real assay, instrument effect, raw-data movement, federation export, or clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -65037,13 +69172,168 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_autonomous_research_engine_execute",
-        "description": "Run the end-to-end autonomous preclinical glioma research engine. It compiles a high-level intent into the closed stage graph, executes bounded local cycles, promotes only returned typed artifacts into downstream checkpoints, and replans evidence, multimodal, mechanism, experiment, computation, replication, release, and federation work. Negative, partial, blocked, budget, policy, and no-progress states remain first-class; MCP uses a deterministic synthetic worker and never performs real assays, instrument effects, clinical decisions, or raw-data movement.",
+        "description": "Run the end-to-end autonomous preclinical glioma research engine. It compiles a high-level intent into the closed stage graph, executes bounded local cycles, promotes only returned typed artifacts into downstream checkpoints, and replans evidence, multimodal, mechanism, experiment, computation, replication, release, and federation work. Outcome-aware policy adaptation reweights information, safety, feasibility, and frontier value after progress, uncertainty, negative results, or stagnation; the adaptation trace is replayable. Negative, partial, blocked, budget, policy, and no-progress states remain first-class. By default the MCP server uses a synthetic rehearsal worker; a trusted host may inject an institution-local executor for real local analysis or already-authorized gateways. This tool never makes clinical decisions or moves raw data.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 with high-level GliomaResearchIntent, focus, typed starting checkpoints, cycle/action/budget bounds, authority switches, selection weights, retry bound, and local-artifact policy."}
+                "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 with high-level GliomaResearchIntent, focus (use adaptive to let the director choose the next dependency-closed evidence, mechanism, experiment, computation, replication, or full-program branch), typed starting checkpoints, cycle/action/budget bounds, authority switches, selection weights, retry bound, local-artifact policy, and optional adaptive_policy controls."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_research_engine_evaluate",
+        "description": "Evaluate the autonomous preclinical glioma engine on caller-supplied held-out action utilities without executing a provider. The route compiles the same dependency-safe frontier used by execution, compares AURORA with score-greedy and coverage-first baselines, and computes a bounded dependency-aware oracle under shared budget/action gates. Held-out values never enter planning and are not biological evidence; no assay, instrument effect, federation export, raw-data movement, or clinical decision occurs.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 used to compile the policy frontier; no provider is invoked."},
+                "held_out_utility_milli": {"type": "object", "additionalProperties": {"type": "integer"}, "description": "Held-out evaluation utility per compiled action; never used for planning."}
+            },
+            "required": ["request", "held_out_utility_milli"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_research_engine_stress_evaluate",
+        "description": "Evaluate robustness of the autonomous preclinical glioma engine across a bounded named set of caller-supplied held-out utility scenarios without executing a provider. Every scenario reuses one compiled dependency-safe frontier and returns per-policy mean, lower-quartile, worst-case, regret-to-oracle, and selection-stability metrics plus per-scenario digests. Scenario utilities never enter planning and are not biological evidence; no assay, instrument effect, federation export, raw-data movement, or clinical decision occurs.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 used to compile one policy frontier; no provider is invoked."},
+                "held_out_scenarios": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {"type": "integer"}}, "description": "Bounded named held-out utility maps keyed by compiled action ID; never used for planning."}
+            },
+            "required": ["request", "held_out_scenarios"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_research_engine_trace_evaluate",
+        "description": "Replay the actual bounded autonomous preclinical glioma engine loop across named synthetic provider-outcome traces and compare all closed focus policies. The result reports per-policy stage progress, worst-case progress, qualification rate, budget, negative-result retention, failed-work burden, and replay digests. Missing outcomes fail closed; traces never become biological evidence and no provider, assay, instrument, federation export, raw-data movement, or clinical decision occurs.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 used as the bounded workflow envelope."},
+                "outcome_traces": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {"type": "object", "properties": {"disposition": {"type": "string", "enum": ["completed", "negative", "partial", "failed"]}, "retryable": {"type": "boolean"}}, "required": ["disposition"]}}, "description": "Bounded named maps from action or stage ID to synthetic completed/negative/partial/failed outcomes."}
+            },
+            "required": ["request", "outcome_traces"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_stage_worker_routes_compile",
+        "description": "Compile deterministic capability-aware routes for every stage in a typed preclinical glioma workflow from institution-local worker profiles. Ready stages select only workers that satisfy stage kind, output schema, autonomy, locality, modality, model-system, availability, and optional determinism gates; not-ready and missing-capability stages remain explicitly blocked. This plans dispatch admission only: no worker, assay, instrument, federation export, raw-data movement, or clinical decision occurs.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaStageWorkerRouteRequest1@1 containing GliomaResearchIntent1@1, bounded local GliomaStageWorkerProfile1@1 declarations, require_deterministic, and require_all_ready."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_research_engine_stage_execute",
+        "description": "Execute the bounded autonomous preclinical glioma engine through capability-aware stage-worker routing using deterministic synthetic local workers. The route binds the worker capability snapshot to the typed intent, runs the existing stage/action adapter, preserves checkpoints, negative evidence, uncertainty, blocked prerequisites, and budget stops, and returns a replayable route-plus-engine artifact. This MCP rehearsal never invokes an institution worker, assay, instrument, federation export, raw-data movement, or clinical decision; production hosts replace the synthetic workers through the typed Rust API.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 with bounded mission, intent, focus, checkpoints, budgets, approvals, and adaptive policy."},
+                "workers": {"type": "array", "maxItems": 128, "items": {"type": "object", "description": "GliomaStageWorkerProfile1@1 capability declaration for a local synthetic rehearsal worker."}},
+                "require_deterministic": {"type": "boolean", "default": true},
+                "require_all_ready": {"type": "boolean", "default": false}
+            },
+            "required": ["request", "workers"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_research_workflow_execute",
+        "description": "Execute one bounded autonomous preclinical glioma workflow through the evidence-gated stage engine. A single typed request can bind the P08 instrument-preflight, P09 reproducible-computation, P10 interpretation/replication, P11 research-object release, and P12 federated-benchmark operating cycles; omitted cycles use deterministic synthetic workers and remain simulation-only. The result preserves stage artifacts, checkpoints, negative/partial/contradictory/held/blocked outcomes, retry and locality decisions, and budget termination. This MCP rehearsal never contacts instruments, moves raw data, exports federation data, publishes/signs objects, or makes a clinical decision; institution hosts inject governed workers through the typed Rust API.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaAutonomousResearchWorkflowRequest1@1 containing the bounded evidence-gated stage-engine request plus optional P08 instrument_cycle, P09 computation_cycle, P10 interpretation_cycle and replication_campaign, P11 release_cycle, and P12 federation_cycle payloads."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_gated_stage_engine_execute",
+        "description": "Run the bounded autonomous preclinical glioma engine only after P01 cross-family evidence qualification and P07 capability-aware stage admission. Partial, negative, contradictory, unresolved, or insufficient evidence returns an explicit hold before routing; ready stages without an eligible deterministic local worker return a route hold; only qualified evidence with complete stage coverage executes through the typed stage registry. The MCP surface uses deterministic synthetic workers and never performs an assay, instrument effect, federation export, raw-data movement, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceGatedStageExecutionRequest1@1 containing a bounded GliomaAutonomousResearchEngineRequest1@1, validated EvidenceTriangulation1@1, evidence floor/global policy, local worker profiles, and determinism policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_gated_stage_engine_instrument_execute",
+        "description": "Rehearse the P01→P07→P08 autonomous preclinical glioma handoff. Evidence qualification and capability admission remain mandatory; a dedicated instrument-preflight worker invokes the existing P08 operating-cycle preflight barrier, authorization, live-interlock, retry, campaign, and emergency-stop logic. The returned stage artifact explicitly records biological_evidence_promoted=false and requires assay QC/adjudication. MCP uses deterministic local-simulation hardware and never contacts an instrument, moves raw data, exports federation data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceGatedStageExecutionRequest1@1 with a dedicated instrument-preflight worker profile and generic profiles for the remaining typed stages."},
+                "instrument_cycle": {"type": "object", "description": "InstrumentOperatingCycleRequest1@1 containing the already declared P08 preflight plans, actions, authorization, live interlocks, retry bound, and local_simulation mode."}
+            },
+            "required": ["request", "instrument_cycle"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_gated_stage_engine_computation_execute",
+        "description": "Rehearse the P01→P07→P09 autonomous preclinical glioma handoff. Evidence qualification and capability admission remain mandatory; a dedicated computational-execution worker invokes P09 workflow compilation, resource admission, replay-keyed campaign execution, bounded retries, and local artifact requirements. The returned stage artifact explicitly records biological_evidence_promoted=false and requires statistical interpretation and reproducibility adjudication. MCP uses deterministic local simulation and never moves raw data, exports federation data, contacts instruments, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceGatedStageExecutionRequest1@1 with a dedicated computational-execution worker profile and generic profiles for the remaining typed stages."},
+                "computation_cycle": {"type": "object", "description": "GliomaComputationOperatingCycleRequest1@1 containing the typed workflow objective, modalities, operations, replay identity, resource gate, local execution mode, and cache policy."}
+            },
+            "required": ["request", "computation_cycle"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_gated_stage_engine_interpretation_execute",
+        "description": "Rehearse the P01→P07→P10 statistical-interpretation handoff. Evidence qualification and capability admission remain mandatory; a dedicated statistical-interpretation worker invokes P10 cross-family synthesis, contradiction/negative-evidence/stability gates, and the bounded adaptive frontier. The returned artifact explicitly records biological_evidence_promoted=false and requires independent replication and release review. MCP uses deterministic local simulation and never moves raw data, exports federation data, contacts instruments, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceGatedStageExecutionRequest1@1 with a dedicated statistical-interpretation worker profile and generic profiles for the remaining typed stages."},
+                "interpretation_cycle": {"type": "object", "description": "GliomaInterpretationOperatingCycleRequest1@1 containing cross-family evidence synthesis, stability/replication floors, adaptive frontier budget, authority, and replay policy."}
+            },
+            "required": ["request", "interpretation_cycle"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_gated_stage_engine_replication_execute",
+        "description": "Rehearse the P01→P07→P10 replication handoff. Evidence qualification and capability admission remain mandatory; a dedicated replication-robustness worker invokes P10 multi-round replication, meta-analysis, transportability, heterogeneity, retry, and budget logic. The returned artifact explicitly records biological_evidence_promoted=false and requires research-object release and federated review. MCP uses deterministic local simulation and never moves raw data, exports federation data, contacts instruments, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceGatedStageExecutionRequest1@1 with a dedicated replication-robustness worker profile and generic profiles for the remaining typed stages."},
+                "replication_campaign": {"type": "object", "description": "GliomaReplicationCampaignRequest1@1 containing bounded study/transport inputs, replication thresholds, replay identity, action budget, and round/retry policy."}
+            },
+            "required": ["request", "replication_campaign"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_gated_stage_engine_release_execute",
+        "description": "Rehearse the P01→P07→P11 research-object release handoff. Evidence qualification and capability admission remain mandatory; a dedicated release worker replays the exact local manifest and evaluates coverage, reproducibility, accountable review, exact-hash, and uncertainty gates. The returned artifact is an unpublished research-object candidate with biological_evidence_promoted=false. MCP never signs, uploads, moves raw data, exports federation data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceGatedStageExecutionRequest1@1 with a dedicated research-object-release worker profile and generic profiles for the remaining typed stages."},
+                "release_cycle": {"type": "object", "description": "GliomaReleaseOperatingCycleRequest1@1 containing exact local replay manifest, replay identity, accountable release gate, uncertainty bound, and local_simulation mode."}
+            },
+            "required": ["request", "release_cycle"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_gated_stage_engine_federation_execute",
+        "description": "Rehearse the P01→P07→P12 aggregate-only federation handoff. Evidence qualification and capability admission remain mandatory; a dedicated federation worker runs cross-site consensus and a bounded follow-up benchmark campaign with site-local raw traces. Heterogeneity, negative, partial, unresolved, and blocked outcomes remain explicit; the returned aggregate artifact is not a clinical decision and is marked biological_evidence_promoted=false.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceGatedStageExecutionRequest1@1 with a dedicated federation-benchmarking worker profile and generic profiles for the remaining typed stages."},
+                "federation_cycle": {"type": "object", "description": "FederatedBenchmarkOperatingCycleRequest1@1 containing aggregate-only site inputs, consensus thresholds, bounded actions, budget/retry policy, and local_simulation mode."}
+            },
+            "required": ["request", "federation_cycle"]
         }
     }));
     definitions.push(json!({
@@ -65059,7 +69349,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_adaptive_workflow",
-        "description": "Plan the next bounded autonomous preclinical glioma workflow batch from typed prior outcomes. An outcome-aware posterior utility model preserves qualified, negative, inconclusive, failed, and blocked observations; deterministic beam search closes prerequisites and enforces cost, risk, authority, instrument, federation, and action-count budgets. The route plans only and never executes an assay, moves raw data, or makes a clinical decision.",
+        "description": "Plan the next bounded autonomous preclinical glioma workflow batch from typed prior outcomes. An outcome-aware posterior utility model preserves qualified, negative, inconclusive, failed, and blocked observations; deterministic beam search closes prerequisites, rewards near-tied cross-stage coverage, and enforces cost, risk, authority, instrument, federation, and action-count budgets. The route plans only and never executes an assay, moves raw data, or makes a clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -65107,7 +69397,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "AdaptiveFrontierRequest1@1 containing a validated InterpretationSynthesis1@1, completed action ids, budget, authority switches, and GliomaSelectionWeights."}
+                "request": {"type": "object", "description": "AdaptiveFrontierRequest1@2 containing a validated InterpretationSynthesis1@1, completed action ids, value-only prior action outcome summaries, budget, authority switches, and GliomaSelectionWeights. Prior failures discount a branch while retaining bounded exploration value."}
             },
             "required": ["request"]
         }
@@ -65118,7 +69408,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "AdaptiveFrontierExecutionRequest1@1 containing AdaptiveFrontierRequest1@1, max_retries, require_artifacts, and allow_unresolved_dispatch."}
+                "request": {"type": "object", "description": "AdaptiveFrontierExecutionRequest1@1 containing AdaptiveFrontierRequest1@2 with prior outcome summaries, max_retries, require_artifacts, and allow_unresolved_dispatch."}
             },
             "required": ["request"]
         }
@@ -65184,6 +69474,43 @@ pub fn tool_definitions() -> Vec<Value> {
         }
     }));
     definitions.push(json!({
+        "name": "glioma_lineage_propagation_analyze",
+        "description": "Fit nonnegative finite-interval propagation operators to local, barcode-resolved preclinical glioma state-count trajectories. Reports effective descendant yield and destination composition, experimental-unit-clustered bootstrap intervals, numerical source-design rank, and held-out forecasts. Operator entries are not cell-switch probabilities or continuous-time rates; incomplete trajectories are excluded rather than treated as extinction. It performs analysis only and never executes experiments or makes clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "LineagePropagationRequest1@1 with two arm bindings, fixed state order, independent-unit/lineage floors, regularization and bounds, bootstrap seed, and practical-effect margin."},
+                "snapshots": {"type": "array", "items": {"type": "object"}, "description": "Local LineagePropagationSnapshot1@1 preclinical barcode-by-state counts with timepoint, experimental unit, lineage, capture fraction, and local artifact reference."
+                }
+            },
+            "required": ["request", "snapshots"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_lineage_response_decompose",
+        "description": "Standardize validated preclinical glioma lineage-propagation operators to one declared pretreatment state mixture, then decompose each source-to-destination contrast into net descendant-yield and destination-state-composition contributions with paired experimental-unit bootstrap intervals. Zero-yield bootstrap draws withhold affected component intervals. Results are descriptive lineage-level analyses, not causal effects, individual-cell transition rates, or clinical guidance; this tool does not dispatch assays.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "LineageResponseDecompositionRequest1@1 with one baseline state share per analysis.state_order (integer ppm summing exactly to 1,000,000) and a practical component-effect margin."},
+                "analysis": {"type": "object", "description": "A validated LineagePropagationAnalysis1@1 from glioma_lineage_propagation_analyze."}
+            },
+            "required": ["request", "analysis"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_lineage_transport_analyze",
+        "description": "Compare validated barcode-resolved glioma propagation contrasts across preclinical cell, organoid, xenograft, and animal model systems. Resamples experimental-unit draws within each study, gives studies equal weight within system and represented systems equal weight, and reports system-specific effects, intervals, heterogeneity range, leave-one-system-out shifts, direction reversals, explicit exclusions, and targeted follow-up. It is an analysis capability only: it does not dispatch experiments, infer clinical benefit, or transport conclusions to patients.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "LineageTransportRequest1@1 with a named objective, minimum represented systems/studies, practical effect and heterogeneity margins, bounded bootstrap, deterministic seed, and confidence level."},
+                "studies": {"type": "array", "items": {"type": "object"}, "description": "LineageTransportStudy1@1 records; each contains a validated LineagePropagationAnalysis1@1 and a local, de-identified artifact reference. Provide independent studies, not cells or technical replicates, as records."}
+            },
+            "required": ["request", "studies"]
+        }
+    }));
+    definitions.push(json!({
         "name": "glioma_transportability_analyze",
         "description": "Estimate whether an effect observed across preclinical glioma studies transports to a declared target model system. Uses signature similarity, quality, replicate count, uncertainty-weighted pooling, heterogeneity, target-model distance, and leave-one-study-out stability. Distant, heterogeneous, negative, excluded, and insufficient evidence remain explicit; this route never makes a clinical decision.",
         "inputSchema": {
@@ -65208,6 +69535,50 @@ pub fn tool_definitions() -> Vec<Value> {
         }
     }));
     definitions.push(json!({
+        "name": "glioma_cross_model_claim_envelope",
+        "description": "Compile a partially identified preclinical glioma claim envelope from independent study-level effect intervals. Gives represented model systems equal weight, expands intervals by an explicit hidden-bias budget, reports sign stability, practical-effect coverage, between-system heterogeneity, leave-one-study-out fragility, omitted estimates, and typed next actions. Model-dependent, negative, partial, and unresolved states remain explicit; this route is analysis-only and never dispatches an experiment, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CrossModelClaimEnvelopeRequest1@1 with objective/claim identity, minimum represented systems and studies, practical-effect and heterogeneity gates, hidden-bias budget, and local CrossModelStudyEstimate1@1 interval records."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_cross_model_replication_frontier",
+        "description": "Compile a bounded follow-up portfolio from a preclinical glioma cross-model claim envelope. Scores independent replication, missing-model acquisition, heterogeneity resolution, influential-study stress, negative-result confirmation, and methods audit by information, expected range reduction, reproducibility, feasibility, risk, cost, dependency closure, and model-system diversity. The result is planning-only: selected actions still require P07 authority and local execution gates; no raw data, instrument, federation, or clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CrossModelReplicationFrontierRequest1@1 containing a validated CrossModelClaimEnvelope1@1, typed follow-up candidates, budget/risk/action limits, information target, and heterogeneity-range target."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_cross_model_replication_mission",
+        "description": "Compile a preclinical glioma cross-model replication frontier into the P07 adaptive workflow scheduler. Materializes selected model-system follow-ups as typed replication actions and applies dependency, budget, risk, autonomy, instrument, and federation gates while preserving negative and blocked states. Planning-only: it never executes an experiment, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CrossModelReplicationMissionRequest1@1 containing mission/objective, a CrossModelReplicationFrontierRequest1@1, prior scheduler observations, completed actions, and bounded P07 authority/resource controls."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_cross_model_replication_mission_execute",
+        "description": "Run a selected preclinical glioma cross-model replication mission through the deterministic local dry-run executor. Replans the P10 frontier, applies the P07 scheduler gates, executes only selected synthetic actions, and emits content-addressed synthetic local artifacts. This is a workbench preview, never biological evidence, and cannot touch instruments, federation, raw data, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CrossModelReplicationMissionExecutionRequest1@1 containing a CrossModelReplicationMissionRequest1@1 plus local artifact references, optional workflow scope, retry bound, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
         "name": "glioma_causal_mediation",
         "description": "Decompose a local preclinical glioma treatment contrast into mediator, total, direct, and indirect effects with deterministic integer covariance, measurement uncertainty, and leave-one-unit-out influence bounds. Underpowered, zero-variance, null, or fragile decompositions remain explicit; this is interpretation only and never clinical decision support.",
         "inputSchema": {
@@ -65225,7 +69596,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "StratifiedCausalRequest1@1 with arm/model bindings, overlap floors, effect threshold, and influence bounds."},
+                "request": {"type": "object", "description": "StratifiedCausalRequest1@2 with arm/model bindings, overlap floors, effect threshold, influence bounds, and unmeasured-confounding sensitivity."},
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local StratifiedObservation1@1 values with de-identified units, confounder strata, outcomes, and artifact references."}
             },
             "required": ["request", "observations"]
@@ -66089,11 +70460,11 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_evidence_novelty_radar",
-        "description": "Rank a bounded local snapshot of preclinical glioma evidence by novelty against a known term/domain corpus, freshness, quality, citation signal, domain gaps, and near-duplicate suppression. Emits deterministic acquire/review/deprioritize actions for P02 compilation and P01 acquisition while preserving low-quality, stale, and no-novel-evidence states. MCP performs no external retrieval, raw-data movement, or clinical decision.",
+        "description": "Rank a bounded local snapshot of preclinical glioma evidence by a composite priority over novelty against a known term/domain corpus, freshness, quality, citation signal, domain gaps, and near-duplicate suppression. Emits deterministic acquire/review/deprioritize actions with the applied priority for P02 compilation and P01 acquisition while preserving low-quality, stale, and no-novel-evidence states. MCP performs no external retrieval, raw-data movement, or clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "EvidenceNoveltyRadarRequest1@1 with a bounded preclinical-only source snapshot, canonical term/domain/claim corpora, freshness window, quality and novelty floors, and action limit."}
+                "request": {"type": "object", "description": "EvidenceNoveltyRadarRequest1@1 with a bounded preclinical-only source snapshot, canonical term/domain/claim corpora, freshness window, quality and novelty floors, and action limit. The response uses GliomaEvidenceNoveltyRadar1@2 and ranks by emitted priority_milli."}
             },
             "required": ["request"]
         }
@@ -66193,7 +70564,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_evidence_contradiction_cut",
-        "description": "Plan a weighted minimum-evidence cut over contradictory preclinical glioma records. The route finds a deterministic audit set covering disagreement edges, reports budget-blocked and independent-replication debt, and routes the surviving cut into typed knowledge compilation without editing evidence, fetching literature, moving raw data, or making a clinical decision.",
+        "description": "Plan a weighted minimum-evidence cut over contradictory preclinical glioma records. A bounded deterministic beam selects an evidence portfolio jointly for disagreement-edge coverage, independent source groups, confidence, cost, and audit capacity, reports budget-blocked and replication debt, and routes the surviving cut into typed knowledge compilation without editing evidence, fetching literature, moving raw data, or making a clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -66475,7 +70846,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_knowledge_frontier",
-        "description": "Prioritize the next scientific frontier in typed preclinical glioma knowledge. Scores coverage debt, contradiction, unresolved evidence, support, and workflow leverage, returns explicit action modes for the next decision-context cycle, preserves negative findings, and performs no retrieval, biological execution, or clinical decision.",
+        "description": "Prioritize the next scientific frontier in typed preclinical glioma knowledge. Uses a bounded deterministic beam over complete claim batches to jointly score coverage debt, contradiction, unresolved evidence, support, workflow leverage, and action-family diversity; returns explicit action modes, preserves negative findings, and performs no retrieval, biological execution, or clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -66591,7 +70962,40 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "DecisionContextArtifactRequest1@1 with objective/study/epoch, consumer compatibility declaration, and DecisionContext1@1."}
+                "request": {"type": "object", "description": "DecisionContextArtifactRequest1@1 with objective/study/epoch, consumer compatibility declaration, and DecisionContext1@2."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_context_snapshot_store",
+        "description": "Index local immutable preclinical glioma decision-context snapshots for crash recovery. Verifies context digests and event lineage, rejects corrupt or unanchored parent chains, protects pinned/referenced ancestors during retention, and reports explicit restore omissions without exporting context payloads or dispatching research actions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionContextSnapshotStoreRequest1@1 with study id, retention bound, DecisionContextSnapshotInput1@1 rows, and an optional restore snapshot id."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_partition_resilient_context_checkpoint",
+        "description": "Reconcile site-local preclinical glioma context deltas after a network partition. Deduplicates identical retries, checks signed current epochs and freshness, preserves field-level conflicts without last-writer-wins, and prevents partitioned or non-consensus checkpoints from promotion; only metadata and digests are returned.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "PartitionResilientContextCheckpointRequest1@1 with study/epoch anchor, network state, conflict policy, freshness limits, and typed site-local ContextCheckpointDelta1@1 rows."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_context_access_govern",
+        "description": "Govern purpose-bound federated access to preclinical glioma decision-context fields. Checks membership, policy, scope, approval, expiry, locality, protected-data exclusions, and revocation; emits allow, redact, deny, approval-required, or revoked decisions with no context payload export.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedContextAccessRequest1@1 with requester/site/study identity, declared purpose, typed field scope, policy/membership digests, expiry, approval, locality, and revocation set."}
             },
             "required": ["request"]
         }
@@ -66603,6 +71007,28 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultiStudyContextRequest1@1 with objective/epoch, study and group quorum, quality/support thresholds, compatibility contract, and DecisionContextArtifact1@1 inputs."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_cross_study_context_difference",
+        "description": "Compare typed preclinical glioma study contexts field-by-field before transport or pooling. The route applies only declared value/unit harmonization, distinguishes measured value differences from missing, unmeasured, unit, domain, and context-version differences, and emits modality acquisition gaps plus transport warnings. It handles metadata only and makes no biological or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CrossStudyContextDifferenceRequest1@1 with bounded StudyContextSpec rows, explicit harmonization rules, modality coverage summaries, and a minimum quality threshold."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_cross_study_context_invariance",
+        "description": "Evaluate a typed preclinical glioma decision rule under declared nuisance-field perturbations and leave-one-study-out partitions. Reports score ranges, decision flips, unsupported studies, independent-group limits, and counterexamples; no raw data or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CrossStudyContextInvarianceRequest1@1 containing a typed ContextDecisionRule, StudyContextSpec inputs, nuisance fields, perturbations, and independent-group floor."}
             },
             "required": ["request"]
         }
@@ -66625,6 +71051,50 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FederatedDecisionContextRequest1@1 with objective, epoch, site quorum, quality/support/robustness gates, and aggregate-only site branch summaries."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_decision_capsule",
+        "description": "Package a site-local preclinical glioma decision context for bounded federation. Carries question scope, content-addressed claims, evidence coverage, omissions, uncertainty, and explicitly allowed downstream action identifiers while rejecting stale, revoked, tampered, over-scoped, raw-data-bearing, and clinical-decision payloads.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedDecisionCapsuleRequest1@1 containing a signed local context capsule, question scope, active federation policy, and current tick."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_budget_snapshot",
+        "description": "Reconcile actual, running, and forecast assay/compute/time/review budgets for a prospective preclinical glioma campaign. Emits utilization buckets, warning/approval/hard-stop alerts, low-confidence uncertainty, and approval-bound branch reallocation proposals; it never authorizes spending or executes research actions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionBudgetRequest1@1 containing four typed budget caps, reconciled local events, branch forecasts, branch plans, and a bounded forecast horizon."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_context_query",
+        "description": "Query a bounded local glioma decision-context index by typed scope and field. Validates schema/context identity, capability expiry and revocation, result budgets, omission and uncertainty policy, and content-addressed pagination cursors; returns digests and typed metadata only, never raw research payloads or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionContextQueryRequest1@1 containing typed local context records, scope/field filters, a signed query capability, result budgets, and an optional digest-bound cursor."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_context_update",
+        "description": "Apply an ordered batch of signed local glioma evidence, QC, resource, and action-outcome events to an active decision context. Deduplicates retries, orders events deterministically, rejects stale anchors, emits immutable epochs, and moves invalidated actions into explicit deferred/negative partitions without exporting raw data or making clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionContextUpdateRequest1@1 containing a validated DecisionContext, content-addressed events, a replay cursor, an event bound, and current local tick."}
             },
             "required": ["request"]
         }
@@ -66713,7 +71183,7 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DecisionActionGraphRequest1@1 with objective, node/wave bounds, budget, and qualified-composition policy."},
-                "context": {"type": "object", "description": "DecisionContext1@1 from glioma_decision_context."},
+                "context": {"type": "object", "description": "DecisionContext1@2 from glioma_decision_context."},
                 "composition": {"type": "object", "description": "KnowledgeComposition1@1 from glioma_knowledge_compose."}
             },
             "required": ["request", "context", "composition"]
@@ -66725,7 +71195,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "DecisionMissionBridgeRequest1@1 with DecisionContext1@1, DecisionActionGraph1@1, optional canonical completed_action_order for resumption, GliomaSelectionConfig1@1, mission gates, bounded rounds/retries, artifact policy, and allow_partial_graph."}
+                "request": {"type": "object", "description": "DecisionMissionBridgeRequest1@1 with DecisionContext1@2, DecisionActionGraph1@1, optional canonical completed_action_order for resumption, GliomaSelectionConfig1@1, mission gates, bounded rounds/retries, artifact policy, and allow_partial_graph."}
             },
             "required": ["request"]
         }
@@ -66737,7 +71207,7 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DecisionOmissionCertificateRequest1@1 with matching objective, canonical required claim/modality/model-system lists, dependency-closure policy, and bounded next-action count."},
-                "context": {"type": "object", "description": "DecisionContext1@1 from glioma_decision_context."},
+                "context": {"type": "object", "description": "DecisionContext1@2 from glioma_decision_context."},
                 "graph": {"type": "object", "description": "DecisionActionGraph1@1 from glioma_decision_action_graph."}
             },
             "required": ["request", "context", "graph"]
@@ -66750,9 +71220,20 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DecisionBranchPlannerRequest1@1 with typed candidates, completed ids, at least two weighted scenarios, resource bounds, penalties, and selection weights."},
-                "context": {"type": "object", "description": "DecisionContext1@1 from glioma_decision_context used as the immutable scientific context binding."}
+                "context": {"type": "object", "description": "DecisionContext1@2 from glioma_decision_context used as the immutable scientific context binding."}
             },
             "required": ["request", "context"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_uncertainty_branch_explorer",
+        "description": "Compare competing preclinical glioma research branches by evidence coverage, model disagreement, expected information gain, cost, failure risk, and explicit observed state. Forecast-only, unobserved, contradicted, blocked, and unresolved branches remain distinct; context-bound annotations are replay-stable; this route never dispatches research or clinical actions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "UncertaintyBranchExplorerRequest1@1 containing a matching DecisionContext1@2, DecisionBranchPlan1@1, optional DecisionBranchEvidence1@1, context-bound annotations, and weights summing to 1000."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
@@ -66762,7 +71243,7 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DecisionActionPlanRequest1@1 with matching objective, completed action ids, and GliomaSelectionConfig1@1."},
-                "context": {"type": "object", "description": "DecisionContext1@1 from glioma_decision_context."}
+                "context": {"type": "object", "description": "DecisionContext1@2 from glioma_decision_context."}
             },
             "required": ["request", "context"]
         }
@@ -66773,7 +71254,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "DecisionBranchCampaignRequest1@1 containing TypedKnowledge1@1, DecisionContext1@1, DecisionBranchPlan1@1, completed action ids, budget, branch bound, retry bound, and stop policy."}
+                "request": {"type": "object", "description": "DecisionBranchCampaignRequest1@1 containing TypedKnowledge1@1, DecisionContext1@2, DecisionBranchPlan1@1, completed action ids, budget, branch bound, retry bound, and stop policy."}
             },
             "required": ["request"]
         }
@@ -66839,6 +71320,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "actions": {"type": "array", "items": {"type": "object"}, "description": "MechanismDiscriminatorAction1@1 candidate assays with per-mechanism predictions, cost, feasibility, and uncertainty."}
             },
             "required": ["request", "hypotheses", "observations", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_temporal_multimodal_mechanism_fusion",
+        "description": "Fuse local preclinical glioma observations across modality and time against competing mechanism hypotheses, weighting residual agreement by QC and retaining source independence, coverage, contradiction, and missingness. Returns posterior-ranked mechanism assessments plus a bounded next-measurement frontier drawn only from unmeasured declared predictions. This is analysis-only: raw artifacts remain local and no assay, instrument, federation export, causal claim, or clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "TemporalMultimodalMechanismFusionRequest1@1 containing bounded temporal mechanism predictions, local artifact-backed observations, model-system scope, QC/contradiction thresholds, and next-action limit."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
@@ -67051,7 +71543,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_mechanism_action_plan",
-        "description": "Compile a validated preclinical glioma mechanism-discrimination result into typed A1 local assay candidates for the autonomous campaign controller. Ranks information gain per cost while penalizing measurement uncertainty and preserving mechanism-unlock value, negative evidence, and limitations; this route plans only and never executes an assay or makes a clinical decision.",
+        "description": "Compile a validated preclinical glioma mechanism-discrimination result into typed A1 local assay candidates for the autonomous campaign controller. Uses a bounded deterministic beam to select a globally complementary assay batch by information gain per cost, measurement uncertainty, and mechanism-unlock value while preserving negative evidence and limitations; this route plans only and never executes an assay or makes a clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -67214,7 +71706,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_robust_intervention_portfolio",
-        "description": "Evaluate and greedily select a robust preclinical glioma intervention portfolio across a declared mechanistic model ensemble. Uses prior-weighted expected effects, lower-tail CVaR-style effects, worst-case gates, feasibility, risk ceilings, costs, and redundancy groups to avoid brittle single-model actions; it never dispatches biology or makes a clinical decision.",
+        "description": "Evaluate and select a robust preclinical glioma intervention portfolio across a declared mechanistic model ensemble. Uses prior-weighted expected effects, lower-tail CVaR-style effects, worst-case gates, feasibility, risk ceilings, costs, and a bounded deterministic beam/knapsack search over redundancy groups to avoid brittle or budget-suboptimal single-model actions; it never dispatches biology or makes a clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -67227,13 +71719,14 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_information_design",
-        "description": "Select a bounded local preclinical glioma assay batch by expected reduction in mechanism uncertainty. Uses integer-only posterior Gini reduction over caller-declared outcome distributions, then applies feasibility, risk, cost, budget, and replicate gates while preserving deferred and unresolved assays; it never executes biology or makes a clinical decision.",
+        "description": "Select a bounded local preclinical glioma assay batch using mechanism Gini (the backward-compatible default) or panel predictive diameter. A deterministic beam scores complete batches jointly for information, feasibility, risk, budget, replicate limits, and complementary discrete outcome partitions, reducing redundant assays; it is not the published PDBAL algorithm, does not establish biological superiority, and never executes biology or makes a clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "InformationDesignRequest1@1 with objective, model system, budget, selection, information, feasibility, risk, cost, and risk-ceiling bounds."},
                 "mechanisms": {"type": "array", "items": {"type": "object"}, "description": "DesignMechanism1@1 prior masses summing to 1000."},
-                "actions": {"type": "array", "items": {"type": "object"}, "description": "DesignAction1@1 candidate assays with per-mechanism discrete outcome probabilities, feasibility, risk, cost, and replicate bounds."}
+                "actions": {"type": "array", "items": {"type": "object"}, "description": "DesignAction1@1 candidate assays with per-mechanism discrete outcome probabilities, feasibility, risk, cost, and replicate bounds."},
+                "acquisition_objective": {"type": "string", "enum": ["mechanism_gini", "panel_predictive_diameter"], "default": "mechanism_gini", "description": "Optional selector objective. Panel predictive diameter scores changes in pairwise predictions over this complete declared assay panel."}
             },
             "required": ["request", "mechanisms", "actions"]
         }
@@ -67306,7 +71799,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_replication_closure_frontier",
-        "description": "Rank the next bounded scientific actions after an independent-site glioma replication result. The controller scores site extension, heterogeneity reconciliation, target-model acquisition, influential-study stress testing, negative-result confirmation, and methods review under explicit information, reproducibility, feasibility, risk, cost, and upstream-state gates. Qualified and negative results remain holds; no assay, instrument, federation export, or clinical decision is dispatched.",
+        "description": "Rank the next bounded scientific actions after an independent-site glioma replication result. The controller scores site extension, heterogeneity reconciliation, target-model acquisition, influential-study stress testing, negative-result confirmation, and methods review under explicit information, reproducibility, feasibility, risk, cost, and upstream-state gates, then uses a deterministic beam/knapsack portfolio to preserve complementary actions instead of greedy top-score packing. Qualified and negative results remain holds; no assay, instrument, federation export, or clinical decision is dispatched.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -67321,7 +71814,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "ReplicationClosureExecutionRequest1@1 containing a validated ReplicationClosureFrontier1@1 and a matching bounded GliomaReplicationCampaignRequest1@1."}
+                "request": {"type": "object", "description": "ReplicationClosureExecutionRequest1@1 containing a validated ReplicationClosureFrontier1@2 and a matching bounded GliomaReplicationCampaignRequest1@1."}
             },
             "required": ["request"]
         }
@@ -67377,6 +71870,28 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "RobustExperimentDesignRequest1@1 containing weighted scenarios, candidate assay utility curves, model system, budget, replicate/throughput bounds, feasibility/risk ceilings, and a lower-tail utility floor."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_heterogeneity_aware_experiment_portfolio",
+        "description": "Allocate a diverse preclinical glioma experiment portfolio across declared model systems and strata while protecting a replication reserve. A bounded deterministic beam chooses replicate counts, rewards complementary independence groups, applies heterogeneity/risk/availability gates, and reports stress-power scenarios, underpowered states, and deferrals. This route is planning-only and never dispatches an assay, instrument, federation export, raw-data movement, causal claim, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "HeterogeneityAwareExperimentPortfolioRequest1@1 containing model-system strata, candidate arms, per-replicate costs, effect/uncertainty/reproducibility estimates, risk/availability, budget, diversity, power, and replication-reserve gates."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_heterogeneity_portfolio_mission",
+        "description": "Compile a selected heterogeneity-aware glioma experiment portfolio into a dependency-safe P07 mission plan. Typed action bindings, dependency closure, authority, risk, budget, and prior outcomes are reconciled before routing; missing bindings and underpowered or blocked portfolios remain explicit holds. This bridge is non-dispatching and never invokes assays, instruments, federation exports, raw-data movement, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "HeterogeneityPortfolioMissionRequest1@1 containing a validated HeterogeneityAwareExperimentPortfolio1@1, typed candidate-to-GliomaActionCandidate bindings, scheduler bounds, completed actions, observations, authority switches, and selection weights."}
             },
             "required": ["request"]
         }
@@ -67476,8 +71991,22 @@ pub fn tool_definitions() -> Vec<Value> {
         }
     }));
     definitions.push(json!({
+        "name": "glioma_active_learning_evaluate",
+        "description": "Evaluate the preclinical glioma active-learning selector on caller-supplied held-out utilities. Compares the AURORA policy with acquisition-greedy and fixed-coverage baselines plus a bounded oracle beam under shared cost, risk, replicate, and redundancy gates. Held-out truth never enters planning; this route is evaluation-only and never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ActiveLearningRequest1@1 used to compile the policy plan."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "ActiveLearningCandidate1@1 candidate assays."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional local ActiveLearningObservation1@1 observations."},
+                "held_out_utility_milli": {"type": "object", "additionalProperties": {"type": "integer"}, "description": "Held-out evaluation utility per candidate; never used for planning."}
+            },
+            "required": ["request", "candidates", "held_out_utility_milli"]
+        }
+    }));
+    definitions.push(json!({
         "name": "glioma_robust_active_learning",
-        "description": "Compile a conservative next-batch plan for preclinical glioma assays across competing mechanistic surrogate models. Reliability- and prior-weighted predictions produce lower-tail utility, model-disagreement and information scores; contradiction, unsupported models, risk, replicate, cost, budget, and redundancy gates remain explicit. This route never executes biology or makes a clinical decision.",
+        "description": "Compile a conservative next-batch plan for preclinical glioma assays across competing mechanistic surrogate models. Reliability- and prior-weighted predictions produce lower-tail utility, model-disagreement and information scores; a deterministic bounded portfolio selector preserves complementary redundancy groups instead of greedy top-score packing, while contradiction, unsupported models, risk, replicate, cost, budget, and redundancy gates remain explicit. This route never executes biology or makes a clinical decision.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -67595,6 +72124,105 @@ pub fn tool_definitions() -> Vec<Value> {
         }
     }));
     definitions.push(json!({
+        "name": "glioma_instrument_fleet_health",
+        "description": "Assess preclinical glioma instrument-fleet health from local aggregate summaries. Detects throughput/QC drift, repeated QC failures, downtime clusters, and calibration instability with confidence calibration and bounded investigation tasks; masks site identity when requested and never moves raw events or dispatches hardware.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FleetHealthMonitorRequest1@1 containing bounded instrument observations, baseline/recent windows, drift/QC thresholds, downtime-cluster threshold, alert budget, and locality policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_acquisition_capacity_plan",
+        "description": "Allocate approved high-throughput preclinical glioma acquisition demand across instrument capacity using deterministic minimum-first weighted fair-share allocation. Reserves maintenance and operator capacity, enforces campaign deadlines and budgets, and exposes starvation/deferral reasons; it never dispatches hardware.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AcquisitionCapacityRequest1@1 containing approved demand contracts, resource capacity/operator/maintenance/budget bounds, horizon, and total budget."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_cross_site_protocol_conformance",
+        "description": "Compare version-pinned preclinical glioma protocol semantics across sites before pooling. Checks ordered steps, semantic roles, units, bounded numeric adaptations, device capabilities, calibration freshness, version identity, and quorum; returns explicit conformant/adapted/stale/blocked/unknown partitions without moving raw samples or dispatching hardware.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProtocolConformanceRequest1@1 containing a digest-bound ReferenceProtocol, site-local protocol/capability/calibration summaries, quorum, and bounded-adaptation policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_maintenance_plan",
+        "description": "Plan deterministic maintenance windows for a preclinical glioma instrument fleet. Searches reservation-free intervals before calibration expiry, marks overdue/low-health/disabled devices, reports conflicts, and feeds safe availability to scheduling without mutating bookings or contacting hardware.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MaintenanceWindowRequest1@1 containing local device service/calibration/health summaries, active reservations, a horizon, and the minimum health floor."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_assay_provenance_audit",
+        "description": "Audit digest-bound preclinical glioma assay provenance before downstream admission. Checks sample lineage and scope, approved versus observed protocol, device calibration, operator authority, clock skew, lifecycle completion, and artifact-chain continuity. Only verified runs enter multimodal analysis or verified release; warning, blocked, and unresolved runs remain explicit negative evidence and no raw samples or hardware commands cross the MCP boundary.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AssayProvenanceAuditRequest1@1 containing canonically ordered digest-bound assay runs, current tick, clock-skew bound, authority policy, and artifact-continuity policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_acquisition_operations_snapshot",
+        "description": "Produce a read-only high-throughput preclinical glioma acquisition operations snapshot. Forecasts backlog, assignment finish times, preflight and calibration blockers, stale telemetry, operator saturation, deadline risk, and fairness-preserving reorder proposals without mutating signed plans or dispatching hardware.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AcquisitionOperationsRequest1@1 containing canonically ordered queue items, device telemetry, horizon, telemetry freshness bound, proposal cap, and fairness floor."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_operator_approval",
+        "description": "Evaluate a single-use human approval for a preclinical glioma instrument action. Binds the exact plan, device, opaque sample scope, operator authority, expiry, interlock observations, uncertainty budget, and emergency-stop path; changed, revoked, consumed, expired, stale, failed, or unmeasured conditions cannot dispatch.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "OperatorApprovalRequest1@1 containing the plan/device/scope/operator binding, bounded effect and stop-path order, interlocks, expiry, uncertainty budget, confirmation, revocation, and single-use state."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_device_capability_manifest",
+        "description": "Publish a signed, revocable, metadata-only preclinical glioma device capability manifest for local and federated scheduling. Binds device class, compatible assay/protocol claims, availability windows, calibration validity, policy/locality constraints, and expiry; tampered, expired, revoked, stale, unavailable, or unsafe manifests cannot schedule work.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedDeviceCapabilityRequest1@1 containing signed capability claims, availability, calibration and attestation digests, revocation/expiry, locality, and explicit secret/raw-identifier exclusion proofs."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_instrument_operations",
+        "description": "Exchange aggregate-only preclinical glioma instrument operations across approved sites. Filters revoked, stale, privacy-insufficient, locality-unsafe, and policy-denied summaries before aggregating service and available capacity; rejects tampering and never exports credentials, raw samples, device traces, or reconstructable site values.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedInstrumentOperationsRequest1@1 containing signed site summaries, current epoch, privacy/freshness floors, eligibility quorum, and metadata-exchange policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
         "name": "glioma_instrument_fleet_execute",
         "description": "Execute the admitted portion of a preclinical glioma instrument fleet schedule through the guarded local gateway. Every run is bound to its scheduled instrument and admitted preflight plan, dependency-safe ordering is enforced, and negative, partial, unresolved, failed, blocked, retry, and emergency-stop outcomes remain explicit. MCP uses a deterministic dry-run gateway; production hardware remains behind the institution-owned InstrumentExecutor seam.",
         "inputSchema": {
@@ -67611,7 +72239,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "InstrumentExecutionRequest1@1 containing an admitted InstrumentPreflightPlan1@1, matching InstrumentAction1@1 records, authorization, live interlocks, tick/budget bounds, retry bound, and artifact policy."}
+                "request": {"type": "object", "description": "InstrumentExecutionRequest1@1 containing an admitted InstrumentPreflightPlan1@2 with an action-manifest digest, matching InstrumentAction1@1 records, authorization, live interlocks, tick/budget bounds, retry bound, and artifact policy."}
             },
             "required": ["request"]
         }
@@ -67640,11 +72268,11 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_adaptive_instrument_campaign_execute",
-        "description": "Select and execute a dependency-closed preclinical glioma instrument portfolio under explicit time, physical-risk, information, and endpoint-diversity gates. The deterministic selector scores expected information, frontier novelty, reproducibility, cost, and risk, then sends only selected admitted plans through the guarded campaign executor. MCP uses a dry-run gateway and creates no hardware, raw-data, or clinical effect.",
+        "description": "Select and execute a dependency-closed preclinical glioma instrument portfolio under explicit time, physical-risk, information, and endpoint-diversity gates. The deterministic selector uses a bounded beam over complete portfolios, scoring expected information, frontier novelty, reproducibility, cost, risk, endpoint complementarity, and a smaller instrument-novelty term before sending only selected admitted plans through the guarded campaign executor. MCP uses a dry-run gateway and creates no hardware, raw-data, or clinical effect.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "AdaptiveInstrumentCampaignRequest1@1 containing bounded preflighted candidates, dependency edges, endpoint labels, information/novelty/reproducibility scores, cost and risk estimates, selection budgets, and negative-stop policy."}
+                "request": {"type": "object", "description": "AdaptiveInstrumentCampaignRequest1@3 containing bounded preflighted candidates, dependency edges, endpoint labels, information/novelty/reproducibility scores, cost and risk estimates, selection budgets, and negative-stop policy."}
             },
             "required": ["request"]
         }
@@ -67687,7 +72315,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_instrument_research_frontier_execute",
-        "description": "Compile adjudicated preclinical glioma instrument outcomes into a status-aware research frontier and execute it through the autonomous mission controller. Qualified assays route to computation, unresolved assays to replication/QC, and negative assays to falsification; information, QC, replicates, uncertainty, cost, and status are scored explicitly. MCP uses a synthetic worker and never performs hardware, clinical, or raw-data effects.",
+        "description": "Compile adjudicated preclinical glioma instrument outcomes into a status-aware, evidence-state-covering research frontier and execute it through the autonomous mission controller. Qualified assays route to computation, unresolved assays to replication/QC, and negative assays to falsification; information, QC, replicates, uncertainty, cost, status, and deterministic independent-run diversity are scored explicitly so bounded frontiers do not erase null or unresolved work. MCP uses a synthetic worker and never performs hardware, clinical, or raw-data effects.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -67757,7 +72385,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_replication_campaign_execute",
-        "description": "Run the bounded autonomous preclinical glioma replication/interpretation loop. It recomputes site-level replication, fixed/random-effects pooling, influence, heterogeneity, and model-system transportability; ranks missing coverage, heterogeneity, influential-study, target-model, and negative-result actions; and uses a simulation-only local executor in MCP. No synthetic observation is promoted to biological evidence and no raw data leaves the institution.",
+        "description": "Run the bounded autonomous preclinical glioma replication/interpretation loop. It recomputes site-level replication, fixed/random-effects pooling, influence, heterogeneity, and model-system transportability; selects each round with a deterministic budget-aware beam over replication, heterogeneity, influential-study, target-model, and negative-result action diversity; and uses a simulation-only local executor in MCP. No synthetic observation is promoted to biological evidence and no raw data leaves the institution.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -67846,6 +72474,72 @@ pub fn tool_definitions() -> Vec<Value> {
         }
     }));
     definitions.push(json!({
+        "name": "glioma_heterogeneity_adaptive_benchmark_power",
+        "description": "Plan aggregate-only federated preclinical glioma benchmark power under site heterogeneity, attrition, modality coverage, privacy noise, cost, and replicate multipliers. Produces a deterministic sensitivity surface, recommended portfolio or narrower claim, claim-width estimate, and explicit underpowered/negative evidence without requesting raw observations or dispatching sites.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "HeterogeneityAdaptiveBenchmarkPowerRequest1@1 containing benchmark binding, effect/power/heterogeneity/privacy/budget gates, bounded surface controls, and aggregate FederatedPowerSiteEnvelope entries."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_aggregate_anomaly_detect",
+        "description": "Detect aggregate-only preclinical glioma benchmark anomalies with robust median/MAD, range, temporal drift, protocol, uncertainty, and privacy-suppression diagnostics. Returns explainable site-local review requests without automatic exclusion, raw-data access, instrument dispatch, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedAggregateAnomalyRequest1@1 containing binding, quality/range/drift/suppression gates, and bounded aggregate observations."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_site_selection_plan",
+        "description": "Plan an explainable preclinical glioma federation from aggregate site capability envelopes. Balances capability/model compatibility, representation tags, marginal independence, capacity, cost, freshness, privacy, and revocation; returns selected, deferred, excluded, and unresolved sites plus the diversity bonus applied at each greedy decision without inviting sites or moving data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedSiteSelectionRequest1@1 containing benchmark binding, quorum/fairness/resource gates, representation requirements, and aggregate capability envelopes. The response uses GliomaFederatedSiteSelectionPlan1@2 with auditable marginal-independence scoring."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_continual_benchmark_monitor",
+        "description": "Monitor immutable aggregate preclinical glioma benchmark windows for temporal drift, change points, coverage gaps, and calibration loss. Returns stable/drifted/under-observed states and rerun or recalibration signals without rewriting snapshots, moving raw data, or making clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ContinualBenchmarkMonitorRequest1@1 containing benchmark binding, temporal/uncertainty gates, and immutable aggregate window summaries."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federation_capacity_plan",
+        "description": "Forecast preclinical glioma federation capacity, privacy-budget headroom, latency, availability, and quorum risk over a bounded horizon. Recommends a constrained or schedulable aggregate benchmark window without creating jobs, contacting sites, moving data, or making clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederationCapacityRequest1@1 containing quorum/horizon/demand gates and site-local aggregate capacity history."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_benchmark_dry_run",
+        "description": "Run a deterministic synthetic/site-local preflight for a preclinical glioma federated benchmark. Checks binding, schema, fixture availability, approval, locality, declared failures, budget, and quorum, while preserving omissions and negative evidence; the result is explicitly non-evidence and cannot contact sites, move raw data, create jobs, or make clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkDryRunRequest1@1 with objective, benchmark binding, required schema, quorum/budget gates, approval policy, and bounded synthetic/site-local fixtures."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
         "name": "glioma_federated_interpretation",
         "description": "Join a validated local glioma closure interpretation with aggregate-only multi-site benchmark consensus. Qualification requires alignment between the local cross-family interpretation and the independent consortium result; heterogeneous, negative, underpowered, contradictory, and unresolved outcomes remain explicit. This route performs analysis only and never moves raw data, executes instruments, or makes clinical decisions.",
         "inputSchema": {
@@ -67913,6 +72607,116 @@ pub fn tool_definitions() -> Vec<Value> {
         }
     }));
     definitions.push(json!({
+        "name": "glioma_multisite_benchmark_workflow",
+        "description": "Apply a resumable aggregate-only preclinical glioma multi-site benchmark workflow event stream across local validation, approval, aggregate query, reconciliation, review, and release. Duplicate events are idempotent, sequence gaps remain partitioned, denied approvals cannot unlock queries, retries are bounded, and late withdrawals remove active contributions. MCP never dispatches sites or moves raw data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkWorkflowRequest1@1 with benchmark thresholds, per-site policy responses, typed workflow events, and event/query/retry budgets."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_benchmark_director_snapshot",
+        "description": "Build a read-only prospective director snapshot for concurrent aggregate-only glioma benchmarks. Separates operational completion from scientific success, reports quorum/budget/privacy/workload/anomaly/freshness/uncertainty risk, and emits bounded reallocation or approval proposals that cannot expand scope or dispatch sites.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "BenchmarkDirectorRequest1@1 with objective, tick, total budgets, reallocation cap, quorum, and bounded concurrent run inputs."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_benchmark_job_execute",
+        "description": "Reconcile a resumable aggregate-only federated glioma benchmark job event stream. Supports idempotent events, checkpoints, retries, cancellation, quorum revalidation, and explicit partition/budget/privacy stops; MCP simulates only and never dispatches sites or moves raw data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "BenchmarkJobRequest1@1 with job identity, sorted site policies, quorum/concurrency/retry limits, budgets, and typed events."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_cross_site_evidence_explore",
+        "description": "Explore harmonized aggregate-only preclinical glioma evidence by model, assay, method, and time window. Retains suppression, non-comparability, revocation, mapping confidence, uncertainty, and heterogeneity instead of silently pooling or dropping cells; MCP never queries sites or moves raw data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CrossSiteEvidenceExplorerRequest1@1 with bounded aggregate observations, suppression threshold, mapping-confidence gate, and cell limit."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_quorum_admission_assess",
+        "description": "Verify aggregate-only federated glioma contribution eligibility and independent-site quorum before query admission. Rejects revoked, stale, unsigned, schema-mismatched, non-conformant, duplicate, correlated, and privacy-unsafe contributions with stable reasons; MCP performs no site query, raw-data movement, credential exchange, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "QuorumAdmissionRequest1@1 with benchmark/schema/policy identity, required model coverage, freshness and privacy budgets, and typed site contributions."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_site_participation_review",
+        "description": "Render the local site participation contract for a preclinical glioma benchmark: purpose, aggregate fields, model and assay coverage, protocol compatibility, workload, privacy cost, explicit approval, and withdrawal. Approval is reversible and the MCP route never dispatches a query, moves raw data, exchanges credentials, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SiteParticipationRequest1@1 with requested/local capabilities, protocol versions, workload/privacy budgets, approval/withdrawal state, and locality boundary declarations."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_contribution_integrity_verify",
+        "description": "Verify typed aggregate-only federated glioma contributions before quorum or statistics. Checks identity, signature, policy scope, schema and benchmark binding, freshness, revocation, locality, aggregate-only boundaries, and duplicate artifacts; returns stable rejection reasons and never uploads, queries sites, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ContributionIntegrityRequest1@1 with benchmark/policy/schema identity, trust freshness bounds, signature requirement, and contribution declarations."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federation_operations_snapshot",
+        "description": "Build an operations-only consortium snapshot for a preclinical glioma federation. Reports service availability, heartbeat freshness, standards gaps, maintenance, incidents, queue pressure, revocation, and policy-bounded failover candidates without exchanging research payloads or credentials or dispatching work.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederationOperationsRequest1@1 with required standards, heartbeat/pressure thresholds, and bounded site operations metadata."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_participant_exchange_execute",
+        "description": "Evaluate a versioned institution-local glioma federation participant exchange for capability discovery, proposal review, aggregate contribution, revocation, or receipt retrieval. Enforces idempotency, policy scope, revocation, and local approval; returns metadata only and performs no credential exchange, raw-data movement, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederationParticipantRequest1@1 with API version, exchange identity, action-specific digest, policy scope, approval, revocation, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_signed_aggregate_submit",
+        "description": "Validate one signed aggregate glioma result before downstream integrity and quorum consumption. Binds API, benchmark/schema/policy identity, signature, approval, revocation, calibration, provenance, privacy, locality, and idempotency; MCP never signs, uploads, moves raw data, exchanges credentials, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SignedAggregateSubmissionRequest1@1 with contribution digest, signature/signer, calibration/provenance, privacy accounting, locality boundary, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
         "name": "glioma_federated_adaptive_campaign_execute",
         "description": "Compile a conservative aggregate-only federated glioma site portfolio into an executable benchmark campaign. The controller turns influence-aware planner scenarios into typed follow-up actions, executes them through a deterministic synthetic aggregate worker, and keeps projected versus observed qualification, heterogeneity, negative, partial, blocked, and no-plan states distinct. Institutions retain raw data and execution authority; MCP never moves raw traces, executes instruments, or makes clinical decisions.",
         "inputSchema": {
@@ -67944,6 +72748,226 @@ pub fn tool_definitions() -> Vec<Value> {
                 "campaign": {"type": "object", "description": "Validated GliomaResearchObjectReplayCampaign1@1 produced by glioma_replay_campaign_execute."}
             },
             "required": ["request", "campaign"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replay_fidelity_execute",
+        "description": "Run a bounded pinned clean-room replay-fidelity gate for a preclinical glioma release candidate. Compares content hashes, lineage, uncertainty, negative findings, and tolerance-bounded numeric outputs; environment mismatch, unexplained divergence, dependency blockage, and resource exhaustion remain explicit non-passing states. MCP uses a synthetic worker and never moves raw data or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReplayFidelityRequest1@1 with a validated ResearchObjectManifest, ReproducibilityBundle, acyclic typed task graph, pinned reference/replay environments, resource cap, retry bound, and required-coverage gate."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_reproducibility_completeness_score",
+        "description": "Score explicit reproducibility completeness for a preclinical glioma research object across data scope, code, environment, methods, artifacts, uncertainty, negative outcomes, lineage, and independent replay. Missing evidence scores zero; hard blockers and leave-one-component-out sensitivity are retained. This is an evaluation gate, not a publication, signature, upload, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReproducibilityCompletenessRequest1@1 with ResearchObjectManifest1@1, typed evidence rows, required dimensions, replay-count gates, and optional ReplayCampaign1@1."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_qualification_preservation_audit",
+        "description": "Audit whether uncertainty, intervals, null results, failed replications, contradictions, omissions, limitations, and negative evidence survive transformation into a preclinical glioma research object. Detects missing or weakened qualifications, unbound lineage, missing required kinds, and unsupported release claims; returns metadata only and never signs, uploads, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "QualificationPreservationRequest1@1 with source/release qualification records, claim strength declarations, lineage bindings, and canonical required qualification kinds."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_release_metadata_normalize",
+        "description": "Compile local preclinical glioma release metadata through an approved, versioned mapping policy. Preserves original values and source links, produces a reversible change set, maps controlled vocabularies deterministically, leaves conflicting candidates unresolved, and requires explicit confirmation for inferred mappings; the route never uploads, signs, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReleaseMetadataNormalizationRequest1@1 with target schema fields, local metadata sources, controlled vocabularies, mapping rules, and confirmed inference rule IDs."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_release_attestation_issue",
+        "description": "Bind a preclinical glioma research-object manifest to build provenance, release-gate evidence, an institution-owned signing authority, and independent verification results. Emits a deterministic signed-attestation envelope with explicit issuer, key, scope, revocation, and mutation checks; the route never creates private keys, publishes, uploads, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SignedReleaseAttestationRequest1@1 with ResearchObjectManifest1@1, build/gate digests, ReleaseGateStatus, authority/key state, verification results, and issue epoch."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_artifact_integrity_scan",
+        "description": "Reduce local scanner observations into a fail-closed preclinical glioma release integrity report. Detects digest mismatch, truncation, unsupported formats, malformed metadata, executable payloads, links, missing required members, and byte-budget violations; verified/quarantined partitions are deterministic and the route never reads or moves raw payload bytes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ArtifactIntegrityRequest1@1 with manifest/root identity, required members, format allow-list, bounded candidate observations, and streaming memory limits."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_release_preview",
+        "description": "Compile an audience-specific preclinical glioma research-object release preview. It deterministically applies section/artifact allow-lists and redactions, reports prior-version differences, verifies the preview digest, and never renders protected payloads, signs, uploads, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReleasePreviewRequest1@1 with ResearchObjectManifest1@1, audience/export profile, canonical allowed/redacted sections and artifacts, and optional prior preview comparison."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_release_queue_snapshot",
+        "description": "Reconcile a high-throughput preclinical glioma release queue and propose a gate-preserving order. Candidate counts, stale CI telemetry, failed checks, reviewer capacity, bottlenecks, and blocked states remain explicit; reorder proposals cannot bypass gates or mutate candidate state.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReleaseQueueRequest1@1 with candidate ledger, CI/reviewer telemetry events, reviewer assignments, current epoch, and staleness bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_release_shareability_check",
+        "description": "Evaluate transitive license, locality, embargo, audience, and field classifications before a preclinical glioma release. Produces deterministic allow/redact/deny/unresolved decisions and blocks unknown or incompatible rights; the route never exports or moves raw payloads and makes no clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReleaseShareabilityRequest1@1 with roots, dependency graph, licenses, field classifications, rights confirmations, embargoes, and audience policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_reproducibility_bundle_compile",
+        "description": "Compile a deterministic dependency-closed offline reproducibility-bundle plan from a validated glioma manifest, shareability decision, local member metadata, workflow/environment digests, and replay instructions. Missing dependencies, cycles, local exclusions, and replay boundaries stay explicit; the route copies no bytes, fetches no network resources, and makes no clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReproducibilityBundleRequest1@1 with ResearchObjectManifest1@1, ReleaseShareabilityDecision1@1, bounded content-addressed members, workflow/environment digests, and offline replay instructions."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multistudy_release_compose",
+        "description": "Compose study-scoped comparative metadata for preclinical glioma research while retaining each model system, method digest, limitation, assay mapping, and provenance boundary. Exact, comparable, and non-equivalent measures are partitioned deterministically; missing or ambiguous fields remain explicit omissions. The route moves no raw data and makes no clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComparativeReleaseRequest1@1 with bounded study objects, required concepts, evidenced assay mappings, and an explicit comparable-pooling policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_comparative_release_explore",
+        "description": "Explore a validated comparative preclinical glioma research object through provenance-linked, access-bound cells. Every visible value retains its study, source field, digest, model system, and exact/comparable relation; missing or non-equivalent mappings remain unavailable or blocked, cache keys change with access scope/epoch, and the route is read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComparativeReleaseExplorerRequest1@1 with a validated ComparativeResearchObject1@1, source study metadata, audience/access scope, target concepts, requested studies, and access epoch."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_continuous_release_compile",
+        "description": "Compile an event-sourced preclinical glioma release candidate and block evidence, schema, policy, staleness, version, and required-closure regressions. Negative findings, explicit omissions, semantic diffs, and accountable-review requirements remain content-addressed. The route never signs, publishes, uploads, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ContinuousReleaseRequest1@1 with ordered local events, pinned required programs/artifacts, schema/policy identity, freshness bound, and optional prior edition."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_release_compile",
+        "description": "Compile a quorum-, freshness-, schema-, policy-, uncertainty-, heterogeneity-, and locality-gated aggregate-only preclinical glioma research object from site-local contributions. Site omissions and localization statements remain explicit; raw data and credentials never enter the object, and the route makes no clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedReleaseRequest1@1 with site-local aggregate contributions, required schema/policy identity, quorum, freshness, uncertainty, heterogeneity, and locality policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_site_capability_envelope_compile",
+        "description": "Compile a privacy-preserving site capability envelope for autonomous preclinical glioma federation planning. Approval, freshness, confidence, model-system, assay, standard, review-capacity, and local-only gates are explicit; omitted capabilities remain visible and no raw samples, credentials, protected identifiers, or clinical decisions are involved.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SiteCapabilityRequest1@1 with site-local capability records, attestation digests, and required model/assay/standard policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_site_provenance_attest",
+        "description": "Create a deterministic site-local provenance attestation for an aggregate-only preclinical glioma contribution. The attestation binds aggregate and source-lineage digests, analysis and calibration versions, environment lock, policy decision, freshness, and signer-chain status; invalid, revoked, stale, protected, non-local, or non-aggregate contributions remain blocked and no raw identifiers or credentials leave the site.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SiteProvenanceAttestationRequest1@1 with aggregate/lineage/calibration/environment digests, policy decision, freshness window, locality flags, and signer-chain metadata."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_benchmark_record_execute",
+        "description": "Compile an immutable replayable aggregate-only preclinical glioma federated benchmark execution record. The record binds benchmark and executor versions, policy, replay identity, quorum, signed site contributions, aggregate metric inputs, uncertainty, and explicit omission reason codes; tampering invalidates the digest and the route never dispatches remote execution, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkExecutionRequest1@1 with benchmark/policy/executor identity, replay and analysis digests, quorum, staleness bound, and signed aggregate site contributions."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_benchmark_governance_cycle_compile",
+        "description": "Compile a typed consortium-governance cycle for an autonomous preclinical glioma benchmark. Authorized stage transitions, site-local votes, quorum, dissent, abstention, policy-version invalidation, release, and correction triggers remain explicit; absent votes never become approvals and the route performs no raw-data movement, instrument execution, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GovernanceCycleRequest1@1 with proposal/benchmark/policy identity, bounded stage transitions, authorized local votes, rationale digests, and quorum."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_aggregate_phenotype_summary_compile",
+        "description": "Compile a typed aggregate-only preclinical glioma phenotype summary while preserving local mappings, suppression, missingness, uncertainty, unit conflicts, and non-comparability. Comparable mappings require explicit pooling policy; the route never moves raw data or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AggregatePhenotypeRequest1@1 with site-local fields, dictionary digest, target concepts, estimand, source-count/uncertainty thresholds, and comparable-pooling policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_object_dependency_leakage_audit",
+        "description": "Audit the transitive dependency closure of a preclinical glioma research-object release before serialization. Detects protected payloads, direct identifiers, local-only references, embedded secrets, path escapes, missing dependencies, cycles, and depth overflow; critical findings block export and the route returns metadata only without moving raw data, signing, uploading, or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReleaseDependencyLeakageRequest1@1 containing sorted roots, dependency nodes, export-prefix allow-list, and traversal depth bound."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
@@ -67984,6 +73008,116 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ResearchObjectMigrationRequest1@1 containing a validated MultimodalResearchObject1@1 bundle, target object/schema versions, accepted source versions, semantic-loss bound, and recomputation policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_archive_migration_execute",
+        "description": "Apply an explicit standards-versioned metadata migration for a preclinical glioma archive object. Preserves artifact bytes, provenance, uncertainty, and negative evidence while making optional omissions, semantic loss, rollback boundaries, and unknown mandatory fields machine-visible; it never writes, uploads, signs, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ArchiveMigrationRequest1@2 containing a source ArchiveObject, target ArchiveSchemaProfile, explicit identity/rename rules, semantic-loss budget, optional-drop policy, and rollback requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_release_signature_verify",
+        "description": "Verify a signed preclinical glioma research object against caller-provided offline trust roots. Binds manifest, build provenance, release-gate, policy scope, canonical signature payload, key validity, freshness, and readiness checks; missing trust material remains unverifiable and the route never imports, uploads, signs, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReleaseSignatureVerificationRequest1@1 containing a SignedReleaseAttestation, expected digests/policy scope, verification time, freshness bound, and offline VerifierTrustRoot set."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_object_conformance_check",
+        "description": "Check a preclinical glioma research object against a frozen standards and scientific-qualification profile. Required/forbidden fields, artifact coverage, provenance, uncertainty, negative evidence, verified signatures, and extension handling are explicit; unsupported content blocks and the route never rewrites, uploads, signs, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ConformanceRequest1@1 containing ArchiveObject, pinned ConformanceProfile, optional ReleaseVerificationReport, and an explicit migration route."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_release_sharing_check",
+        "description": "Evaluate field-level sharing of an aggregate-only preclinical glioma release across a consortium. Enforces recipient scope, quorum, site membership, revocation, locality, human-data exclusion, localization, and policy denial; returns explicit share/redact/deny/unresolved decisions without upload, raw-data movement, signing, or clinical interpretation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedReleaseSharingRequest1@1 containing a validated FederatedResearchObject, field-level aggregate metadata, and recipient/quorum/revocation policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_release_event_protocol_replay",
+        "description": "Replay an ordered preclinical glioma research-release lifecycle with content-bound events, predecessor-chain validation, idempotent duplicate handling, authority revocation checks, and explicit correction, withdrawal, and supersession states. The route is deterministic and simulation-only: it never publishes, uploads, signs, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReleaseEventProtocolRequest1@1 containing a bounded object identity, policy scope, ordered lifecycle events, content digests, authority state, and replay limit."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_version_retention_plan",
+        "description": "Plan immutable-version retention and archival transitions for preclinical glioma research objects. Protects pins, legal holds, lineage, replica health, and content digests; produces explicit retain, archive, deletion-blocked, restoration-blocked, and unresolved decisions without deleting, rewriting, uploading, moving raw data, signing, or making clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "RetentionGovernorRequest1@1 containing release versions, verified storage health, retention windows, replica thresholds, and immutable-version policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_distributed_archive_mirror",
+        "description": "Assess policy-approved archival replicas for preclinical glioma research objects. Compares source and replica digests, availability, freshness, repair budgets, and locality; returns synchronized, partial, blocked, or unresolved status with bounded repair work without copying, uploading, deleting, moving raw data, signing, or making clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DistributedMirrorRequest1@1 containing source version digests, replica health observations, allowed regions, freshness limits, and repair budget."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_release_queue_schedule",
+        "description": "Schedule a high-throughput preclinical glioma release queue using readiness gates, reviewer and compute capacity, fairness credits, risk, deadlines, and bounded horizons. Produces scheduled, deferred, or blocked entries with reasons; it never publishes, signs, uploads, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReleaseQueueScheduleRequest1@1 containing candidate gate states, resource estimates, risk/deadline/fairness signals, and planning capacity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_consortium_publication_steward",
+        "description": "Reconcile independent preclinical glioma consortium publication decisions with quorum, signed authority, digest, pending-response, dissent, and correction-lineage gates. Produces ready, partial, or blocked state without allowing site overwrite or performing publication, upload, signing, raw-data movement, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ConsortiumPublicationRequest1@1 containing candidate digest, site decisions, authority/signature state, quorum, dissent, and correction digests."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_object_exchange_plan",
+        "description": "Plan a resumable, idempotent exchange of a signed preclinical glioma research object. Enforces audience, locality, grant, signature, size, chunk range, duplicate, cursor, and missing-chunk gates, returning ready, partial, or blocked state without performing network transfer, upload, publication, signing, or raw-data movement.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ResearchObjectExchangeRequest1@1 containing a signed version manifest, chunk acknowledgements, recipient policy, and resume cursor."}
             },
             "required": ["request"]
         }

@@ -1,10 +1,11 @@
-//! Robust intervention portfolio optimisation for preclinical glioma research.
+//! Robust intervention portfolio optimisation with bounded beam/knapsack search for preclinical glioma research.
 //!
 //! A mechanistic perturbation that looks useful in one graph can be actively misleading when
 //! another plausible graph predicts the opposite effect.  This feature evaluates each candidate
 //! intervention across the declared model ensemble, computes a prior-weighted lower-tail
-//! (CVaR-style) effect, and greedily packs only interventions that survive worst-case,
-//! agreement, risk, cost, and feasibility gates.  It is an assay-prioritisation product: no
+//! (CVaR-style) effect, and uses a bounded deterministic beam/knapsack search to pack only
+//! interventions that survive worst-case, agreement, risk, cost, and feasibility gates.  It is an
+//! assay-prioritisation product: no
 //! perturbation is dispatched and no clinical decision is produced.
 
 use super::counterfactual::{CounterfactualDisposition, CounterfactualIntervention};
@@ -15,7 +16,7 @@ use super::ensemble_counterfactual::{
 use crate::glioma_engine::GliomaModelSystem;
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P05-F27";
@@ -23,6 +24,7 @@ pub const OUTPUT_SCHEMA: &str = "GliomaRobustInterventionPortfolio1@1";
 pub const MAX_CANDIDATES: usize = 1_024;
 pub const MAX_MODELS: usize = 64;
 pub const MAX_SELECTED: usize = 256;
+const PORTFOLIO_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -386,7 +388,12 @@ fn validate_request(
     Ok(())
 }
 
-/// Evaluate and greedily select a robust preclinical intervention portfolio.
+/// Select a bounded robust portfolio by deterministic beam/knapsack search.
+///
+/// Individual scores are normalized per cost so they remain comparable in the researcher
+/// surface, but portfolio packing must reason about absolute value and combinations. The bounded
+/// beam retains alternative cheap portfolios long enough for them to beat one expensive,
+/// high-rate candidate while preserving the one-candidate-per-redundancy-group gate.
 pub fn plan_glioma_robust_intervention_portfolio(
     request: &RobustInterventionRequest,
     models: &[CounterfactualModel],
@@ -564,26 +571,115 @@ pub fn plan_glioma_robust_intervention_portfolio(
         .iter()
         .map(|score| score.candidate_id.clone())
         .collect::<Vec<_>>();
-    let mut selected_order = Vec::new();
-    let mut selected_groups = BTreeSet::new();
-    let mut total_cost = 0_u64;
-    for score in &scored {
-        if selected_order.len() >= request.max_selected || !score.eligible {
-            continue;
-        }
-        let candidate = ordered_candidates
-            .iter()
-            .find(|candidate| candidate.candidate_id == score.candidate_id)
-            .expect("score candidate exists");
-        if selected_groups.contains(&candidate.redundancy_group)
-            || total_cost.saturating_add(u64::from(candidate.cost_units)) > request.budget_units
-        {
-            continue;
-        }
-        selected_groups.insert(candidate.redundancy_group.clone());
-        total_cost = total_cost.saturating_add(u64::from(candidate.cost_units));
-        selected_order.push(candidate.candidate_id.clone());
+    #[derive(Clone)]
+    struct PortfolioState {
+        selected_indices: Vec<usize>,
+        next_index: usize,
+        groups: BTreeSet<String>,
+        cost_units: u64,
+        absolute_utility: i128,
     }
+
+    let candidate_by_id = ordered_candidates
+        .iter()
+        .map(|candidate| (candidate.candidate_id.as_str(), candidate))
+        .collect::<BTreeMap<_, _>>();
+    let eligible_indices = scored
+        .iter()
+        .enumerate()
+        .filter(|(_, score)| score.eligible)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let initial = PortfolioState {
+        selected_indices: Vec::new(),
+        next_index: 0,
+        groups: BTreeSet::new(),
+        cost_units: 0,
+        absolute_utility: 0,
+    };
+    let mut best = initial.clone();
+    let mut beam = vec![initial];
+    for _depth in 0..request.max_selected {
+        let mut expanded = Vec::new();
+        for state in &beam {
+            for position in state.next_index..eligible_indices.len() {
+                let score_index = eligible_indices[position];
+                let score = &scored[score_index];
+                let candidate = candidate_by_id[score.candidate_id.as_str()];
+                if state.groups.contains(&candidate.redundancy_group)
+                    || state
+                        .cost_units
+                        .saturating_add(u64::from(candidate.cost_units))
+                        > request.budget_units
+                {
+                    continue;
+                }
+                let mut selected_indices = state.selected_indices.clone();
+                selected_indices.push(score_index);
+                let mut groups = state.groups.clone();
+                groups.insert(candidate.redundancy_group.clone());
+                let absolute_utility = state.absolute_utility.saturating_add(
+                    i128::from(score.robust_utility_milli)
+                        .saturating_mul(i128::from(candidate.cost_units)),
+                );
+                expanded.push(PortfolioState {
+                    selected_indices,
+                    next_index: position.saturating_add(1),
+                    groups,
+                    cost_units: state
+                        .cost_units
+                        .saturating_add(u64::from(candidate.cost_units)),
+                    absolute_utility,
+                });
+            }
+        }
+        if expanded.is_empty() {
+            break;
+        }
+        expanded.sort_by(|left, right| {
+            right
+                .absolute_utility
+                .cmp(&left.absolute_utility)
+                .then_with(|| {
+                    right
+                        .selected_indices
+                        .len()
+                        .cmp(&left.selected_indices.len())
+                })
+                .then_with(|| {
+                    let left_ids = left
+                        .selected_indices
+                        .iter()
+                        .map(|index| scored[*index].candidate_id.as_str())
+                        .collect::<Vec<_>>();
+                    let right_ids = right
+                        .selected_indices
+                        .iter()
+                        .map(|index| scored[*index].candidate_id.as_str())
+                        .collect::<Vec<_>>();
+                    left_ids.cmp(&right_ids)
+                })
+        });
+        expanded.truncate(PORTFOLIO_BEAM_WIDTH);
+        if let Some(candidate) = expanded.first() {
+            let better = candidate.absolute_utility > best.absolute_utility
+                || (candidate.absolute_utility == best.absolute_utility
+                    && (candidate.selected_indices.len() > best.selected_indices.len()
+                        || (candidate.selected_indices.len() == best.selected_indices.len()
+                            && candidate.selected_indices.as_slice()
+                                < best.selected_indices.as_slice())));
+            if better {
+                best = candidate.clone();
+            }
+        }
+        beam = expanded;
+    }
+    let selected_order = best
+        .selected_indices
+        .iter()
+        .map(|index| scored[*index].candidate_id.clone())
+        .collect::<Vec<_>>();
+    let total_cost = best.cost_units;
     let selected_ids = selected_order.iter().cloned().collect::<BTreeSet<_>>();
     let deferred_order = candidate_order
         .iter()
@@ -735,6 +831,22 @@ mod tests {
             .negative_evidence
             .iter()
             .any(|item| item.contains("risk-ceiling-blocked")));
+        output.validate().unwrap();
+    }
+
+    #[test]
+    fn beam_packing_keeps_independent_robust_candidates_under_budget() {
+        let models = vec![model("optimistic", 900), model("conservative", 700)];
+        let mut second = candidate("second", "second-group", "invasion", 100);
+        second.intervention.intervention_id = "second-intervention".into();
+        let output = plan_glioma_robust_intervention_portfolio(
+            &request(),
+            &models,
+            &[candidate("first", "first-group", "invasion", 100), second],
+        )
+        .unwrap();
+        assert_eq!(output.selected_order.len(), 2);
+        assert_eq!(output.total_cost_units, 2);
         output.validate().unwrap();
     }
 }

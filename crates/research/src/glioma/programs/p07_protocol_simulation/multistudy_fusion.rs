@@ -367,7 +367,9 @@ pub fn fuse_glioma_protocol_evidence(
             contradictory.push(endpoint_id.clone());
             (
                 ProtocolFusionDisposition::Contradictory,
-                format!("reconcile contradictory endpoint {endpoint_id} across model systems before transport"),
+                format!(
+                    "reconcile contradictory endpoint {endpoint_id} across model systems before transport"
+                ),
             )
         } else if measured_study_count < request.min_studies {
             unresolved.push(endpoint_id.clone());
@@ -393,13 +395,17 @@ pub fn fuse_glioma_protocol_evidence(
             negative.push(endpoint_id.clone());
             (
                 ProtocolFusionDisposition::Negative,
-                format!("publish the replicated null or negative endpoint {endpoint_id} and test alternatives"),
+                format!(
+                    "publish the replicated null or negative endpoint {endpoint_id} and test alternatives"
+                ),
             )
         } else if qualified_count >= request.min_studies {
             qualified.push(endpoint_id.clone());
             (
                 ProtocolFusionDisposition::Qualified,
-                format!("transport endpoint {endpoint_id} to downstream mechanism analysis with model context"),
+                format!(
+                    "transport endpoint {endpoint_id} to downstream mechanism analysis with model context"
+                ),
             )
         } else {
             partial.push(endpoint_id.clone());

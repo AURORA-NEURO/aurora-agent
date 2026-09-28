@@ -1,4 +1,4 @@
-//! Budgeted portfolio planning for reproducible glioma computation DAGs.
+//! Beam-selected portfolio planning for reproducible glioma computation DAGs.
 //!
 //! The P09 executor runs a declared computation graph. This module decides which analyses to run
 //! first when a study has more possible multimodal analyses than its compute/time budget allows.
@@ -14,9 +14,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P09-F11";
-pub const OUTPUT_SCHEMA: &str = "GliomaComputationPortfolioPlan1@1";
+pub const OUTPUT_SCHEMA: &str = "GliomaComputationPortfolioPlan1@2";
 pub const MAX_CANDIDATES: usize = 4_096;
 pub const MAX_MODALITIES: usize = 64;
+const COMPUTATION_PORTFOLIO_BEAM_WIDTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComputationCandidate {
@@ -280,6 +281,35 @@ fn utility(candidate: &ComputationCandidate, request: &ComputationPortfolioReque
     positive.saturating_sub(penalty).min(i64::MAX as u128) as i64
 }
 
+/// Add a bounded portfolio-coverage bonus for candidates that open a new
+/// redundancy group or modality. The base utility remains dominant: coverage
+/// can only break a near tie, so a required or materially higher-value analysis
+/// is not displaced by a novelty preference. Counts are computed from the
+/// declared candidate surface, making the ordering deterministic and replayable
+/// even when the caller supplies candidates in a different order.
+fn selection_utility(
+    candidate: &ComputationCandidate,
+    request: &ComputationPortfolioRequest,
+    redundancy_counts: &BTreeMap<String, usize>,
+    modality_counts: &BTreeMap<GliomaModality, usize>,
+) -> i64 {
+    let base = utility(candidate, request);
+    let tie_break_scale = base.max(1) / 10;
+    let redundancy_bonus = if redundancy_counts.get(&candidate.redundancy_group).copied() == Some(1)
+    {
+        tie_break_scale
+    } else {
+        0
+    };
+    let modality_bonus = if modality_counts.get(&candidate.modality).copied() == Some(1) {
+        tie_break_scale / 2
+    } else {
+        0
+    };
+    base.saturating_add(redundancy_bonus)
+        .saturating_add(modality_bonus)
+}
+
 fn closure(
     id: &str,
     candidates: &BTreeMap<String, &ComputationCandidate>,
@@ -306,6 +336,99 @@ fn closure(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ComputationPortfolioState {
+    selected: BTreeSet<String>,
+    dependency_order: Vec<String>,
+    budget_used: u64,
+    duration_used: u64,
+    modalities: BTreeSet<GliomaModality>,
+}
+
+impl ComputationPortfolioState {
+    fn empty() -> Self {
+        Self {
+            selected: BTreeSet::new(),
+            dependency_order: Vec::new(),
+            budget_used: 0,
+            duration_used: 0,
+            modalities: BTreeSet::new(),
+        }
+    }
+
+    fn admit(&mut self, id: &str, candidate: &ComputationCandidate) {
+        if self.selected.insert(id.to_string()) {
+            self.budget_used = self
+                .budget_used
+                .saturating_add(candidate.task.estimated_cost_units);
+            self.duration_used = self
+                .duration_used
+                .saturating_add(candidate.task.estimated_duration_ticks);
+            self.modalities.insert(candidate.modality);
+            self.dependency_order.push(id.to_string());
+        }
+    }
+}
+
+fn computation_portfolio_score(
+    state: &ComputationPortfolioState,
+    candidates: &BTreeMap<String, &ComputationCandidate>,
+    request: &ComputationPortfolioRequest,
+) -> u128 {
+    if state.selected.is_empty() {
+        return 0;
+    }
+    let total_utility = state.selected.iter().fold(0_u128, |total, id| {
+        // Resource penalties can legitimately make an optional candidate's utility negative.
+        // Never reinterpret that signed value as an enormous unsigned score: a negative-utility
+        // task may be required for an explicit obligation, but it must not dominate optional
+        // portfolio search merely because of integer conversion.
+        total.saturating_add(utility(candidates[id], request).max(0) as u128)
+    });
+    let redundancy_groups = state
+        .selected
+        .iter()
+        .map(|id| candidates[id].redundancy_group.as_str())
+        .collect::<BTreeSet<_>>()
+        .len() as u128;
+    let diversity_factor = (1_u128.saturating_add(state.modalities.len() as u128))
+        .saturating_mul(10)
+        .saturating_add(1_u128.saturating_add(redundancy_groups));
+    // Keep resource pressure additive. Multiplying cost and duration factors made a complete
+    // prerequisite closure look worse than an isolated cheap task even when it delivered much
+    // more information, which is precisely the greedy failure this portfolio planner exists to
+    // avoid.
+    let resource_penalty = 1_u128
+        .saturating_add(
+            (state.budget_used as u128).saturating_mul(u128::from(request.cost_penalty_milli)),
+        )
+        .saturating_add(
+            (state.duration_used as u128)
+                .saturating_mul(u128::from(request.duration_penalty_milli)),
+        );
+    total_utility
+        .saturating_mul(diversity_factor)
+        .saturating_mul(1_000_000)
+        .checked_div(resource_penalty.max(1))
+        .unwrap_or(0)
+}
+
+fn sort_and_prune_computation_beam(
+    beam: &mut Vec<ComputationPortfolioState>,
+    candidates: &BTreeMap<String, &ComputationCandidate>,
+    request: &ComputationPortfolioRequest,
+) {
+    beam.sort_by(|left, right| {
+        computation_portfolio_score(right, candidates, request)
+            .cmp(&computation_portfolio_score(left, candidates, request))
+            .then_with(|| left.budget_used.cmp(&right.budget_used))
+            .then_with(|| left.duration_used.cmp(&right.duration_used))
+            .then_with(|| left.dependency_order.cmp(&right.dependency_order))
+    });
+    beam.dedup_by(|left, right| left.selected == right.selected);
+    beam.truncate(COMPUTATION_PORTFOLIO_BEAM_WIDTH);
+}
+
 /// Plan a deterministic resource-bounded computation portfolio and prerequisite order.
 pub fn plan_glioma_computation_portfolio(
     request: &ComputationPortfolioRequest,
@@ -321,57 +444,195 @@ pub fn plan_glioma_computation_portfolio(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
+    let mut redundancy_counts = BTreeMap::new();
+    let mut modality_counts = BTreeMap::new();
+    for candidate in candidates {
+        *redundancy_counts
+            .entry(candidate.redundancy_group.clone())
+            .or_insert(0) += 1;
+        *modality_counts.entry(candidate.modality).or_insert(0) += 1;
+    }
     let mut ordered = candidates.iter().collect::<Vec<_>>();
     ordered.sort_by(|left, right| {
         right
             .required
             .cmp(&left.required)
-            .then_with(|| utility(right, request).cmp(&utility(left, request)))
+            .then_with(|| {
+                selection_utility(right, request, &redundancy_counts, &modality_counts).cmp(
+                    &selection_utility(left, request, &redundancy_counts, &modality_counts),
+                )
+            })
             .then_with(|| left.candidate_id.cmp(&right.candidate_id))
     });
-    let mut scores =
-        candidates
-            .iter()
-            .map(|candidate| ComputationCandidateScore {
-                candidate_id: candidate.candidate_id.clone(),
-                operation: candidate.task.operation,
-                utility_milli: utility(candidate, request),
-                dependency_count: candidate.task.depends_on.len().min(u16::MAX as usize) as u16,
-                modality: candidate.modality,
-                disposition: ComputationCandidateDisposition::Unresolved,
-                rationale:
-                    "candidate utility is compared after prerequisite closure and resource gates"
-                        .into(),
-            })
-            .collect::<Vec<_>>();
+    let mut scores = candidates
+        .iter()
+        .map(|candidate| ComputationCandidateScore {
+            candidate_id: candidate.candidate_id.clone(),
+            operation: candidate.task.operation,
+            utility_milli: selection_utility(
+                candidate,
+                request,
+                &redundancy_counts,
+                &modality_counts,
+            ),
+            dependency_count: candidate.task.depends_on.len().min(u16::MAX as usize) as u16,
+            modality: candidate.modality,
+            disposition: ComputationCandidateDisposition::Unresolved,
+            rationale:
+                "coverage-aware utility is compared after prerequisite closure and resource gates"
+                    .into(),
+        })
+        .collect::<Vec<_>>();
     scores.sort_by(|left, right| left.candidate_id.cmp(&right.candidate_id));
-    let mut selected = BTreeSet::new();
-    let mut dependency_order = Vec::new();
     let mut deferred = BTreeSet::new();
     let mut blocked = BTreeSet::new();
     let mut unresolved = BTreeSet::new();
     let mut negative = BTreeSet::new();
     let mut uncertainty = BTreeSet::new();
-    let mut modalities = BTreeSet::new();
-    let mut budget_used = 0_u64;
-    let mut duration_used = 0_u64;
     let completed_ids = completed.clone();
-    for candidate in ordered {
+    // Required analyses are admitted first, but optional analyses are chosen by a bounded beam
+    // over complete dependency closures. This preserves hard obligations while avoiding the
+    // greedy failure mode where a high-scoring single modality consumes the entire budget.
+    let mut required_state = ComputationPortfolioState::empty();
+    for candidate in ordered.iter().filter(|candidate| candidate.required) {
+        if completed.contains(&candidate.candidate_id)
+            || required_state.selected.contains(&candidate.candidate_id)
+            || (request.require_deterministic && !candidate.task.deterministic)
+        {
+            continue;
+        }
+        let mut closure_order = Vec::new();
+        if closure(
+            &candidate.candidate_id,
+            &candidate_map,
+            &completed_ids,
+            &mut BTreeSet::new(),
+            &mut closure_order,
+        )
+        .is_err()
+            || (request.require_deterministic
+                && closure_order
+                    .iter()
+                    .any(|id| !candidate_map[id].task.deterministic))
+        {
+            continue;
+        }
+        let new_ids = closure_order
+            .iter()
+            .filter(|id| !required_state.selected.contains(*id) && !completed.contains(*id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let new_cost = new_ids
+            .iter()
+            .map(|id| candidate_map[id].task.estimated_cost_units)
+            .sum::<u64>();
+        let new_duration = new_ids
+            .iter()
+            .map(|id| candidate_map[id].task.estimated_duration_ticks)
+            .sum::<u64>();
+        let new_modalities = new_ids
+            .iter()
+            .map(|id| candidate_map[id].modality)
+            .collect::<BTreeSet<_>>();
+        if required_state.selected.len() + new_ids.len() <= request.max_tasks
+            && required_state.budget_used.saturating_add(new_cost) <= request.budget_units
+            && required_state.duration_used.saturating_add(new_duration) <= request.duration_ticks
+            && required_state.modalities.len()
+                + new_modalities
+                    .difference(&required_state.modalities)
+                    .count()
+                <= request.max_modalities
+        {
+            for id in new_ids {
+                required_state.admit(&id, candidate_map[&id]);
+            }
+        }
+    }
+
+    let mut beam = vec![required_state];
+    for candidate in ordered.iter().filter(|candidate| !candidate.required) {
+        let mut next = beam.clone();
+        for state in &beam {
+            if completed.contains(&candidate.candidate_id)
+                || state.selected.contains(&candidate.candidate_id)
+                || (request.require_deterministic && !candidate.task.deterministic)
+            {
+                continue;
+            }
+            let mut closure_order = Vec::new();
+            if closure(
+                &candidate.candidate_id,
+                &candidate_map,
+                &completed_ids,
+                &mut BTreeSet::new(),
+                &mut closure_order,
+            )
+            .is_err()
+                || (request.require_deterministic
+                    && closure_order
+                        .iter()
+                        .any(|id| !candidate_map[id].task.deterministic))
+            {
+                continue;
+            }
+            let new_ids = closure_order
+                .iter()
+                .filter(|id| !state.selected.contains(*id) && !completed.contains(*id))
+                .cloned()
+                .collect::<Vec<_>>();
+            let new_cost = new_ids
+                .iter()
+                .map(|id| candidate_map[id].task.estimated_cost_units)
+                .sum::<u64>();
+            let new_duration = new_ids
+                .iter()
+                .map(|id| candidate_map[id].task.estimated_duration_ticks)
+                .sum::<u64>();
+            let new_modalities = new_ids
+                .iter()
+                .map(|id| candidate_map[id].modality)
+                .collect::<BTreeSet<_>>();
+            if state.selected.len() + new_ids.len() > request.max_tasks
+                || state.budget_used.saturating_add(new_cost) > request.budget_units
+                || state.duration_used.saturating_add(new_duration) > request.duration_ticks
+                || state.modalities.len() + new_modalities.difference(&state.modalities).count()
+                    > request.max_modalities
+            {
+                continue;
+            }
+            let mut admitted = state.clone();
+            for id in new_ids {
+                admitted.admit(&id, candidate_map[&id]);
+            }
+            next.push(admitted);
+        }
+        sort_and_prune_computation_beam(&mut next, &candidate_map, request);
+        beam = next;
+    }
+    sort_and_prune_computation_beam(&mut beam, &candidate_map, request);
+    let final_state = beam
+        .into_iter()
+        .next()
+        .unwrap_or_else(ComputationPortfolioState::empty);
+    let selected = final_state.selected;
+    let dependency_order = final_state.dependency_order;
+    let modalities = final_state.modalities;
+    let budget_used = final_state.budget_used;
+    let duration_used = final_state.duration_used;
+    let mut selected_ids = selected.iter().cloned().collect::<Vec<_>>();
+    selected_ids.retain(|id| candidate_map.contains_key(id));
+    for candidate in candidates {
+        let score = scores
+            .iter_mut()
+            .find(|score| score.candidate_id == candidate.candidate_id)
+            .expect("score exists");
         if completed.contains(&candidate.candidate_id) {
-            let score = scores
-                .iter_mut()
-                .find(|score| score.candidate_id == candidate.candidate_id)
-                .expect("score exists");
             score.disposition = ComputationCandidateDisposition::Blocked;
             score.rationale = "already completed in caller-supplied replay state".into();
             blocked.insert(candidate.candidate_id.clone());
             continue;
         }
         if request.require_deterministic && !candidate.task.deterministic {
-            let score = scores
-                .iter_mut()
-                .find(|score| score.candidate_id == candidate.candidate_id)
-                .expect("score exists");
             score.disposition = ComputationCandidateDisposition::Unresolved;
             score.rationale = "non-deterministic task is held by reproducibility policy".into();
             unresolved.insert(candidate.candidate_id.clone());
@@ -386,30 +647,17 @@ pub fn plan_glioma_computation_portfolio(
             &mut BTreeSet::new(),
             &mut closure_order,
         ) {
-            let score = scores
-                .iter_mut()
-                .find(|score| score.candidate_id == candidate.candidate_id)
-                .expect("score exists");
             score.disposition = ComputationCandidateDisposition::Blocked;
             score.rationale = reason.clone();
             blocked.insert(candidate.candidate_id.clone());
             negative.insert(format!("{}:{reason}", candidate.candidate_id));
             continue;
         }
-        let new_ids = closure_order
-            .iter()
-            .filter(|id| !selected.contains(*id) && !completed.contains(*id))
-            .cloned()
-            .collect::<Vec<_>>();
         if request.require_deterministic
             && closure_order
                 .iter()
                 .any(|id| !candidate_map[id].task.deterministic)
         {
-            let score = scores
-                .iter_mut()
-                .find(|score| score.candidate_id == candidate.candidate_id)
-                .expect("score exists");
             score.disposition = ComputationCandidateDisposition::Unresolved;
             score.rationale =
                 "a prerequisite closure contains a non-deterministic task held by reproducibility policy"
@@ -421,64 +669,21 @@ pub fn plan_glioma_computation_portfolio(
             ));
             continue;
         }
-        let new_cost = new_ids
-            .iter()
-            .map(|id| candidate_map[id].task.estimated_cost_units)
-            .sum::<u64>();
-        let new_duration = new_ids
-            .iter()
-            .map(|id| candidate_map[id].task.estimated_duration_ticks)
-            .sum::<u64>();
-        let new_modalities = new_ids
-            .iter()
-            .map(|id| candidate_map[id].modality)
-            .collect::<BTreeSet<_>>();
-        if selected.len() + new_ids.len() > request.max_tasks
-            || budget_used.saturating_add(new_cost) > request.budget_units
-            || duration_used.saturating_add(new_duration) > request.duration_ticks
-            || modalities.len() + new_modalities.difference(&modalities).count()
-                > request.max_modalities
-        {
-            let score = scores
-                .iter_mut()
-                .find(|score| score.candidate_id == candidate.candidate_id)
-                .expect("score exists");
-            if candidate.required {
-                score.disposition = ComputationCandidateDisposition::Blocked;
-                score.rationale =
-                    "required candidate cannot fit the declared resource envelope".into();
-                blocked.insert(candidate.candidate_id.clone());
-                negative.insert(format!("{}:required-resource-cap", candidate.candidate_id));
-            } else {
-                score.disposition = ComputationCandidateDisposition::Deferred;
-                score.rationale = "deferred because prerequisite closure exceeds budget, time, task, or modality capacity".into();
-                deferred.insert(candidate.candidate_id.clone());
-            }
+        if selected.contains(&candidate.candidate_id) {
+            score.disposition = ComputationCandidateDisposition::Selected;
             continue;
         }
-        for id in &new_ids {
-            selected.insert(id.clone());
-            dependency_order.push(id.clone());
-            modalities.insert(candidate_map[id].modality);
-        }
-        budget_used = budget_used.saturating_add(new_cost);
-        duration_used = duration_used.saturating_add(new_duration);
-        scores
-            .iter_mut()
-            .find(|score| score.candidate_id == candidate.candidate_id)
-            .expect("score exists")
-            .disposition = ComputationCandidateDisposition::Selected;
-    }
-    let mut selected_ids = selected.iter().cloned().collect::<Vec<_>>();
-    selected_ids.retain(|id| candidate_map.contains_key(id));
-    for score in &mut scores {
-        if score.disposition == ComputationCandidateDisposition::Unresolved
-            && !unresolved.contains(&score.candidate_id)
-            && !blocked.contains(&score.candidate_id)
-            && !deferred.contains(&score.candidate_id)
-        {
-            deferred.insert(score.candidate_id.clone());
+        if candidate.required {
+            score.disposition = ComputationCandidateDisposition::Blocked;
+            score.rationale = "required candidate cannot fit the declared resource envelope".into();
+            blocked.insert(candidate.candidate_id.clone());
+            negative.insert(format!("{}:required-resource-cap", candidate.candidate_id));
+        } else {
             score.disposition = ComputationCandidateDisposition::Deferred;
+            score.rationale =
+                "deferred by bounded portfolio search because its complete closure was dominated or exceeded the resource envelope"
+                    .into();
+            deferred.insert(candidate.candidate_id.clone());
         }
     }
     let disposition = if selected_ids.is_empty() && !blocked.is_empty() {
@@ -644,5 +849,119 @@ mod tests {
         assert!(plan.blocked_order.contains(&"missing".into()));
         assert!(plan.unresolved_order.contains(&"stochastic".into()));
         assert!(!plan.negative_evidence.is_empty());
+    }
+
+    #[test]
+    fn near_tied_portfolio_prefers_a_new_redundancy_group() {
+        let mut repeat_a = candidate(
+            "repeat-a",
+            task("repeat-a", ComputationOperation::Quantify, vec![]),
+            GliomaModality::Imaging,
+            900,
+        );
+        repeat_a.redundancy_group = "same-signal".into();
+        repeat_a.required = true;
+        let mut repeat_b = candidate(
+            "repeat-b",
+            task("repeat-b", ComputationOperation::Validate, vec![]),
+            GliomaModality::Imaging,
+            899,
+        );
+        repeat_b.redundancy_group = "same-signal".into();
+        let mut novel = candidate(
+            "novel",
+            task("novel", ComputationOperation::ModelFit, vec![]),
+            GliomaModality::Imaging,
+            898,
+        );
+        novel.redundancy_group = "new-signal".into();
+        let mut constrained = request();
+        constrained.max_tasks = 2;
+        constrained.budget_units = 4;
+        constrained.duration_ticks = 20;
+        constrained.min_modalities = 1;
+        let plan =
+            plan_glioma_computation_portfolio(&constrained, &[repeat_b, novel, repeat_a]).unwrap();
+        assert!(plan.selected_order.contains(&"repeat-a".into()));
+        assert!(plan.selected_order.contains(&"novel".into()));
+        assert!(plan.deferred_order.contains(&"repeat-b".into()));
+        assert_eq!(plan.selected_order.len(), 2);
+        plan.validate().unwrap();
+    }
+
+    #[test]
+    fn beam_preserves_modality_coverage_against_two_locally_strong_repeats() {
+        let mut high_imaging = candidate(
+            "high-imaging",
+            task("high-imaging", ComputationOperation::Quantify, vec![]),
+            GliomaModality::Imaging,
+            1_000,
+        );
+        high_imaging.redundancy_group = "imaging-a".into();
+        let mut repeat_imaging = candidate(
+            "repeat-imaging",
+            task("repeat-imaging", ComputationOperation::Validate, vec![]),
+            GliomaModality::Imaging,
+            999,
+        );
+        repeat_imaging.redundancy_group = "imaging-b".into();
+        let mut orthogonal = candidate(
+            "orthogonal-spatial",
+            task(
+                "orthogonal-spatial",
+                ComputationOperation::Integrate,
+                vec![],
+            ),
+            GliomaModality::Spatial,
+            700,
+        );
+        orthogonal.redundancy_group = "spatial".into();
+        let mut constrained = request();
+        constrained.max_tasks = 2;
+        constrained.budget_units = 4;
+        constrained.duration_ticks = 20;
+        constrained.min_modalities = 2;
+        let plan = plan_glioma_computation_portfolio(
+            &constrained,
+            &[repeat_imaging, orthogonal, high_imaging],
+        )
+        .unwrap();
+        assert_eq!(plan.selected_order.len(), 2);
+        assert!(plan.selected_order.contains(&"high-imaging".into()));
+        assert!(plan.selected_order.contains(&"orthogonal-spatial".into()));
+        assert!(plan.deferred_order.contains(&"repeat-imaging".into()));
+        assert_eq!(
+            plan.modality_order,
+            vec![GliomaModality::Imaging, GliomaModality::Spatial]
+        );
+        plan.validate().unwrap();
+    }
+
+    #[test]
+    fn negative_utility_tasks_cannot_win_from_signed_to_unsigned_score_wrap() {
+        let mut expensive = candidate(
+            "expensive",
+            task("expensive", ComputationOperation::ModelFit, vec![]),
+            GliomaModality::Imaging,
+            0,
+        );
+        expensive.task.estimated_cost_units = 1_000;
+        expensive.task.estimated_duration_ticks = 1_000;
+        let mut constrained = request();
+        constrained.max_tasks = 1;
+        constrained.budget_units = 1_000;
+        constrained.duration_ticks = 1_000;
+        constrained.min_modalities = 1;
+        let informative = candidate(
+            "informative",
+            task("informative", ComputationOperation::Quantify, vec![]),
+            GliomaModality::Spatial,
+            900,
+        );
+        let plan =
+            plan_glioma_computation_portfolio(&constrained, &[expensive, informative]).unwrap();
+        assert_eq!(plan.selected_order, vec!["informative"]);
+        assert!(plan.deferred_order.contains(&"expensive".into()));
+        plan.validate().unwrap();
     }
 }

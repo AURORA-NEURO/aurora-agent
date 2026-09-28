@@ -1,8 +1,10 @@
 //! Question-to-decision context program ownership.
 
+pub mod access_governor;
 pub mod action_bridge;
 pub mod action_graph;
 pub mod adaptive_branch_campaign;
+pub mod adaptive_context_scheduler;
 pub mod adaptive_controller;
 pub mod admission_gate;
 pub mod branch_campaign;
@@ -11,17 +13,31 @@ pub mod branch_planner;
 pub mod campaign;
 pub mod context_compiler;
 pub mod context_replay;
+pub mod cross_study_context_diff;
+pub mod cross_study_context_invariance_test;
+pub mod decision_budget_dashboard;
 pub mod decision_context_artifact;
+pub mod decision_context_query_api;
 pub mod decision_cycle;
+pub mod decision_event_update_api;
 pub mod decision_loop_governor;
+pub mod federated_decision_capsule;
 pub mod federated_decision_context;
 pub mod mission_bridge;
 pub mod multi_study_context_artifact;
 pub mod multi_study_workflow;
 pub mod omission_certificate;
+pub mod partition_checkpoint;
+pub mod snapshot_store;
+pub mod uncertainty_branch_explorer;
 pub mod value_calibration;
 pub mod value_optimizer;
 
+pub use access_governor::{
+    govern_federated_context_access, ContextAccessDecision, ContextAccessFieldDecision,
+    ContextAccessGovernorError, ContextAccessPurpose, FederatedContextAccessDecision,
+    FederatedContextAccessRequest,
+};
 pub use action_bridge::{
     plan_decision_actions, DecisionActionPlan, DecisionActionPlanDisposition,
     DecisionActionPlanError, DecisionActionPlanRequest,
@@ -36,6 +52,12 @@ pub use adaptive_branch_campaign::{
     AdaptiveDecisionBranchCampaignDisposition, AdaptiveDecisionBranchCampaignError,
     AdaptiveDecisionBranchCampaignRequest, AdaptiveDecisionBranchCampaignRound,
     AdaptiveDecisionBranchCampaignStopReason,
+};
+pub use adaptive_context_scheduler::{
+    schedule_glioma_context_refresh, ContextRefreshAction, ContextRefreshCandidate,
+    ContextRefreshDeferral, ContextRefreshDeferralReason, ContextRefreshReason,
+    ContextRefreshSchedule, ContextRefreshScheduleDisposition, ContextRefreshScheduleError,
+    ContextRefreshScheduleRequest,
 };
 pub use adaptive_controller::{
     execute_glioma_adaptive_decision_controller, AdaptiveDecisionCampaignDisposition,
@@ -80,19 +102,54 @@ pub use context_replay::{
     DecisionContextReplayDisposition, DecisionContextReplayError, DecisionContextReplayRequest,
     DecisionContextReplayTransition,
 };
+pub use cross_study_context_diff::{
+    analyze_glioma_cross_study_context_difference, ContextDifferenceKind, ContextFieldDifference,
+    ContextFieldDomain, ContextHarmonizationRule, ContextModalityCoverage,
+    ContextStudyPairDifference, ContextUnitAlias, ContextValueAlias,
+    CrossStudyContextDifferenceDisposition, CrossStudyContextDifferenceError,
+    CrossStudyContextDifferenceReport, CrossStudyContextDifferenceRequest, StudyContextField,
+    StudyContextSpec,
+};
+pub use cross_study_context_invariance_test::{
+    test_glioma_cross_study_context_invariance, ContextDecisionRule, ContextInvarianceDisposition,
+    ContextInvarianceFieldResult, ContextNuisancePerturbation, CrossStudyContextInvarianceError,
+    CrossStudyContextInvarianceReport, CrossStudyContextInvarianceRequest, InvarianceEvaluation,
+    InvariancePredicate, InvariancePredicateOperator, InvarianceStudyInput,
+};
+pub use decision_budget_dashboard::{
+    compile_glioma_decision_budget_snapshot, BudgetAlert, BudgetAlertSeverity, BudgetBranchPlan,
+    BudgetBucket, BudgetEvent, BudgetEventState, BudgetForecast, BudgetReallocationProposal,
+    BudgetResource, DecisionBudgetBucketSnapshot, DecisionBudgetDisposition, DecisionBudgetError,
+    DecisionBudgetRequest, DecisionBudgetSnapshot,
+};
 pub use decision_context_artifact::{
     materialize_glioma_decision_context_artifact, DecisionContextArtifact,
     DecisionContextArtifactAction, DecisionContextArtifactCompatibility,
     DecisionContextArtifactConsumer, DecisionContextArtifactError, DecisionContextArtifactRequest,
 };
+pub use decision_context_query_api::{
+    query_glioma_decision_context, DecisionContextQueryCursor, DecisionContextQueryError,
+    DecisionContextQueryRecord, DecisionContextQueryRequest, DecisionContextQueryResult,
+    DecisionContextQueryRow, QueryCapability, QueryCompleteness, QueryField, QueryValueState,
+};
 pub use decision_cycle::{
     execute_glioma_decision_operating_cycle, DecisionOperatingCycle,
     DecisionOperatingCycleDisposition, DecisionOperatingCycleError, DecisionOperatingCycleRequest,
+};
+pub use decision_event_update_api::{
+    update_glioma_decision_context, DecisionContextEvent, DecisionContextUpdateDisposition,
+    DecisionContextUpdateEpoch, DecisionContextUpdateError, DecisionContextUpdateRequest,
+    DecisionContextUpdateResult, DecisionEventKind,
 };
 pub use decision_loop_governor::{
     govern_glioma_decision_loop, DecisionLoopGovernorDisposition, DecisionLoopGovernorError,
     DecisionLoopGovernorRequest, DecisionLoopGovernorResult, DecisionLoopRound,
     DecisionLoopRoundAssessment, DecisionLoopRoundDisposition, DecisionLoopStopReason,
+};
+pub use federated_decision_capsule::{
+    package_glioma_federated_decision_capsule, DecisionCapsulePolicy,
+    FederatedDecisionCapsuleDisposition, FederatedDecisionCapsuleError,
+    FederatedDecisionCapsuleRequest, FederatedDecisionContext, LocalDecisionContextCapsule,
 };
 pub use federated_decision_context::{
     aggregate_glioma_federated_decision_context, FederatedBranchDisposition,
@@ -118,6 +175,23 @@ pub use omission_certificate::{
     certify_decision_omissions, DecisionCoverageState, DecisionOmissionCertificate,
     DecisionOmissionCertificateError, DecisionOmissionCertificateRequest,
     DecisionOmissionDisposition, DecisionOmissionEntry,
+};
+pub use partition_checkpoint::{
+    reconcile_partition_resilient_context_checkpoint, CheckpointConflictPolicy,
+    CheckpointFieldConflict, CheckpointNetworkState, CheckpointSiteDisposition,
+    CheckpointSiteStatus, ContextCheckpointDelta, ContextCheckpointDisposition,
+    ContextCheckpointField, ContextFieldDelta, ContextFieldValue, PartitionCheckpointError,
+    PartitionResilientContextCheckpoint, PartitionResilientContextCheckpointRequest,
+};
+pub use snapshot_store::{
+    store_glioma_decision_context_snapshots, DecisionContextSnapshotIndex,
+    DecisionContextSnapshotInput, DecisionContextSnapshotRecord, DecisionContextSnapshotStoreError,
+    DecisionContextSnapshotStoreRequest, SnapshotStoreDisposition,
+};
+pub use uncertainty_branch_explorer::{
+    explore_glioma_uncertain_branches, DecisionBranchAnnotation, DecisionBranchComparison,
+    DecisionBranchExplorerDisposition, DecisionBranchExplorerError, DecisionBranchExplorerStatus,
+    UncertaintyBranchExplorer, UncertaintyBranchExplorerRequest,
 };
 pub use value_calibration::{
     calibrate_glioma_decision_value, DecisionValueCalibrationCampaignDisposition,

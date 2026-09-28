@@ -497,11 +497,9 @@ impl LongHorizonCalibrationAnalysis {
                     .cloned()
                     .collect::<BTreeSet<_>>();
                 resolved_ids.intersection(&unknown_ids).next().is_some()
-                    || resolved_ids.intersection(&negative_ids).next().is_some()
-                    || unknown_ids.intersection(&negative_ids).next().is_some()
                     || !resolved_ids.is_subset(&observation_ids)
                     || !unknown_ids.is_subset(&observation_ids)
-                    || !negative_ids.is_subset(&observation_ids)
+                    || !negative_ids.is_subset(&resolved_ids)
                     || resolved_ids.len() + unknown_ids.len() != observation_ids.len()
                     || window.unknown_count != unknown_ids.len()
             })

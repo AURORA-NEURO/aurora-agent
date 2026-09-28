@@ -479,10 +479,14 @@ pub fn compile_glioma_federated_evidence_operating_cycle(
             let (kind, rationale) = match claim.action {
                 MultiSiteOutcomeAction::PromoteToKnowledge
                     if reconciliation.disposition == MultiSiteOutcomeDisposition::Ready
-                        && request.transport.disposition == FederatedOutcomeTransportDisposition::Ready => (
-                    FederatedCycleActionKind::BridgeQualifiedEvidence,
-                    "reconciled support passed the aggregate gates and can enter typed-knowledge review",
-                ),
+                        && request.transport.disposition
+                            == FederatedOutcomeTransportDisposition::Ready =>
+                {
+                    (
+                        FederatedCycleActionKind::BridgeQualifiedEvidence,
+                        "reconciled support passed the aggregate gates and can enter typed-knowledge review",
+                    )
+                }
                 MultiSiteOutcomeAction::PreserveNegative => (
                     FederatedCycleActionKind::PreserveNegativeResults,
                     "reconciler marked a null or negative result for explicit knowledge preservation",
