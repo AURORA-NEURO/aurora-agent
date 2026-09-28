@@ -147,6 +147,13 @@ termination, deployment identity, distributed storage, external workers, and pro
 remain outside the workspace. See [HTTP_API.md](HTTP_API.md) and the source-specific adapter
 contracts in the backlog.
 
+The API router keeps request dispatch and shared state in
+[`router.rs`](../crates/api/src/router.rs), with mission lifecycle routes in
+[`router/missions.rs`](../crates/api/src/router/missions.rs), evidence and artifact registry routes in
+[`router/evidence.rs`](../crates/api/src/router/evidence.rs), and operator snapshots and gate reviews
+in [`router/operations.rs`](../crates/api/src/router/operations.rs). These modules share one router
+instance and do not create separate dispatch or persistence authorities.
+
 Signed bundles, signed webhook envelopes, and caller-supplied key-registry policy are present; the
 workspace does not own production key custody or deployment trust roots. `DockerSandbox` provides a
 separate opt-in Docker command boundary for a pinned Linux image. It resolves and pins the selected
