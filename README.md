@@ -1067,14 +1067,14 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**83 crates, 538,938 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,355,697 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 
-The table below is generated. It used to be hand-maintained and drifted to claiming twenty-three
-crates and 820 tests — the same hand-copy drift [`crates/devx`](crates/devx)'s exit-code audit
-exists to catch, sitting in the README of the repository that wrote the audit. Regenerate it, and
-the test count, with:
+The table below is generated. The crate, tool, and Rust line counts are synchronized from Cargo
+metadata and the embedded MCP catalogue; CI checks that the public documentation stays current.
+Run `python tools/sync_repository_facts.py --write` after changing either source. The table and
+test count can be regenerated with:
 
 ```bash
 tools/status.sh --tests

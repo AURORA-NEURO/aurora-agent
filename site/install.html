@@ -73,7 +73,7 @@ claude plugin install aurora-agent@aurora</code></pre>
     <pre><code>code --install-extension aurora-agent-0.1.3.vsix</code></pre>
 
     <p>The extension registers the MCP server with VS Code (1.101+) so Copilot agent mode can call
-    the 259 tools, and adds workflow/autopilot/pipeline views. It can also be built from source in
+    the 893 tools, and adds workflow/autopilot/pipeline views. It can also be built from source in
     <code>editors/vscode</code> with <code>npm install &amp;&amp; npm run package</code>.</p>
 
     <h2>MCP registry</h2>
@@ -102,7 +102,7 @@ cargo build --release --offline</code></pre>
     <p>The server speaks JSON-RPC 2.0 over newline-delimited stdio and follows the MCP lifecycle
     (<code>initialize</code>, then <code>notifications/initialized</code>, then tool calls). Paths are
     confined to <code>--root</code>; absolute paths, <code>..</code>, and symlink escapes are refused.
-    259 tools are exposed, from <code>fiber_compile</code> / <code>fiber_refine</code> /
+    893 tools are exposed, from <code>fiber_compile</code> / <code>fiber_refine</code> /
     <code>fiber_verify</code> through the evaluation, oracle, safety, and operations surfaces.</p>
 
     <h3>CLI and HTTP gateway</h3>

@@ -11,7 +11,7 @@ triage care, enroll participants, or claim medical-device functionality.
 
 ## What it is
 
-AURORA Agent is a Rust workspace of 79 crates implementing the FIBER decision-context compiler.
+AURORA Agent is a Rust workspace of 88 crates implementing the FIBER decision-context compiler.
 The central idea, from README.md: context assembly is a compiler pass — instead of retrieval plus
 summarisation plus vibes-based compaction, a typed decision query is compiled into the smallest
 decision-sufficient evidence region, delivered as a Decision Section, and accompanied by a Context
@@ -23,7 +23,7 @@ whole knowledge structure by default."
 
 Surfaces:
 
-- 259 MCP tools via the `bioprism-mcp` stdio server (JSON-RPC 2.0 over newline-delimited stdio,
+- 893 MCP tools via the `bioprism-mcp` stdio server (JSON-RPC 2.0 over newline-delimited stdio,
   full MCP lifecycle).
 - A CLI (`bioprism`), with `--json` envelopes and a 10-exit-code retryability matrix: every failure
   code carries exactly one retry decision, so a caller holding nothing but the process status can

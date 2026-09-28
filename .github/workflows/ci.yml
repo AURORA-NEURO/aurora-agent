@@ -31,6 +31,8 @@ jobs:
         run: python tools/validate_glioma_organization.py
       - name: validate documentation map and local links
         run: python tools/validate_docs_index.py
+      - name: validate published repository facts
+        run: python tools/sync_repository_facts.py --check
       # The repository predates this workflow and contains unrelated stable-rustfmt drift.
       # Keep the gate actionable by checking every Rust file changed by this revision while
       # the existing baseline is migrated deliberately rather than hiding the result.

@@ -20,7 +20,7 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    { "@type": "Question", "name": "What is AURORA Agent?", "acceptedAnswer": { "@type": "Answer", "text": "AURORA Agent is a local Model Context Protocol (MCP) server built on FIBER, a decision context compiler. A typed decision query is compiled into the smallest decision-sufficient evidence region, delivered as a Decision Section plus a Context Certificate stating exactly what was omitted and whether the omission could have changed the decision. It is a Rust workspace of 79 crates exposing 259 MCP tools, a CLI, and a local HTTP gateway, under Apache-2.0." } },
+    { "@type": "Question", "name": "What is AURORA Agent?", "acceptedAnswer": { "@type": "Answer", "text": "AURORA Agent is a local Model Context Protocol (MCP) server built on FIBER, a decision context compiler. A typed decision query is compiled into the smallest decision-sufficient evidence region, delivered as a Decision Section plus a Context Certificate stating exactly what was omitted and whether the omission could have changed the decision. It is a Rust workspace of 88 crates exposing 893 MCP tools, a CLI, and a local HTTP gateway, under Apache-2.0." } },
     { "@type": "Question", "name": "What is a Context Certificate?", "acceptedAnswer": { "@type": "Answer", "text": "A Context Certificate is a machine-readable receipt that accompanies every compiled Decision Section. It states exactly which facts were omitted and whether each omission could have changed the decision. Certificates hash canonical bytes and can be verified without linking the compiler that produced them." } },
     { "@type": "Question", "name": "What does 'context engineering, with receipts' mean?", "acceptedAnswer": { "@type": "Answer", "text": "Context engineering is the practice of selecting what an LLM sees. AURORA Agent adds a receipt: the Context Certificate, which states what was omitted from the compiled context and whether the omission could have changed the decision. The receipt is machine-checkable — the fiber_verify tool (or bioprism context verify) verifies a certificate without linking the engine that produced it." } },
     { "@type": "Question", "name": "How is this different from RAG?", "acceptedAnswer": { "@type": "Answer", "text": "RAG ranks passages by similarity and hopes the top-k suffice. FIBER computes a mandatory protected closure before any relevance step, slices dependencies from a typed world, and fails rather than truncating when the budget is smaller than the closure. The output carries an explicit sufficiency claim and an omission account, not a similarity ranking." } },
@@ -69,7 +69,7 @@
       context compiler. A typed decision query is compiled into the smallest decision-sufficient
       evidence region, delivered as a Decision Section plus a Context Certificate stating exactly
       what was omitted and whether the omission could have changed the decision. It is a Rust
-      workspace of 79 crates (engine crates prefixed <code>bioprism-</code>) exposing 259 MCP tools,
+      workspace of 88 crates (engine crates prefixed <code>bioprism-</code>) exposing 893 MCP tools,
       a CLI, and a local HTTP gateway, licensed Apache-2.0.</p>
     </div>
 
