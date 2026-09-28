@@ -282,6 +282,30 @@ def test_action_enforces_result_byte_bound_while_cli_writes(
     assert not Path(environment["GITHUB_OUTPUT"]).exists()
 
 
+def test_action_capture_bounds_many_small_result_writes_and_discards_diagnostics(tmp_path: Path) -> None:
+    environment = _environment(tmp_path)
+    payload = {
+        "schema": CLI_SCHEMA,
+        "command": "run",
+        "routing_mode": "explicit_domain",
+        "result": {"status": "completed"},
+    }
+    chunks = [json.dumps(payload)[index : index + 1] for index in range(len(json.dumps(payload)))]
+    captured_diagnostic_writers = []
+
+    def chunked_cli(_argv, *, environ, writer, error_writer) -> int:
+        captured_diagnostic_writers.append(error_writer)
+        assert error_writer.write("private diagnostic" * 100_000) == len("private diagnostic" * 100_000)
+        for chunk in chunks:
+            writer.write(chunk)
+        return 0
+
+    outputs = run_action(environment, command=chunked_cli)
+    assert outputs["status"] == "completed"
+    assert not hasattr(captured_diagnostic_writers[0], "getvalue")
+    assert "private diagnostic" not in Path(environment["GITHUB_OUTPUT"]).read_text(encoding="utf-8")
+
+
 def test_action_runs_local_provider_and_caller_owned_mcp_end_to_end(tmp_path: Path, monkeypatch) -> None:
     fixture = ROOT / "python" / "tests" / "autonomous_brain_mcp_server.py"
     command = f'"{sys.executable.replace(chr(92), "/")}" -u "{fixture.as_posix()}"'
