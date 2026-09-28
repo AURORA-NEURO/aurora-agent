@@ -17,8 +17,19 @@ from ._jsonrpc import (
     parse_response,
     request_object,
 )
-from .errors import ArgumentError, LifecycleError, ProcessExited, ProtocolError, RemoteError, ResponseTimeout, TransportError
+from .errors import (
+    ArgumentError,
+    LifecycleError,
+    ProcessExited,
+    ProtocolError,
+    RemoteError,
+    ResponseTimeout,
+    TransportError,
+)
 from .models import JsonObject, Session, ToolResult
+
+_MAX_STDERR_TAIL_BYTES = 64_000
+_STDERR_READ_CHUNK_BYTES = 4_096
 
 
 class AsyncClient:
@@ -37,8 +48,14 @@ class AsyncClient:
     ) -> None:
         if not command or any(not isinstance(part, str) or not part for part in command):
             raise ArgumentError("command must contain at least one non-empty string")
-        if timeout <= 0 or max_frame_bytes <= 0:
-            raise ArgumentError("timeout and max_frame_bytes must be positive")
+        if timeout <= 0:
+            raise ArgumentError("timeout must be positive")
+        if (
+            isinstance(max_frame_bytes, bool)
+            or not isinstance(max_frame_bytes, int)
+            or max_frame_bytes <= 0
+        ):
+            raise ArgumentError("max_frame_bytes must be a positive integer")
         self.command = tuple(command)
         self.cwd = str(Path(cwd)) if cwd is not None else None
         self.env = dict(env) if env is not None else None
@@ -51,7 +68,7 @@ class AsyncClient:
         self._initialized = False
         self._session: Session | None = None
         self._stderr_task: asyncio.Task[None] | None = None
-        self._stderr_chunks: list[str] = []
+        self._stderr_tail = bytearray()
         self._lock = asyncio.Lock()
 
     @property
@@ -77,6 +94,7 @@ class AsyncClient:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=self.max_frame_bytes + 1,
             )
         except (OSError, ValueError) as error:
             raise TransportError(f"could not start MCP command: {error}") from error
@@ -167,12 +185,22 @@ class AsyncClient:
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
+        if process.stdin is not None:
+            try:
+                await process.stdin.wait_closed()
+            except (BrokenPipeError, ConnectionError):
+                pass
+        if process.stdout is not None:
+            # Consume and discard stdout after process exit so the subprocess pipe
+            # transport reaches EOF before the caller's event loop can close.
+            while await process.stdout.read(_STDERR_READ_CHUNK_BYTES):
+                pass
         if self._stderr_task is not None:
             await asyncio.gather(self._stderr_task, return_exceptions=True)
             self._stderr_task = None
 
     def stderr(self) -> str:
-        return "".join(self._stderr_chunks)[-64_000:]
+        return self._stderr_tail.decode("utf-8", errors="replace")
 
     def _require_initialized(self) -> None:
         if self._process is None:
@@ -209,6 +237,10 @@ class AsyncClient:
                     raw = await asyncio.wait_for(process.stdout.readline(), timeout=remaining)
                 except asyncio.TimeoutError as error:
                     raise ResponseTimeout(method, self.timeout) from error
+                except (asyncio.LimitOverrunError, ValueError) as error:
+                    raise ProtocolError(
+                        f"peer frame exceeds the {self.max_frame_bytes}-byte bound"
+                    ) from error
                 if not raw:
                     raise ProcessExited(process.returncode, self.stderr())
                 response = parse_response(raw, self.max_frame_bytes)
@@ -231,12 +263,12 @@ class AsyncClient:
 
     async def _drain_stderr(self, stream: asyncio.StreamReader) -> None:
         while True:
-            raw = await stream.readline()
+            raw = await stream.read(_STDERR_READ_CHUNK_BYTES)
             if not raw:
                 return
-            self._stderr_chunks.append(raw.decode("utf-8", errors="replace"))
-            if len(self._stderr_chunks) > 64:
-                del self._stderr_chunks[:-64]
+            self._stderr_tail.extend(raw)
+            if len(self._stderr_tail) > _MAX_STDERR_TAIL_BYTES:
+                del self._stderr_tail[: len(self._stderr_tail) - _MAX_STDERR_TAIL_BYTES]
 
     async def __aenter__(self) -> "AsyncClient":
         try:
