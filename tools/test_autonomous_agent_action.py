@@ -172,6 +172,7 @@ def test_action_hides_inputs_and_provider_key_from_mcp_child_environment(tmp_pat
     monkeypatch.setenv("GITHUB_RUN_ID", "fixture-run-42")
     monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path))
     monkeypatch.setenv("GITHUB_OUTPUT", str(github_output))
+    monkeypatch.setenv("INPUT_UNRELATED_AMBIENT", "ambient-private-input")
     monkeypatch.delenv("INPUT_APPROVE_PROVIDER_CALL", raising=False)
     monkeypatch.delenv("INPUT_APPROVE_MISSION_DISPATCH", raising=False)
     captured: dict[str, object] = {}
@@ -180,18 +181,21 @@ def test_action_hides_inputs_and_provider_key_from_mcp_child_environment(tmp_pat
         captured["task_in_cli_environment"] = environ["INPUT_TASK"]
         captured["credential_in_cli_environment"] = environ["AURORA_ACTION_TEST_KEY"]
         captured["task_in_child_environment"] = "INPUT_TASK" in os.environ
+        captured["ambient_input_in_child_environment"] = "INPUT_UNRELATED_AMBIENT" in os.environ
         captured["credential_in_child_environment"] = "AURORA_ACTION_TEST_KEY" in os.environ
         writer.write(json.dumps({"schema": CLI_SCHEMA, "command": "run", "routing_mode": "explicit_domain", "result": {"status": "completed"}}))
         return 0
 
-    run_action(os.environ, command=fake_cli)
+    run_action(environment, command=fake_cli)
     assert captured == {
         "task_in_cli_environment": "private task fixture",
         "credential_in_cli_environment": "provider-secret-fixture",
         "task_in_child_environment": False,
+        "ambient_input_in_child_environment": False,
         "credential_in_child_environment": False,
     }
     assert os.environ["INPUT_TASK"] == "private task fixture"
+    assert os.environ["INPUT_UNRELATED_AMBIENT"] == "ambient-private-input"
     assert os.environ["AURORA_ACTION_TEST_KEY"] == "provider-secret-fixture"
 
 

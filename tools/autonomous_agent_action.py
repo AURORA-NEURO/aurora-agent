@@ -240,13 +240,18 @@ def _call_cli_with_private_environment(
 ) -> int:
     """Keep action inputs and the provider key out of the spawned MCP process environment."""
 
-    if environ is not os.environ:
-        return command(argv, environ=environ, writer=writer, error_writer=error_writer)
     cli_environ = dict(environ)
-    credential_env = _input(environ, "credential-env", "OPENAI_API_KEY").strip()
-    private_names = {name for name in environ if name.startswith("INPUT_")}
-    if credential_env:
-        private_names.add(credential_env)
+    credential_names = {
+        _input(source, "credential-env", "OPENAI_API_KEY").strip()
+        for source in (environ, os.environ)
+    }
+    private_names = {
+        name
+        for source in (environ, os.environ)
+        for name in source
+        if name.startswith("INPUT_")
+    }
+    private_names.update(name for name in credential_names if name)
     removed = {name: os.environ.pop(name) for name in private_names if name in os.environ}
     try:
         return command(argv, environ=cli_environ, writer=writer, error_writer=error_writer)
