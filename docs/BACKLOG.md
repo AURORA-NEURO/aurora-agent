@@ -130,6 +130,16 @@ the adapter preserves source page order and marks a numeric p-value of zero as p
 precision-limited. It makes no causal, clinical, or treatment claims
 ([REST API](https://www.ebi.ac.uk/gwas/docs/programmatic-access/rest-api),
 [v2 reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference)).
+The reviewed GWAS Catalog integration now also provides a separate v2 study-ancestry adapter in
+Python and TypeScript. Each reviewed plan names at most 10 GCST accessions and permits exactly one
+bounded collection request per study, avoiding implicit request fan-out from association results.
+It validates ancestry item links against the fixed study, preserves missing fields separately from
+reported empty lists, records source-order output truncation, and projects only receipt digests into
+autonomous evidence. Ancestry categories and recruitment geography remain source descriptors; the
+adapter does not infer representativeness, case/control counts, association-specific sample sizes,
+causality, clinical relevance, or treatment benefit
+([v2 reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference),
+[population descriptors](https://www.ebi.ac.uk/gwas/population-descriptors)).
 The claim-integrity acquisition settlement path now requires a deployment-owned independent
 evidence authority, gives it a read-only digest-bound projection of the exact request, receipt,
 accepted source-quality assessment, claim contracts, and evidence metadata, and records the

@@ -2516,3 +2516,39 @@ marked as possibly precision-limited. These fields do not establish causal effec
 or treatment benefit. See the [GWAS Catalog REST API guide](https://www.ebi.ac.uk/gwas/docs/programmatic-access/rest-api/),
 [v2 API reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference), and
 [v1-to-v2 migration guide](https://www.ebi.ac.uk/gwas/docs/news/rest-api-v2-migration-guide/).
+
+## Reviewed GWAS Catalog study ancestry retrieval
+
+`ReviewedGwasCatalogAncestryRetrievalAdapter` queries the v2
+`/studies/{accession_id}/ancestries` collection for caller-selected, syntax-validated GCST study
+accessions. `prepare()` is network-free. Approved execution makes exactly one request per selected
+study, with at most 10 studies and 50 returned ancestry records per study, while enforcing the
+shared request, response, tree, aggregate-byte, and bundle limits. The endpoint returns one
+collection response; the adapter validates every row, records a bounded source-order prefix if the
+output cap is crossed, and does not follow item links or fan out from association rows.
+
+```ts
+const ancestryConfig = new ReviewedGwasCatalogAncestryRetrievalConfig({
+  studyAccessions: ["GCST90296481"],
+});
+const ancestryAdapter = new ReviewedGwasCatalogAncestryRetrievalAdapter(ancestryConfig);
+const ancestryPlan = ancestryAdapter.prepare();
+const ancestryReview = createReviewedGwasCatalogAncestryExecutionMetadata(ancestryPlan, true);
+const ancestryRegistration = createReviewedGwasCatalogAncestryAutonomousEvidenceRegistration(
+  ancestryAdapter,
+  ancestryPlan,
+  "GCST90296481",
+);
+```
+
+The transient bundle carries stage, source-reported individual count, ancestry labels, and origin
+and recruitment descriptors. Missing values remain `null`; source-reported empty lists remain empty.
+The metadata does not provide case/control counts, association-specific sample sizes, population
+representativeness, or genetic ancestry inference. Autonomous evidence validates the plan-bound
+receipt and emits provenance digests only, with `confidence: null`. See the
+[GWAS Catalog v2 reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference),
+[REST API guide](https://www.ebi.ac.uk/gwas/docs/programmatic-access/rest-api/), and
+[population descriptors](https://www.ebi.ac.uk/gwas/population-descriptors).
+The built-in transport applies `timeoutMs`, refuses redirects, and shares the Catalog request
+pacer. An injected transport receives an abort signal and must stop its request on abort while
+owning redirect, network, and credential policy.

@@ -165,6 +165,52 @@ claims. See the [GWAS Catalog REST API guide](https://www.ebi.ac.uk/gwas/docs/pr
 [v2 API reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference), and
 [v1-to-v2 migration guide](https://www.ebi.ac.uk/gwas/docs/news/rest-api-v2-migration-guide/).
 
+## Reviewed GWAS Catalog study ancestry retrieval
+
+`ReviewedGwasCatalogAncestryRetrievalAdapter` queries the v2
+`/studies/{accession_id}/ancestries` collection for caller-selected, syntax-validated GCST study
+accessions. `prepare()` is network-free. Approved execution makes exactly one request per selected
+study, with at most 10 studies, 50 returned ancestry records per study, and the shared request,
+response, tree, aggregate-byte, and bundle limits. The v2 endpoint returns the complete collection
+in one response; the adapter validates every row, retains the source-order prefix if its output cap
+is crossed, and does not follow item links or fan out from association rows.
+
+```python
+from prism_sdk import (
+    ReviewedGwasCatalogAncestryRetrievalAdapter,
+    ReviewedGwasCatalogAncestryRetrievalConfig,
+    create_reviewed_gwas_catalog_ancestry_autonomous_evidence_registration,
+    create_reviewed_gwas_catalog_ancestry_execution_metadata,
+)
+
+config = ReviewedGwasCatalogAncestryRetrievalConfig(
+    study_accessions=("GCST90296481",),
+)
+adapter = ReviewedGwasCatalogAncestryRetrievalAdapter(config)
+plan = adapter.prepare()
+review = create_reviewed_gwas_catalog_ancestry_execution_metadata(
+    plan,
+    approve_source_dispatch=True,
+)
+registration = create_reviewed_gwas_catalog_ancestry_autonomous_evidence_registration(
+    adapter,
+    plan,
+    study_accession="GCST90296481",
+)
+```
+
+The transient bundle carries stage, source-reported individual count, ancestry labels, and origin
+and recruitment descriptors. A missing value remains `None`; a source-reported empty list remains
+empty. These descriptors do not give case/control counts, association-specific sample sizes,
+population representativeness, or genetic ancestry inference. The autonomous registration validates
+the plan-bound receipt and exposes provenance digests only, with `confidence=None`. See the
+[GWAS Catalog v2 reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference),
+[REST API guide](https://www.ebi.ac.uk/gwas/docs/programmatic-access/rest-api/), and
+[population descriptors](https://www.ebi.ac.uk/gwas/population-descriptors).
+The built-in transport applies `timeout_ms`, refuses redirects, and shares the Catalog request
+pacer. An injected Python fetcher receives `timeout_ms` but must enforce it along with its own
+redirect, network, and credential policy.
+
 ## Reviewed Europe PMC publication-metadata retrieval
 
 `ReviewedEuropePmcRetrievalAdapter` reads Europe PMC's fixed REST search endpoint in JSON `lite`
