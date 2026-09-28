@@ -309,6 +309,16 @@ def test_action_enforces_result_byte_bound_while_cli_writes(
     assert not Path(environment["GITHUB_OUTPUT"]).exists()
 
 
+def test_action_rejects_oversized_multibyte_output_without_encoding_a_copy() -> None:
+    class EncodingForbiddenText(str):
+        def encode(self, *_args, **_kwargs):
+            raise AssertionError("rejected output must not be copied into UTF-8 bytes")
+
+    writer = action_module._BoundedTextBuffer(maximum_bytes=8)
+    with pytest.raises(AutonomousAgentActionError, match="exceeds its byte bound"):
+        writer.write(EncodingForbiddenText("界" * 4))
+
+
 def test_action_capture_bounds_many_small_result_writes_and_discards_diagnostics(tmp_path: Path) -> None:
     environment = _environment(tmp_path)
     payload = {

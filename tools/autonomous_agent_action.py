@@ -48,9 +48,28 @@ class _BoundedTextBuffer(io.TextIOBase):
     def write(self, value: str) -> int:
         if not isinstance(value, str):
             raise TypeError("CLI output must be text")
-        value_size = len(value) if value.isascii() else len(value.encode("utf-8"))
-        if self._size_bytes + value_size > self._maximum_bytes:
+        remaining = self._maximum_bytes - self._size_bytes
+        if len(value) > remaining:
             raise AutonomousAgentActionError("autonomous CLI result exceeds its byte bound")
+        if value.isascii():
+            value_size = len(value)
+        else:
+            value_size = 0
+            for index, character in enumerate(value):
+                codepoint = ord(character)
+                if codepoint <= 0x7F:
+                    width = 1
+                elif codepoint <= 0x7FF:
+                    width = 2
+                elif 0xD800 <= codepoint <= 0xDFFF:
+                    raise UnicodeEncodeError("utf-8", value, index, index + 1, "surrogates not allowed")
+                elif codepoint <= 0xFFFF:
+                    width = 3
+                else:
+                    width = 4
+                value_size += width
+                if value_size > remaining:
+                    raise AutonomousAgentActionError("autonomous CLI result exceeds its byte bound")
         self._buffer.write(value)
         self._size_bytes += value_size
         return len(value)
