@@ -91,6 +91,15 @@ fixed TCGA-GBM and TCGA-LGG project IDs. It requests only the project summary an
 category counts after literal approval, binds transport/config/plan/response metadata by digest,
 and projects only digest references into autonomous evidence. This is a bounded cohort inventory,
 not case-level research or an exhaustive GDC search.
+The Python and TypeScript SDKs also expose a reviewed cBioPortal metadata adapter for fixed public
+TCGA `gbm_tcga` and `lgg_tcga` studies. Each study plan permits exactly a study-summary GET and one
+sorted `SUMMARY` molecular-profile GET, with a 128-profile page cap and normalized source digests.
+The adapter rejects private or mismatched studies, unsupported profile types, duplicate profile
+identifiers, and a full page that could have been truncated; it retains no sample, patient, clinical,
+or molecular-value rows. Literal approval is required before dispatch, and autonomous evidence
+receives only digests. The current public API is beta, so the adapter is intentionally fixed-scope
+and fails closed when the source contract changes ([API overview](https://docs.cbioportal.org/web-api-and-clients/),
+[OpenAPI reference](https://www.cbioportal.org/api/swagger-ui/index.html?urls.primaryName=internal)).
 Remaining work toward full autonomous external research is additional reviewed source/provider
 coverage, concrete tenant-authorized shared-store and monotonic-anchor integrations,
 deployment-owned independent claim-quality authority over retrieved evidence, human-review

@@ -837,6 +837,19 @@ receipt, and project only digest metadata without widening the approved source p
 first reviewed live-retrieval adapter, not general web research or evidence validation; broader
 sources, shared coordination, uncertain-call reconciliation, evidence-quality enforcement, and
 independent claim-integrity review remain deployment work.
+Python and TypeScript also expose `ReviewedCBioPortalRetrievalAdapter` for two fixed public
+catalogue lanes (`gbm_tcga`, `lgg_tcga`). After a network-free `prepare()` and literal dispatch
+approval, it issues exactly two bounded GETs per selected study: the study summary and one sorted
+`SUMMARY` molecular-profile page capped at 128 rows. It keeps only allow-listed study descriptors,
+aggregate sample counts, and profile metadata; sample, patient, clinical, and molecular-value routes
+are outside the plan. Plans bind the endpoint, fields, pagination, transport identity, and fixed
+study set. Receipts bind the normalized catalogue and counts; autonomous evidence receives only
+bundle/source digests. Full profile pages are refused as potentially truncated, missing counts remain
+unknown, and source metadata stays transient. The public API is documented as beta and can change;
+the adapter fails closed on identity, response, or profile-schema drift. See the official
+[API overview](https://docs.cbioportal.org/web-api-and-clients/) and
+[OpenAPI reference](https://www.cbioportal.org/api/swagger-ui/index.html?urls.primaryName=internal).
+It supplies catalogue coverage, not evidence quality or exhaustive glioma discovery.
 For a safe before/after refresh, use
 [`scripts/run_neurosurgical_public_literature_refresh_review.ps1`](scripts/run_neurosurgical_public_literature_refresh_review.ps1):
 it validates the baseline, creates a separate candidate, runs the cross-specialty refresh audit,

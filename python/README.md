@@ -78,6 +78,19 @@ Retrieved abstracts remain unverified source text and require independent eviden
 claim review. The adapter does not provide a shared durable coordinator, uncertain-call
 reconciliation, exactly-once delivery, or durable raw-bundle storage.
 
+`ReviewedCBioPortalRetrievalAdapter` provides a separate, explicitly approved metadata catalogue
+for the fixed public `gbm_tcga` and `lgg_tcga` studies. Its plan is network-free. Approved execution
+performs a study-summary GET and one sorted `SUMMARY` molecular-profile GET per study, capped at
+128 profiles. It retains only allow-listed descriptors and the source-reported aggregate sample
+count; samples, patients, clinical rows, and molecular values are not requested. Use
+`create_reviewed_cbioportal_autonomous_evidence_registration()` to bind one study plan to the
+evidence runtime. It validates the transient bundle and receipt, then returns only source and bundle
+digests. Missing counts remain unknown, and a full profile page is refused because it may be
+truncated. The [official cBioPortal API documentation](https://docs.cbioportal.org/web-api-and-clients/)
+links to the current [OpenAPI reference](https://www.cbioportal.org/api/swagger-ui/index.html?urls.primaryName=internal);
+that API is beta and may change, so the adapter refuses contract drift. It does not claim exhaustive
+glioma coverage or evidence quality.
+
 When an actual local model is available, `ollama_provider()` configures the Ollama
 OpenAI-compatible loopback server (`http://127.0.0.1:11434/v1`) without reading or requiring an
 API key. Register it with `LLMRuntime`, select an installed model, and retain the normal provider
