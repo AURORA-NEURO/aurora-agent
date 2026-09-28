@@ -980,8 +980,30 @@ export class MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalWorker
     if (anchorAdvanced === false) return false;
     const snapshotWritten = await this.store.writeIfUnchanged(expectedSnapshotDigest, encoded);
     if (snapshotWritten !== true && snapshotWritten !== false) fail("journal compare-and-set must return a boolean");
-    if (snapshotWritten === false) fail("monotonic anchor advanced before journal compare-and-swap; matching signed snapshot roll-forward is required");
+    if (snapshotWritten === false) fail("monotonic anchor advanced before journal compare-and-swap; matching anchor-bound snapshot roll-forward is required");
     return true;
+  }
+
+  async rollForward(snapshotValue: AutonomousGoalWorkerJournalSnapshot): Promise<AutonomousGoalWorkerJournalSnapshot> {
+    const snapshot = AutonomousGoalWorkerJournal.validateSnapshot(snapshotValue);
+    const anchor = await this.readAnchor();
+    if (anchor === null || canonicalJson(anchorForSnapshot(snapshot)) !== canonicalJson(anchor)) fail("roll-forward snapshot does not match the trusted monotonic anchor");
+    const current = await super.read();
+    if (current !== null && current.snapshot_digest === snapshot.snapshot_digest) {
+      const restored = await this.read();
+      if (restored === null) fail("roll-forward did not restore the anchor-bound journal snapshot");
+      return restored;
+    }
+    if (current !== null && current.sequence >= snapshot.sequence) fail("roll-forward snapshot does not advance the stored journal");
+    const encoded = canonicalJson(this.envelope(snapshot));
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_GOAL_WORKER_JOURNAL_MAX_AUTHENTICATED_BYTES) fail("authenticated journal snapshot exceeds its byte bound");
+    const expected = current?.snapshot_digest ?? null;
+    const written = await this.store.writeIfUnchanged(expected, encoded);
+    if (written !== true && written !== false) fail("journal compare-and-set must return a boolean");
+    if (written === false) fail("journal roll-forward compare-and-swap conflict");
+    const restored = await this.read();
+    if (restored === null || restored.snapshot_digest !== snapshot.snapshot_digest) fail("roll-forward did not restore the anchor-bound journal snapshot");
+    return restored;
   }
 }
 

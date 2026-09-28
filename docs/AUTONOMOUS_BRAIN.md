@@ -7843,7 +7843,8 @@ and Python `MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalSnapsho
 bind snapshot sequence, head digest, and snapshot digest to a caller-owned monotonic anchor CAS.
 Deployments must keep that anchor in a separately protected, non-rollback trust domain and provide
 tenant authorization and encryption. The anchor advances before the snapshot CAS; a crash in
-between fails closed and requires explicit roll-forward from the matching signed snapshot.
+between fails closed. Recover with Python `roll_forward(snapshot)` or TypeScript `rollForward(snapshot)`;
+the candidate is accepted only when its digest, sequence, and head match the trusted anchor.
 
 `AutonomousGoalControlLoop` is the bounded autonomous continuation above one worker batch. It can
 run up to 128 scheduler/worker cycles and 8,192 total runs, invoke a caller-owned metadata-only
@@ -7901,9 +7902,10 @@ the same cross-language MAC contract. The optional
 journal sequence, head digest, and snapshot digest to a caller-owned monotonic anchor CAS and rejects
 replay of an older HMAC-valid snapshot. The anchor must live outside the journal store's rollback
 domain. HMAC does not encrypt the journal or enforce tenant/store authorization. A crash after anchor
-advance but before snapshot CAS fails closed and requires explicit roll-forward from the matching
-signed snapshot; deployments still provide protected key management, authorization, and the trusted
-anchor implementation.
+advance but before snapshot CAS fails closed. Recover with Python `roll_forward(snapshot)` or
+TypeScript `rollForward(snapshot)`; the candidate is accepted only when its digest, sequence, and
+head match the trusted anchor. Deployments still provide protected key management, authorization,
+and the trusted anchor implementation.
 
 Deployments that own both stores should compose them with
 `AutonomousGoalRecoveryCoordinator` (Python and TypeScript). Its restore transaction is ordered:

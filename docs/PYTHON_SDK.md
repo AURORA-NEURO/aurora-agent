@@ -149,7 +149,8 @@ For an HMAC-protected shared snapshot store with rollback detection, use
 `anchor` implementing `read()` and `write_if_unchanged(expected_anchor_digest, state)`. The anchor
 must live in a separately protected, non-rollback trust domain. It advances before the snapshot
 store CAS, so interruption between the two writes fails closed and requires roll-forward from the
-matching signed snapshot. The TypeScript SDK exposes the same contract.
+matching anchor-bound snapshot with `roll_forward(snapshot)`. The TypeScript SDK exposes the same contract
+through `rollForward(snapshot)`.
 
 Preview-admission approvals also use exact nanosecond strings in schema 0.2. Existing 0.1 approval
 records and snapshots are refused with a re-review requirement: an old approval is not migrated

@@ -1400,6 +1400,9 @@ test("monotonic journal anchor rejects replay of an older valid signed snapshot"
 
   store.value = oldEnvelope;
   await assert.rejects(() => persistence.read(), /rollback or incomplete commit/);
+  await assert.rejects(() => persistence.rollForward(oldSnapshot), /does not match the trusted monotonic anchor/);
+  const restored = await persistence.rollForward(newSnapshot);
+  assert.equal(restored.snapshot_digest, newSnapshot.snapshot_digest);
 });
 
 test("verified dispatch outcomes settle exact recovered attempts and keep uncertain status blocked", () => {
@@ -2799,6 +2802,9 @@ test("monotonic goal anchor rejects replay of an older valid signed snapshot", a
 
   store.value = oldEnvelope;
   await assert.rejects(() => persistence.read(), /rollback or incomplete commit/);
+  await assert.rejects(() => persistence.rollForward(oldSnapshot), /does not match the trusted monotonic anchor/);
+  const restored = await persistence.rollForward(newSnapshot);
+  assert.equal(restored.snapshot_digest, newSnapshot.snapshot_digest);
 });
 
 test("migrated goal, journal, and checkpoint snapshots survive persistence and a live restart cycle", async () => {

@@ -1806,6 +1806,10 @@ def test_monotonic_journal_anchor_rejects_replay_of_an_older_valid_signed_snapsh
     store.value = old_envelope
     with pytest.raises(AutonomousGoalError, match="rollback or incomplete commit"):
         persistence.read()
+    with pytest.raises(AutonomousGoalError, match="does not match the trusted monotonic anchor"):
+        persistence.roll_forward(old_snapshot)
+    restored = persistence.roll_forward(new_snapshot)
+    assert restored["snapshot_digest"] == new_snapshot["snapshot_digest"]
 
 
 def test_verified_dispatch_outcomes_settle_exact_recovered_attempts_and_keep_uncertain_status_blocked() -> None:
@@ -3726,6 +3730,10 @@ def test_monotonic_goal_anchor_rejects_replay_of_an_older_valid_signed_snapshot(
     store.value = old_envelope
     with pytest.raises(AutonomousGoalError, match="rollback or incomplete commit"):
         persistence.read()
+    with pytest.raises(AutonomousGoalError, match="does not match the trusted monotonic anchor"):
+        persistence.roll_forward(old_snapshot)
+    restored = persistence.roll_forward(new_snapshot)
+    assert restored["snapshot_digest"] == new_snapshot["snapshot_digest"]
     ledger.close()
 
 

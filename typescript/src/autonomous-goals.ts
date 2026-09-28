@@ -925,8 +925,30 @@ export class MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalPersis
     if (anchorAdvanced === false) return false;
     const snapshotWritten = await this.textStore.writeIfUnchanged(expectedSnapshotDigest, encoded);
     if (snapshotWritten !== true && snapshotWritten !== false) throw new ArgumentError("goal snapshot compare-and-set must return a boolean");
-    if (snapshotWritten === false) throw new ArgumentError("goal monotonic anchor advanced before snapshot compare-and-swap; matching signed snapshot roll-forward is required");
+    if (snapshotWritten === false) throw new ArgumentError("goal monotonic anchor advanced before snapshot compare-and-swap; matching anchor-bound snapshot roll-forward is required");
     return true;
+  }
+
+  async rollForward(snapshotValue: AutonomousGoalSnapshot): Promise<AutonomousGoalSnapshot> {
+    const snapshot = validateAutonomousGoalSnapshot(snapshotValue);
+    const anchor = await this.readAnchor();
+    if (anchor === null || canonicalJson(goalAnchorForSnapshot(snapshot)) !== canonicalJson(anchor)) throw new ArgumentError("goal roll-forward snapshot does not match the trusted monotonic anchor");
+    const current = await super.read();
+    if (current !== null && current.snapshot_digest === snapshot.snapshot_digest) {
+      const restored = await this.read();
+      if (restored === null) throw new ArgumentError("goal roll-forward did not restore the anchor-bound snapshot");
+      return restored;
+    }
+    if (current !== null && current.sequence >= snapshot.sequence) throw new ArgumentError("goal roll-forward snapshot does not advance the stored ledger");
+    const encoded = canonicalJson(this.envelope(snapshot));
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_GOAL_MAX_AUTHENTICATED_SNAPSHOT_BYTES) throw new ArgumentError("authenticated goal snapshot exceeds its byte bound");
+    const expected = current?.snapshot_digest ?? null;
+    const written = await this.textStore.writeIfUnchanged(expected, encoded);
+    if (written !== true && written !== false) throw new ArgumentError("goal snapshot compare-and-set must return a boolean");
+    if (written === false) throw new ArgumentError("goal roll-forward compare-and-swap conflict");
+    const restored = await this.read();
+    if (restored === null || restored.snapshot_digest !== snapshot.snapshot_digest) throw new ArgumentError("goal roll-forward did not restore the anchor-bound snapshot");
+    return restored;
   }
 }
 

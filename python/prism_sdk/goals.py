@@ -2036,8 +2036,37 @@ class MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalSnapshotPersi
         if type(snapshot_written) is not bool:
             raise AutonomousGoalError("goal snapshot compare-and-set must return a boolean")
         if not snapshot_written:
-            raise AutonomousGoalError("goal monotonic anchor advanced before snapshot compare-and-swap; matching signed snapshot roll-forward is required")
+            raise AutonomousGoalError("goal monotonic anchor advanced before snapshot compare-and-swap; matching anchor-bound snapshot roll-forward is required")
         return True
+
+    def roll_forward(self, snapshot_value: Mapping[str, Any]) -> dict[str, Any]:
+        """Repair a split commit only from a valid snapshot whose identity matches the anchor."""
+
+        snapshot = validate_goal_snapshot(snapshot_value)
+        anchor = self._read_anchor()
+        if anchor is None or self._anchor_for(snapshot) != anchor:
+            raise AutonomousGoalError("goal roll-forward snapshot does not match the trusted monotonic anchor")
+        current = super().read()
+        if current is not None and current["snapshot_digest"] == snapshot["snapshot_digest"]:
+            restored = self.read()
+            if restored is None:
+                raise AutonomousGoalError("goal roll-forward did not restore the anchor-bound snapshot")
+            return restored
+        if current is not None and current["sequence"] >= snapshot["sequence"]:
+            raise AutonomousGoalError("goal roll-forward snapshot does not advance the stored ledger")
+        encoded = _canonical_goal_json(self._envelope(snapshot))
+        if len(encoded.encode("utf-8")) > MAX_AUTHENTICATED_GOAL_SNAPSHOT_BYTES:
+            raise AutonomousGoalError("authenticated goal snapshot exceeds its byte bound")
+        expected = None if current is None else current["snapshot_digest"]
+        snapshot_written = self.store.write_if_unchanged(expected, encoded)
+        if type(snapshot_written) is not bool:
+            raise AutonomousGoalError("goal snapshot compare-and-set must return a boolean")
+        if not snapshot_written:
+            raise AutonomousGoalError("goal roll-forward compare-and-swap conflict")
+        restored = self.read()
+        if restored is None or restored["snapshot_digest"] != snapshot["snapshot_digest"]:
+            raise AutonomousGoalError("goal roll-forward did not restore the anchor-bound snapshot")
+        return restored
 
 
 class AutonomousGoalPersistenceCoordinator:

@@ -1198,7 +1198,7 @@ class MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalWorkerJournal
 
     The anchor must be stored in a trust domain that cannot be rolled back with the journal text
     store. It advances before the journal CAS; a crash between those writes fails closed and needs
-    explicit roll-forward reconciliation from the matching signed snapshot.
+    explicit roll-forward reconciliation from the matching anchor-bound snapshot.
     """
 
     def __init__(
@@ -1282,8 +1282,37 @@ class MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalWorkerJournal
         if type(snapshot_written) is not bool:
             _fail("journal compare-and-set must return a boolean")
         if not snapshot_written:
-            _fail("monotonic anchor advanced before journal compare-and-swap; matching signed snapshot roll-forward is required")
+            _fail("monotonic anchor advanced before journal compare-and-swap; matching anchor-bound snapshot roll-forward is required")
         return True
+
+    def roll_forward(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        """Repair a split commit only from a valid snapshot whose identity matches the anchor."""
+
+        snapshot = AutonomousGoalWorkerJournal.validate_snapshot(value)
+        anchor = self._read_anchor()
+        if anchor is None or self._anchor_for(snapshot) != anchor:
+            _fail("roll-forward snapshot does not match the trusted monotonic anchor")
+        current = super().read()
+        if current is not None and current["snapshot_digest"] == snapshot["snapshot_digest"]:
+            restored = self.read()
+            if restored is None:
+                _fail("journal roll-forward did not restore the anchor-bound snapshot")
+            return restored
+        if current is not None and current["sequence"] >= snapshot["sequence"]:
+            _fail("roll-forward snapshot does not advance the stored journal")
+        encoded = canonical_json(self._envelope(snapshot))
+        if len(encoded.encode("utf-8")) > MAX_AUTHENTICATED_GOAL_WORKER_JOURNAL_BYTES:
+            _fail("authenticated journal snapshot exceeds its byte bound")
+        expected = None if current is None else current["snapshot_digest"]
+        snapshot_written = self.store.write_if_unchanged(expected, encoded)
+        if type(snapshot_written) is not bool:
+            _fail("journal compare-and-set must return a boolean")
+        if not snapshot_written:
+            _fail("journal roll-forward compare-and-swap conflict")
+        restored = self.read()
+        if restored is None or restored["snapshot_digest"] != snapshot["snapshot_digest"]:
+            _fail("journal roll-forward did not restore the anchor-bound snapshot")
+        return restored
 
 
 class AutonomousGoalWorkerJournalPersistenceCoordinator:
