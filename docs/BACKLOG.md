@@ -83,7 +83,12 @@ config/plan/bundle/receipt digests for shared transport fixtures, explicit unkno
 transient publication values, and source-checked digest-only evidence registration. Its keyword
 lanes are not exhaustive, and it does not retrieve abstracts, full text, or independent quality
 judgments ([API](https://dev.europepmc.org/RestfulWebService)).
-Remaining work toward full autonomous external research is broader reviewed source/provider
+The Python and TypeScript SDKs now also expose a reviewed NCI GDC project-metadata adapter for the
+fixed TCGA-GBM and TCGA-LGG project IDs. It requests only the project summary and aggregate data
+category counts after literal approval, binds transport/config/plan/response metadata by digest,
+and projects only digest references into autonomous evidence. This is a bounded cohort inventory,
+not case-level research or an exhaustive GDC search.
+Remaining work toward full autonomous external research is additional reviewed source/provider
 coverage, concrete tenant-authorized shared-store integrations with anti-rollback guarantees,
 deployment-owned independent claim-quality authority over retrieved evidence, human-review
 settlement integrations, production scheduling integrations, and production retention/authorization

@@ -14271,3 +14271,61 @@ spend budget. Numeric snapshots can be persisted and rehydrated by the caller, b
 estimate accounting rather than billing truth and do not reconstruct an in-flight external
 request. Typed overflow errors retain only bounded accounting fields; task text, prompts,
 provider payloads, credentials, and keys remain transient.
+
+## Reviewed NCI GDC project metadata
+
+The Python and TypeScript SDKs expose `ReviewedGdcRetrievalAdapter` for the fixed `TCGA-GBM` and
+`TCGA-LGG` projects. Preflight is provider-free and returns a digest-bound plan. Live retrieval
+requires literal `approve_source_dispatch: true` and makes one request per selected project to the
+fixed GDC `/projects/{project_id}` endpoint, expanding only the public project summary and aggregate
+data-category counts. The query follows the GDC [project endpoint contract](https://docs.gdc.cancer.gov/API/Users_Guide/Search_and_Retrieval/).
+
+```python
+from prism_sdk import (
+    ReviewedGdcRetrievalAdapter,
+    ReviewedGdcRetrievalConfig,
+    create_reviewed_gdc_autonomous_evidence_registration,
+    create_reviewed_gdc_execution_metadata,
+)
+
+config = ReviewedGdcRetrievalConfig(project_ids=("TCGA-GBM",))
+adapter = ReviewedGdcRetrievalAdapter(config)
+plan = adapter.prepare()  # deterministic; no network request
+metadata = create_reviewed_gdc_execution_metadata(
+    plan,
+    approve_source_dispatch=True,
+)
+registration = create_reviewed_gdc_autonomous_evidence_registration(
+    adapter,
+    plan,
+    project_id="TCGA-GBM",
+)
+```
+
+The TypeScript API mirrors the same contract:
+
+```typescript
+const config = new ReviewedGdcRetrievalConfig({ projectIds: ["TCGA-GBM"] });
+const adapter = new ReviewedGdcRetrievalAdapter(config);
+const plan = adapter.prepare(); // deterministic; no network request
+const metadata = createReviewedGdcExecutionMetadata(plan, true);
+const registration = createReviewedGdcAutonomousEvidenceRegistration(
+  adapter,
+  plan,
+  "TCGA-GBM",
+);
+```
+
+The result is a bounded, transient aggregate inventory: project name and classification metadata,
+release state, reported case/file totals, and categorized aggregate counts. Missing totals remain
+`null` and make completeness `unknown`; they are never replaced with zero. The autonomous evidence
+registration validates the source receipt and projects only bundle/source digests, a provenance
+label, and limitations. It does not persist project text, query cases, enumerate files, retrieve
+assay or sequence values, or access controlled data. The fixed two-project catalogue is not an
+exhaustive GDC search, and its counts do not establish patient eligibility, study quality, outcomes,
+or clinical meaning.
+
+Injected transports must use a distinct reviewed transport identity and own their timeout,
+redirect, and network policy. The Python and TypeScript contract tests use one shared fixture
+transport identity and require matching configuration, plan, bundle, and receipt digests; each
+built-in transport retains its own implementation identity.

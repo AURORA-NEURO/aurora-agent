@@ -18,6 +18,43 @@ raise `AttributeError` after package initialization. The import compatibility sh
 package initialization and restores Python's original import function before `import prism_sdk`
 returns.
 
+## Reviewed NCI GDC project-metadata retrieval
+
+`ReviewedGdcRetrievalAdapter` supports the fixed `TCGA-GBM` and `TCGA-LGG` project catalogue.
+`prepare()` is network-free. Approved execution makes one pinned request per project for summary
+and aggregate data-category metadata only. `create_reviewed_gdc_autonomous_evidence_registration()`
+binds a single-project plan to the evidence runtime and validates the transient source receipt before
+projecting provenance digests. Missing source totals stay `None` and produce `unknown` completeness.
+
+```python
+from prism_sdk import (
+    ReviewedGdcRetrievalAdapter,
+    ReviewedGdcRetrievalConfig,
+    create_reviewed_gdc_autonomous_evidence_registration,
+    create_reviewed_gdc_execution_metadata,
+)
+
+config = ReviewedGdcRetrievalConfig(project_ids=("TCGA-GBM",))
+adapter = ReviewedGdcRetrievalAdapter(config)
+plan = adapter.prepare()
+review = create_reviewed_gdc_execution_metadata(
+    plan,
+    approve_source_dispatch=True,
+)
+registration = create_reviewed_gdc_autonomous_evidence_registration(
+    adapter,
+    plan,
+    project_id="TCGA-GBM",
+)
+```
+
+The plan and review record do not dispatch; the evidence runtime consumes that record only at the
+approved acquisition boundary. Project names and aggregate counts remain in the caller-owned
+transient result, while durable evidence observations contain source and bundle digests only. The
+adapter does not query case, sample, file, molecular-value, or controlled-access endpoints. Its
+fixed catalogue is not exhaustive and does not establish patient eligibility, quality, outcomes, or
+clinical meaning. See the [GDC Search and Retrieval guide](https://docs.gdc.cancer.gov/API/Users_Guide/Search_and_Retrieval/).
+
 ## Reviewed Europe PMC publication-metadata retrieval
 
 `ReviewedEuropePmcRetrievalAdapter` reads Europe PMC's fixed REST search endpoint in JSON `lite`

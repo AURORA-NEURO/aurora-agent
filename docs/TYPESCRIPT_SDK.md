@@ -2401,3 +2401,30 @@ projects digest-only provenance observations. This source supplies bibliographic
 abstracts, full text, exhaustive coverage, or independent study-quality judgments. See the
 [Europe PMC REST API](https://dev.europepmc.org/RestfulWebService) and its
 [web-service reference](https://dev.europepmc.org/docs/EBI_Europe_PMC_Web_Service_Reference.pdf).
+
+## Reviewed NCI GDC project-metadata retrieval
+
+`ReviewedGdcRetrievalAdapter` supports the fixed `TCGA-GBM` and `TCGA-LGG` project catalogue.
+`prepare()` is network-free. Approved execution makes one pinned request per project for summary
+and aggregate data-category metadata only. `createReviewedGdcAutonomousEvidenceRegistration()` binds
+a single-project plan to the evidence runtime and validates the transient source receipt before
+projecting provenance digests. Missing source totals stay `null` and produce `unknown` completeness.
+
+```ts
+const config = new ReviewedGdcRetrievalConfig({ projectIds: ["TCGA-GBM"] });
+const adapter = new ReviewedGdcRetrievalAdapter(config);
+const plan = adapter.prepare();
+const review = createReviewedGdcExecutionMetadata(plan, true);
+const registration = createReviewedGdcAutonomousEvidenceRegistration(
+  adapter,
+  plan,
+  "TCGA-GBM",
+);
+```
+
+The plan and review record do not dispatch; the evidence runtime consumes that record only at the
+approved acquisition boundary. Project names and aggregate counts remain in the caller-owned
+transient result, while durable evidence observations contain source and bundle digests only. The
+adapter does not query case, sample, file, molecular-value, or controlled-access endpoints. Its
+fixed catalogue is not exhaustive and does not establish patient eligibility, quality, outcomes, or
+clinical meaning. See the [GDC Search and Retrieval guide](https://docs.gdc.cancer.gov/API/Users_Guide/Search_and_Retrieval/).
