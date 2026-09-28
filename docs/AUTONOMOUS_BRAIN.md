@@ -7868,6 +7868,9 @@ domain-scoped value update to future admission signals; a custom learner returns
 priority/urgency signals plus a learning-state digest. Learners cannot change dependency edges,
 deadlines, or cost estimates. Feedback and learner state are
 retained as digests/counts only, with evaluator values and live results remaining process-local.
+Direct calls to `AutonomousGoalBanditLearner.update` enforce the same binding: each evaluation
+must name one goal in the supplied bounded goal set, and a goal may appear only once per update.
+Orphaned or duplicate packets are rejected without changing the learner state.
 
 The outer loop now has its own crash/restart boundary rather than relying on the worker journal
 alone. Supply a stable `run_id` and a checkpoint callback (or use

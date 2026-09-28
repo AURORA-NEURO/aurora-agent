@@ -409,31 +409,52 @@ class AutonomousGoalBanditLearner:
     def _update_unlocked(self, evaluations: Sequence[Mapping[str, Any]], goals: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if not isinstance(evaluations, Sequence) or isinstance(evaluations, (str, bytes, bytearray)) or len(evaluations) > MAX_GOAL_CONTROL_EVALUATIONS:
             _fail("bandit evaluations are outside their bounds")
+        if not isinstance(goals, Sequence) or isinstance(goals, (str, bytes, bytearray)) or len(goals) > MAX_GOALS:
+            _fail("bandit goals are outside their bounds")
+
+        # Snapshot caller-owned containers before validation/use. Sequence and Mapping are
+        # public protocols, so implementations may otherwise change between repeated reads.
+        evaluation_rows: list[dict[str, Any]] = []
+        for raw in evaluations:
+            if len(evaluation_rows) >= MAX_GOAL_CONTROL_EVALUATIONS:
+                _fail("bandit evaluations are outside their bounds")
+            if not isinstance(raw, Mapping):
+                _fail("bandit evaluation is malformed")
+            evaluation_rows.append(dict(raw))
+
         goals_by_id: dict[str, Mapping[str, Any]] = {}
+        goal_rows: list[dict[str, Any]] = []
         for goal in goals:
+            if len(goal_rows) >= MAX_GOALS:
+                _fail("bandit goals are outside their bounds")
             if not isinstance(goal, Mapping):
                 _fail("bandit goal is malformed")
-            goal_id = _identifier(goal.get("goal_id"), name="bandit goal_id")
+            goal_row = dict(goal)
+            goal_id = _identifier(goal_row.get("goal_id"), name="bandit goal_id")
             if goal_id in goals_by_id:
                 _fail("bandit goals contain duplicate goal_id values")
-            goals_by_id[goal_id] = goal
+            goals_by_id[goal_id] = goal_row
+            goal_rows.append(goal_row)
         if self.generation >= 2**31 - 1:
             _fail("bandit generation is exhausted")
-        for raw in evaluations:
-            if not isinstance(raw, Mapping) or not isinstance(raw.get("passed"), bool):
+        seen_goal_ids: set[str] = set()
+        for raw in evaluation_rows:
+            if not isinstance(raw.get("passed"), bool):
                 _fail("bandit evaluation is malformed")
             domain = _identifier(raw.get("domain"), name="bandit evaluation domain", maximum=128)
+            evaluation_goal_id = _identifier(raw.get("goal_id"), name="bandit evaluation goal_id")
+            if evaluation_goal_id not in goals_by_id:
+                _fail("bandit evaluation references an unknown goal_id")
+            if evaluation_goal_id in seen_goal_ids:
+                _fail("bandit evaluations contain duplicate goal_id values")
+            seen_goal_ids.add(evaluation_goal_id)
             reward = raw.get("reward")
             if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not -1.0 <= float(reward) <= 1.0:
                 _fail("bandit evaluation reward is outside its bounds")
-            evaluation_goal = goals_by_id.get(raw.get("goal_id"))
-            if evaluation_goal is not None:
-                context_domain, capability, risk_class = self._context(evaluation_goal, name="bandit evaluation goal")
-                if context_domain != domain:
-                    _fail("bandit evaluation domain does not match its goal")
-            else:
-                capability = None
-                risk_class = None
+            evaluation_goal = goals_by_id[evaluation_goal_id]
+            context_domain, capability, risk_class = self._context(evaluation_goal, name="bandit evaluation goal")
+            if context_domain != domain:
+                _fail("bandit evaluation domain does not match its goal")
             arm = self._ensure_arm(domain, capability, risk_class)
             if int(arm["pulls"]) >= 2**31 - 1:
                 _fail("bandit arm pulls are exhausted")
@@ -446,7 +467,7 @@ class AutonomousGoalBanditLearner:
         self.generation += 1
         total_pulls = max(1, sum(int(arm["pulls"]) for arm in self.arms.values()))
         signals: list[dict[str, Any]] = []
-        for goal in goals:
+        for goal in goal_rows:
             status = goal.get("status")
             if status not in {"ready", "paused", "failed"}:
                 continue

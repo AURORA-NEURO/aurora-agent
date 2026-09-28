@@ -277,6 +277,37 @@ def test_goal_bandit_separates_capability_and_risk_contexts_with_deterministic_r
     assert validate_autonomous_goal_control_loop_snapshot(checkpoint)["learner_state"] == snapshot
 
 
+def test_goal_bandit_rejects_unbound_or_duplicate_evaluations_without_mutating_state() -> None:
+    goals = [{"goal_id": "known-goal", "domain": "coding", "status": "ready"}]
+    evaluation = {"goal_id": "known-goal", "domain": "coding", "reward": 0.8, "passed": True}
+    invalid_batches = [
+        ([{"domain": "coding", "reward": 0.8, "passed": True}], "goal_id"),
+        ([{**evaluation, "goal_id": "missing-goal"}], "unknown goal_id"),
+        ([evaluation, evaluation], "duplicate goal_id"),
+    ]
+
+    for packets, message in invalid_batches:
+        learner = AutonomousGoalBanditLearner()
+        with pytest.raises(AutonomousGoalError, match=message):
+            learner.update(packets, goals)
+        assert learner.snapshot()["generation"] == 0
+        assert learner.snapshot()["arms"] == []
+
+
+def test_goal_bandit_rejects_oversized_goal_sequence() -> None:
+    from prism_sdk.goals import MAX_GOALS
+
+    goals = [
+        {"goal_id": f"goal-{index}", "domain": "coding", "status": "ready"}
+        for index in range(MAX_GOALS + 1)
+    ]
+    learner = AutonomousGoalBanditLearner()
+    with pytest.raises(AutonomousGoalError, match="goals are outside their bounds"):
+        learner.update([], goals)
+    assert learner.snapshot()["generation"] == 0
+    assert learner.snapshot()["arms"] == []
+
+
 def test_goal_control_loop_preview_is_provider_free_and_explains_all_domain_admission() -> None:
     domains = tuple(AUTONOMOUS_DOMAINS)
     ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=len(domains) + 1)
