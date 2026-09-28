@@ -428,8 +428,12 @@ class AutonomousAgentStateMixin:
         if error is not None:
             try:
                 controller.fail(reason="execution_error")
-            except Exception:
-                pass
+            except Exception as settlement_error:
+                settlement_class = type(settlement_error).__name__[:128]
+                error.add_note(
+                    "autonomous execution failure status could not be confirmed in the journal "
+                    f"({settlement_class}); inspect the journal before resuming"
+                )
             return
         status = getattr(result, "status", None)
         if not isinstance(status, str):

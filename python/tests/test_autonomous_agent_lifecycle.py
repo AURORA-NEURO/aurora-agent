@@ -29,6 +29,23 @@ from prism_sdk import (
 )
 
 
+def test_execution_settlement_failure_is_attached_to_original_error() -> None:
+    class FailingController:
+        def fail(self, *, reason: str) -> None:
+            raise OSError("private persistence detail")
+
+    original_error = RuntimeError("provider failed")
+
+    AutonomousAgent._finish_execution(FailingController(), error=original_error)
+
+    assert type(original_error) is RuntimeError
+    assert original_error.__notes__ == [
+        "autonomous execution failure status could not be confirmed in the journal "
+        "(OSError); inspect the journal before resuming"
+    ]
+    assert "private persistence detail" not in "\n".join(original_error.__notes__)
+
+
 class _LifecyclePersistenceStub:
     def restore(self) -> None:
         return None

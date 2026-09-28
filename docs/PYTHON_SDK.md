@@ -263,6 +263,11 @@ provider outcome also records a metadata-only `retryable` flag. With `stop_on_er
 non-retryable failure moves the controller to `error` and requires an explicit `fail()` decision;
 retryable failures remain eligible for the caller's bounded continuation ladder.
 
+If an agent operation fails and the journal cannot confirm the terminal failure transition, the
+original operation exception is preserved with a bounded Python exception note. Inspect the
+execution journal before resuming that id; the in-memory failure is not evidence that the journal
+recorded it.
+
 An evaluator-approved planning transition is recorded with
 `controller.replan(instruction_digest=..., reason=..., attempt=...)`. Only the instruction digest,
 bounded reason, attempt index, and incremented replan counter enter the journal. `max_replans`
