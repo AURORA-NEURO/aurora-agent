@@ -170,6 +170,9 @@ pub struct GuidelineReference {
     pub title: String,
     pub uri: String,
     pub publisher: String,
+    /// Calendar date printed by the source, distinct from when this snapshot was retrieved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_date: Option<String>,
 }
 
 /// Compact PubMed citation, abstract, and indexing metadata. An indexed citation or abstract is
@@ -1049,6 +1052,17 @@ impl RealGliomaBundle {
             validate_text(&reference.reference_id, "reference_id")?;
             validate_text(&reference.title, "reference.title")?;
             validate_text(&reference.publisher, "reference.publisher")?;
+            if let Some(updated_date) = &reference.updated_date {
+                validate_text(updated_date, "reference.updated_date")?;
+                if !is_calendar_date(updated_date) {
+                    return Err(NeurosurgeryError::RealDataRejected {
+                        reason: format!(
+                            "guideline reference {} has an invalid updated_date",
+                            reference.reference_id
+                        ),
+                    });
+                }
+            }
             if !reference.uri.starts_with("https://") || !is_allow_listed_uri(&reference.uri) {
                 return Err(NeurosurgeryError::RealDataRejected {
                     reason: "guideline reference is not an allow-listed HTTPS authority"

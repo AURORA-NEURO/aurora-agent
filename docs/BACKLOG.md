@@ -24,6 +24,10 @@ a planning/citation surface, and the autonomous review wave emits an explicit
 project rows are source-linked, missingness and truncation stay explicit, and no files, samples,
 molecular values, cohort merges, or clinical conclusions are produced.
 
+The glioma population refresh now fetches the fixed NCI PDQ page and records its validated visible
+title and machine-readable update date in the source hash. It retains citation metadata only; the
+PDQ body is not copied into the snapshot. The optional date preserves validation of older bundles.
+
 When a caller supplies an explicit freshness clock, the autonomous workflow distinguishes stale
 from future-dated sources: stale sources emit a `refresh_source_snapshot` action pointing the
 worker to the allow-listed refresh adapter while preserving candidate validation and human

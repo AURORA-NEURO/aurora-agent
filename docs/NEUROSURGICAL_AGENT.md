@@ -840,7 +840,9 @@ population plane. It retrieves bounded public metadata from ClinicalTrials.gov, 
 cBioPortal, NCI PDQ, and PubMed, computes Rust-compatible hashes for every source, validates the
 mandatory registry/genomic/portal/guideline records, and atomically installs a candidate only
 after the local contract passes. The output contains no patient rows, assay values, image bytes,
-credentials, or synthetic fallback; promotion remains a reviewer-owned snapshot decision.
+credentials, or synthetic fallback; promotion remains a reviewer-owned snapshot decision. The
+refresh reads the NCI PDQ page's title and machine-readable update date for provenance, but does not
+copy or retain PDQ body text. Older snapshots without that optional update date remain valid.
 
 ```powershell
 '{"query":{"query":{"text":"glioblastoma","limit":8},"graph":{"max_nodes":32,"max_edges":64}},"claims":[{"claim_id":"trial-metadata","kind":"source_observation","scope":"public_record_metadata","text":"The packet contains a public registry record.","citations":[{"record_kind":"clinical_trial","record_id":"NCT00005955"}]}]}' |

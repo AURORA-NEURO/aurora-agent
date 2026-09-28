@@ -109,6 +109,44 @@ fn extended_real_snapshot_adds_tcga_lgg_without_collapsing_provenance() {
 }
 
 #[test]
+fn guideline_update_dates_are_optional_for_old_snapshots_and_bound_into_source_hashes() {
+    let mut data = bundle();
+    data.validate()
+        .expect("older snapshots without a source update date remain valid");
+    let serialized = serde_json::to_value(&data).expect("snapshot serializes");
+    assert!(serialized["references"][0].get("updated_date").is_none());
+
+    let source_id = data.references[0].source_id.clone();
+    let old_source_digest = data
+        .canonical_source_hashes()
+        .expect("old source hash computes")[&source_id]
+        .clone();
+    data.references[0].updated_date = Some("2025-03-28".to_string());
+    let source_digests = data
+        .canonical_source_hashes()
+        .expect("updated guideline source hash computes");
+    assert_ne!(source_digests[&source_id], old_source_digest);
+    data.sources
+        .iter_mut()
+        .find(|source| source.source_id == source_id)
+        .expect("PDQ source exists")
+        .content_sha256 = source_digests[&source_id].clone();
+    data.validate()
+        .expect("a source-reported calendar update date is valid");
+
+    data.references[0].updated_date = Some("2025-02-30".to_string());
+    let source_digests = data
+        .canonical_source_hashes()
+        .expect("malformed dates still have canonical bytes");
+    data.sources
+        .iter_mut()
+        .find(|source| source.source_id == source_id)
+        .expect("PDQ source exists")
+        .content_sha256 = source_digests[&source_id].clone();
+    assert!(data.validate().is_err(), "invalid dates must not be hash-blessed");
+}
+
+#[test]
 fn natural_language_intake_can_route_real_dicom_and_fhir_imports_together() {
     let agent = NeurosurgicalAgent::default();
     let real_data = extended_bundle();

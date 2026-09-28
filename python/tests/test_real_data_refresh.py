@@ -16,6 +16,12 @@ from prism_sdk.real_data_refresh import (
 
 
 def _fake_fetch(url: str):
+    if url == "https://www.cancer.gov/types/brain/hp/adult-brain-treatment-pdq":
+        return (
+            '<main><h1>Central Nervous System Tumors Treatment (PDQ®)–Health Professional Version</h1>'
+            '</main><footer><strong>Updated:</strong>'
+            '<time datetime="2025-03-28T12:00:00Z">March 28, 2025</time></footer>'
+        ).encode("utf-8")
     if "clinicaltrials.gov/api/v2/studies" in url:
         return {
             "studies": [{
@@ -85,7 +91,15 @@ def _refresh_kwargs() -> dict[str, object]:
 
 
 def test_refresh_builds_real_bundle_with_rust_compatible_digests() -> None:
-    bundle, report = refresh_real_glioma_data(**_refresh_kwargs())
+    request_urls: list[str] = []
+
+    def tracked_fetch(url: str):
+        request_urls.append(url)
+        return _fake_fetch(url)
+
+    bundle, report = refresh_real_glioma_data(
+        **{**_refresh_kwargs(), "fetch": tracked_fetch}
+    )
     validate_real_glioma_bundle(bundle)
     assert report.bundle_digest == bundle_digest(bundle)
     assert report.source_count == 5
@@ -93,8 +107,32 @@ def test_refresh_builds_real_bundle_with_rust_compatible_digests() -> None:
     assert report.genomic_project_count == 1
     assert report.molecular_profile_count == 1
     assert report.reference_count == 1
+    assert bundle["references"][0]["updated_date"] == "2025-03-28"
+    assert bundle["references"][0]["title"] == (
+        "Central Nervous System Tumors Treatment (PDQ®)–Health Professional Version"
+    )
+    assert request_urls.count("https://www.cancer.gov/types/brain/hp/adult-brain-treatment-pdq") == 1
     assert bundle["synthetic_data"] is False
     assert all(len(source["content_sha256"]) == 64 for source in bundle["sources"])
+
+
+@pytest.mark.parametrize(
+    "pdq_html",
+    [
+        "<h1>Unexpected NCI page</h1><time datetime='2025-03-28T12:00:00Z'>date</time>",
+        "<h1>Central Nervous System Tumors Treatment (PDQ®)–Health Professional Version</h1>",
+        "<h1>Central Nervous System Tumors Treatment (PDQ®)–Health Professional Version</h1>"
+        "<time datetime='2025-02-30T12:00:00Z'>date</time>",
+    ],
+)
+def test_refresh_refuses_pdq_pages_without_the_expected_title_and_valid_update_date(pdq_html: str) -> None:
+    def malformed_pdq_fetch(url: str):
+        if url == "https://www.cancer.gov/types/brain/hp/adult-brain-treatment-pdq":
+            return pdq_html
+        return _fake_fetch(url)
+
+    with pytest.raises(RealDataRefreshError):
+        refresh_real_glioma_data(**{**_refresh_kwargs(), "fetch": malformed_pdq_fetch})
 
 
 def test_checked_in_snapshot_replays_with_python_digest_contract() -> None:
