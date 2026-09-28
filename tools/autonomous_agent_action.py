@@ -105,7 +105,7 @@ def _lines(environ: Mapping[str, str], name: str, *, maximum: int, item_limit: i
             raise AutonomousAgentActionError(f"{name} exceeds its bounded list contract")
     if len(set(values)) != len(values):
         raise AutonomousAgentActionError(f"{name} entries must be unique")
-    return values
+    return tuple(values)
 
 
 def _bounded_positive_integer(environ: Mapping[str, str], name: str, *, default: str, maximum: int) -> int:

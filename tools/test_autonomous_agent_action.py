@@ -126,6 +126,9 @@ def test_action_bounds_command_and_list_inputs_before_tokenization(tmp_path: Pat
         "x" * action_module.MAX_ACTION_MCP_COMMAND_BYTES
     )
     assert exact_argv.count("--model") == 16
+    assert action_module._lines(exact_bounds, "models", maximum=16) == tuple(
+        f"{index:02d}" + "m" * 254 for index in range(16)
+    )
 
 
 def test_action_requires_exact_tool_allowlist_and_independent_effect_approval(tmp_path: Path) -> None:
