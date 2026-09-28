@@ -208,6 +208,7 @@ fn prefixed(run_id: &str, action_id: &str) -> String {
     format!("{run_id}:{action_id}")
 }
 
+#[cfg(test)]
 fn canonicalize_assessment_pairs<T>(
     assessment_run_order: Vec<String>,
     assessments: Vec<T>,

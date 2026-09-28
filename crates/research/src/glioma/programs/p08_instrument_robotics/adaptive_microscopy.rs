@@ -880,7 +880,7 @@ fn stratum_debt(target: &MicroscopyStratumTarget) -> u16 {
     }
     let remaining = u32::from(target.target_field_count - target.acquired_field_count);
     let total = u32::from(target.target_field_count);
-    ((remaining * 1_000 + total - 1) / total) as u16
+    (remaining * 1_000).div_ceil(total) as u16
 }
 
 fn priority(

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F32";
+pub const FEATURE_ID: &str = super::lineage_dynamics::FEATURE_ID;
 pub const OUTPUT_SCHEMA: &str = "GliomaLongitudinalTransport1@1";
 pub const MAX_STUDIES: usize = 4_096;
 pub const MAX_OBSERVATIONS: usize = 16_384;

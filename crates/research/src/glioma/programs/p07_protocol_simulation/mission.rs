@@ -16,8 +16,9 @@
 
 use super::action_execution::{
     ActionPortfolioExecution, ActionPortfolioExecutionDisposition, ActionPortfolioExecutionError,
-    ActionPortfolioExecutionRequest, GliomaActionExecutor, MAX_RETRIES,
-    execute_glioma_action_portfolio,
+    ActionPortfolioExecutionRequest, GliomaActionArtifactInput, GliomaActionExecutor,
+    GliomaActionWorkflowScope, MAX_RETRIES,
+    execute_glioma_action_portfolio_with_context,
 };
 use crate::glioma_engine::{
     adapt_glioma_candidates_from_outcomes, glioma_action_outcome_key, GliomaActionCandidate,

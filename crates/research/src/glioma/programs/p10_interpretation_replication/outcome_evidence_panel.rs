@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F06";
+pub const FEATURE_ID: &str = super::replication_assay_mapping_ledger::FEATURE_ID;
 pub const OUTPUT_SCHEMA: &str = "GliomaRegisteredOutcomeEvidencePanel1@1";
 pub const MAX_STUDIES: usize = 512;
 pub const MAX_TEXT_BYTES: usize = 128;

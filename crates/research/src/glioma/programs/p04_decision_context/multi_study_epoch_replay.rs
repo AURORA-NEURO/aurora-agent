@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P04-F30";
+pub const FEATURE_ID: &str = super::partition_checkpoint::FEATURE_ID;
 pub const OUTPUT_SCHEMA: &str = "GliomaMultiStudyContextEpochReplay1@2";
 pub const MIN_EPOCHS: usize = 2;
 pub const MAX_EPOCHS: usize = 32;

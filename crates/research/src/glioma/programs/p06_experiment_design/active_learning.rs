@@ -482,7 +482,7 @@ pub fn plan_glioma_active_learning(
                 .or_insert(0_usize) += 1;
             counts
         });
-    let selected;
+
     let mut deferred = Vec::new();
     let mut blocked = Vec::new();
     let mut unresolved = Vec::new();
@@ -592,7 +592,7 @@ pub fn plan_glioma_active_learning(
             spent: 0,
             utility: 0,
         });
-    selected = best.selections;
+    let selected = best.selections;
     let groups = best.groups;
     let remaining_budget = request.budget_units.saturating_sub(best.spent);
     for (index, _) in &eligible {

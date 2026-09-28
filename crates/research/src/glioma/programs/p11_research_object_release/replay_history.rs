@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P11-F12";
+pub const FEATURE_ID: &str = super::license_scope_checker::FEATURE_ID;
 pub const OUTPUT_SCHEMA: &str = "GliomaResearchObjectReplayHistory1@1";
 pub const MAX_EPOCHS: usize = 32;
 pub const MAX_SITES_PER_EPOCH: usize = 64;

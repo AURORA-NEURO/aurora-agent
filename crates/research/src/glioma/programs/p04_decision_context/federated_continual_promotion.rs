@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P04-F29";
+pub const FEATURE_ID: &str = super::snapshot_store::FEATURE_ID;
 pub const OUTPUT_SCHEMA: &str = "GliomaFederatedContinualContextPromotion1@1";
 pub const MAX_EPOCHS: usize = 32;
 pub const MIN_STABILITY_EPOCHS: usize = 2;

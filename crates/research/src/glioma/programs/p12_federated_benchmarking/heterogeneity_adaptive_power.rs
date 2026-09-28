@@ -453,7 +453,7 @@ pub fn plan_glioma_heterogeneity_adaptive_benchmark_power(
             adequate: false,
         });
     }
-    let recommendation = if let Some(_) = qualified {
+    let recommendation = if qualified.is_some() {
         PowerRecommendation::QualifiedPortfolio
     } else if candidate.len() < request.minimum_sites {
         PowerRecommendation::AddSites

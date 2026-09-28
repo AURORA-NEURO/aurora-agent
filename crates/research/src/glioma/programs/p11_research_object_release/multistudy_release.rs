@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P11-F14";
+pub const FEATURE_ID: &str = super::multistudy_release_composer::FEATURE_ID;
 pub const INPUT_SCHEMA: &str = "GliomaResearchObjectMultiStudyReleaseRequest1@1";
 pub const OUTPUT_SCHEMA: &str = "GliomaResearchObjectMultiStudyRelease1@1";
 pub const MIN_STUDIES: usize = 2;

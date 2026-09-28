@@ -135,7 +135,7 @@ fn safe_text(value: &str) -> bool {
 }
 
 fn valid_id(value: &Option<String>) -> bool {
-    value.as_ref().map_or(true, |item| safe_text(item))
+    value.as_ref().is_none_or(|item| safe_text(item))
 }
 
 fn snapshot_body(snapshot: &AcquisitionOperationsSnapshot) -> serde_json::Value {

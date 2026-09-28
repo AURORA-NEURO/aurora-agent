@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F04";
+pub const FEATURE_ID: &str = super::lineage_response_decomposition::FEATURE_ID;
 pub const OUTPUT_SCHEMA: &str = "GliomaRegisteredOutcomeReportingAudit1@1";
 pub const MAX_STUDIES: usize = 512;
 pub const MAX_OUTCOMES_PER_STUDY: usize = 64;

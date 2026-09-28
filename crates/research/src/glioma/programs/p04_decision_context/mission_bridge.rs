@@ -9,7 +9,8 @@
 use super::{DecisionActionGraph, DecisionActionGraphDisposition, DecisionContext};
 use crate::glioma::programs::p07_protocol_simulation::{
     GliomaActionExecutor, GliomaAutonomousResearchMission, GliomaMissionError, GliomaMissionGates,
-    GliomaMissionRequest, execute_glioma_autonomous_research_mission,
+    GliomaMissionExecutionContext, GliomaMissionRequest,
+    execute_glioma_autonomous_research_mission_with_context,
 };
 use crate::glioma_engine::GliomaSelectionConfig;
 use bioprism_ids::ContentHash;

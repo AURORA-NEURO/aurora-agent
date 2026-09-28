@@ -21,7 +21,7 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P11-F21";
+pub const FEATURE_ID: &str = super::research_object_exchange_api::FEATURE_ID;
 pub const INPUT_SCHEMA: &str = "GliomaLocalReleaseSignatureContext1@1";
 pub const OUTPUT_SCHEMA: &str = "GliomaLocalReleaseSignatureVerification1@1";
 pub const SIGNATURE_ALGORITHM: &str = "ed25519";

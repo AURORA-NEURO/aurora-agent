@@ -203,7 +203,7 @@ pub fn plan_federation_capacity(
             .push(observation);
     }
     for history in by_site.values_mut() {
-        history.sort_by(|left, right| left.epoch.cmp(&right.epoch));
+        history.sort_by_key(|left| left.epoch);
     }
     let mut forecast = Vec::new();
     let mut negative = Vec::new();

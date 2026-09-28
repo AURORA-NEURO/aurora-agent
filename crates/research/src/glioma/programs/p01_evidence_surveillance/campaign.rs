@@ -10,6 +10,7 @@
 use super::surveillance::{
     EvidenceSurveillance, EvidenceSurveillanceAction, EvidenceSurveillanceActionKind,
     EvidenceSurveillanceDisposition, EvidenceSurveillanceRequest, surveil_glioma_evidence,
+    MAX_RECORDS,
 };
 use crate::glioma::evidence::{EvidenceRecord, EvidenceState};
 use crate::glioma_engine::LocalArtifactRef;

@@ -21,7 +21,7 @@ use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P04-F31";
+pub const FEATURE_ID: &str = super::adaptive_context_scheduler::FEATURE_ID;
 pub const OUTPUT_SCHEMA: &str = "GliomaMultiStudyExecutionReceipt1@1";
 pub const MAX_SOURCE_RECEIPTS: usize = 256;
 pub const MAX_BINDINGS: usize = MAX_TASKS;

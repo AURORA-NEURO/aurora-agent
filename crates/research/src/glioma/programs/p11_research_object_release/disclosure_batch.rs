@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P11-F04";
+pub const FEATURE_ID: &str = super::qualification_preserver::FEATURE_ID;
 pub const OUTPUT_SCHEMA: &str = "GliomaReleaseDisclosureBatch1@1";
 const MIN_ITEMS: usize = 2;
 const MAX_ITEMS: usize = 128;

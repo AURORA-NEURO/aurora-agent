@@ -17,7 +17,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P11-F19";
+pub const FEATURE_ID: &str = super::release_queue_console::FEATURE_ID;
 pub const INPUT_SCHEMA: &str = "GliomaReleaseBatchReviewWorkbenchRequest1@1";
 pub const OUTPUT_SCHEMA: &str = "GliomaReleaseBatchReviewWorkbench1@1";
 pub const MAX_REVIEW_PACKET_BYTES: usize = 4 * 1024 * 1024;

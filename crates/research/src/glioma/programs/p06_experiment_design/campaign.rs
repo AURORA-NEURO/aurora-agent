@@ -615,7 +615,7 @@ fn prediction_distance(left: &CampaignAction, right: &CampaignAction) -> u64 {
                 .get(*key)
                 .copied()
                 .unwrap_or(0);
-            left_value.abs_diff(right_value) as u64
+            left_value.abs_diff(right_value)
         })
         .sum::<u64>();
     (total / keys.len() as u64).min(1_000)

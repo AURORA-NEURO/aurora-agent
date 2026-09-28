@@ -11,7 +11,7 @@ use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P11-F02";
+pub const FEATURE_ID: &str = super::reproducibility_score::FEATURE_ID;
 pub const OUTPUT_SCHEMA: &str = "GliomaReleaseDisclosureRegister1@1";
 const MAX_ENTRIES: usize = 256;
 const MAX_STATEMENT_CHARS: usize = 4_096;

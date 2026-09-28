@@ -278,10 +278,7 @@ pub(super) fn admitted_candidates_with_frontier_priority(
             }
             let mut adjusted = candidate.clone();
             if !gate.linked_claim_order.is_empty() {
-                adjusted.information_gain_milli = ((u32::from(adjusted.information_gain_milli)
-                    + u32::from(gate.claim_priority_milli)
-                    + 1)
-                    / 2) as u16;
+                adjusted.information_gain_milli = (u32::from(adjusted.information_gain_milli) + u32::from(gate.claim_priority_milli)).div_ceil(2) as u16;
             }
             Some(adjusted)
         })
@@ -489,7 +486,7 @@ pub fn plan_glioma_scientific_frontier(
                 || (link.claim_order.is_empty()
                     && candidate_by_id
                         .get(link.action_id.as_str())
-                        .map_or(true, |candidate| {
+                        .is_none_or(|candidate| {
                             !is_frontier_bootstrap_stage(candidate.stage_kind)
                         }))
         })

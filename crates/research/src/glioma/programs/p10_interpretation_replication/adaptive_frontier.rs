@@ -12,8 +12,9 @@ use super::{
     InterpretationEvidenceFamily, InterpretationSynthesis, InterpretationSynthesisDisposition,
 };
 use crate::glioma_engine::{
-    GliomaActionCandidate, GliomaActionSelection, GliomaEngineError, GliomaModality,
-    GliomaModelSystem, GliomaSelectionWeights, GliomaStageKind, select_glioma_actions,
+    adapt_glioma_candidates_from_outcomes, GliomaActionCandidate, GliomaActionOutcomeSummary,
+    GliomaActionSelection, GliomaEngineError, GliomaModality, GliomaModelSystem,
+    GliomaSelectionWeights, GliomaStageKind, select_glioma_actions,
 };
 use bioprism_foundation::{AutonomyTier, Effect};
 use bioprism_ids::ContentHash;

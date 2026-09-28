@@ -12,7 +12,8 @@ use super::action_execution::{
     execute_glioma_action_portfolio_with_context,
 };
 use crate::glioma_engine::{
-    GliomaActionCandidate, GliomaActionSelection, GliomaModality, GliomaModelSystem,
+    adapt_glioma_candidates_from_outcomes, GliomaActionCandidate, GliomaActionOutcomeSummary,
+    GliomaActionSelection, GliomaModality, GliomaModelSystem,
     GliomaResearchIntent, GliomaResearchPlan, GliomaSelectionConfig, GliomaSelectionWeights,
     GliomaStage, GliomaStageKind, StageReadiness, compile_glioma_research, select_glioma_actions,
 };

@@ -618,7 +618,7 @@ pub fn index_glioma_artifact_lineage(
             let status = if orphan_order.contains(&node.artifact.artifact_id) {
                 ArtifactLineageNodeStatus::Orphan
             } else {
-                proof_status.unwrap_or_else(|| {
+                proof_status.unwrap_or({
                     if !node.access_granted {
                         ArtifactLineageNodeStatus::Unauthorized
                     } else if node.is_root {

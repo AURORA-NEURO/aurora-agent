@@ -7,8 +7,8 @@ This file is generated from `PROGRAM_PLAN.md`, `organization.json`, and the live
 - Implemented feature IDs: 384
 - Planned feature IDs: 0
 - Feature modules: 384
-- Workflow/composition modules: 23
-- Module-local Rust test annotations: 1473 (a count is not a measure of assertion quality or scientific validation)
+- Workflow/composition modules: 24
+- Module-local Rust test annotations: 1558 (a count is not a measure of assertion quality or scientific validation)
 
 ## Research workflow and ownership flow
 
@@ -251,82 +251,58 @@ Shared public feature modules owned outside this folder:
   P08 instrument preflight.
 - Promotion gate: every action has typed prerequisites, value/risk budget, unresolved context,
   and a falsifiable stop condition.
-- Context compilation now retains the complete typed action frontier and uses a bounded,
-  deterministic portfolio bonus for distinct action families, modalities, and model systems when
-  the action cap is tight; deferred actions and omission reasons remain explicit.
-- P04-F31 — `adaptive_context_scheduler` is the autonomous refresh controller. It ranks stale,
-  contradictory, newly updated, and starved decision contexts across fairness groups under hard
-  action and compute budgets, but admits only contexts with an actual refresh trigger. Fresh,
-  noncritical contexts are retained as typed `not_due` deferrals so they do not consume refresh
-  capacity or starve invalidated contexts. Critical budget deferrals become `budget_blocked`, while
-  every other omission carries an action-limit, budget, or `not_due` reason; no deferred context is
-  treated as current. The `GliomaContextRefreshSchedule1@2` schedule is deterministic and
-  digest-bound, but dispatch remains with the caller-owned local context compiler.
-- P04-F17 — `uncertainty_branch_explorer` is the researcher-facing comparison surface for
-  competing decision branches. It joins the immutable context and scenario-aware portfolio plan
-  with optional observed branch evidence, computes claim coverage, model-system/modalities,
-  expected information gain, scenario disagreement, cost, failure risk, and a transparent
-  weighted ranking. Forecast-only, evidence-limited, confirmed, contradicted, blocked, and
-  unresolved states remain distinct; omitted claims and negative evidence remain visible. Notes
-  are context-digest-bound annotations and the output is replay-stable. It is a decision-support
-  capability for preclinical research, not a clinical recommendation or autonomous dispatch.
-- P04-F18 — `cross_study_context_diff` is the field-level transportability gate before contexts
-  are pooled. It compares model, assay, material, timing, environment, intervention, and
-  missingness fields; applies only declared value/unit aliases; and distinguishes measured value
-  differences from missing, unmeasured, unit, domain, and context-version mismatches. Pair-level
-  transport warnings and modality acquisition gaps remain explicit for P06/P10 follow-up.
-- P04-F26 — `cross_study_context_invariance_test` executes a typed rule across independent
-  studies, applies declared nuisance-field perturbations, and retains leave-one-study-out flips,
-  counterexamples, missing measurements, and unresolved group-floor states. It is a transport
-  diagnostic for preclinical research, never a clinical or biological conclusion.
-- P04-F29 — `snapshot_store` is the local immutable recovery substrate for long-running agents. It
-  verifies each context digest and event lineage, rejects corrupt or unanchored parent chains,
-  retains protected snapshots and all ancestors needed for recovery, and emits deterministic
-  retention/restore omissions. The index is metadata-only at the MCP boundary; institution-local
-  storage retains the context payload and no snapshot is treated as biological evidence.
-- P04-F30 — `partition_checkpoint` reconciles typed site-local context deltas after a network
-  partition. It acknowledges identical retries, classifies stale/future/anchored contributions,
-  computes field-level convergence from content digests, and preserves conflicts instead of
-  applying last-writer-wins. Partitioned or non-consensus checkpoints cannot be promoted, and the
-  MCP surface returns metadata only while site payloads remain local.
-- P04-F32 — `access_governor` is the field-level federation control plane. It binds a request to a
-  declared preclinical purpose, verified membership/policy/scope digests, approval, expiry, and a
-  revocation set; it emits allow, redact, deny, approval-required, or revoked decisions without
-  widening scope or returning context values. Protected or non-local requests fail closed.
-- Current implementation: 32/32 slots. Maintain with federated continual context promotion,
-  richer outcome assimilation, decision-context replay across study epochs, and independent
-  multi-site context reproductions.
+- F06 contract: each study may provide at most one digest-addressed outcome per selected action.
+  Completed, negative, failed, blocked, and unknown remain distinct; absence means no outcome was
+  supplied. Policy-denied studies cannot contribute outcomes. The multi-study artifact retains the
+  eligible outcome ledger and holds any action with an adverse result out of its shared frontier.
+  F30 replays those outcome states and refuses temporal promotion after negative, failed, blocked,
+  or unknown history. F07 satisfies only the corresponding local dependency when a completed result
+  exists and does not schedule that action again at that study; it retains the completion digests.
+  This remains a research planning contract, not execution authority.
+- F02 contract: decision-context replay retains its exact epoch snapshots, local action outcomes,
+  and promotion threshold in the output. Verification validates every child context and recomputes
+  the transitions and outcome partitions from that retained ledger, rejecting digest-restamped
+  summary changes. Epoch, outcome, action-row, request-byte, and report-byte limits bound the replay
+  record; the output remains a planning artifact and does not grant execution authority.
+- F29 contract: the consortium decision steward supplies 2–32 consecutive, digest-valid
+  `FederatedDecisionContextReport` values for one exact objective plus explicit temporal-stability,
+  site, independent-group, support, uncertainty, risk, heterogeneity, and influence thresholds.
+  The promotion evaluator retains the exact aggregate reports and their digests, requires the same
+  top-ranked qualified branch throughout the configured consecutive-epoch window, refuses reused
+  observation identities across epochs, and holds any candidate with negative, contradicted,
+  failed, unknown, underpowered, or policy-ineligible evidence in its stability window. It emits a
+  replayable promotion report with the full epoch ledger, adverse-evidence lineage, reason codes,
+  and a route back to P04's decision cycle or researcher review. Acceptance requires exact objective
+  and contiguous epoch binding, each child report's own digest validation, bounded report size,
+  deterministic decision replay, and no raw-data transfer or autonomous assay execution. It depends
+  on P04-F04 and P04-F24; it does not establish site identity, clinical utility, or release authority.
+- F30 contract: a study-context steward supplies 2–32 consecutive `MultiStudyDecisionContextArtifact`
+  values for one exact objective, with temporal stability, study/group quorum, support, and
+  disagreement thresholds. The replay validates every source digest, requires stable study-to-group
+  identity, derives each action's per-epoch disposition from the recorded frontier and explicit
+  metrics, and retains additions, retirements, qualification loss, omissions, and typed completed,
+  negative, failed, blocked, and unknown local outcomes with their result digests. An action is
+  stable only after the configured consecutive qualified window and without historical adverse or
+  conflicted action evidence. Output verification deterministically
+  replays the full retained source ledger; size and row limits bound the request/report, and no
+  assay or instrument is dispatched. It depends on P04-F06 and routes only to the P04 research
+  cycle, review, or further workflow planning.
+- F31 contract: a workflow operator supplies the exact F07 workflow plan, its F06 source artifact,
+  digest-valid cross-program `GliomaExecutionReceipt` values, and explicit task/receipt/stage
+  bindings. The adapter checks study identity and requires the bound engine stage to match the
+  action's declared stage kind; approval-held tasks and stage reuse are rejected. It retains a
+  bounded, value-free source snapshot and maps completed stages to completed, blocked failures to
+  failed, clean blocks to blocked, and generic negative/partial engine stages to unknown. The
+  generic engine receipt cannot distinguish a dry-run negative label from a measured biological
+  negative, so this boundary never promotes that label to negative evidence. The output can be
+  converted into per-study F06 outcomes, replays its sanitized receipt/task ledger, and routes
+  missing receipts or unresolved results explicitly. It does not dispatch work or make scientific
+  or clinical conclusions. It depends on P04-F06, P04-F07, and the shared glioma engine receipt.
+- Current implementation: 24/32 slots. The matching BioPRISM source blueprint is not bundled in
+  this checkout; the next wave is to check the remaining P04 slots against that source before
+  assigning further feature work.
 
-P04-F08 `federated_decision_capsule` is the site-to-consortium context boundary. It packages a
-question scope, content-addressed claims, evidence-coverage identifiers, omissions, uncertainty,
-and downstream action identifiers while retaining locality and explicit expiry. Import rejects
-stale, revoked, tampered, protected-payload, or over-scoped capsules; action authority is an
-intersection with the receiving policy, never an expansion. The resulting capsule is a
-simulation-only handoff to the existing P04/P05/P06 decision routes and never a clinical decision.
-
-P04-F19 `decision_budget_dashboard` is the prospective resource-control surface for autonomous
-glioma campaigns. It reconciles completed and running event consumption with branch forecasts over
-assay, compute, time, and review resources; emits warning, approval-required, and hard-stop states;
-and proposes deterministic, approval-bound reallocations when a high-priority branch exceeds its
-current envelope. Forecast confidence and negative accounting evidence remain visible, and no
-proposal authorizes spending or dispatches an experiment.
-
-P04-F21 `decision_context_query_api` is the bounded read surface for autonomous glioma research
-agents and workbenches. It queries typed local context records by schema-bound scope and field,
-requires a digest-verified capability with expiry, revocation, and result budgets, and paginates
-with content-addressed cursors. Omitted, uncertain, unavailable, and negative states remain
-explicit; the route returns metadata and provenance digests only and never exports raw evidence or
-makes a clinical decision.
-
-P04-F23 `decision_event_update_api` is the live context update surface for prospective glioma
-campaigns. It accepts content-addressed evidence, QC, resource, and action-outcome events against
-an immutable context anchor, orders them deterministically, makes retries idempotent, and emits a
-new digest-bound epoch per applied event. Contradictions, failed quality checks, exhausted
-resources, blocked actions, and negative results invalidate executable branches into explicit
-deferred/negative partitions without deleting history; stale anchors and conflicting retries fail
-closed.
-
-Folder inventory: 32 source modules; 32/32 feature slots implemented. The program folder directly owns 32 feature modules; shared public feature facades live under `crates/research/src/glioma/`.
+Folder inventory: 35 source modules; 32/32 feature slots implemented. The program folder directly owns 32 feature modules; shared public feature facades live under `crates/research/src/glioma/`.
 
 | Module | Kind / feature slot | Purpose | Direct test annotations | Imports |
 |---|---|---|---:|---|
@@ -342,7 +318,7 @@ Folder inventory: 32 source modules; 32/32 feature slots implemented. The progra
 | [`branch_planner`](crates/research/src/glioma/programs/p04_decision_context/branch_planner.rs) | GAF-GLIOMA-P04-F22 | Robust branch planning for autonomous preclinical glioma research. | 3 | `context_compiler`, `p02_evidence_knowledge::knowledge_graph` |
 | [`campaign`](crates/research/src/glioma/programs/p04_decision_context/campaign.rs) | GAF-GLIOMA-P04-F20 | Bounded autonomous question-to-action campaigns for preclinical glioma research. | 4 | `action_bridge`, `context_compiler` |
 | [`context_compiler`](crates/research/src/glioma/programs/p04_decision_context/context_compiler.rs) | GAF-GLIOMA-P04-F01 | Evidence-gap to next-action compilation for the autonomous glioma workflow. | 3 | — |
-| [`context_replay`](crates/research/src/glioma/programs/p04_decision_context/context_replay.rs) | GAF-GLIOMA-P04-F02 | Epoch-aware decision-context replay for autonomous preclinical glioma research. | 2 | `context_compiler` |
+| [`context_replay`](crates/research/src/glioma/programs/p04_decision_context/context_replay.rs) | GAF-GLIOMA-P04-F02 | Epoch-aware decision-context replay for autonomous preclinical glioma research. | 4 | `context_compiler` |
 | [`cross_study_context_diff`](crates/research/src/glioma/programs/p04_decision_context/cross_study_context_diff.rs) | GAF-GLIOMA-P04-F18 | Field-level cross-study context comparison for `GAF-GLIOMA-P04-F18`. | 5 | — |
 | [`cross_study_context_invariance_test`](crates/research/src/glioma/programs/p04_decision_context/cross_study_context_invariance_test.rs) | GAF-GLIOMA-P04-F26 | Cross-study context invariance testing for `GAF-GLIOMA-P04-F26`. | 5 | `cross_study_context_diff` |
 | [`decision_budget_dashboard`](crates/research/src/glioma/programs/p04_decision_context/decision_budget_dashboard.rs) | GAF-GLIOMA-P04-F19 | Prospective research-budget accounting and rebalancing for autonomous glioma programs. | 5 | — |
@@ -351,11 +327,14 @@ Folder inventory: 32 source modules; 32/32 feature slots implemented. The progra
 | [`decision_cycle`](crates/research/src/glioma/programs/p04_decision_context/decision_cycle.rs) | GAF-GLIOMA-P04-F24 | End-to-end decision-context orchestration for preclinical glioma research. | 2 | `action_bridge`, `action_graph`, `branch_planner`, `campaign`, `context_compiler` |
 | [`decision_event_update_api`](crates/research/src/glioma/programs/p04_decision_context/decision_event_update_api.rs) | GAF-GLIOMA-P04-F23 | Event-sourced updates for a live preclinical glioma decision context. | 5 | `context_compiler` |
 | [`decision_loop_governor`](crates/research/src/glioma/programs/p04_decision_context/decision_loop_governor.rs) | GAF-GLIOMA-P04-F16 | Sequential stopping and continuation policy for autonomous glioma research loops. | 3 | — |
+| [`federated_continual_promotion`](crates/research/src/glioma/programs/p04_decision_context/federated_continual_promotion.rs) | alias: `super::snapshot_store::FEATURE_ID` | Continual promotion gate over independently digested, site-local decision-context epochs. | 5 | `federated_decision_context`, `snapshot_store` |
 | [`federated_decision_capsule`](crates/research/src/glioma/programs/p04_decision_context/federated_decision_capsule.rs) | GAF-GLIOMA-P04-F08 | Signed, bounded decision-context capsules for federated preclinical glioma research. | 5 | — |
-| [`federated_decision_context`](crates/research/src/glioma/programs/p04_decision_context/federated_decision_context.rs) | GAF-GLIOMA-P04-F04 | Federated continual decision-context aggregation for preclinical glioma research. | 5 | — |
+| [`federated_decision_context`](crates/research/src/glioma/programs/p04_decision_context/federated_decision_context.rs) | GAF-GLIOMA-P04-F04 | Federated continual decision-context aggregation for preclinical glioma research. | 6 | — |
 | [`mission_bridge`](crates/research/src/glioma/programs/p04_decision_context/mission_bridge.rs) | GAF-GLIOMA-P04-F25 | Decision-context to autonomous-mission execution bridge. | 2 | — |
-| [`multi_study_context_artifact`](crates/research/src/glioma/programs/p04_decision_context/multi_study_context_artifact.rs) | GAF-GLIOMA-P04-F06 | Multi-study typed decision-context artifact for preclinical glioma research. | 4 | `decision_context_artifact` |
-| [`multi_study_workflow`](crates/research/src/glioma/programs/p04_decision_context/multi_study_workflow.rs) | GAF-GLIOMA-P04-F07 | Dependency-safe multi-study workflow planning for preclinical glioma research. | 9 | `decision_context_artifact`, `multi_study_context_artifact` |
+| [`multi_study_context_artifact`](crates/research/src/glioma/programs/p04_decision_context/multi_study_context_artifact.rs) | GAF-GLIOMA-P04-F06 | Multi-study typed decision-context artifact for preclinical glioma research. | 5 | `context_replay`, `decision_context_artifact` |
+| [`multi_study_epoch_replay`](crates/research/src/glioma/programs/p04_decision_context/multi_study_epoch_replay.rs) | alias: `super::partition_checkpoint::FEATURE_ID` | Replay aligned multi-study decision contexts across consecutive study epochs. | 8 | `multi_study_context_artifact`, `partition_checkpoint` |
+| [`multi_study_execution_receipt`](crates/research/src/glioma/programs/p04_decision_context/multi_study_execution_receipt.rs) | alias: `super::adaptive_context_scheduler::FEATURE_ID` | Bind institution-local cross-program stage receipts to P04 multi-study action assignments. | 4 | `adaptive_context_scheduler`, `context_replay`, `multi_study_context_artifact`, `multi_study_workflow` |
+| [`multi_study_workflow`](crates/research/src/glioma/programs/p04_decision_context/multi_study_workflow.rs) | GAF-GLIOMA-P04-F07 | Dependency-safe multi-study workflow planning for preclinical glioma research. | 12 | `context_replay`, `decision_context_artifact`, `multi_study_context_artifact` |
 | [`omission_certificate`](crates/research/src/glioma/programs/p04_decision_context/omission_certificate.rs) | GAF-GLIOMA-P04-F11 | Deterministic omission certification for question-to-decision contexts. | 3 | `action_graph`, `context_compiler` |
 | [`partition_checkpoint`](crates/research/src/glioma/programs/p04_decision_context/partition_checkpoint.rs) | GAF-GLIOMA-P04-F30 | Partition-resilient multi-study decision-context checkpoint reconciliation. | 5 | `context_compiler` |
 | [`snapshot_store`](crates/research/src/glioma/programs/p04_decision_context/snapshot_store.rs) | GAF-GLIOMA-P04-F29 | Local immutable decision-context snapshot indexing for long-running glioma programs. | 4 | `context_compiler` |
@@ -460,7 +439,7 @@ Folder inventory: 34 source modules; 32/32 feature slots implemented. The progra
 | [`pathway_activity`](crates/research/src/glioma/programs/p05_mechanism_exploration/pathway_activity.rs) | GAF-GLIOMA-P05-F29 | Signed pathway-activity inference for preclinical glioma research. | 4 | — |
 | [`prospective_controller`](crates/research/src/glioma/programs/p05_mechanism_exploration/prospective_controller.rs) | GAF-GLIOMA-P05-F15 | Prospective high-throughput mechanism workflow control for preclinical glioma research. | 2 | `multi_study_workflow` |
 | [`robust_portfolio`](crates/research/src/glioma/programs/p05_mechanism_exploration/robust_portfolio.rs) | GAF-GLIOMA-P05-F27 | Robust intervention portfolio optimisation with bounded beam/knapsack search for preclinical glioma research. | 3 | `counterfactual`, `ensemble_counterfactual` |
-| [`robustness_stress`](crates/research/src/glioma/programs/p05_mechanism_exploration/robustness_stress.rs) | GAF-GLIOMA-P05-F07 | Adversarial robustness stress surfaces for preclinical glioma mechanisms. | 2 | — |
+| [`robustness_stress`](crates/research/src/glioma/programs/p05_mechanism_exploration/robustness_stress.rs) | GAF-GLIOMA-P05-F07 | Adversarial robustness stress surfaces for preclinical glioma mechanisms. | 4 | — |
 | [`state_filter`](crates/research/src/glioma/programs/p05_mechanism_exploration/state_filter.rs) | GAF-GLIOMA-P05-F16 | Longitudinal finite-state mechanism filtering for preclinical glioma research. | 3 | — |
 | [`state_smoother`](crates/research/src/glioma/programs/p05_mechanism_exploration/state_smoother.rs) | GAF-GLIOMA-P05-F17 | Fixed-interval mechanism-state smoothing for preclinical glioma research. | 4 | `state_filter` |
 | [`temporal_multimodal_fusion`](crates/research/src/glioma/programs/p05_mechanism_exploration/temporal_multimodal_fusion.rs) | workflow composition | Temporal and multimodal mechanism fusion for preclinical glioma research. | 2 | — |
@@ -873,7 +852,7 @@ Folder inventory: 40 source modules; 32/32 feature slots implemented. The progra
 | [`multi_fidelity`](crates/research/src/glioma/programs/p06_experiment_design/multi_fidelity.rs) | GAF-GLIOMA-P06-F20 | Cost-aware multi-fidelity optimization for preclinical glioma experiments. | 3 | — |
 | [`multi_fidelity_campaign`](crates/research/src/glioma/programs/p06_experiment_design/multi_fidelity_campaign.rs) | GAF-GLIOMA-P06-F21 | Closed-loop multi-fidelity intervention campaigns for preclinical glioma research. | 3 | `multi_fidelity` |
 | [`operating_cycle`](crates/research/src/glioma/programs/p06_experiment_design/operating_cycle.rs) | GAF-GLIOMA-P06-F23 | End-to-end experiment-design orchestration for preclinical glioma research. | 2 | `campaign` |
-| [`posterior_batch`](crates/research/src/glioma/programs/p06_experiment_design/posterior_batch.rs) | workflow composition | Batch-conditional selection over externally supplied glioma posterior draws. | 7 | `active_learning` |
+| [`posterior_batch`](crates/research/src/glioma/programs/p06_experiment_design/posterior_batch.rs) | workflow composition | Blueprint feature GAF-GLIOMA-P06-F12: batch-conditional selection over externally supplied glioma posterior draws. | 12 | `active_learning` |
 | [`power_reestimation`](crates/research/src/glioma/programs/p06_experiment_design/power_reestimation.rs) | GAF-GLIOMA-P06-F04 | Adaptive power re-estimation and group-sequential boundaries for preclinical glioma assays. | 5 | — |
 | [`power_stress_surface`](crates/research/src/glioma/programs/p06_experiment_design/power_stress_surface.rs) | GAF-GLIOMA-P06-F14 | Scenario stress surface for preclinical glioma power planning. | 2 | — |
 | [`replication_continuation`](crates/research/src/glioma/programs/p06_experiment_design/replication_continuation.rs) | GAF-GLIOMA-P06-F27 | Observation-driven continuation control for multi-site preclinical glioma replication. | 2 | `replication_plan` |
@@ -1061,11 +1040,11 @@ Folder inventory: 42 source modules; 32/32 feature slots implemented. The progra
 | Module | Kind / feature slot | Purpose | Direct test annotations | Imports |
 |---|---|---|---:|---|
 | [`action_execution`](crates/research/src/glioma/programs/p07_protocol_simulation/action_execution.rs) | GAF-GLIOMA-P07-F19 | Execution of a beam-selected preclinical glioma action portfolio. | 5 | — |
-| [`active_learning_campaign`](crates/research/src/glioma/programs/p07_protocol_simulation/active_learning_campaign.rs) | GAF-GLIOMA-P07-F23 | Autonomous active-learning campaign execution for preclinical glioma research. | 5 | `p06_experiment_design::active_learning` |
+| [`active_learning_campaign`](crates/research/src/glioma/programs/p07_protocol_simulation/active_learning_campaign.rs) | GAF-GLIOMA-P07-F23 | GAF-GLIOMA-P07-F23: autonomous active-learning campaign execution for preclinical research. | 7 | `p06_experiment_design::active_learning` |
 | [`adaptive_scheduler`](crates/research/src/glioma/programs/p07_protocol_simulation/adaptive_scheduler.rs) | GAF-GLIOMA-P07-F12 | Evidence-aware, dependency-closed scheduling for autonomous preclinical glioma programs. | 5 | — |
 | [`adaptive_scientific_mission`](crates/research/src/glioma/programs/p07_protocol_simulation/adaptive_scientific_mission.rs) | alias: `super::mission::FEATURE_ID` | Replanned, evidence-driven execution for preclinical glioma research missions. | 2 | `action_execution`, `frontier_execution`, `mission`, `scientific_frontier` |
 | [`autonomous_campaign`](crates/research/src/glioma/programs/p07_protocol_simulation/autonomous_campaign.rs) | GAF-GLIOMA-P07-F20 | Autonomous, closed-loop execution of a preclinical glioma research campaign. | 3 | `action_execution` |
-| [`autonomous_engine`](crates/research/src/glioma/programs/p07_protocol_simulation/autonomous_engine.rs) | GAF-GLIOMA-P07-F11 | End-to-end autonomous research engine for preclinical glioma programs. | 11 | `action_execution`, `director` |
+| [`autonomous_engine`](crates/research/src/glioma/programs/p07_protocol_simulation/autonomous_engine.rs) | GAF-GLIOMA-P07-F11 | End-to-end autonomous research engine for preclinical glioma programs. | 4 | `action_execution`, `director` |
 | [`autonomous_protocol`](crates/research/src/glioma/programs/p07_protocol_simulation/autonomous_protocol.rs) | GAF-GLIOMA-P07-F09 | Bounded autonomous control for one preclinical glioma protocol mission. | 3 | `branch_optimizer`, `compensation`, `execution`, `simulator` |
 | [`autonomous_workflow`](crates/research/src/glioma/programs/p07_protocol_simulation/autonomous_workflow.rs) | workflow composition | Unified autonomous glioma workflow composition. | 0 | `evidence_gated_stage_execution` |
 | [`branch_optimizer`](crates/research/src/glioma/programs/p07_protocol_simulation/branch_optimizer.rs) | GAF-GLIOMA-P07-F04 | Deterministic beam-search selection of resource-feasible protocol branches. | 3 | `simulator` |
@@ -1095,7 +1074,7 @@ Folder inventory: 42 source modules; 32/32 feature slots implemented. The progra
 | [`program_cycle`](crates/research/src/glioma/programs/p07_protocol_simulation/program_cycle.rs) | GAF-GLIOMA-P07-F17 | Program-level control for autonomous preclinical glioma research. | 2 | `action_execution`, `autonomous_engine`, `director` |
 | [`program_scheduler`](crates/research/src/glioma/programs/p07_protocol_simulation/program_scheduler.rs) | GAF-GLIOMA-P07-F15 | High-throughput autonomous scheduling for preclinical glioma research programs. | 4 | `action_execution`, `director` |
 | [`research_autopilot`](crates/research/src/glioma/programs/p07_protocol_simulation/research_autopilot.rs) | GAF-GLIOMA-P07-F21 | Evidence-to-execution autopilot for local preclinical glioma research. | 3 | `action_execution` |
-| [`robust_active_learning_campaign`](crates/research/src/glioma/programs/p07_protocol_simulation/robust_active_learning_campaign.rs) | GAF-GLIOMA-P07-F24 | Autonomous execution loop for robust ensemble active learning. | 4 | `p06_experiment_design::active_learning`, `p06_experiment_design::robust_active_learning` |
+| [`robust_active_learning_campaign`](crates/research/src/glioma/programs/p07_protocol_simulation/robust_active_learning_campaign.rs) | GAF-GLIOMA-P07-F24 | GAF-GLIOMA-P07-F24: autonomous execution loop for robust ensemble active learning. | 6 | `p06_experiment_design::active_learning`, `p06_experiment_design::robust_active_learning` |
 | [`scenario_ensemble`](crates/research/src/glioma/programs/p07_protocol_simulation/scenario_ensemble.rs) | workflow composition | Robust scenario-ensemble simulation for autonomous preclinical glioma workflows. | 2 | `simulator` |
 | [`scientific_frontier`](crates/research/src/glioma/programs/p07_protocol_simulation/scientific_frontier.rs) | GAF-GLIOMA-P07-F25 | Scientific frontier orchestration for autonomous preclinical glioma research. | 3 | — |
 | [`simulator`](crates/research/src/glioma/programs/p07_protocol_simulation/simulator.rs) | GAF-GLIOMA-P07-F02 | Deterministic resource-constrained protocol simulation for preclinical glioma campaigns. | 4 | — |
@@ -1121,164 +1100,15 @@ Shared public feature modules owned outside this folder:
 - Downstream edges: P03 QC, P07 protocol state, P09 computation, and P11 research-object release.
 - Promotion gate: A3 physical execution requires signed preflight, interlocks, revocation checks,
   local-only raw data, and honest partial-execution compensation.
-- Preflight plans now bind a canonical digest of every admitted action, including operation,
-  timing, parameters, output schema, model system, and risk. The execution gateway recomputes the
-  manifest before dispatch and refuses mutated actions even when IDs, instrument scope, and model
-  system still match; the plan schema is versioned so this is an explicit compatibility boundary.
-- Current implementation: 32/32 slots. The adaptive microscopy loop computes fixed-point
-  expected information gain from a local glioma-state posterior and calibrated image-outcome model,
-  enforces invasion-front/state coverage before resampling, estimates conservative instrument-dose
-  cost from typed illumination settings, and executes one capture through existing authorization
-  and live-interlock checks. Its research-workflow entry point now derives state posteriors from P03
-  segmented-track morphodynamics, requires biological-unit-held-out qualification, blocks
-  low-quality/out-of-domain/ambiguous fields, and refuses to execute without caller-owned
-  preflight grants. Posterior confidence and margin thresholds are explicit in the P03 request
-  and bound into the versioned analysis digest, so an autonomous loop cannot silently turn a
-  near-tie into an action. A quality/information-qualified field on the coverage frontier that
-  exceeds the remaining dose is reported as `dose_budget_exhausted`, not as missing biological
-  coverage, so the autonomous loop can request budget review without sampling an over-covered
-  stratum.
-  Human-origin material is excluded. Maintain with prospective comparison against fixed-grid,
-  equal-dose sampling across independent non-human preclinical model systems.
-- The adaptive instrument campaign now uses a bounded deterministic beam over complete
-  dependency-closed portfolios, not only the downstream root. Prerequisites contribute their
-  information, endpoint coverage, duration, and risk to the portfolio objective, while endpoint
-  diversity remains primary and a smaller instrument-novelty term spreads near-equal work across
-  a trusted fleet. The selector compares alternative whole portfolios before applying explicit
-  information, endpoint, cost, risk, and dependency gates, and ranks portfolios that satisfy the
-  scientific information/endpoint floors ahead of higher-scoring but gate-infeasible portfolios.
-  Its versioned output also exposes a complete `deferred_order` complement so bounded execution
-  can be resumed when capacity, approvals, or endpoint gaps change without losing candidates.
-- P08-F25 `research_frontier` now uses a bounded portfolio beam over adjudicated instrument
-  outcomes. Evidence-state completeness (qualified, negative, unresolved), independent source-run
-  coverage, and frontier utility are optimized jointly; `GliomaInstrumentResearchFrontier1@2`
-  preserves null and unresolved routes before handing the selected candidates to P07, and never
-  promotes hardware completion into biological evidence.
-- P08-F30 `fleet_health_monitor` is an aggregate-only instrument reliability algorithm. It compares
-  baseline and recent throughput/QC/calibration windows, detects consecutive downtime clusters,
-  calibrates confidence from effective observations, and emits healthy/watch/investigate/blocked
-  partitions plus bounded site-local investigation tasks. Site identity can be masked and the
-  monitor never exports raw traces, dispatches hardware, or turns a single noisy metric into a
-  hard stop.
-- P08-F31 `acquisition_capacity_controller` is the prospective high-throughput allocator. It uses
-  a bounded allocation beam rather than one-unit greedy fill, jointly scoring minimum-demand
-  closure, minimum fairness, weighted target coverage, priority, deadline urgency, resource cost,
-  and global/per-resource budgets. Completion horizon, weighted Jain fairness, disabled resources,
-  approval gaps, starvation deferrals, and search-bound uncertainty are explicit; the plan remains
-  preflight-bound and cannot dispatch hardware (`GliomaAcquisitionCapacityPlan1@2`).
-- P08-F28 `cross_site_protocol_conformance` compares a digest-bound reference protocol with
-  site-local semantic realizations before any federated pooling. Ordered step identity, semantic
-  role, units, numeric tolerance, required capabilities, calibration class/freshness, and version
-  identity are checked independently; bounded adaptations may be admitted only under policy, while
-  stale or blocked sites remain excluded with named negative evidence.
-- P08-F29 `maintenance_window_manager` searches the earliest reservation-free service interval for
-  each instrument before calibration expiry. Overdue service, low health, disabled devices, and
-  fleets with no safe gap are explicit locks; the plan feeds capacity and fleet scheduling but
-  never mutates bookings or contacts hardware.
-- P08-F27 `assay_provenance_integrity_audit` is the prospective admission barrier between local
-  acquisition and downstream glioma analysis. It separately checks sample lineage and scope,
-  approved versus observed protocol, calibration expiry, operator authority, clock skew, lifecycle
-  completion, and artifact-chain continuity. Only a fully verified run enters P03/P09 analysis or
-  verified research-object release; warnings, blocks, unresolved lifecycle state, and negative
-  evidence remain explicit and digest-bound.
-- P08-F19 `high_throughput_acquisition_console` is the read-only operations surface for autonomous
-  screening campaigns. It projects assignment finish times and deadline risk, counts preflight and
-  calibration blockers, identifies stale device telemetry and saturated operator capacity, and
-  ranks approved ready demand with a deterministic priority/urgency/fairness score. Proposals are
-  advisory only: they cannot rewrite signed plans, bypass approval, or dispatch an instrument. The
-  versioned snapshot now returns the complete ready-demand candidate order plus a canonical
-  `deferred_reorder_order` complement whenever the proposal cap truncates the advisory queue, so
-  later capacity rounds can resume without silently dropping work.
-- P08-F17 `instrument_operator_approval_console` is the physical-effect authorization boundary.
-  A single-use approval is bound to the exact plan digest, device, opaque sample scope, operator
-  authority, expiry, interlock observations, uncertainty budget, and emergency-stop path. Revoked,
-  expired, consumed, changed, failed, stale, or unmeasured conditions never become dispatchable;
-  the MCP surface only returns a simulation-safe approval decision for the local gateway.
-- P08-F08 `federated_device_capability_manifest` publishes the scheduler-facing device contract.
-  Capability claims, protocol versions, availability windows, calibration validity, policy digest,
-  revocation, expiry, and explicit secret/raw-identifier exclusion proofs are content-bound before
-  a site can be considered schedulable. The federated payload is metadata-only; stale, unavailable,
-  revoked, tampered, or locality-unsafe declarations remain visible as negative operational state.
-- P08-F32 `federated_instrument_operations` exchanges the consortium scheduling aggregate. Each
-  site summary is signature-checked and filtered by membership revocation, freshness, privacy floor,
-  locality/credential exclusion, and exchange policy before service and available capacity are
-  summed. Site-level capacity is not exported, reconstruction-risk is reported, and a quorum is
-  required before the aggregate can inform a federated campaign.
-- P08-F09 `phase_resolved_invasion_schedule` adds a separate experiment-design capability: it
-  ranks already device-validated time-lapse profiles using conservative reporter-phase dwell times,
-  independently measured motility persistence/localization error, reporter/tracking quality, and
-  calibrated total-dose limits. A macro-average/worst-phase fixed-point objective avoids letting a
-  common long phase conceal a missed short phase. This returns a schedule proposal—not biological
-  evidence or an autonomous hardware command—and routes the selected profile through the existing
-  P08 protocol compiler and signed preflight. The question is grounded in conflicting preclinical
-  observations: some organoid invasion assays report low proliferation markers in invasive cells,
-  while cell-cycle-resolved time-lapse work reports highly motile G2/M subpopulations. That conflict
-  is a reason to measure phase and movement together, not to assume a “go-and-grow” mechanism.
-  Its action-plan compiler expands the selected, version-pinned cadence into bounded P08 image
-  actions; each remains operator-gated and must pass the ordinary protocol binding, qualified
-  calibration, live interlocks, and guarded gateway path. A 48-world held-out synthetic trajectory
-  suite tests phase coverage and motility recovery against a fixed-cadence baseline at equal total
-  dose; passing this software benchmark is not prospective biological validation.
-  References: da Silva et al., *Spontaneous Glioblastoma Spheroid Infiltration of Early-Stage
-  Cerebral Organoids Models Brain Tumor Invasion* (2018),
-  https://journals.sagepub.com/doi/10.1177/2472555218764623; Akhunbay-Fudge et al., *Glioblastoma
-  invasion into different organoid hosts reveals cell-intrinsic and proliferative migratory
-  programs* (2026), https://pmc.ncbi.nlm.nih.gov/articles/PMC13059114/. The score is a sampling
-  proxy; release requires comparison to fixed-cadence and equal-dose baselines on held-out
-  non-human preclinical trajectories, including reporter dropout, unequal phase durations, and
-  phototoxicity/track-quality shifts. No novelty claim is considered proven by these references.
-
-P08-F07 `assay_run_schema` is the typed handoff between an admitted local run and downstream
-ingestion/computation. It binds an opaque non-human sample token, approved protocol digest,
-qualified calibration, exact preflight digest, acquisition cadence, channel schemas, and local
-storage policy into a content-addressed `AssayRunSpec`. `record_glioma_assay_run_result` requires
-one explicit state per channel and emits `Completed`, `Negative`, `Partial`, `Blocked`, or
-`Unresolved` without imputing missing measurements. P03/P09 consumers can therefore distinguish
-measured image artifacts from transport-only, failed, dropped, or unresolved channels. Human-origin
-material, direct identifiers, non-local raw data, model mismatch, stale calibration, and incomplete
-preflight are rejected before dispatch. The contract is Rust/serde-compatible and preserves
-simulation-only execution as non-biological evidence.
-
-P08-F13 `instrument_protocol_compiler` turns a typed, version-pinned assay protocol into an
-ordered `InstrumentAction` plan before preflight or gateway binding. It matches each requested
-operation/output schema against the local device capability manifest, performs exact fixed-point
-dimensional conversion (for example seconds to milliseconds and milliliters to microliters),
-checks device ranges and required parameters, and emits expected local artifacts, a proof-linked
-preflight checklist, and explicit compensation actions. Unsupported commands, dimensional
-mismatches, overlapping schedules, and risk/duration-policy violations remain visible in an
-unsupported-step report and force `Unsupported` or `Blocked`; they never disappear or become
-dispatchable. Golden, unit-mismatch, unsupported-command, and budget fixtures establish
-deterministic compilation and fail-closed behavior. The compiled plan still requires P08-F02
-calibration, P08 preflight, authorization, protocol binding, interlocks, and the institution-local
-gateway before physical execution.
-
-P08-F14 `synchronized_multimodal_acquisition` executes the useful shared-timeline portion of a
-multimodal glioma assay. It accepts an investigator-declared set of imaging, molecular, and
-functional captures, checks that each instrument has a validity-bounded clock calibration, converts
-global assay ticks into device ticks with integer drift correction, and rejects overlapping or
-over-budget captures before dispatch. A caller-owned institution gateway executes captures one at a
-time; every result must carry a local artifact, observed timing, and a quality value. The engine
-computes corrected global starts and bundle skew, preserves failed/negative/unresolved/blocked
-modalities, and emits a bundle artifact only when all required modalities pass their quality and
-skew gates. A failed device can therefore never make a multimodal run appear complete. Dry-run
-execution is explicitly simulation-only and cannot be interpreted as biological evidence. The
-acceptance suite covers deterministic ordering, calibrated clock conversion, late-device skew,
-required-device failure, and instrument overlap blocking. Raw signals and sample payloads remain
-institution-local; this is an acquisition/orchestration capability, not a clinical or biological
-classifier.
-P08-F14 admission now uses a bounded interval/risk portfolio beam rather than first-fit timeline
-greediness. Required channels dominate optional channels when they conflict on one instrument;
-among equally complete required portfolios, the planner maximizes admitted channel coverage, then
-prefers lower total risk with replay-stable ties. Every displaced channel remains blocked and is
-reported in the uncertainty partition, so an optional early capture cannot silently starve a
-required later modality.
-The autonomous-stage bridge now lets the P07 engine invoke this P08 operating cycle as its typed
-`instrument-preflight` worker. It runs the existing preflight barrier, authorization and revocation
-checks, live-interlock recheck, bounded campaign, retry accounting, and emergency-stop path; the
-returned stage artifact embeds the operating-cycle outcome while explicitly setting
-`biological_evidence_promoted=false` and requiring assay-evidence adjudication. A dry-run
-constructor is available for sandbox/MCP rehearsal, while production hosts inject their own
-institution-owned `InstrumentExecutor` through the same stage-worker trait.
+- Current implementation: 16/32 slots. Failure recovery and queue-aware fleet routing are already
+  implemented and registered. The existing F16 science loop and F25 research-frontier handoff now
+  carry an explicit instrument-to-analysis provenance contract: assay observations bind by
+  `(run_id, action_id)`, assessments retain campaign order and each execution digest, and the loop
+  input digest commits to the exact request and observations. `validate_against` rechecks the
+  requested preflight/run binding and recomputes each assessment from its run-scoped observations;
+  F25 consumes the run-bound assessments directly and commits to the source-loop digest. This
+  closes the known multi-run attribution gap without allocating a new slot. The upstream source
+  blueprint is still absent, so do not name another P08 feature wave until its contract is checked.
 
 Folder inventory: 33 source modules; 32/32 feature slots implemented. The program folder directly owns 32 feature modules; shared public feature facades live under `crates/research/src/glioma/`.
 
@@ -1313,7 +1143,7 @@ Folder inventory: 33 source modules; 32/32 feature slots implemented. The progra
 | [`protocol_binding`](crates/research/src/glioma/programs/p08_instrument_robotics/protocol_binding.rs) | GAF-GLIOMA-P08-F22 | Bind approved glioma instrument actions to a version-pinned local device protocol profile. | 5 | `execution`, `preflight` |
 | [`recovery`](crates/research/src/glioma/programs/p08_instrument_robotics/recovery.rs) | GAF-GLIOMA-P08-F06 | Deterministic recovery planning for institution-local glioma instrument runs. | 2 | `execution` |
 | [`research_frontier`](crates/research/src/glioma/programs/p08_instrument_robotics/research_frontier.rs) | GAF-GLIOMA-P08-F25 | Status-aware instrument-result to autonomous-research-frontier compilation. | 3 | `assay_adjudication`, `science_loop` |
-| [`science_loop`](crates/research/src/glioma/programs/p08_instrument_robotics/science_loop.rs) | GAF-GLIOMA-P08-F16 | Governed instrument-to-science loop for preclinical glioma assays. | 2 | `assay_adjudication`, `execution`, `operating_cycle` |
+| [`science_loop`](crates/research/src/glioma/programs/p08_instrument_robotics/science_loop.rs) | GAF-GLIOMA-P08-F16 | Governed instrument-to-science loop for preclinical glioma assays. | 4 | `assay_adjudication`, `execution`, `operating_cycle` |
 | [`signal_extraction`](crates/research/src/glioma/programs/p08_instrument_robotics/signal_extraction.rs) | GAF-GLIOMA-P08-F01 | Robust local instrument-signal extraction for preclinical glioma workflows. | 3 | — |
 | [`simulated_protocol_workflow`](crates/research/src/glioma/programs/p08_instrument_robotics/simulated_protocol_workflow.rs) | GAF-GLIOMA-P08-F23 | P07-simulation-gated execution of one instrument-backed glioma protocol slice (`GAF-GLIOMA-P08-F23`), not an end-to-end executor for every P07 task. | 6 | `calibration`, `execution`, `preflight`, `protocol_binding` |
 | [`synchronized_multimodal_acquisition`](crates/research/src/glioma/programs/p08_instrument_robotics/synchronized_multimodal_acquisition.rs) | GAF-GLIOMA-P08-F14 | Synchronized multimodal acquisition for preclinical glioma assays. | 5 | — |
@@ -1330,179 +1160,14 @@ Folder inventory: 33 source modules; 32/32 feature slots implemented. The progra
 - Downstream edges: P10 interpretation, P11 release, and P12 federated benchmark aggregation.
 - Promotion gate: byte-stable canonicalization, resource termination, crash/retry recovery,
   negative-result retention, and independent replay.
-- P09-F05 — `workflow_execution_manifest` wraps the computation DAG with pinned tools, typed task
-  contracts, local resource bindings, retry policy, expected outputs, and an explicit unsupported-
-  step list. It rejects undeclared effects, non-local resources, unpinned tools, and graph coverage
-  gaps before a scheduler sees the plan. Resource-shortfall and unsupported states remain blocked,
-  while a ready manifest can be handed to the existing caller-owned P09 executor.
-- P09-F08 — `partial_result_semantics` is the computation-to-interpretation missingness contract.
-  It requires explicit field observations and separates measured values, measured nulls, censored,
-  interrupted, failed, unavailable, redacted, and invalid states. It derives conservative gates for
-  descriptive summaries, model fitting, mechanism inference, and publication, so budget-censored
-  or missing fields cannot become measured zeroes. The bundle is replay-bound and carries negative
-  evidence and a recovery/review handoff.
-- P09-F07 — `artifact_lineage_index` verifies content-addressed derivation edges and computes
-  deterministic output-to-root proofs. Exact, transformed, sampled, and semantic-loss relations
-  remain distinct; tampered digests, unauthorized nodes, cycles, missing parents, and orphan
-  artifacts become explicit gaps rather than being hidden by a successful task status.
-- P09-F17 — `computation_run_inspector` is the researcher-facing run observability contract. It
-  reconciles immutable task outcomes with ordered telemetry, resource totals, stale windows,
-  lineage status, and partial-result limitations, then emits a deterministic recovery issue bundle.
-  Missing terminal events and disposition mismatches remain unresolved instead of being shown as
-  success.
-- P09-F19 — `high_throughput_compute_timeline` turns those run inspections into a campaign-level
-  operations product. It separates successful, failed, incomplete, and unresolved task volume;
-  ranks queue latency, compute duration, retry burden, resource saturation, and stale telemetry;
-  retains scientific scope and run links; and evaluates throughput forecasts only against an
-  explicit held-out run partition. Failed work cannot inflate capacity, and an uncalibrated
-  forecast remains a partial state rather than an operational claim.
-- P09-F26 — `interpretation_frontier` now retains the complete computation-derived action universe
-  and uses a bounded stage-diverse utility/cost beam for the executable subset. Deferred actions
-  remain canonical, routable, and visible alongside replay, negative-result, and recovery gates in
-  `GliomaComputationInterpretationFrontier1@2`; no task disappears before P07 admission.
-- The campaign controller now carries value-only `ComputationOutcomeSummary` posteriors into every
-  planner round and into selective recovery. Completed, cached, negative, partial, failed, and
-  skipped task outcomes remain separately countable with retry burden and an explicit smoothed
-  success estimate; raw artifacts never leave the institution-local executor. This lets an
-  autonomous planner prioritize validation or robustness work from observed computation behavior
-  without turning a failed or missing result into a success claim.
-- P09-F11 — `computation_portfolio_planner` now admits required analyses first, then uses a
-  deterministic bounded beam over complete prerequisite closures. Whole portfolios are compared
-  by information, uncertainty reduction, coverage, modality and redundancy diversity, cost, and
-  duration rather than by a single local score. This makes a tight compute envelope prefer
-  genuinely complementary glioma evidence while preserving typed DAG closure, resource gates,
-  deterministic replay, and explicit deferral of lower-coverage work. Signed utility arithmetic
-  clamps negative optional-task utility before portfolio scoring, so a resource-heavy low-value
-  analysis cannot win through signed-to-unsigned conversion.
-- P09-F10 — `execution` charges the declared estimated cost and duration for every worker
-  invocation, including retry attempts, while replay-cache hits remain zero-cost. A retry is
-  admitted only when its full envelope still fits the remaining budget; otherwise the task is
-  recorded as failed with an explicit budget-stop uncertainty and dependents are skipped. This
-  prevents transient failures from silently exceeding compute limits or making partial runs look
-  cheaper than the work actually attempted. Retry counts represent dispatched retries only, and
-  `GliomaComputationExecution1@2` makes that accounting contract explicit. Structured provider
-  failures returned through the typed result channel are terminal immediately, with a task-failed
-  stop reason rather than being misclassified as a dependency-only block.
-- The autonomous-stage bridge composes P09-F24 with P07's routed engine. A dedicated
-  `computational-execution` worker now invokes workflow compilation, the declared resource gate,
-  the replay-keyed computation campaign, bounded retries, and the caller-owned local executor.
-  Its `GliomaComputationRun1@1` stage artifact records the full operating-cycle outcome while
-  explicitly setting `biological_evidence_promoted=false`; completed computation remains subject
-  to statistical-interpretation and reproducibility adjudication. The MCP rehearsal uses only the
-  deterministic local executor, while institution hosts can inject a governed executor through
-  `GliomaComputationExecutor`.
-- The `computation_placement_stress_evaluate` composition evaluates that placement policy under
-  worker loss, transfer-cost inflation, and contracted compute windows. It replays the exact typed
-  DAG and compares the proposed multi-worker schedule with a constrained fastest-single-worker
-  baseline, reporting assigned coverage, makespan, transfer cost, non-degradation evidence, and
-  scenario-level uncertainty. This gives the autonomous engine an operational promotion gate
-  before local execution without treating scheduling performance as biological evidence.
-- Current implementation: 32/32 slots. The phase-resolved imaging handoff now consumes only
-  completed, local, de-identified P08 capture artifacts and compiles them into the standard P09
-  ingest-to-validate/export DAG. It preserves negative, partial, and unresolved acquisition as
-  blocked handoff states; dry-run captures are explicitly simulation-only and cannot be read as
-  biological measurements. Maintain with placement optimization, artifact lineage joins, and
-  adaptive robustness-guided recomputation.
-
-P09-F06 `execution_environment_lock` is the autonomous computation admission layer. It converts
-workflow identity, an institution architecture profile, and signed trusted package metadata into
-an exact content-addressed environment/build identity. OS, compiler, libraries, models, runtimes,
-and accelerators carry resolved versions, source/build digests, ABI, availability, and portability
-limits. Mutable or compromised sources block before dispatch; unavailable, incompatible, untrusted,
-and non-portable dependencies remain explicit. Permutation, compromise, version, architecture,
-optional-dependency, and human/clinical-boundary tests are included.
-
-P09-F09 `environment_resolution_agent` closes the environment recovery loop. It evaluates
-trusted, signed, content-addressed dependency and hardware candidates against the existing lock
-request, refuses poisoned or mutable sources, enforces change/cost budgets, and preserves pinned
-scientific versions and sources unless an explicit approval is present. A qualified proposal
-contains the exact resulting lock; rejected candidates, unresolved conflicts, and approval debt
-remain visible for an operator or the next autonomous cycle. Candidate-order, missing-dependency,
-silent-upgrade, poisoned-source, and deterministic-proposal tests are included.
-
-P09-F21 `reproducible_task_api` is the typed handoff between autonomous planning and an
-institution-local computation worker. It binds a task's replay identity, canonical input schemas,
-authorized local artifacts, qualified environment lock, expiring policy grant, idempotency key,
-and cost/duration budget into a replayable execution handle. Duplicate submissions reuse the exact
-handle; conflicting key reuse, unauthorized artifacts, expired grants, and over-budget work fail
-before dispatch. The exchange returns explicit not-started/partial/failure state and never moves
-raw data or executes a worker in the core.
-
-P09-F16 `federated_workflow_template_exchange` is the consortium-facing workflow product.
-It packages a deterministic, local-only task/schema/effect contract with a qualified environment
-identity and a held-out validation card, then admits only signed aggregate site attestations under
-an expiry-bounded sharing policy. Two independent conformant sites can publish a portability claim
-and explicit revalidation-required adaptations; failed, revoked, missing, or stale evidence remains
-visible and blocks portability. Inputs, credentials, and raw outputs never leave their institution.
-
-P09-F22 `artifact_registry_connector` is the data-plane admission boundary for autonomous
-computation. It resolves handles by exact content hash, schema, license, approved registry source,
-signed metadata, availability, freshness, locality, and an expiring site grant. Corrupt, stale,
-ambiguous, unauthorized, protected-human, direct-identifier, and clinical-decision candidates are
-denied or left unresolved; the connector returns a verified local handle and never moves raw bytes.
-
-P09-F28 `federated_replay_conformance` is the cross-site release gate for a reusable glioma
-workflow. It verifies signed aggregate replay metrics against an exact workflow digest and
-versioned absolute/relative tolerances, retains per-metric deviations, and emits missing, stale,
-revoked, tampered, rejected, and out-of-tolerance site states. A portability claim is possible only
-when every required site passes; absent or failed evidence is never imputed as success.
-
-P09-F29 `local_compute_cache_governor` turns cache reuse into a reproducibility-controlled
-product capability. It binds every hit to input, code, environment, policy, semantic-version, and
-output-schema identities, invalidates entries after dependency or policy changes, and applies
-deterministic retention and size/entry quotas. Only unpinned local intermediates may be evicted;
-pinned research inputs can block admission. The decision returns reusable handles, invalidations,
-eviction records, negative evidence, and uncertainty without accessing raw bytes.
-
-P09-F30 `multistudy_cache_partition` extends cache safety to consortium-scale studies. It
-partitions reuse by requesting study and de-identification scope, permits explicitly public
-reference assets to cross studies, rejects protected or restricted cross-study reads, and
-invalidates entries when cache-key or policy identity changes. Boundary flags for human data,
-direct identifiers, and clinical decisions fail closed before any handle is returned.
-
-P09-F31 `high_throughput_compute_capacity` is the queue-to-capacity control surface for
-autonomous preclinical glioma computation. It orders admitted jobs with deterministic fairness
-across workflow groups, calibrates duration and success intervals from local runtime observations,
-reserves bounded concurrency/resource/memory/accelerator/budget capacity, and keeps stale
-telemetry, saturation, age expiry, deferral, and required-job blocking visible. It emits a
-simulation-only `ComputeCapacityPlan`; local schedulers may consume that plan, but the MCP route
-does not execute code or move protected data.
-
-P09-F32 `federated_compute_cost_exchange` is the consortium placement surface for reproducible
-glioma computation. It exchanges signed aggregate capacity classes, cost intervals, capability
-and localization scopes, freshness, and reconstruction-risk evidence while keeping credentials,
-raw inputs, and outputs at the originating site. Revoked, stale, expired, incompatible, or
-policy-over-budget sites are excluded explicitly; missing summaries remain unresolved and never
-become implied capacity. The resulting `FederatedComputeCapacityEnvelope` is a ranked,
-simulation-only handoff to a caller-owned local scheduler.
-
-P09-F23 `computation_event_stream` gives the autonomous engine a replayable execution
-telemetry surface. It orders task, resource, QC, and recovery events by durable sequence,
-deduplicates exact retries, emits explicit recovery gaps instead of inferring completion from
-missing telemetry, and preserves event identity when payloads are redacted by local policy.
-Cursor-bound pages are deterministic across permutations and resumable after network loss;
-the route remains institution-local and never performs raw-data movement or clinical decisions.
-
-P09-F04 `federated_replay_discrepancy_scan` is the consortium computational-science lead's
-cross-site replay-localization capability. It compares signed permitted aggregate attestations
-without moving protected inputs, separates workflow, data-version, environment, dependency,
-numeric-kernel, seed, output, and multi-factor divergence, and emits bounded non-dispatchable
-site-local diagnostic tasks. Missing or stale summaries remain unresolved; raw inputs and clinical
-decisions stay out of scope. Deterministic permutation, injected environment/seed differences,
-missing-field, signature, and raw/clinical-boundary tests are included.
-
-P09-F18 `cross_study_comparator` is the computational scientist's cross-study alignment and
-variation diagnostic. It accepts explicit feature semantics, units, pipeline/version/normalization
-profiles, local artifact handles, and independent experimental-group identities. It refuses hidden
-unit or semantic coercion, preserves missing and censored observations as exclusions, gives each
-independence group equal weight while using bounded inverse-uncertainty weighting within each group,
-and reports pooled fixed-point means, uncertainty, total range/MAD, within-pipeline variation,
-between-pipeline variation, and leave-one-group-out shifts. A feature
-with dominant pipeline variation is labeled `processing_shift`; residual disagreement is retained
-as `biological_variation` rather than averaged away; incomplete support remains `insufficient` or
-`non_comparable`. The result is a typed input for P10 interpretation/replication and P06 follow-up
-selection, not a causal claim and not a clinical prediction. Deterministic permutation, unit/schema
-shift, processing-shift, and repeated-independence-group tests are included.
+- Current implementation: 13/32 slots registered in the research feature catalog: F01 robustness,
+  F02 reproducibility, F03 artifact-lineage joins, F10 execution, F11 portfolio planning, F12
+  portfolio execution, F13 campaigns, F14 workflow compilation, F15 robustness-guided computation,
+  F20 worker placement, F24 operating cycle, F25 recovery campaign, and F26 interpretation-frontier
+  compilation. The earlier next-wave items for placement optimization, artifact-lineage joins, and
+  robustness-guided recomputation are therefore already delivered; do not count them again. The
+  matching source blueprint for the remaining 19 slots is not bundled in this checkout, so name
+  their next implementation wave only after checking that source contract.
 
 Folder inventory: 34 source modules; 32/32 feature slots implemented. The program folder directly owns 32 feature modules; shared public feature facades live under `crates/research/src/glioma/`.
 
@@ -1531,7 +1196,7 @@ Folder inventory: 34 source modules; 32/32 feature slots implemented. The progra
 | [`operating_cycle`](crates/research/src/glioma/programs/p09_reproducible_computation/operating_cycle.rs) | GAF-GLIOMA-P09-F24 | Intent-to-computation operating cycle for autonomous preclinical glioma research. | 2 | `campaign`, `execution`, `workflow` |
 | [`partial_result_semantics`](crates/research/src/glioma/programs/p09_reproducible_computation/partial_result_semantics.rs) | GAF-GLIOMA-P09-F08 | Typed partial-result semantics for reproducible preclinical glioma computation. | 4 | `execution` |
 | [`phase_resolved_imaging_handoff`](crates/research/src/glioma/programs/p09_reproducible_computation/phase_resolved_imaging_handoff.rs) | GAF-GLIOMA-P09-F27 | Compile completed phase-resolved glioma image captures into a reproducible P09 workflow. | 4 | `execution`, `p08_instrument_robotics`, `p08_instrument_robotics::execution`, `p08_instrument_robotics::phase_resolved_invasion_schedule`, `p08_instrument_robotics::preflight`, `workflow` |
-| [`placement`](crates/research/src/glioma/programs/p09_reproducible_computation/placement.rs) | GAF-GLIOMA-P09-F20 | Deterministic worker placement for reproducible preclinical glioma computation. | 3 | `execution` |
+| [`placement`](crates/research/src/glioma/programs/p09_reproducible_computation/placement.rs) | GAF-GLIOMA-P09-F20 | Deterministic worker placement for reproducible preclinical glioma computation. | 4 | `execution` |
 | [`placement_stress_evaluation`](crates/research/src/glioma/programs/p09_reproducible_computation/placement_stress_evaluation.rs) | workflow composition | Stress evaluation for the reproducible glioma computation placement planner. | 2 | `execution`, `placement` |
 | [`planning`](crates/research/src/glioma/programs/p09_reproducible_computation/planning.rs) | GAF-GLIOMA-P09-F11 | Beam-selected portfolio planning for reproducible glioma computation DAGs. | 5 | `execution` |
 | [`portfolio_execution`](crates/research/src/glioma/programs/p09_reproducible_computation/portfolio_execution.rs) | GAF-GLIOMA-P09-F12 | Autonomous bridge from computation-portfolio selection to local execution. | 2 | `execution`, `planning` |
@@ -1698,118 +1363,132 @@ transportability diagnostic, not a clinical prediction or treatment recommendati
   doi:10.1038/s41467-021-21038-1.
 
 - Downstream edges: P06 follow-up design, P11 release verdicts, and P12 consortium comparisons.
+- Promotion gate: estimand clarity, uncertainty, sensitivity, rival explanations, independent
+  reproduction, and explicit null/negative outcomes.
+- P10-F32 — longitudinal replication transport. Consumer: replication scientist. Inputs are
+  independent study-level effect observations on one declared shared time grid, each tied to a
+  local artifact, source model system, and population signature. The compiler retains complete,
+  incomplete, low-quality, and too-distant study states; it uses one common eligible study set at
+  every timepoint, then reports similarity-weighted fixed-point effects, heterogeneity,
+  leave-one-study-out influence, pooled longitudinal slope, and directional agreement. Missing
+  timepoints are never imputed. Model-system identity is categorical: a different source system
+  incurs the maximum 1000 gap, and signature similarity continues to weight any source admitted
+  under an explicit request threshold. Promotion requires study quorum, full time-grid coverage,
+  acceptable model gap, heterogeneity and influence, and stable direction; a stable sub-threshold
+  trend is retained as negative evidence. Inputs are bounded to 4,096 studies, 16,384 observations,
+  and effects within ±1,000,000,000 milli-units. Leave-one-study-out effects are recomputed by
+  removing each study's weighted contribution from precomputed totals. Dependencies: P10-F13 trajectory analysis, P10-F17 model
+  transportability, and P10-F22 validation replication gate. Downstream edges: P11 provenance and
+  P12 aggregate replication comparison. Acceptance requires deterministic request/source/output
+  digests, local de-identified artifact references, explicit exclusion reasons, replay validation,
+  and negative/null outcome retention. The source blueprint distribution is not configured in this
+  checkout, so these thresholds and completeness rules are explicitly repository-defined rather
+  than claimed as a verbatim blueprint contract.
+- P10-F02 — multi-study pairwise effect concordance (`scientific_algorithm` at
+  `multimodal_multi_study`). Consumer: replication scientist. This repository-defined algorithm
+  compares local preclinical study effects only when the caller binds the exact same estimand and
+  effect unit. Each study carries a source-report digest, unique independence group, model system,
+  quality, replicate count, uncertainty interval, explicit estimate/null/unresolved state, and a
+  local de-identified artifact. Low-quality and unresolved rows remain in the output but cannot
+  pass the evidence floor. Same-model study pairs are compared by their full effect intervals;
+  cross-model pairs are reported as incomparable instead of being pooled or treated as transport.
+  Opposite, confidently non-null intervals are explicit discordance; interval overlap, interval
+  gap, expected-direction support, and expected-direction refutation remain separate fields.
+  Admission, independent-group, directional-support, quality, and direction-concordance floors are
+  explicit request fields.
+  The output reports per-study and pairwise states, not a pooled effect estimate, so it complements
+  P10-F09 meta-analysis and P10-F17 transportability. States are `insufficient_evidence`,
+  `cross_model_only`, `negative`, `heterogeneous`, `discordant`, and `concordant`. Bounds: 512
+  study rows and 130,816 pair rows; effect/uncertainty magnitudes are capped at 1,000,000,000
+  milli-units. Dependencies: P10-F10 causal contrast, P10-F09 meta-analysis, and P10-F17
+  transportability. Downstream edges: P10-F03 contradiction planning and P11 provenance.
+  Acceptance requires estimand/unit and source binding, unique independent groups, local artifacts,
+  complete same-model pair accounting, explicit cross-model and null/unresolved states,
+  deterministic replay/tamper checks, and zero external dispatch. The detailed source blueprint is
+  not configured in this checkout; this contract is repository-defined.
+- P10-F03 — prospective contradiction resolution (`scientific_algorithm` at
+  `prospective_high_throughput`). Consumer: methods reviewer and experimental design lead. This
+  is distinct from P01-F08's audit-cut planner: it compiles a bounded prospective experiment
+  portfolio to discriminate caller-declared mutually exclusive rival hypotheses. The request
+  binds one estimand/effect unit and at least two digest-bound hypotheses. Evidence records bind a
+  hypothesis, independent group, assessment (`supports`, `refutes`, `null`, `unresolved`), quality,
+  and local de-identified source artifact. A source group is counted once; null, unresolved, and
+  low-quality evidence stay visible and do not count as support. A contradiction is active only
+  after independent support floors establish at least two rivals, or one supported rival also has
+  an independent refutation. Candidate resolver designs arrive from P06 with one predicted effect
+  interval per rival, feasibility, risk, cost, and a digest-bound local protocol artifact. A rival
+  pair is covered only when prediction intervals are separated by the declared minimum margin.
+  The deterministic budgeted selector chooses designs by newly covered rival pairs per cost, with
+  feasibility/risk gates and stable tie-breaks; it reports uncovered pairs and skipped candidates.
+  States are `insufficient_evidence`, `no_contradiction`, `no_discriminator`, `budget_blocked`,
+  `partial`, and `plan_ready`. `plan_ready` means only that the predeclared discriminating design
+  covers all rival pairs; it never means an experiment ran or a hypothesis was resolved. Bounds:
+  16 rivals, 16,384 evidence records, 1,024 candidates, 32 selected designs, and signed effect /
+  uncertainty magnitudes capped at 1,000,000,000 milli-units. Dependencies: P10-F07 claim
+  adjudication, P10-F19 interpretation synthesis, and P06 experiment design. Downstream edges: P06
+  protocol planning, P11 provenance, and P12 independent replication comparison. Acceptance
+  requires independent-group accounting, local artifact binding, candidate interval completeness,
+  full-pair coverage or explicit unresolved-pair accounting, deterministic replay/tamper checks,
+  budget/risk enforcement, and zero external dispatch. The detailed source blueprint is not
+  configured in this checkout; this contract is repository-defined.
+- P10-F04 — registered-outcome reporting completeness (`scientific_algorithm` at
+  `multimodal_multi_study`). Consumer: research-integrity reviewer. This repository-defined audit
+  compares digest-bound local registry protocols with reviewed result-report metadata. Each study
+  binds one unique independence group, a registry report, protocol artifact, optional registration
+  and first-enrollment days, completion status/day, and at least one registered primary outcome.
+  An optional result report lists only outcome identifiers and reporting state (`reported`,
+  `incomplete`, or `ambiguous`); effect values, direction, significance, and raw records are never
+  accepted. Registration timing is derived from the supplied day fields and is explicit as
+  prospective, retrospective, or unknown. Primary outcomes become due only for a completed study
+  after the caller-declared reporting lag; recent, ongoing, terminated, and unknown-status studies
+  are retained without being treated as missing completed results. The audit marks overdue planned
+  outcomes absent from a report as missing, reports unregistered outcomes separately, and retains
+  every study/outcome row. It reports completeness thresholds and review signals only: absence does
+  not establish an unpublished, negative, or selectively suppressed result, and retrospective
+  registration or an unregistered reported outcome is not itself proof of misconduct or bias.
+  States are `insufficient_evidence`, `insufficient_follow_up`, `material_reporting_gap`,
+  `registration_anomaly`, `uncertain`, and `coverage_threshold_met`. Bounds: 512 studies, 64
+  registered outcomes per study, 128 reported outcomes per study, 32,768 total outcome rows, a
+  200,000-day absolute day ceiling, and a 3,650-day maximum reporting lag. Dependencies: P10-F02
+  multi-study concordance and P01 registry/source evidence. Downstream edges: P10-F03 prospective
+  contradiction planning and P11 negative-result disclosure. Acceptance requires exact source-report
+  coverage, independent-group accounting, local de-identified artifacts, canonical replay/tamper
+  validation, complete overdue-primary accounting, and zero external dispatch. The detailed source
+  blueprint is not configured in this checkout; this contract is repository-defined.
+- P10-F05 — registered-outcome evidence record (`typed_data_primitive` at `local_single_study`).
+  Consumer: research-integrity reviewer. This repository-defined record binds one study's exact
+  outcome/estimand/unit, independent-group identity, registry report, optional result report, local
+  de-identified artifacts, and reviewed availability state (`estimate`, `null`, `missing`,
+  `incomplete`, `ambiguous`, `not_due`, or `unresolved`). Estimate/null rows require bounded effect,
+  uncertainty, and quality values; unavailable states carry no effect values. Its schema rejects
+  undeclared fields, status/value mismatches, direct identifiers, and non-local artifacts. The
+  record is content-digested and independently replayable. It makes no multi-study claim and does not
+  interpret effect direction. Acceptance requires all status shapes, artifact boundaries, digest
+  tamper checks, deterministic replay, and zero external dispatch. The detailed source blueprint is
+  not configured in this checkout; this contract is repository-defined.
+- P10-F06 — registered-outcome evidence panel (`typed_data_primitive` at `multimodal_multi_study`).
+  Consumer: replication lead and evidence integrator. This repository-defined panel combines at
+  least two and at most 512 validated F05 records for the exact same outcome/estimand/unit, each from
+  a unique independent group. It binds the complete canonical registry/result report digest sets,
+  sorts records by study ID, preserves each availability state, and emits explicit availability
+  counts plus a replayable panel digest. It is a typed data boundary only: no effects are pooled,
+  directional support is inferred, or missing values imputed. Acceptance requires exact record and
+  digest coverage, independent-group uniqueness, schema-compatible source records, permutation-
+  stable replay/tamper checks, local de-identified artifacts, and zero external dispatch. The
+  detailed source blueprint is not configured in this checkout; this contract is repository-defined.
+- The companion missing-outcome sensitivity route is a derived view over the same per-study row
+  shape: it evaluates caller-declared bounded scenarios separately from observed results and never
+  changes the typed F05/F06 evidence records.
+- Current implementation: 32/32 slots. F02 is implemented as a repository-defined multi-study
+  pairwise concordance analysis, F03 as a repository-defined prospective contradiction planner,
+  F04 as a repository-defined registered-outcome completeness audit, F05 as the single-study typed
+  outcome record, and F06 as its multi-study typed evidence panel.
 
-#### Implemented P10-F05 typed independent-site replication protocol
-
-`GAF-GLIOMA-P10-F05` is owned by `programs/p10_interpretation_replication/replication_protocol_schema.rs`.
-It compiles a preclinical replication contract with an explicit estimand, assay scope, independent
-site capabilities, randomization, masking, stopping rule, prespecified analysis, declared
-deviations, and named unknowns. Source-site provenance is retained, but source values cannot be
-reused as independent-site identity. Blocking unknowns produce a valid blocked protocol rather
-than an executable-looking pass. The artifact is canonical, content-addressed, and replay-stable;
-it never dispatches work or makes a clinical decision.
-
-#### Implemented P10-F06 cross-site assay-mapping ledger
-
-`GAF-GLIOMA-P10-F06` is owned by `programs/p10_interpretation_replication/replication_assay_mapping_ledger.rs`.
-It compares source and replication variable dictionaries, units, semantic roles, detection limits,
-and calibration observations. Exact and calibrated mappings are separately listed from
-context-limited, non-equivalent, and unresolved mappings; uncertain measures are never promoted
-into a pooled analysis. Every accepted transform carries an evidence digest and bounded residual
-check. This is a measurement-comparability contract, not a biological replication result.
-
-#### Implemented P10-F04 lineage-response decomposition
-
-`GAF-GLIOMA-P10-F04` is owned by
-`programs/p10_interpretation_replication/lineage_response_decomposition.rs`. It standardizes the
-P10-F02 control and perturbation propagation operators to the same investigator-declared
-pretreatment state mixture, then decomposes each source-to-destination output contrast into
-symmetric net-descendant-yield and destination-composition components. Its consumers are the
-preclinical glioma methods reviewer and P06 assay-allocation planner.
-
-- Inputs: a validated P10-F02 analysis and an explicit integer-ppm source-state composition that
-  sums to one million, plus a prespecified practical component margin.
-- Estimand: expected finite-interval descendants per million cells under the declared starting
-  state mixture. The decomposition uses the symmetric identity
-  `Δ(yq) = Δy(qₜ+q꜀)/2 + (yₜ+y꜀)Δq/2`; each source/destination pair reports the total, both
-  components, paired bootstrap intervals, and fixed-point reconstruction residual.
-- Interpretation: net yield combines proliferation and death; destination composition is an
-  aggregate lineage-level quantity. Neither component is a direct cell-switch probability, a pure
-  growth/viability effect, or a causal mediation estimate. Conclusions depend on the supplied
-  baseline mixture.
-- Fail-closed behavior: rank-unresolved or prediction-failing P10-F02 analyses do not produce
-  qualified component estimates. If a positive-share source state has zero yield in any bootstrap
-  draw, the affected component intervals are withheld rather than conditioning on draws that can
-  be estimated. Output is explicitly unresolved/partial and routes follow-up to net-yield,
-  state-composition, joint validation, replication, or identifiability review.
-- Acceptance: pure-yield changes leave the composition component at zero; pure destination
-  redistribution leaves the yield component at zero; each pair reconstructs the standardized
-  total contrast within fixed-point tolerance; row/order permutations preserve identical output;
-  malformed mixtures and invalid source analyses are rejected; and zero-yield draws cannot be
-  silently dropped.
-- Prior-art comparison: PATH already estimates cell-state heritability/plasticity and transition
-  and proliferation dynamics from phylogenetically annotated single-cell lineages, including a
-  glioblastoma application; Neftel et al. established lineage-tracing evidence for plasticity among
-  glioblastoma cell states. This feature explicitly does **not** claim a new transition model or
-  decomposition family. Its product advance is a reproducible, paired-unit-bootstrap decomposition
-  directly composed with P10-F02's aggregate barcode-by-state operator and routed into assay design.
-  Its biological utility remains unvalidated until prospective held-out model benchmarking.
-  Sources: Schiffman et al., *Nature Genetics* 56, 2174–2184 (2024),
-  doi:10.1038/s41588-024-01920-6; Neftel et al., *Cell* 178, 835–849.e21 (2019),
-  doi:10.1016/j.cell.2019.06.024.
-
-P10-F07 `claim_adjudication` now computes confidence from the disposition of each scientific
-gate, not from unconstrained numeric summaries alone. A negative or unresolved causal, sensitivity,
-replication, or meta-analysis gate contributes zero or a bounded hold score; a strong downstream
-signal cannot average away missing or failed evidence. The output schema is
-`GliomaCausalClaimAdjudication1@3`. Selected follow-ups are canonicalized for replay while
-priority order remains the execution recommendation; when the caller action cap is smaller than
-the generated portfolio, deferred action IDs remain explicit and disjoint rather than being
-dropped. Timepoint completion, confounder measurement, independent replication, heterogeneity
-resolution, negative-result publication, and bounded preclinical release therefore remain
-routable in later cycles.
-
-- Program promotion gate: estimand clarity, unit-clustered uncertainty, full-rank or explicitly unresolved
-  design, calibrated held-out prediction, sensitivity to assay batch, capture correction, and regularization,
-  independent reproduction, and explicit null/negative outcomes.
-- The adaptive interpretation campaign now records value-only per-action outcome posteriors and
-  exposes them to history-aware planners. Completed, negative, partial, failed, and skipped
-  actions remain distinct with retry burden and a smoothed success estimate, so a glioma planner
-  can switch from a failing frontier action to complementary stability, replication, or mechanism
-  discrimination work without importing institution-local artifacts or fabricating evidence.
-- P10-F20/P10-F26 now close that loop inside the frontier selector: prior action summaries are
-  carried into `GliomaAdaptiveResearchFrontier1@2`, and the empirical-Bayes adapter discounts
-  information, leverage, feasibility, and safety scores for repeatedly failing branches while
-  preserving a bounded novelty bonus. The next batch therefore changes because of observed local
-  outcomes, not because a static action table was replayed; the summary is retained in the signed
-  content-addressed frontier digest for deterministic resumption.
-- P10-F26 now charges each adaptive round from the nested portfolio's measured worker-invocation
-  spend, including retries, instead of summing each dispatched action once. A transient
-  interpretation-worker failure therefore cannot create false budget headroom for a later round.
-- P10-F18 now charges every replication-campaign worker invocation before dispatch, including
-  failed and retry attempts. Retry counts are incremented only for an observed retryable failure;
-  if the next attempt cannot fit the remaining budget, the action is recorded as failed with an
-  explicit budget-exhaustion uncertainty and the campaign returns a replayable partial result.
-  Terminal executor failures now seal the attempted round as well, retaining its observations,
-  budget delta, and final re-analysis instead of returning a failed campaign with an unaccounted
-  spend.
-- Current implementation: 32/32 slots including P10-F02 through P10-F06. Maintain with
-  longitudinal replication transport and prospective contradiction resolution.
-
-P10-F27 `replication_closure_frontier` now adds deterministic target- and model-system-diversity
-bonuses to its bounded cost/risk beam. Near-tied closure portfolios therefore cover distinct
-independent-site, heterogeneity, target-model, stress-test, or negative-confirmation routes rather
-than repeating one closure target; the versioned frontier is `GliomaReplicationClosureFrontier1@2`.
-P10-F28 now translates selected closure targets into an admitted campaign-action-kind set before
-dispatch. The campaign selector is filtered by that set, so a high-level frontier approval for
-independent-site replication, heterogeneity resolution, target-model acquisition, stress testing,
-or negative-result confirmation cannot silently drift into another scientific operation.
-
-Folder inventory: 33 source modules; 32/32 feature slots implemented. The program folder directly owns 30 feature modules; shared public feature facades live under `crates/research/src/glioma/`.
+Folder inventory: 40 source modules; 32/32 feature slots implemented. The program folder directly owns 30 feature modules; shared public feature facades live under `crates/research/src/glioma/`.
 
 | Module | Kind / feature slot | Purpose | Direct test annotations | Imports |
 |---|---|---|---:|---|
-| [`adaptive_campaign`](crates/research/src/glioma/programs/p10_interpretation_replication/adaptive_campaign.rs) | GAF-GLIOMA-P10-F26 | Bounded multi-round adaptive interpretation campaigns. | 4 | `adaptive_execution`, `adaptive_frontier`, `synthesis` |
+| [`adaptive_campaign`](crates/research/src/glioma/programs/p10_interpretation_replication/adaptive_campaign.rs) | GAF-GLIOMA-P10-F26 | Bounded multi-round adaptive interpretation campaigns. | 2 | `adaptive_execution`, `adaptive_frontier`, `synthesis` |
 | [`adaptive_execution`](crates/research/src/glioma/programs/p10_interpretation_replication/adaptive_execution.rs) | GAF-GLIOMA-P10-F25 | Guarded execution of the adaptive interpretation frontier. | 3 | `adaptive_frontier` |
 | [`adaptive_frontier`](crates/research/src/glioma/programs/p10_interpretation_replication/adaptive_frontier.rs) | GAF-GLIOMA-P10-F20 | Outcome-conditioned next-step planning for the autonomous preclinical glioma engine. | 6 | — |
 | [`autonomous_stage_bridge`](crates/research/src/glioma/programs/p10_interpretation_replication/autonomous_stage_bridge.rs) | workflow composition | P07 autonomous-engine bridges for P10 interpretation and replication stages. | 1 | `campaign`, `operating_cycle` |
@@ -1827,13 +1506,20 @@ Folder inventory: 33 source modules; 32/32 feature slots implemented. The progra
 | [`lineage_propagation`](crates/research/src/glioma/programs/p10_interpretation_replication/lineage_propagation.rs) | GAF-GLIOMA-P10-F02 | Fit and validate a lineage-resolved finite-interval glioma cell-state propagation operator. | 8 | — |
 | [`lineage_response_decomposition`](crates/research/src/glioma/programs/p10_interpretation_replication/lineage_response_decomposition.rs) | GAF-GLIOMA-P10-F04 | Decompose preclinical glioma lineage-propagation contrasts into net-yield and state-composition components. | 3 | `lineage_propagation` |
 | [`lineage_transport`](crates/research/src/glioma/programs/p10_interpretation_replication/lineage_transport.rs) | GAF-GLIOMA-P10-F03 | Compare lineage-resolved glioma perturbation contrasts across preclinical model systems. | 5 | — |
+| [`longitudinal_transport`](crates/research/src/glioma/programs/p10_interpretation_replication/longitudinal_transport.rs) | alias: `super::lineage_dynamics::FEATURE_ID` | Longitudinal transport of independent preclinical replication studies. | 7 | `lineage_dynamics` |
 | [`mediation`](crates/research/src/glioma/programs/p10_interpretation_replication/mediation.rs) | GAF-GLIOMA-P10-F15 | Deterministic causal-mediation analysis for preclinical glioma studies. | 4 | — |
 | [`meta_analysis`](crates/research/src/glioma/programs/p10_interpretation_replication/meta_analysis.rs) | GAF-GLIOMA-P10-F09 | Deterministic fixed-point meta-analysis for independent preclinical glioma studies. | 5 | — |
 | [`operating_cycle`](crates/research/src/glioma/programs/p10_interpretation_replication/operating_cycle.rs) | GAF-GLIOMA-P10-F24 | Interpretation-gate and adaptive-frontier operating cycle for preclinical glioma research. | 1 | `adaptive_frontier`, `synthesis` |
+| [`outcome_evidence_panel`](crates/research/src/glioma/programs/p10_interpretation_replication/outcome_evidence_panel.rs) | alias: `super::replication_assay_mapping_ledger::FEATURE_ID` | Canonical multi-study panel of registered-outcome evidence records. | 6 | `outcome_record`, `replication_assay_mapping_ledger` |
+| [`outcome_missingness_sensitivity`](crates/research/src/glioma/programs/p10_interpretation_replication/outcome_missingness_sensitivity.rs) | workflow composition | Sensitivity envelope for missing registered preclinical outcome results. | 6 | `outcome_record` |
+| [`outcome_record`](crates/research/src/glioma/programs/p10_interpretation_replication/outcome_record.rs) | alias: `super::replication_protocol_schema::FEATURE_ID` | Digest-bound typed registered-outcome evidence record for one local study. | 3 | `replication_protocol_schema` |
+| [`outcome_reporting_audit`](crates/research/src/glioma/programs/p10_interpretation_replication/outcome_reporting_audit.rs) | alias: `super::lineage_response_decomposition::FEATURE_ID` | Registered-outcome completeness and timing audit for local preclinical studies. | 7 | `lineage_response_decomposition` |
+| [`prospective_contradiction`](crates/research/src/glioma/programs/p10_interpretation_replication/prospective_contradiction.rs) | alias: `super::lineage_transport::FEATURE_ID` | Prospective discrimination planning for conflicting preclinical glioma claims. | 7 | `lineage_transport` |
 | [`replication_assay_mapping_ledger`](crates/research/src/glioma/programs/p10_interpretation_replication/replication_assay_mapping_ledger.rs) | GAF-GLIOMA-P10-F06 | Cross-site assay equivalence ledger for independent preclinical glioma replication. | 3 | `replication_protocol_schema` |
 | [`replication_closure_campaign`](crates/research/src/glioma/programs/p10_interpretation_replication/replication_closure_campaign.rs) | GAF-GLIOMA-P10-F29 | Bounded, multi-round execution of a glioma replication-closure frontier sequence. | 1 | `campaign`, `replication_closure_execution`, `replication_closure_frontier`, `validation_replication_campaign` |
 | [`replication_closure_execution`](crates/research/src/glioma/programs/p10_interpretation_replication/replication_closure_execution.rs) | GAF-GLIOMA-P10-F28 | Execute a selected replication-closure frontier for preclinical glioma research. | 1 | `campaign`, `replication_closure_frontier`, `validation_replication_campaign` |
 | [`replication_closure_frontier`](crates/research/src/glioma/programs/p10_interpretation_replication/replication_closure_frontier.rs) | GAF-GLIOMA-P10-F27 | Replication-closure frontier with bounded portfolio selection for autonomous preclinical glioma research. | 3 | `campaign`, `validation_replication_campaign`, `validation_replication_gate` |
+| [`replication_concordance`](crates/research/src/glioma/programs/p10_interpretation_replication/replication_concordance.rs) | alias: `super::lineage_propagation::FEATURE_ID` | Pairwise concordance for independent, estimand-aligned preclinical glioma studies. | 7 | `lineage_propagation` |
 | [`replication_protocol_schema`](crates/research/src/glioma/programs/p10_interpretation_replication/replication_protocol_schema.rs) | GAF-GLIOMA-P10-F05 | A typed, independent-site replication contract for preclinical glioma work. | 4 | — |
 | [`sensitivity`](crates/research/src/glioma/programs/p10_interpretation_replication/sensitivity.rs) | GAF-GLIOMA-P10-F12 | Unmeasured-confounding sensitivity bounds for preclinical glioma effects. | 3 | — |
 | [`state_transition`](crates/research/src/glioma/programs/p10_interpretation_replication/state_transition.rs) | GAF-GLIOMA-P10-F14 | Longitudinal discrete-state transition analysis for preclinical glioma models. | 8 | — |
@@ -1862,150 +1548,185 @@ Shared public feature modules owned outside this folder:
 - Downstream edges: P12 federation and every upstream program's publication handoff.
 - Promotion gate: complete provenance, methods/limitations, replay evidence, policy-compliant
   localization, signed checksums, and negative-result disclosure.
-- Cross-program handoff: `execute_glioma_engine_release_operating_cycle` accepts only a qualified
-  P07 autonomous-engine run. It content-binds the final workflow plan, engine execution digest,
-  replay identity, exact checkpoint artifacts, and engine-reported negative evidence before P11
-  starts replay or release evaluation. Partial, held, approval-pending, blocked, exhausted, or
-  tampered engine runs are rejected as release inputs rather than being upgraded into publication
-  candidates.
-- Autonomous stage bridge: `glioma_evidence_gated_stage_engine_release_execute` routes a qualified
-  P01/P07 frontier into the P11 replay and release gate as an unpublished typed research-object
-  candidate. It keeps exact checkpoint hashes, negative evidence, uncertainty, and accountable
-  review visible; signing, publication, raw-data movement, and federation remain separate governed
-  actions.
-- P11-F02 `reproducibility_score` computes explicit data-scope, code, environment, methods,
-  artifact, uncertainty, negative-outcome, lineage, and independent-replay dimensions. Missing
-  evidence scores zero; blocked manifests, replay mismatch, and missing scientific qualifications
-  hard-block the profile. Leave-one-component-out sensitivity identifies which required component
-  carries the claim, and the route remains evaluation-only until accountable release review.
-- P11-F03 `leakage_audit` traverses the complete release dependency graph before serialization,
-  preserving transitive paths while detecting protected payloads, direct identifiers, local-only
-  references, embedded secrets, path escapes, missing dependencies, cycles, and depth overflow.
-  Critical findings hard-block export; omitted local nodes remain explicit and the audit emits only
-  metadata and content digests.
-- P11-F04 `qualification_preserver` compares source and release qualification declarations,
-  preserving uncertainty, intervals, null outcomes, failed replications, contradictions, omissions,
-  limitations, and negative evidence. Weakened or missing qualifications, unbound lineage, and
-  unsupported release claims remain explicit blockers; no release claim can exceed its evidence.
-- P11-F09 `metadata_normalizer` compiles local release metadata through approved mapping rules,
-  controlled vocabularies, and a target schema while retaining exact source-field links and a
-  reversible change set. Conflicting values remain unresolved, inferred rules require confirmation,
-  required fields fail closed, and protected human/clinical metadata is rejected before release.
-- P11-F08 `signed_attestation` binds the manifest, build provenance, release-gate evidence, signer
-  scope, independent verification results, and key revocation state into a content-addressed
-  attestation. Failed gates, inactive/revoked authorities, missing verification, and post-sign
-  mutation are fail-closed; issuing remains an institution-owned cryptographic seam.
-- P11-F11 `artifact_integrity_scanner` reduces local streaming observations into a verified or
-  quarantined partition. Digest mismatch, truncation, unsupported formats, malformed metadata,
-  executable payloads, links, missing members, and byte/memory-budget violations remain explicit
-  findings and can never be represented as verified.
-- P11-F12 `license_scope_checker` evaluates transitive dependency licenses, audience scope,
-  locality, embargo, rights confirmation, and field classification into allow/redact/deny/unresolved
-  decisions. Unknown rights never become allowed; raw data, identifiers, secrets, and local-only
-  content remain protected before any export plan is accepted.
-- P11-F13 `release_bundle_compiler` compiles only supplied, authorized, content-addressed members
-  into a deterministic offline replay plan. Missing dependencies and cycles block completion;
-  excluded local inputs retain an explicit origin-institution replay boundary and limitations rather
-  than being silently fetched or represented as complete.
-- P11-F14 `multistudy_release_composer` composes study-scoped comparative metadata while retaining
-  model-system, method, provenance, limitation, and assay-mapping lineage. Exact, comparable, and
-  non-equivalent measures are partitioned deterministically; missing studies remain unavailable and
-  comparable measures require an explicit pooling policy.
-- P11-F15 `continuous_release_pipeline` compiles an ordered local event stream into an immutable
-  release candidate. It detects stale or non-monotonic versions, missing required programs/artifacts,
-  schema and policy regressions, dropped negative evidence, and explicit omissions; semantic diffs
-  and accountable-review requirements remain content-addressed before any publication action.
-- P11-F16 `federated_release_bundle` joins only policy-approved aggregate contributions from local
-  sites. Quorum, freshness, schema/policy identity, uncertainty, heterogeneity, human-data, and
-  locality gates are evaluated per site; omissions and localization statements remain in the signed
-  object boundary, while raw data and credentials never enter the federated bundle.
-- P11-F17 `release_preview_workbench` compiles an exact audience-specific release preview from a
-  validated manifest. Canonical section/artifact allow-lists and redactions are applied before
-  rendering, prior-version differences are explicit, and protected payloads cannot enter any
-  preview path.
-- P11-F18 `comparative_release_explorer` exposes only source-linked cells from a validated
-  comparative object. Every cell retains study, assay field, digest, model-system, and mapping
-  relation; missing/non-equivalent mappings stay unavailable or blocked, and access-bound cache
-  keys force eviction when scope or epoch changes.
-- P11-F19 `release_queue_console` reconciles a high-throughput candidate ledger with CI and reviewer
-  telemetry. It marks stale observations, exposes failed checks and reviewer bottlenecks, preserves
-  blocked states, and proposes only gate-preserving reorderings without mutating scientific state.
-- P11-F21 `research_object_exchange_api` plans resumable, idempotent chunk exchange from a signed
-  version manifest. Audience, locality, grant, signature, size, range, duplicate, cursor, and
-  missing-chunk gates remain explicit; incomplete transfers are resumable and never become a
-  publication side effect.
-- P11-F27 `prospective_replay_fidelity_gate` runs a bounded clean-room task graph against the
-  bundle-pinned environment. It compares content hashes, lineage digests, uncertainty, negative
-  findings, and numeric metrics with task-local tolerances; unexplained divergence, dependency
-  blockage, and resource exhaustion remain non-passing states. A tolerance pass is explicitly
-  qualified rather than collapsed into exact reproducibility.
-- P11-F10 `replay` charges every replay-worker invocation before dispatch, including retry and
-  terminal-failure attempts. If a retry no longer fits the remaining budget, it is not launched;
-  the task and budget uncertainty remain in the sealed round, and dependent tasks cannot be
-  promoted from a partial replay. Replay spend and retry counts reconcile exactly to round ledgers.
-- P11-F22 `archive_migration_adapter` applies only explicit, version-pinned identity or rename
-  rules to long-lived research objects. It preserves artifact bytes, provenance, uncertainty, and
-  negative evidence while reporting reversible mappings, optional omissions, semantic-loss budgets,
-  and rollback boundaries; unknown mandatory fields or undeclared lossy transforms fail closed.
-- P11-F25 `release_signature_verifier` verifies a signed release object against caller-provided
-  offline trust roots. It independently checks manifest, build, release-gate, policy, canonical
-  signature payload, key validity, freshness, and release readiness; tampering blocks, missing
-  trust material remains unverifiable, and cryptographic validity never overrides scientific gates.
-- P11-F26 `research_object_conformance_suite` evaluates a frozen standards profile against schema
-  identity/version, required and forbidden fields, artifact coverage, provenance, uncertainty,
-  negative evidence, verified-signature requirements, and declared extensions. Unsupported fields
-  block with an explicit migration route; local extensions remain warnings rather than silently
-  becoming part of the frozen core contract.
-- P11-F28 `federated_release_sharing_gate` evaluates every aggregate field against recipient scope,
-  quorum, site membership, revocation, localization, human-data exclusion, raw-data locality, and
-  field policy. Share, redact, deny, and unresolved outcomes are independently content-addressed;
-  a permissive global policy cannot override a revoked site or denied field.
-- P11-F23 `release_event_protocol` replays content-bound candidate, review, publication, correction,
-  withdrawal, and supersession events through an ordered lifecycle. Predecessor-chain integrity,
-  authority revocation, sequence gaps, conflicting duplicates, and idempotent delivery remain
-  explicit, while the protocol performs no publication or raw-data movement.
-- P11-F29 `version_retention_governor` plans immutable-version retention and archival transitions
-  from age, legal hold, pin, supersession, lineage, and verified-replica evidence. It produces
-  deterministic retain/archive/deletion-blocked/restoration-blocked decisions and never mutates
-  bytes or silently authorizes destruction.
-- P11-F30 `distributed_archive_mirror` compares source and replica digests, availability, freshness,
-  repair budgets, and approved regions. It distinguishes synchronized, repair-required, blocked,
-  and unresolved versions and emits only bounded repair work; unauthorized or corrupt replicas
-  never count toward archive health.
-- P11-F31 `release_queue_scheduler` ranks ready candidates by gate state, reviewer readiness,
-  fairness credit, deadline, and risk-adjusted priority under explicit compute/reviewer capacity.
-  It emits scheduled, deferred, and blocked entries with reasons; no unready candidate can bypass
-  the scientific or provenance gate.
-- P11-F32 `consortium_publication_steward` reconciles independent site approvals, rejections,
-  abstentions, pending responses, signatures, digest identity, quorum, dissent, and correction
-  lineage. It preserves every site's authority and cannot convert silence or a revoked approval
-  into publication.
-- Current implementation: 32/32 slots. Maintain with versioned exchange and
-  migration/conformance, archival retention, and consortium publication operations.
+- Current implementation: 20/32 slots: the base research-object manifest (F01), typed disclosure
+  register (F02), multi-study disclosure panel (F03), prioritized disclosure batch ledger (F04),
+  multimodal bundle (F05), migration planning (F06), dependency closure (F07), replay campaign (F10), archival
+  replay history reconciliation (F12), local release workflow (F13), multi-study release
+  reconciliation (F14), prospective release batch queue (F15), federated continual release
+  change control (F16), local steward review workbench (F17), portfolio review workbench (F18),
+  prospective batch review workbench (F19), release gate (F20), local signature protocol (F21),
+  signed local trust policy (F22), and release operating cycle (F24). The MCP
+  program catalog reports implementation status from the research crate's explicit feature
+  registry, so the remaining slots stay distinguishable from executable capabilities.
+- F12 contract: the reproducibility steward supplies one research-object digest, at least two
+  ordered epochs (up to 32), a minimum two-site quorum (up to 64 sites in any epoch), and at most
+  512 bounded site commitments paired with already validated replay campaigns. The output is a
+  canonical, digest-chained aggregate with per-epoch counts and reproducible, divergent,
+  insufficient, or unresolved states. It depends on
+  P11-F10 campaign validation and P09 reproducible-computation content hashes. It does not retrieve
+  archives, execute old code, authenticate site commitments, or replace P12's consortium benchmark.
+  Site commitments must be opaque and preferably keyed; the caller is responsible for archive
+  retrieval, identity authentication, and signer verification. Acceptance requires input identity
+  and duplicate checks, canonical ordering, bounded work, tamper-detecting chain/report digests,
+  preserving negative and unresolved outcomes, and no task/objective/artifact data in the aggregate.
+- F02 contract: the local reproducibility steward supplies one valid P11-F01 manifest. The
+  compiler emits one sorted, digest-bound row for each negative-result or limitation statement,
+  binding each row to the exact manifest digest and single-study identity. Rows contain
+  category-specific statement digests without copying the statement text. The repository-defined
+  bounds are 256 total rows, 4096 characters per source statement, and 65536 total source
+  characters. Acceptance requires complete disclosure coverage, unique statements within each
+  category, stable ordering, a verified output digest, and explicit false values for scientific-
+  truth verification and release authorization. This structural register does not establish that a
+  statement is scientifically correct or that the manifest is ready to sign. The source blueprint
+  distribution is absent from this checkout; F02 is a repository-defined contract derived from
+  P11's typed-data/local-study catalog slot. Statement digests are unkeyed integrity commitments,
+  not confidentiality protection; callers must not use them to conceal guessable disclosure text.
+- F03 contract: the reproducibility steward supplies one research identity, an expected cohort of
+  2 to 128 unique study/manifest commitments with caller-declared independence groups, and zero or
+  more observed F01 manifests paired with their F02 disclosure registers. Every observed child is
+  revalidated and must match exactly one expected study and manifest digest. Missing expected
+  studies remain explicit; complete means only that every expected manifest/register pair was
+  supplied. The panel preserves per-study negative-result/limitation counts and child register
+  digests without pooling counts or copying disclosure text. Acceptance requires at least two
+  declared independence groups, exact expected-cohort accounting, unique study/manifest identity,
+  deterministic row ordering, bounded inputs, and a replay-validated panel digest. Independence
+  remains caller-declared and unauthenticated; scientific truth and release authorization remain
+  false. The source blueprint distribution is absent from this checkout; F03 is a repository-defined
+  contract derived from P11's typed-data/multi-study catalog slot. Child statement digests are
+  unkeyed and do not provide confidentiality.
+- F04 contract: the queue steward predeclares 2 to 128 P11-F03 panel submissions, each with a
+  unique item ID, bounded priority, research identity, and exact F03 request digest. Submitted
+  items carry one F03 panel request and its F01/F02 study inputs; each panel is recomputed and
+  matched to its predeclared identity and digest. The ledger sorts by priority and item ID, keeps
+  omitted items as awaiting submission, and reports complete or partial state with per-panel study
+  counts. It never pools disclosure counts, returns statement text, dispatches work, authenticates
+  independence, verifies scientific truth, or authorizes release. Acceptance requires deterministic
+  order, unique item and request identities, bounded inputs, exact digest binding, and replay
+  validation. The source blueprint distribution is absent from this checkout; F04 is a
+  repository-defined contract derived from P11's typed-data/prospective-high-throughput catalog
+  slot. Statement commitments remain unkeyed and do not provide confidentiality.
+- F13 contract: the local reproducibility steward supplies one matching multimodal package and
+  replay request, a dependency depth/program-coverage policy, and accountable release-gate policy.
+  The workflow compiles the package, computes transitive dependency closure, and only invokes the
+  caller-owned replay executor when package and closure are closed; it then evaluates the release
+  gate and returns an operator handoff. It depends on P11-F05/F07/F10/F20. Acceptance requires all
+  request policy checks before executor invocation, strict identity and digest binding across every
+  stage, fail-closed behavior for partial or blocked closure, exact phase ordering, explicit
+  negative/unresolved evidence, and no signature, upload, publication, or raw-data movement.
+- F14 contract: the release steward supplies a complete ordered set of opaque study commitments
+  and bounded P11-F13 workflow reports for one research identity. The output preserves each
+  study's manifest/workflow digests and state while reporting missing, ready, held, unresolved,
+  blocked, and non-reproducible counts. It never merges artifacts or promotes one study's result
+  to another. Acceptance requires exact expected-cohort accounting, unique study identities and
+  commitments, validated child workflow digests, canonical digest chaining, size limits, and a
+  ready disposition only when every expected study is ready for its own accountable signing
+  review. Caller-supplied study commitments and review identities are not authenticated here.
+- F15 contract: the local release queue owner submits up to 128 prioritized P11-F13 candidates,
+  one shared replay budget, and a workflow-count cap. The controller validates and prepares every
+  candidate before using the caller-owned executor, then dispatches serially in stable priority,
+  submission, and job order. It defers candidates whose minimum admitted task budget is unavailable,
+  records per-job budget and workflow digests, and stops after an execution failure whose resource
+  use cannot be reconciled. It depends on P11-F13 and the bounded replay controller P11-F10.
+  Acceptance requires no executor calls before whole-queue preflight, global spend never exceeding
+  the supplied budget, deterministic order, explicit budget/workflow-limit deferrals, and no
+  continuation after unknown spend. This is bounded local batch dispatch, not parallel execution.
+- F16 contract: the federation release steward supplies one stable expected cohort, two to 32
+  ordered release epochs, validated P11-F14 portfolio reports, and a bounded independent-review
+  quorum for manifest changes. The coordinator compares each study's manifest to the immediately
+  preceding epoch, binds each supplied review to the exact old/new digest pair, and preserves
+  missing epochs, missing studies, continuity gaps, held workflows, and divergent outcomes. Only
+  complete portfolios with no unresolved continuity and sufficient independent change reviews
+  become ready for signing review. It composes P11-F14 portfolio reports and follows P11-F20's
+  accountable-review boundary. Acceptance
+  requires stable research/cohort identity, report and request limits, unique reviewer commitments,
+  review binding to actual changed manifests, deterministic digest chaining, and fail-closed
+  treatment of missing or non-independent evidence. Caller-supplied site and reviewer commitments
+  are not authenticated; the coordinator does not sign, publish, upload, contact sites, or move raw
+  data.
+- F17 contract: the local reproducibility steward supplies a validated P11-F13 workflow and
+  digest-bound checklist responses for provenance/package, dependency closure, replay, release
+  gate, and limitations/negative evidence. The workbench compiles a fixed review packet, records
+  pending, acknowledged, action-required, or unresolved responses, and returns a digest-chained
+  review record. A completed checklist is not itself a P11-F20 approval, signer authorization, or
+  publication. Acceptance requires validated child-workflow identity, a bounded checklist and
+  response set, unique known item commitments, no acknowledgement of unavailable evidence,
+  canonical item ordering, explicit incomplete/upstream negative states, and a report that marks
+  reviewer identity as unauthenticated and release authorization as false. It depends on P11-F13
+  local workflow and the P11-F20 gate evidence.
+- F18 contract: the portfolio reviewer supplies a validated P11-F14 cohort report and up to 64
+  P11-F17 local review packets, each mapped to one opaque expected study commitment. The workbench
+  checks exact workflow-digest and disposition binding, then preserves per-study missing, pending,
+  corrective, unresolved, held, blocked, and non-reproducible states. Portfolio review completes
+  only when every expected study has a completed checklist and its F14 workflow is ready for its
+  own signing review. Acceptance requires exact cohort accounting, unique study mappings, child
+  packet validation, bounded payloads, canonical digest chaining, and no cross-study promotion.
+  Reviewer and study commitments remain caller-supplied and unauthenticated; the report does not
+  satisfy a signing quorum or authorize, sign, or publish.
+- F19 contract: the high-throughput queue steward supplies a validated P11-F15 batch report and
+  up to 128 P11-F17 local review packets keyed by job ID. The workbench binds each packet to the
+  exact produced workflow digest and disposition, keeps deterministic queue order, and preserves
+  budget deferrals, workflow failures, and jobs not attempted after a failure. It marks the review
+  queue complete only when all produced workflows have complete review packets and the batch has
+  no deferred or failed jobs. Acceptance requires exact batch/job identity, unique packet mapping,
+  child validation, bounded payloads, review/workflow status agreement, digest chaining, and no
+  cross-job promotion. Reviewer commitments are unauthenticated caller inputs; this workbench
+  cannot authorize or publish release objects.
+- F21 contract: the local release steward supplies one ready P11-F13 workflow, its completed
+  P11-F17 review packet, a signer key identifier, a public Ed25519 key, a detached signature, and
+  a caller-issued challenge digest. The verifier binds the signature to canonical bytes covering
+  the manifest, workflow, review packet, release gate, key identifier, public-key digest, and
+  challenge before emitting a verification record. Acceptance requires exact child identity/digest
+  bindings, bounded and canonical inputs, cryptographic verification, and explicit false values for
+  signer identity authentication, key authority, replay prevention, release authorization, and
+  publication. The verification record retains the validated workflow and review packet so a
+  downstream consumer can recompute every bound digest after transport. It depends on
+  P11-F13/F17/F20. It does not manage private keys, establish trust in the caller's public key,
+  enforce challenge uniqueness, authorize release, or publish.
+- F22 contract: the release-key administrator supplies the F21 signature-verification record, a
+  bounded release trust policy, its detached Ed25519 signature, and the policy authority key ID,
+  public key, and expected key digest loaded from local operator configuration. Each sorted policy
+  grant binds one exact signer key and research identity to the P11 release-approval purpose, a
+  validity interval, and optional revocation time. The evaluator revalidates F21, checks the local
+  root pin, verifies the signed policy, and evaluates the matching grant at an explicit timestamp.
+  Acceptance requires canonical bounded policy bytes, unique and sorted grants, exact key/scope/
+  purpose matching, time and revocation checks, proof inputs retained for independent validation,
+  and a decision digest. The root pin remains caller-configured; signer trust is not release
+  authorization and challenge replay remains unchecked. It does not manage private keys or publish.
+- Next wave: the other 12 unimplemented slots. Assign each slot a typed contract, consumer,
+  dependency edge, and acceptance gate before adding its implementation.
 
-Folder inventory: 32 source modules; 32/32 feature slots implemented. The program folder directly owns 31 feature modules; shared public feature facades live under `crates/research/src/glioma/`.
+Folder inventory: 45 source modules; 32/32 feature slots implemented. The program folder directly owns 31 feature modules; shared public feature facades live under `crates/research/src/glioma/`.
 
 | Module | Kind / feature slot | Purpose | Direct test annotations | Imports |
 |---|---|---|---:|---|
 | [`archive_migration_adapter`](crates/research/src/glioma/programs/p11_research_object_release/archive_migration_adapter.rs) | GAF-GLIOMA-P11-F22 | Standards-versioned archive migration adapter for preclinical glioma research objects. | 4 | — |
 | [`artifact_integrity_scanner`](crates/research/src/glioma/programs/p11_research_object_release/artifact_integrity_scanner.rs) | GAF-GLIOMA-P11-F11 | Bounded release-artifact integrity scanning for preclinical glioma research objects. | 5 | — |
 | [`autonomous_stage_bridge`](crates/research/src/glioma/programs/p11_research_object_release/autonomous_stage_bridge.rs) | workflow composition | P07 autonomous-engine bridge for the governed P11 research-object release cycle. | 1 | `operating_cycle`, `replay` |
+| [`batch_review_workbench`](crates/research/src/glioma/programs/p11_research_object_release/batch_review_workbench.rs) | alias: `super::release_queue_console::FEATURE_ID` | Prospective human-review queue over bounded local release batches. | 0 | `local_release_workflow`, `release_batch`, `release_queue_console`, `review_workbench` |
 | [`comparative_release_explorer`](crates/research/src/glioma/programs/p11_research_object_release/comparative_release_explorer.rs) | GAF-GLIOMA-P11-F18 | Read-only provenance-linked comparative explorer for released preclinical glioma studies. | 4 | `multistudy_release_composer` |
 | [`consortium_publication_steward`](crates/research/src/glioma/programs/p11_research_object_release/consortium_publication_steward.rs) | GAF-GLIOMA-P11-F32 | Quorum-aware consortium publication and correction coordination for preclinical glioma objects. | 2 | — |
 | [`continuous_release_pipeline`](crates/research/src/glioma/programs/p11_research_object_release/continuous_release_pipeline.rs) | GAF-GLIOMA-P11-F15 | Prospective continuous release-candidate compilation for preclinical glioma programs. | 5 | — |
 | [`dependency_closure`](crates/research/src/glioma/programs/p11_research_object_release/dependency_closure.rs) | GAF-GLIOMA-P11-F07 | Transitive dependency-closure analysis for preclinical glioma research objects. | 2 | `multimodal_bundle` |
+| [`disclosure_batch`](crates/research/src/glioma/programs/p11_research_object_release/disclosure_batch.rs) | alias: `super::qualification_preserver::FEATURE_ID` | Prospective, bounded ledger for high-throughput P11-F03 disclosure-panel requests. | 2 | `disclosure_panel`, `qualification_preserver` |
+| [`disclosure_panel`](crates/research/src/glioma/programs/p11_research_object_release/disclosure_panel.rs) | alias: `super::leakage_audit::FEATURE_ID` | Expected-cohort reconciliation for local P11-F02 disclosure registers. | 3 | `disclosure_register`, `leakage_audit` |
+| [`disclosure_register`](crates/research/src/glioma/programs/p11_research_object_release/disclosure_register.rs) | alias: `super::reproducibility_score::FEATURE_ID` | Typed, digest-bound disclosure inventory for one local research-object manifest. | 3 | `reproducibility_score` |
 | [`distributed_archive_mirror`](crates/research/src/glioma/programs/p11_research_object_release/distributed_archive_mirror.rs) | GAF-GLIOMA-P11-F30 | Verified, locality-aware archival mirror assessment for preclinical glioma research objects. | 2 | — |
+| [`federated_continual`](crates/research/src/glioma/programs/p11_research_object_release/federated_continual.rs) | alias: `super::federated_release_bundle::FEATURE_ID` | Longitudinal change control for federated research-object release snapshots. | 0 | `federated_release_bundle`, `multistudy_release` |
 | [`federated_release_bundle`](crates/research/src/glioma/programs/p11_research_object_release/federated_release_bundle.rs) | GAF-GLIOMA-P11-F16 | Federated aggregate research-object release for preclinical glioma consortia. | 5 | — |
 | [`federated_release_sharing_gate`](crates/research/src/glioma/programs/p11_research_object_release/federated_release_sharing_gate.rs) | GAF-GLIOMA-P11-F28 | Field-level federation sharing gate for preclinical glioma research objects. | 3 | `federated_release_bundle` |
 | [`leakage_audit`](crates/research/src/glioma/programs/p11_research_object_release/leakage_audit.rs) | GAF-GLIOMA-P11-F03 | Transitive dependency and locality-leakage audit for glioma research-object releases. | 5 | — |
 | [`license_scope_checker`](crates/research/src/glioma/programs/p11_research_object_release/license_scope_checker.rs) | GAF-GLIOMA-P11-F12 | Transitive license, locality, embargo, and audience shareability evaluation for releases. | 5 | — |
+| [`local_release_workflow`](crates/research/src/glioma/programs/p11_research_object_release/local_release_workflow.rs) | alias: `super::release_bundle_compiler::FEATURE_ID` | Local, single-study release workflow orchestration for preclinical glioma research objects. | 0 | `dependency_closure`, `multimodal_bundle`, `release_bundle_compiler`, `release_gate`, `replay` |
 | [`metadata_normalizer`](crates/research/src/glioma/programs/p11_research_object_release/metadata_normalizer.rs) | GAF-GLIOMA-P11-F09 | Deterministic, reversible metadata normalization for preclinical glioma research objects. | 5 | — |
 | [`migration`](crates/research/src/glioma/programs/p11_research_object_release/migration.rs) | GAF-GLIOMA-P11-F06 | Versioned migration checks for multimodal preclinical glioma research objects. | 2 | `multimodal_bundle` |
 | [`multimodal_bundle`](crates/research/src/glioma/programs/p11_research_object_release/multimodal_bundle.rs) | GAF-GLIOMA-P11-F05 | Multimodal research-object packaging for preclinical glioma studies. | 2 | — |
+| [`multistudy_release`](crates/research/src/glioma/programs/p11_research_object_release/multistudy_release.rs) | alias: `super::multistudy_release_composer::FEATURE_ID` | Multi-study release readiness orchestration for preclinical glioma research. | 0 | `local_release_workflow`, `multistudy_release_composer` |
 | [`multistudy_release_composer`](crates/research/src/glioma/programs/p11_research_object_release/multistudy_release_composer.rs) | GAF-GLIOMA-P11-F14 | Provenance-preserving multi-study comparative release composition for preclinical glioma work. | 5 | — |
 | [`operating_cycle`](crates/research/src/glioma/programs/p11_research_object_release/operating_cycle.rs) | GAF-GLIOMA-P11-F24 | Reproducible research-object release operating cycle for preclinical glioma work. | 3 | `release_gate`, `replay` |
+| [`portfolio_review_workbench`](crates/research/src/glioma/programs/p11_research_object_release/portfolio_review_workbench.rs) | alias: `super::comparative_release_explorer::FEATURE_ID` | Multi-study steward session over separately completed local review packets. | 0 | `comparative_release_explorer`, `local_release_workflow`, `multistudy_release`, `review_workbench` |
 | [`prospective_replay_fidelity_gate`](crates/research/src/glioma/programs/p11_research_object_release/prospective_replay_fidelity_gate.rs) | GAF-GLIOMA-P11-F27 | Prospective replay-fidelity gate for preclinical glioma research releases. | 4 | `release_bundle_compiler` |
 | [`qualification_preserver`](crates/research/src/glioma/programs/p11_research_object_release/qualification_preserver.rs) | GAF-GLIOMA-P11-F04 | Scientific-qualification preservation audit for glioma research-object releases. | 5 | — |
+| [`release_batch`](crates/research/src/glioma/programs/p11_research_object_release/release_batch.rs) | alias: `super::continuous_release_pipeline::FEATURE_ID` | Prospective, budgeted release-workflow queue for high-throughput preclinical studies. | 0 | `continuous_release_pipeline`, `dependency_closure`, `local_release_workflow`, `replay` |
 | [`release_bundle_compiler`](crates/research/src/glioma/programs/p11_research_object_release/release_bundle_compiler.rs) | GAF-GLIOMA-P11-F13 | Dependency-closed offline reproducibility-bundle compilation for preclinical glioma results. | 5 | `license_scope_checker` |
 | [`release_event_protocol`](crates/research/src/glioma/programs/p11_research_object_release/release_event_protocol.rs) | GAF-GLIOMA-P11-F23 | Deterministic, idempotent release-lifecycle event protocol for preclinical glioma objects. | 3 | — |
 | [`release_gate`](crates/research/src/glioma/programs/p11_research_object_release/release_gate.rs) | GAF-GLIOMA-P11-F20 | Reproducibility-aware release gating for preclinical glioma research objects. | 4 | `replay` |
@@ -2014,10 +1735,14 @@ Folder inventory: 32 source modules; 32/32 feature slots implemented. The progra
 | [`release_queue_scheduler`](crates/research/src/glioma/programs/p11_research_object_release/release_queue_scheduler.rs) | GAF-GLIOMA-P11-F31 | Fair, gate-preserving high-throughput scheduling for preclinical glioma releases. | 2 | — |
 | [`release_signature_verifier`](crates/research/src/glioma/programs/p11_research_object_release/release_signature_verifier.rs) | GAF-GLIOMA-P11-F25 | Offline signature, provenance, and revocation verification for glioma research objects. | 3 | `release_gate`, `signed_attestation` |
 | [`replay`](crates/research/src/glioma/programs/p11_research_object_release/replay.rs) | GAF-GLIOMA-P11-F10 | Autonomous reproducibility replay campaigns for preclinical glioma research. | 7 | — |
+| [`replay_history`](crates/research/src/glioma/programs/p11_research_object_release/replay_history.rs) | alias: `super::license_scope_checker::FEATURE_ID` | Long-horizon reconciliation of independently produced archival replay campaigns. | 0 | `license_scope_checker`, `replay` |
 | [`reproducibility_score`](crates/research/src/glioma/programs/p11_research_object_release/reproducibility_score.rs) | GAF-GLIOMA-P11-F02 | Reproducibility-completeness scoring for preclinical glioma research objects. | 5 | `replay` |
 | [`research_object_conformance_suite`](crates/research/src/glioma/programs/p11_research_object_release/research_object_conformance_suite.rs) | GAF-GLIOMA-P11-F26 | Pinned standards conformance for preclinical glioma research objects. | 3 | `archive_migration_adapter`, `release_signature_verifier` |
 | [`research_object_exchange_api`](crates/research/src/glioma/programs/p11_research_object_release/research_object_exchange_api.rs) | GAF-GLIOMA-P11-F21 | Resumable, audience- and locality-gated exchange planning for preclinical glioma objects. | 2 | — |
+| [`review_workbench`](crates/research/src/glioma/programs/p11_research_object_release/review_workbench.rs) | alias: `super::release_preview_workbench::FEATURE_ID` | Local reproducibility-steward checklist for a completed single-study release workflow. | 0 | `local_release_workflow`, `release_preview_workbench` |
+| [`signature_protocol`](crates/research/src/glioma/programs/p11_research_object_release/signature_protocol.rs) | alias: `super::research_object_exchange_api::FEATURE_ID` | Canonical local Ed25519 signing-payload preparation and signature verification. | 2 | `local_release_workflow`, `multimodal_bundle`, `release_gate`, `replay`, `research_object_exchange_api`, `review_workbench` |
 | [`signed_attestation`](crates/research/src/glioma/programs/p11_research_object_release/signed_attestation.rs) | GAF-GLIOMA-P11-F08 | Fail-closed signed attestation planning for preclinical glioma research-object releases. | 5 | `release_gate` |
+| [`trust_policy`](crates/research/src/glioma/programs/p11_research_object_release/trust_policy.rs) | alias: `super::archive_migration_adapter::FEATURE_ID` | Verification of signed, project-scoped release-key trust policies. | 3 | `archive_migration_adapter`, `signature_protocol` |
 | [`version_retention_governor`](crates/research/src/glioma/programs/p11_research_object_release/version_retention_governor.rs) | GAF-GLIOMA-P11-F29 | Immutable-version retention planning for preclinical glioma research objects. | 2 | — |
 
 Shared public feature modules owned outside this folder:
@@ -2040,12 +1765,12 @@ Shared public feature modules owned outside this folder:
   replication, and P11 release.
 - Promotion gate: no raw-data movement, signed capability/policy manifests, quorum, outlier and
   leave-one-site-out analysis, and independently reproducible aggregate results.
-- Autonomous stage bridge: `glioma_evidence_gated_stage_engine_federation_execute` executes the
-  P12 consensus and bounded follow-up campaign from the P07 frontier using aggregate-only site
-  artifacts. It preserves heterogeneous, negative, partial, unresolved, and blocked outcomes and
-  requires consortium governance and independent validation before any transportability claim.
-- Current implementation: 32/32 slots. Maintain with benchmark world versioning, adaptive site
-  selection, and cross-consortium negative-result registries.
+- Current implementation: 10/32 slots registered in the research feature catalog: F01 consensus,
+  F02 power, F10 benchmark campaigns, F12 site planning, F20 mechanism transport, F24 operating
+  cycle, F26 adaptive site campaigns, F28 transport campaigns, F29 replication transport, and F30
+  federated interpretation. Adaptive site selection is already delivered by F12 and F26; do not
+  count it again as future work. Benchmark-world versioning and a cross-consortium negative-result
+  registry remain candidate themes only; assign either to a slot after checking its source contract.
 
 P12-F10's federated benchmark campaign uses a bounded deterministic portfolio beam rather than
 greedy top-score selection. It rewards complementary action kinds and target-site coverage under

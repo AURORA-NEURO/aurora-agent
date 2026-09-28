@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P11-F17";
+pub const FEATURE_ID: &str = super::release_preview_workbench::FEATURE_ID;
 pub const INPUT_SCHEMA: &str = "GliomaLocalReleaseReviewPacketRequest1@1";
 pub const OUTPUT_SCHEMA: &str = "GliomaLocalReleaseReviewPacket1@1";
 pub const CHECKLIST_ITEM_COUNT: usize = 5;

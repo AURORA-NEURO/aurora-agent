@@ -199,8 +199,8 @@ fn validate_attestation(
         if missing.contains(field) {
             continue;
         }
-        if field == "stage_digests" {
-            if request
+        if field == "stage_digests"
+            && request
                 .required_stage_order
                 .iter()
                 .any(|stage| !attestation.stage_digests.contains_key(stage))
@@ -209,7 +209,6 @@ fn validate_attestation(
                     "missing stage digests must be declared explicitly".into(),
                 ));
             }
-        }
     }
     Ok(())
 }
@@ -320,7 +319,6 @@ fn diagnostic_action(kind: ReplayDivergenceKind, _stage: &str) -> (&'static str,
         ),
         ReplayDivergenceKind::NoDivergence => ("no_action", "replay identities match"),
     }
-    .into()
 }
 
 fn digest_input(report: &FederatedReplayDiscrepancyReport) -> serde_json::Value {

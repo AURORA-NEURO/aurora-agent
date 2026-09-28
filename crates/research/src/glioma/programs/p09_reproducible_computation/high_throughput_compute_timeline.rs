@@ -157,7 +157,7 @@ fn percentile_bounds(values: &[u32]) -> (u32, u32) {
     }
     let mut sorted = values.to_vec();
     sorted.sort_unstable();
-    let low_index = (sorted.len().saturating_sub(1) * 1) / 4;
+    let low_index = sorted.len().saturating_sub(1) / 4;
     let high_index = (sorted.len().saturating_sub(1) * 3) / 4;
     (sorted[low_index], sorted[high_index])
 }
@@ -413,8 +413,7 @@ fn summarize_run(
     } else {
         CampaignRunDisposition::Successful
     };
-    let mut candidates = vec![
-        (
+    let mut candidates = [(
             CampaignBottleneck::QueueLatency,
             queue_latency_ticks.unwrap_or(0),
         ),
@@ -441,8 +440,7 @@ fn summarize_run(
         (
             CampaignBottleneck::FailureBurden,
             u64::from(failed_task_count) * 1_000,
-        ),
-    ];
+        )];
     candidates.sort_by(|left, right| {
         right
             .1

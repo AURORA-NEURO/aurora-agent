@@ -287,7 +287,7 @@ fn validate_request(request: &DecisionBudgetRequest) -> Result<(), DecisionBudge
     Ok(())
 }
 
-fn bucket_for<'a>(budgets: &'a [BudgetBucket], resource: BudgetResource) -> &'a BudgetBucket {
+fn bucket_for(budgets: &[BudgetBucket], resource: BudgetResource) -> &BudgetBucket {
     budgets
         .iter()
         .find(|budget| budget.resource == resource)

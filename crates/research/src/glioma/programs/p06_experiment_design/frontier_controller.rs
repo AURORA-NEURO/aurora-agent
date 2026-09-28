@@ -411,7 +411,7 @@ fn marginal_round_diversity_milli(
     let modality_novelty = selected_candidates
         .iter()
         .all(|selected| selected.modality != candidate.modality);
-    ((u16::from(clone_novelty) * 1_000 + u16::from(modality_novelty) * 1_000) / 2) as u16
+    ((u16::from(clone_novelty) * 1_000 + u16::from(modality_novelty) * 1_000) / 2)
 }
 
 fn expected_information_gain(

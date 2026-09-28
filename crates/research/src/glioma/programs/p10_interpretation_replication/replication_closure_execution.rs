@@ -7,10 +7,10 @@
 //! silently become a campaign.
 
 use super::campaign::{
-    GliomaReplicationCampaign, GliomaReplicationCampaignDisposition,
+    GliomaReplicationActionKind, GliomaReplicationCampaign, GliomaReplicationCampaignDisposition,
     GliomaReplicationCampaignError, GliomaReplicationCampaignExecutor,
     GliomaReplicationCampaignRequest, GliomaReplicationCampaignStopReason,
-    execute_glioma_replication_campaign,
+    execute_glioma_replication_campaign_with_action_kinds,
 };
 use super::replication_closure_frontier::{
     ReplicationClosureDisposition, ReplicationClosureFrontier, ReplicationClosureTarget,
@@ -137,6 +137,44 @@ fn validate_request(
         .map(|score| score.action_id.clone())
         .collect::<Vec<_>>();
     Ok(executable)
+}
+
+fn action_kind_for_target(target: ReplicationClosureTarget) -> Option<GliomaReplicationActionKind> {
+    match target {
+        ReplicationClosureTarget::ExtendIndependentSites => {
+            Some(GliomaReplicationActionKind::ReplicateStudy)
+        }
+        ReplicationClosureTarget::ReconcileHeterogeneity => {
+            Some(GliomaReplicationActionKind::ResolveHeterogeneity)
+        }
+        ReplicationClosureTarget::AcquireTargetModel => {
+            Some(GliomaReplicationActionKind::AcquireTargetModel)
+        }
+        ReplicationClosureTarget::StressTestInfluentialStudy => {
+            Some(GliomaReplicationActionKind::ReassayInfluentialStudy)
+        }
+        ReplicationClosureTarget::ConfirmNegativeResult => {
+            Some(GliomaReplicationActionKind::PublishNegativeResult)
+        }
+        ReplicationClosureTarget::MethodsReview => None,
+    }
+}
+
+fn admitted_action_kinds(
+    frontier: &ReplicationClosureFrontier,
+) -> BTreeSet<GliomaReplicationActionKind> {
+    frontier
+        .scores
+        .iter()
+        .filter(|score| {
+            frontier
+                .selected_order
+                .binary_search(&score.action_id)
+                .is_ok()
+                && score.route == EXECUTION_ROUTE
+        })
+        .filter_map(|score| action_kind_for_target(score.target))
+        .collect()
 }
 
 struct ReplicationClosureExecutionOutcome {

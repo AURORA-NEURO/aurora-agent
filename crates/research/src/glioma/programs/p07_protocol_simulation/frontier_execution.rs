@@ -9,7 +9,8 @@
 
 use super::action_execution::{
     ActionPortfolioExecution, ActionPortfolioExecutionError, ActionPortfolioExecutionRequest,
-    GliomaActionExecutor, MAX_RETRIES, execute_glioma_action_portfolio,
+    GliomaActionArtifactInput, GliomaActionExecutor, GliomaActionWorkflowScope, MAX_RETRIES,
+    execute_glioma_action_portfolio_with_selection_and_context,
 };
 use super::scientific_frontier::{
     admitted_candidates_with_frontier_priority, ScientificFrontierPlan,

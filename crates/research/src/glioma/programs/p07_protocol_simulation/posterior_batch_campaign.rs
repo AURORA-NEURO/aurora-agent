@@ -548,7 +548,7 @@ pub fn execute_glioma_posterior_batch_campaign<
                 || observations
                     .iter()
                     .any(|previous| previous.observation_id == outcome.observation_id)
-                || bins.map_or(true, |count| outcome.outcome_bin as usize >= count)
+                || bins.is_none_or(|count| outcome.outcome_bin as usize >= count)
                 || outcome.artifact.validate().is_err()
                 || outcome.artifact.content_type != candidate.output_schema;
             if invalid {

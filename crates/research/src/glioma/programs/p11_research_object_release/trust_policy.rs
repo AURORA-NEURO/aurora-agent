@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P11-F22";
+pub const FEATURE_ID: &str = super::archive_migration_adapter::FEATURE_ID;
 pub const INPUT_SCHEMA: &str = "GliomaReleaseTrustPolicy1@1";
 pub const OUTPUT_SCHEMA: &str = "GliomaReleaseSignerTrustDecision1@1";
 pub const TRUST_POLICY_SCHEMA_VERSION: &str = "aurora-release-trust-policy/1.0";

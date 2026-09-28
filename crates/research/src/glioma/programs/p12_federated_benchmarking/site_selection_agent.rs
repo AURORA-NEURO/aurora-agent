@@ -291,9 +291,9 @@ fn site_state_better(
     }
 }
 
-fn select_site_portfolio<'a>(
+fn select_site_portfolio(
     request: &FederatedSiteSelectionRequest,
-    eligible: &[&'a GliomaSiteCapabilityEnvelope],
+    eligible: &[&GliomaSiteCapabilityEnvelope],
     preliminary: &[SiteSelectionScore],
 ) -> (SitePortfolioState, bool) {
     let initial = SitePortfolioState {

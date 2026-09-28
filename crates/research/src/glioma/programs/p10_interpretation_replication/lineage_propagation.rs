@@ -863,7 +863,7 @@ fn quantile_interval(mut values: Vec<i64>, confidence_milli: u16) -> PpmInterval
     let last = values.len().saturating_sub(1);
     let tail = u64::from(1_000 - confidence_milli) / 2;
     let lower = (last as u64 * tail / 1_000) as usize;
-    let upper = ((last as u64 * (1_000 - tail) + 999) / 1_000).min(last as u64) as usize;
+    let upper = (last as u64 * (1_000 - tail)).div_ceil(1_000).min(last as u64) as usize;
     PpmInterval {
         lower: values[lower],
         upper: values[upper],

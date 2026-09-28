@@ -185,7 +185,7 @@ impl InstrumentBackedMechanismCampaignRun {
                         || entry
                             .observation_rejection_reason
                             .as_deref()
-                            .map_or(true, str::is_empty)
+                            .is_none_or(str::is_empty)
                     {
                         return Err(InstrumentBackedMechanismCampaignError::InvalidOutput(
                             "unreduced instrument result is not an explicit failed campaign action"

@@ -154,8 +154,8 @@ fn digest_input(proposal: &EnvironmentResolutionProposal) -> serde_json::Value {
 fn validate_candidate(
     candidate: &EnvironmentResolutionCandidate,
 ) -> Result<(), EnvironmentResolutionError> {
-    if !unique_non_empty(&[candidate.candidate_id.clone()], 1)
-        || !unique_non_empty(&[candidate.dependency_name.clone()], 1)
+    if !unique_non_empty(std::slice::from_ref(&candidate.candidate_id), 1)
+        || !unique_non_empty(std::slice::from_ref(&candidate.dependency_name), 1)
         || candidate.proposed_version.trim().is_empty()
         || candidate.proposed_version.len() > MAX_TEXT_LEN
         || candidate.proposed_source.trim().is_empty()

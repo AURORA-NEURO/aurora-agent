@@ -321,14 +321,10 @@ pub fn compose_glioma_multistudy_release(
         if study_order.len() != studies.len() {
             continue;
         }
-        let relation = if relations
-            .iter()
-            .any(|relation| *relation == MappingRelation::NonEquivalent)
+        let relation = if relations.contains(&MappingRelation::NonEquivalent)
         {
             MappingRelation::NonEquivalent
-        } else if relations
-            .iter()
-            .any(|relation| *relation == MappingRelation::Comparable)
+        } else if relations.contains(&MappingRelation::Comparable)
         {
             MappingRelation::Comparable
         } else {
