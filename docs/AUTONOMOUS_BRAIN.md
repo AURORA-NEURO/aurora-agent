@@ -7838,8 +7838,12 @@ TypeScript and `AuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence`
 cross-SDK HMAC-SHA256 envelope with a deployment-owned keyring and required atomic CAS. Readers can
 accept retained rotation keys while writes use the active key. The envelope authenticates the
 canonical snapshot and key id; it does not encrypt the metadata or detect rollback to an earlier
-valid envelope. Deployments still need their own access controls, encryption, and trusted monotonic
-anchor if they require anti-rollback guarantees.
+valid envelope. The optional `MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalPersistence`
+and Python `MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence` also
+bind snapshot sequence, head digest, and snapshot digest to a caller-owned monotonic anchor CAS.
+Deployments must keep that anchor in a separately protected, non-rollback trust domain and provide
+tenant authorization and encryption. The anchor advances before the snapshot CAS; a crash in
+between fails closed and requires explicit roll-forward from the matching signed snapshot.
 
 `AutonomousGoalControlLoop` is the bounded autonomous continuation above one worker batch. It can
 run up to 128 scheduler/worker cycles and 8,192 total runs, invoke a caller-owned metadata-only
@@ -7892,10 +7896,14 @@ snapshot content with HMAC-SHA256, requires a store-level compare-and-swap imple
 retains the logical `snapshot_digest` as the CAS version. Deployment keyrings may trust prior key IDs
 while writing with a newly activated key; a receipt signed by an untrusted or retired key is
 rejected before the journal is restored. The adapter keeps key material out of stored JSON and uses
-the same cross-language MAC contract. HMAC does not encrypt the journal, enforce tenant/store
-authorization, or prevent a storage operator from replaying an older valid snapshot. Deployments
-must provide protected key management, an authenticated transactional store, and an anti-rollback
-policy suitable for their recovery threat model.
+the same cross-language MAC contract. The optional
+`MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence` binds the
+journal sequence, head digest, and snapshot digest to a caller-owned monotonic anchor CAS and rejects
+replay of an older HMAC-valid snapshot. The anchor must live outside the journal store's rollback
+domain. HMAC does not encrypt the journal or enforce tenant/store authorization. A crash after anchor
+advance but before snapshot CAS fails closed and requires explicit roll-forward from the matching
+signed snapshot; deployments still provide protected key management, authorization, and the trusted
+anchor implementation.
 
 Deployments that own both stores should compose them with
 `AutonomousGoalRecoveryCoordinator` (Python and TypeScript). Its restore transaction is ordered:

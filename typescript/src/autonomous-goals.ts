@@ -22,6 +22,7 @@ export const AUTONOMOUS_GOAL_SCHEMA_V01 = "bioprism-autonomous-goal/0.1" as cons
 export const AUTONOMOUS_GOAL_EVENT_SCHEMA_V01 = "bioprism-autonomous-goal-event/0.1" as const;
 export const AUTONOMOUS_GOAL_SNAPSHOT_SCHEMA_V01 = "bioprism-autonomous-goal-snapshot/0.1" as const;
 export const AUTONOMOUS_GOAL_AUTH_SCHEMA = "bioprism-autonomous-goal-auth/0.1" as const;
+export const AUTONOMOUS_GOAL_MONOTONIC_ANCHOR_SCHEMA = "bioprism-autonomous-goal-monotonic-anchor/0.1" as const;
 export const AUTONOMOUS_GOAL_RETENTION = "value_only_goal_state;task_prompt_response_tool_payloads_and_credentials_not_retained" as const;
 export const AUTONOMOUS_GOAL_MAX_GOALS = 4_096;
 export const AUTONOMOUS_GOAL_MAX_EVENTS = 16_384;
@@ -143,6 +144,20 @@ export interface AutonomousGoalTextStore {
 
 export interface AutonomousGoalTransactionalTextStore extends AutonomousGoalTextStore {
   writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): boolean | Promise<boolean>;
+}
+
+export interface AutonomousGoalMonotonicAnchor extends JsonObject {
+  schema: typeof AUTONOMOUS_GOAL_MONOTONIC_ANCHOR_SCHEMA;
+  sequence: number;
+  snapshot_digest: string;
+  head_digest: string;
+  anchor_digest: string;
+}
+
+/** Deployment-owned anchor storage must survive rollback of the goal snapshot store. */
+export interface TransactionalAutonomousGoalMonotonicAnchorStore {
+  read(): unknown | Promise<unknown>;
+  writeIfUnchanged(expectedAnchorDigest: string | null, value: Readonly<AutonomousGoalMonotonicAnchor>): boolean | Promise<boolean>;
 }
 
 function identifier(value: unknown, name: string): string {
@@ -791,7 +806,7 @@ export class AuthenticatedTransactionalJsonAutonomousGoalPersistence extends Tra
     this.textStore = options.textStore;
   }
 
-  private envelope(snapshotValue: unknown): AutonomousGoalSnapshot & { authentication: AutonomousGoalSnapshotAuthentication } {
+  protected envelope(snapshotValue: unknown): AutonomousGoalSnapshot & { authentication: AutonomousGoalSnapshotAuthentication } {
     const snapshot = validateAutonomousGoalSnapshot(snapshotValue);
     const body = { schema: AUTONOMOUS_GOAL_AUTH_SCHEMA, key_id: this.active_key_id, snapshot };
     const tag = hmacSha256HexSync(new TextEncoder().encode(canonicalJson(body)), this.keys.get(this.active_key_id)!);
@@ -837,6 +852,81 @@ export class AuthenticatedTransactionalJsonAutonomousGoalPersistence extends Tra
       return current !== null && current.snapshot_digest === expectedSnapshotDigest;
     }
     return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(envelope));
+  }
+}
+
+function normalizeGoalMonotonicAnchor(value: unknown): AutonomousGoalMonotonicAnchor | null {
+  if (value === null) return null;
+  if (!isObject(value) || Object.keys(value).sort().join(",") !== "anchor_digest,head_digest,schema,sequence,snapshot_digest" || value.schema !== AUTONOMOUS_GOAL_MONOTONIC_ANCHOR_SCHEMA) throw new ArgumentError("goal monotonic anchor record is malformed");
+  const body = {
+    schema: AUTONOMOUS_GOAL_MONOTONIC_ANCHOR_SCHEMA,
+    sequence: finiteInteger(value.sequence, "goal anchor sequence"),
+    snapshot_digest: digest(value.snapshot_digest, "goal anchor snapshot_digest")!,
+    head_digest: value.head_digest === "" ? "" : digest(value.head_digest, "goal anchor head_digest")!,
+  };
+  if (body.sequence > AUTONOMOUS_GOAL_MAX_EVENTS) throw new ArgumentError("goal monotonic anchor sequence exceeds its journal bound");
+  const anchorDigest = digest(value.anchor_digest, "goal anchor digest")!;
+  if (digestJsonSync(body) !== anchorDigest) throw new ArgumentError("goal monotonic anchor digest does not match its content");
+  return Object.freeze({ ...body, anchor_digest: anchorDigest });
+}
+
+function goalAnchorForSnapshot(snapshot: AutonomousGoalSnapshot): AutonomousGoalMonotonicAnchor {
+  const body = {
+    schema: AUTONOMOUS_GOAL_MONOTONIC_ANCHOR_SCHEMA,
+    sequence: snapshot.sequence,
+    snapshot_digest: snapshot.snapshot_digest,
+    head_digest: snapshot.head_digest,
+  };
+  return Object.freeze({ ...body, anchor_digest: digestJsonSync(body) });
+}
+
+/** HMAC goal persistence with a caller-owned non-rollback anchor and monotonic journal sequence. */
+export class MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalPersistence extends AuthenticatedTransactionalJsonAutonomousGoalPersistence {
+  constructor(options: {
+    textStore: AutonomousGoalTransactionalTextStore;
+    anchor: TransactionalAutonomousGoalMonotonicAnchorStore;
+    keys: ReadonlyMap<string, Uint8Array>;
+    active_key_id: string;
+  }) {
+    super(options);
+    if (!options.anchor || typeof options.anchor.read !== "function" || typeof options.anchor.writeIfUnchanged !== "function") throw new ArgumentError("goal monotonic anchor must implement read and writeIfUnchanged");
+    this.anchor = options.anchor;
+  }
+
+  private readonly anchor: TransactionalAutonomousGoalMonotonicAnchorStore;
+
+  private async readAnchor(): Promise<AutonomousGoalMonotonicAnchor | null> {
+    return normalizeGoalMonotonicAnchor(await this.anchor.read());
+  }
+
+  override async read(): Promise<AutonomousGoalSnapshot | null> {
+    const snapshot = await super.read();
+    const anchor = await this.readAnchor();
+    if (snapshot === null && anchor === null) return null;
+    if (snapshot === null || anchor === null) throw new ArgumentError("goal monotonic anchor and authenticated snapshot are not both present");
+    if (canonicalJson(goalAnchorForSnapshot(snapshot)) !== canonicalJson(anchor)) throw new ArgumentError("goal monotonic anchor does not match the authenticated snapshot; rollback or incomplete commit detected");
+    return snapshot;
+  }
+
+  override async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshotValue: AutonomousGoalSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null) digest(expectedSnapshotDigest, "expected_snapshot_digest");
+    const current = await this.read();
+    const currentDigest = current?.snapshot_digest ?? null;
+    if (currentDigest !== expectedSnapshotDigest) return false;
+    const snapshot = validateAutonomousGoalSnapshot(snapshotValue);
+    if (current !== null && snapshot.snapshot_digest === currentDigest) return true;
+    if (current !== null && snapshot.sequence <= current.sequence) throw new ArgumentError("goal monotonic snapshot sequence must advance");
+    const encoded = canonicalJson(this.envelope(snapshot));
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_GOAL_MAX_AUTHENTICATED_SNAPSHOT_BYTES) throw new ArgumentError("authenticated goal snapshot exceeds its byte bound");
+    const currentAnchor = current === null ? null : await this.readAnchor();
+    const nextAnchor = goalAnchorForSnapshot(snapshot);
+    const anchorAdvanced = await this.anchor.writeIfUnchanged(currentAnchor?.anchor_digest ?? null, nextAnchor);
+    if (anchorAdvanced !== true && anchorAdvanced !== false) throw new ArgumentError("goal monotonic anchor compare-and-set must return a boolean");
+    if (anchorAdvanced === false) return false;
+    const snapshotWritten = await this.textStore.writeIfUnchanged(expectedSnapshotDigest, encoded);
+    if (snapshotWritten !== true && snapshotWritten !== false) throw new ArgumentError("goal snapshot compare-and-set must return a boolean");
+    if (snapshotWritten === false) throw new ArgumentError("goal monotonic anchor advanced before snapshot compare-and-swap; matching signed snapshot roll-forward is required");
+    return true;
   }
 }
 

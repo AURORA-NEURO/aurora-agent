@@ -43,6 +43,7 @@ GOAL_SCHEMA = "bioprism-autonomous-goal/0.2"
 GOAL_EVENT_SCHEMA = "bioprism-autonomous-goal-event/0.2"
 GOAL_SNAPSHOT_SCHEMA = "bioprism-autonomous-goal-snapshot/0.2"
 GOAL_AUTH_SCHEMA = "bioprism-autonomous-goal-auth/0.1"
+GOAL_MONOTONIC_ANCHOR_SCHEMA = "bioprism-autonomous-goal-monotonic-anchor/0.1"
 GOAL_STEP_SCHEMA = "bioprism-autonomous-goal-step/0.1"
 GOAL_RETENTION = "value_only_goal_state;task_prompt_response_tool_payloads_and_credentials_not_retained"
 MAX_GOALS = 4_096
@@ -1776,6 +1777,13 @@ class TransactionalAutonomousGoalSnapshotTextStore(AutonomousGoalSnapshotTextSto
     def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
 
 
+class GoalSnapshotMonotonicAnchorStore(Protocol):
+    """Deployment-owned non-rollback compare-and-set storage for goal snapshot head metadata."""
+
+    def read(self) -> Mapping[str, Any] | None: ...
+    def write_if_unchanged(self, expected_anchor_digest: str | None, value: Mapping[str, Any]) -> bool: ...
+
+
 class JsonAutonomousGoalSnapshotPersistence:
     """Canonical JSON goal persistence over a caller-owned text store."""
 
@@ -1939,6 +1947,97 @@ class AuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence(Transactio
             current = self.read()
             return current is not None and current["snapshot_digest"] == expected_snapshot_digest
         return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
+class MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence(AuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence):
+    """Bind HMAC goal snapshots to a deployment-owned non-rollback monotonic anchor."""
+
+    def __init__(
+        self,
+        store: TransactionalAutonomousGoalSnapshotTextStore,
+        *,
+        anchor: GoalSnapshotMonotonicAnchorStore,
+        keys: Mapping[str, bytes],
+        active_key_id: str,
+    ) -> None:
+        super().__init__(store, keys=keys, active_key_id=active_key_id)
+        if not callable(getattr(anchor, "read", None)) or not callable(getattr(anchor, "write_if_unchanged", None)):
+            raise AutonomousGoalError("goal monotonic anchor must implement read and write_if_unchanged")
+        self.anchor = anchor
+
+    def _read_anchor(self) -> dict[str, Any] | None:
+        raw = self.anchor.read()
+        if raw is None:
+            return None
+        expected = {"schema", "sequence", "snapshot_digest", "head_digest", "anchor_digest"}
+        if not isinstance(raw, Mapping) or set(raw) != expected or raw.get("schema") != GOAL_MONOTONIC_ANCHOR_SCHEMA:
+            raise AutonomousGoalError("goal monotonic anchor record is malformed")
+        sequence = raw.get("sequence")
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or not 0 <= sequence <= MAX_GOAL_EVENTS:
+            raise AutonomousGoalError("goal monotonic anchor sequence is invalid")
+        body = {
+            "schema": GOAL_MONOTONIC_ANCHOR_SCHEMA,
+            "sequence": sequence,
+            "snapshot_digest": _digest_value(raw.get("snapshot_digest"), name="goal anchor snapshot_digest"),
+            "head_digest": raw.get("head_digest"),
+        }
+        if body["head_digest"] != "":
+            body["head_digest"] = _digest_value(body["head_digest"], name="goal anchor head_digest")
+        anchor_digest = _digest_value(raw.get("anchor_digest"), name="goal anchor anchor_digest")
+        if _digest(body) != anchor_digest:
+            raise AutonomousGoalError("goal monotonic anchor digest does not match its content")
+        return {**body, "anchor_digest": anchor_digest}
+
+    @staticmethod
+    def _anchor_for(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+        body = {
+            "schema": GOAL_MONOTONIC_ANCHOR_SCHEMA,
+            "sequence": snapshot["sequence"],
+            "snapshot_digest": snapshot["snapshot_digest"],
+            "head_digest": snapshot["head_digest"],
+        }
+        return {**body, "anchor_digest": _digest(body)}
+
+    def read(self) -> dict[str, Any] | None:
+        snapshot = super().read()
+        anchor = self._read_anchor()
+        if snapshot is None and anchor is None:
+            return None
+        if snapshot is None or anchor is None:
+            raise AutonomousGoalError("goal monotonic anchor and authenticated snapshot are not both present")
+        if self._anchor_for(snapshot) != anchor:
+            raise AutonomousGoalError("goal monotonic anchor does not match the authenticated snapshot; rollback or incomplete commit detected")
+        return snapshot
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot_value: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and not _valid_digest(expected_snapshot_digest):
+            raise AutonomousGoalError("goal expected snapshot digest is invalid")
+        current = self.read()
+        current_digest = None if current is None else current["snapshot_digest"]
+        if current_digest != expected_snapshot_digest:
+            return False
+        snapshot = validate_goal_snapshot(snapshot_value)
+        if current is not None and snapshot["snapshot_digest"] == current_digest:
+            return True
+        if current is not None and snapshot["sequence"] <= current["sequence"]:
+            raise AutonomousGoalError("goal monotonic snapshot sequence must advance")
+        envelope = self._envelope(snapshot)
+        encoded = _canonical_goal_json(envelope)
+        if len(encoded.encode("utf-8")) > MAX_AUTHENTICATED_GOAL_SNAPSHOT_BYTES:
+            raise AutonomousGoalError("authenticated goal snapshot exceeds its byte bound")
+        current_anchor = None if current is None else self._read_anchor()
+        next_anchor = self._anchor_for(snapshot)
+        anchor_advanced = self.anchor.write_if_unchanged(None if current_anchor is None else current_anchor["anchor_digest"], next_anchor)
+        if type(anchor_advanced) is not bool:
+            raise AutonomousGoalError("goal monotonic anchor compare-and-set must return a boolean")
+        if not anchor_advanced:
+            return False
+        snapshot_written = self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+        if type(snapshot_written) is not bool:
+            raise AutonomousGoalError("goal snapshot compare-and-set must return a boolean")
+        if not snapshot_written:
+            raise AutonomousGoalError("goal monotonic anchor advanced before snapshot compare-and-swap; matching signed snapshot roll-forward is required")
+        return True
 
 
 class AutonomousGoalPersistenceCoordinator:

@@ -144,6 +144,13 @@ records the original snapshot digest and chain head in the migrated snapshot. Ti
 never inferred. Migrated snapshots preserve that provenance through subsequent SQLite and JSON
 snapshot round trips.
 
+For an HMAC-protected shared snapshot store with rollback detection, use
+`MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence` and supply an
+`anchor` implementing `read()` and `write_if_unchanged(expected_anchor_digest, state)`. The anchor
+must live in a separately protected, non-rollback trust domain. It advances before the snapshot
+store CAS, so interruption between the two writes fails closed and requires roll-forward from the
+matching signed snapshot. The TypeScript SDK exposes the same contract.
+
 Preview-admission approvals also use exact nanosecond strings in schema 0.2. Existing 0.1 approval
 records and snapshots are refused with a re-review requirement: an old approval is not migrated
 into current authority. Supply `issued_at_ns`, `expires_at_ns`, and verification `now_ns` in the

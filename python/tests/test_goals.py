@@ -24,6 +24,7 @@ from prism_sdk.goals import (
     AutonomousGoalError,
     AutonomousGoalLedger,
     AutonomousGoalPersistenceCoordinator,
+    MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence,
     AutonomousGoalRecord,
     JsonAutonomousGoalSnapshotPersistence,
     TransactionalJsonAutonomousGoalSnapshotPersistence,
@@ -73,6 +74,7 @@ from prism_sdk.autonomous_goal_worker_journal import (
     GOAL_WORKER_JOURNAL_RETENTION,
     GOAL_WORKER_JOURNAL_SNAPSHOT_SCHEMA_V01,
     AutonomousGoalWorkerJournal,
+    MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence,
     JsonAutonomousGoalWorkerJournalPersistence,
     AutonomousGoalWorkerJournalPersistenceCoordinator,
     migrate_legacy_autonomous_goal_worker_journal_snapshot,
@@ -1750,6 +1752,60 @@ def test_authenticated_shared_goal_journal_rotates_keys_rejects_tampering_and_fe
     coordinator_a.flush()
     with pytest.raises(AutonomousGoalError, match="compare-and-swap conflict"):
         coordinator_b.flush()
+
+
+def test_monotonic_journal_anchor_rejects_replay_of_an_older_valid_signed_snapshot() -> None:
+    class SharedJournalStore:
+        def __init__(self):
+            self.value = None
+
+        def read(self):
+            return self.value
+
+        def write(self, value):
+            self.value = value
+
+        def write_if_unchanged(self, expected_snapshot_digest, value):
+            actual = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+            if actual != expected_snapshot_digest:
+                return False
+            self.value = value
+            return True
+
+    class TrustedAnchorStore:
+        def __init__(self):
+            self.value = None
+
+        def read(self):
+            return None if self.value is None else dict(self.value)
+
+        def write_if_unchanged(self, expected_anchor_digest, value):
+            actual = None if self.value is None else self.value["anchor_digest"]
+            if actual != expected_anchor_digest:
+                return False
+            self.value = dict(value)
+            return True
+
+    store, anchor = SharedJournalStore(), TrustedAnchorStore()
+    persistence = MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence(
+        store, anchor=anchor, keys={"journal-v1": b"a" * 32}, active_key_id="journal-v1",
+    )
+    journal = AutonomousGoalWorkerJournal(clock=lambda: 123)
+    journal.record(batch_id="anchored-batch", goal_id="anchored-goal", phase="prepared", attempt=0, revision=0, schedule_digest="a" * 64, created_ns=123)
+    coordinator = AutonomousGoalWorkerJournalPersistenceCoordinator(journal, persistence)
+    assert coordinator.restore() is None
+    old_snapshot = coordinator.flush()
+    old_envelope = store.value
+    assert anchor.value["snapshot_digest"] == old_snapshot["snapshot_digest"]
+
+    journal.record(batch_id="anchored-batch", goal_id="anchored-goal", phase="claimed", attempt=1, revision=1, schedule_digest="a" * 64, created_ns=124)
+    new_snapshot = coordinator.flush()
+    assert new_snapshot["sequence"] > old_snapshot["sequence"]
+    assert anchor.value["snapshot_digest"] == new_snapshot["snapshot_digest"]
+
+    store.value = old_envelope
+    with pytest.raises(AutonomousGoalError, match="rollback or incomplete commit"):
+        persistence.read()
 
 
 def test_verified_dispatch_outcomes_settle_exact_recovered_attempts_and_keep_uncertain_status_blocked() -> None:
@@ -3617,6 +3673,60 @@ def test_authenticated_goal_snapshots_share_a_key_rotatable_hmac_contract_with_t
         rotating_persistence.read()
     for ledger in (source, rotating_ledger, stale_ledger):
         ledger.close()
+
+
+def test_monotonic_goal_anchor_rejects_replay_of_an_older_valid_signed_snapshot() -> None:
+    class SharedGoalStore:
+        def __init__(self):
+            self.value = None
+
+        def read(self):
+            return self.value
+
+        def write(self, value):
+            self.value = value
+
+        def write_if_unchanged(self, expected_snapshot_digest, value):
+            actual = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+            if actual != expected_snapshot_digest:
+                return False
+            self.value = value
+            return True
+
+    class TrustedAnchorStore:
+        def __init__(self):
+            self.value = None
+
+        def read(self):
+            return None if self.value is None else dict(self.value)
+
+        def write_if_unchanged(self, expected_anchor_digest, value):
+            actual = None if self.value is None else self.value["anchor_digest"]
+            if actual != expected_anchor_digest:
+                return False
+            self.value = dict(value)
+            return True
+
+    store, anchor = SharedGoalStore(), TrustedAnchorStore()
+    persistence = MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence(
+        store, anchor=anchor, keys={"goal-v1": b"g" * 32}, active_key_id="goal-v1",
+    )
+    ledger = AutonomousGoalLedger(clock=lambda: 123)
+    ledger.create(goal_id="anchored-goal", task_digest=_digest("anchored goal"), domain="coding", now_ns=123)
+    coordinator = AutonomousGoalPersistenceCoordinator(ledger, persistence)
+    assert coordinator.restore() is None
+    old_snapshot = coordinator.flush()
+    old_envelope = store.value
+
+    ledger.transition("anchored-goal", "running", expected_revision=0, now_ns=124)
+    new_snapshot = coordinator.flush()
+    assert new_snapshot["sequence"] > old_snapshot["sequence"]
+    assert anchor.value["snapshot_digest"] == new_snapshot["snapshot_digest"]
+
+    store.value = old_envelope
+    with pytest.raises(AutonomousGoalError, match="rollback or incomplete commit"):
+        persistence.read()
+    ledger.close()
 
 
 def test_goal_ledger_survives_restart_and_keeps_objective_value_only(tmp_path: Path) -> None:

@@ -5369,6 +5369,7 @@ export {
 } from "./autonomous-memory-consolidation-scheduler.js";
 export {
   AUTONOMOUS_GOAL_AUTH_SCHEMA,
+  AUTONOMOUS_GOAL_MONOTONIC_ANCHOR_SCHEMA,
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_EVENT_SCHEMA_V01,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,
@@ -5388,6 +5389,7 @@ export {
   validateAutonomousGoalSnapshot,
   AutonomousGoalPersistenceCoordinator,
   AuthenticatedTransactionalJsonAutonomousGoalPersistence,
+  MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalPersistence,
   JsonAutonomousGoalPersistence,
   TransactionalJsonAutonomousGoalPersistence,
   WebStorageAutonomousGoalTextStore,
@@ -5403,6 +5405,8 @@ export type {
   AutonomousGoalPersistence,
   AutonomousGoalTextStore,
   AutonomousGoalTransactionalTextStore,
+  AutonomousGoalMonotonicAnchor,
+  TransactionalAutonomousGoalMonotonicAnchorStore,
   AutonomousGoalRecord,
   AutonomousGoalSettlementMetadata,
   AutonomousGoalSnapshot,
@@ -5475,6 +5479,7 @@ export type {
 } from "./autonomous-goal-worker.js";
 export {
   AUTONOMOUS_GOAL_WORKER_JOURNAL_AUTH_SCHEMA,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_MONOTONIC_ANCHOR_SCHEMA,
   AUTONOMOUS_GOAL_WORKER_JOURNAL_AUTH_SCHEMA_V01,
   AUTONOMOUS_GOAL_WORKER_JOURNAL_MAX_AUTHENTICATED_BYTES,
   AUTONOMOUS_GOAL_DISPATCH_RESOLUTION_RETENTION,
@@ -5492,6 +5497,7 @@ export {
   AutonomousGoalWorkerJournal,
   AutonomousGoalWorkerJournalPersistenceCoordinator,
   AuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence,
+  MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence,
   JsonAutonomousGoalWorkerJournalPersistence,
   migrateLegacyAutonomousGoalWorkerJournalSnapshot,
   migrateLegacyAuthenticatedAutonomousGoalWorkerJournalEnvelope,
@@ -5508,6 +5514,8 @@ export type {
   AutonomousGoalWorkerJournalMigration,
   AutonomousGoalWorkerJournalTextStore,
   TransactionalAutonomousGoalWorkerJournalTextStore,
+  AutonomousGoalWorkerJournalMonotonicAnchor,
+  TransactionalAutonomousGoalWorkerJournalMonotonicAnchorStore,
 } from "./autonomous-goal-worker-journal.js";
 export {
   AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA,

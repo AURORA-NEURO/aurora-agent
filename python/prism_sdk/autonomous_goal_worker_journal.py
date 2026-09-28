@@ -42,6 +42,7 @@ MAX_GOAL_WORKER_JOURNAL_SNAPSHOT_BYTES = 2_000_000
 MAX_AUTHENTICATED_GOAL_WORKER_JOURNAL_BYTES = MAX_GOAL_WORKER_JOURNAL_SNAPSHOT_BYTES + 2_048
 AUTHENTICATED_GOAL_WORKER_JOURNAL_SCHEMA_V01 = "bioprism-autonomous-goal-worker-journal-auth/0.1"
 AUTHENTICATED_GOAL_WORKER_JOURNAL_SCHEMA = "bioprism-autonomous-goal-worker-journal-auth/0.2"
+GOAL_WORKER_JOURNAL_MONOTONIC_ANCHOR_SCHEMA = "bioprism-autonomous-goal-worker-journal-monotonic-anchor/0.1"
 GOAL_DISPATCH_RESOLUTION_SCHEMA_V01 = "bioprism-autonomous-goal-dispatch-resolution/0.1"
 GOAL_DISPATCH_RESOLUTION_SCHEMA = "bioprism-autonomous-goal-dispatch-resolution/0.2"
 GOAL_DISPATCH_RESOLUTION_RETENTION = "metadata_only_dispatch_status;external_evidence_payloads_not_retained"
@@ -1059,6 +1060,13 @@ class TransactionalGoalWorkerJournalTextStore(GoalWorkerJournalTextStore, Protoc
     def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
 
 
+class GoalWorkerJournalMonotonicAnchorStore(Protocol):
+    """Deployment-owned non-rollback compare-and-set storage for journal head metadata."""
+
+    def read(self) -> Mapping[str, Any] | None: ...
+    def write_if_unchanged(self, expected_anchor_digest: str | None, value: Mapping[str, Any]) -> bool: ...
+
+
 class JsonAutonomousGoalWorkerJournalPersistence:
     """Canonical JSON adapter; the caller owns encryption, authorization, and durability."""
 
@@ -1183,6 +1191,99 @@ class AuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence(JsonA
         if len(encoded.encode("utf-8")) > MAX_AUTHENTICATED_GOAL_WORKER_JOURNAL_BYTES:
             _fail("authenticated journal snapshot exceeds its byte bound")
         return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
+class MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence(AuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence):
+    """Bind HMAC snapshots to a deployment-owned non-rollback monotonic anchor.
+
+    The anchor must be stored in a trust domain that cannot be rolled back with the journal text
+    store. It advances before the journal CAS; a crash between those writes fails closed and needs
+    explicit roll-forward reconciliation from the matching signed snapshot.
+    """
+
+    def __init__(
+        self,
+        store: TransactionalGoalWorkerJournalTextStore,
+        *,
+        anchor: GoalWorkerJournalMonotonicAnchorStore,
+        keys: Mapping[str, bytes],
+        active_key_id: str,
+    ) -> None:
+        super().__init__(store, keys=keys, active_key_id=active_key_id)
+        if not callable(getattr(anchor, "read", None)) or not callable(getattr(anchor, "write_if_unchanged", None)):
+            _fail("monotonic anchor must implement read and write_if_unchanged")
+        self.anchor = anchor
+
+    def _read_anchor(self) -> dict[str, Any] | None:
+        raw = self.anchor.read()
+        if raw is None:
+            return None
+        keys = {"schema", "sequence", "snapshot_digest", "head_digest", "anchor_digest"}
+        if not isinstance(raw, Mapping) or set(raw) != keys or raw.get("schema") != GOAL_WORKER_JOURNAL_MONOTONIC_ANCHOR_SCHEMA:
+            _fail("monotonic anchor record is malformed")
+        unsigned = {
+            "schema": GOAL_WORKER_JOURNAL_MONOTONIC_ANCHOR_SCHEMA,
+            "sequence": _integer(raw.get("sequence"), name="anchor.sequence", maximum=MAX_GOAL_WORKER_JOURNAL_EVENTS),
+            "snapshot_digest": _digest(raw.get("snapshot_digest"), name="anchor.snapshot_digest"),
+            "head_digest": raw.get("head_digest"),
+        }
+        if unsigned["head_digest"] != "":
+            unsigned["head_digest"] = _digest(unsigned["head_digest"], name="anchor.head_digest")
+        supplied_digest = _digest(raw.get("anchor_digest"), name="anchor.anchor_digest")
+        if content_digest(unsigned) != supplied_digest:
+            _fail("monotonic anchor digest does not match its content")
+        return {**unsigned, "anchor_digest": supplied_digest}
+
+    @staticmethod
+    def _anchor_for(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+        body = {
+            "schema": GOAL_WORKER_JOURNAL_MONOTONIC_ANCHOR_SCHEMA,
+            "sequence": snapshot["sequence"],
+            "snapshot_digest": snapshot["snapshot_digest"],
+            "head_digest": snapshot["head_digest"],
+        }
+        return {**body, "anchor_digest": content_digest(body)}
+
+    def read(self) -> dict[str, Any] | None:
+        snapshot = super().read()
+        anchor = self._read_anchor()
+        if snapshot is None and anchor is None:
+            return None
+        if snapshot is None or anchor is None:
+            _fail("monotonic anchor and authenticated snapshot are not both present")
+        if self._anchor_for(snapshot) != anchor:
+            _fail("monotonic anchor does not match the authenticated snapshot; rollback or incomplete commit detected")
+        return snapshot
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None:
+            _digest(expected_snapshot_digest, name="expected_snapshot_digest")
+        current = self.read()
+        current_digest = None if current is None else current["snapshot_digest"]
+        if current_digest != expected_snapshot_digest:
+            return False
+        snapshot = AutonomousGoalWorkerJournal.validate_snapshot(value)
+        if current is not None and snapshot["snapshot_digest"] == current_digest:
+            return True
+        if current is not None and snapshot["sequence"] <= current["sequence"]:
+            _fail("monotonic journal snapshot sequence must advance")
+        encoded = canonical_json(self._envelope(snapshot))
+        if len(encoded.encode("utf-8")) > MAX_AUTHENTICATED_GOAL_WORKER_JOURNAL_BYTES:
+            _fail("authenticated journal snapshot exceeds its byte bound")
+        current_anchor = None if current is None else self._read_anchor()
+        expected_anchor_digest = None if current_anchor is None else current_anchor["anchor_digest"]
+        next_anchor = self._anchor_for(snapshot)
+        anchor_advanced = self.anchor.write_if_unchanged(expected_anchor_digest, next_anchor)
+        if type(anchor_advanced) is not bool:
+            _fail("monotonic anchor compare-and-set must return a boolean")
+        if not anchor_advanced:
+            return False
+        snapshot_written = self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+        if type(snapshot_written) is not bool:
+            _fail("journal compare-and-set must return a boolean")
+        if not snapshot_written:
+            _fail("monotonic anchor advanced before journal compare-and-swap; matching signed snapshot roll-forward is required")
+        return True
 
 
 class AutonomousGoalWorkerJournalPersistenceCoordinator:

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   AutonomousGoalPersistenceCoordinator,
   AuthenticatedTransactionalJsonAutonomousGoalPersistence,
+  MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalPersistence,
   AutonomousGoalScheduler,
   AutonomousGoalWorker,
   AutonomousGoalControlLoop,
@@ -24,6 +25,7 @@ import {
   AutonomousBrainFacade,
   InMemoryAutonomousActionAdmissionLedger,
   AutonomousGoalWorkerJournal,
+  MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence,
   AuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence,
   AUTONOMOUS_GOAL_WORKER_JOURNAL_AUTH_SCHEMA,
   AUTONOMOUS_GOAL_WORKER_JOURNAL_AUTH_SCHEMA_V01,
@@ -1353,6 +1355,51 @@ test("authenticated shared goal journal rotates keys, rejects tampering, and fen
   await coordinatorB.restore();
   await coordinatorA.flush();
   await assert.rejects(() => coordinatorB.flush(), /compare-and-swap conflict/);
+});
+
+test("monotonic journal anchor rejects replay of an older valid signed snapshot", async () => {
+  const store = {
+    value: null,
+    read() { return this.value; },
+    write(value) { this.value = value; },
+    writeIfUnchanged(expected, value) {
+      const actual = this.value === null ? null : JSON.parse(this.value).snapshot_digest;
+      if (actual !== expected) return false;
+      this.value = value;
+      return true;
+    },
+  };
+  const anchor = {
+    value: null,
+    read() { return this.value === null ? null : structuredClone(this.value); },
+    writeIfUnchanged(expected, value) {
+      const actual = this.value?.anchor_digest ?? null;
+      if (actual !== expected) return false;
+      this.value = structuredClone(value);
+      return true;
+    },
+  };
+  const persistence = new MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalWorkerJournalPersistence({
+    store,
+    anchor,
+    keys: new Map([["journal-v1", new Uint8Array(32).fill(0x61)]]),
+    active_key_id: "journal-v1",
+  });
+  const journal = new AutonomousGoalWorkerJournal({ clock: () => 123 });
+  journal.record({ batch_id: "anchored-batch", goal_id: "anchored-goal", phase: "prepared", attempt: 0, revision: 0, schedule_digest: "a".repeat(64), created_ns: 123 });
+  const coordinator = new AutonomousGoalWorkerJournalPersistenceCoordinator(journal, persistence);
+  assert.equal(await coordinator.restore(), null);
+  const oldSnapshot = await coordinator.flush();
+  const oldEnvelope = store.value;
+  assert.equal(anchor.value.snapshot_digest, oldSnapshot.snapshot_digest);
+
+  journal.record({ batch_id: "anchored-batch", goal_id: "anchored-goal", phase: "claimed", attempt: 1, revision: 1, schedule_digest: "a".repeat(64), created_ns: 124 });
+  const newSnapshot = await coordinator.flush();
+  assert.ok(newSnapshot.sequence > oldSnapshot.sequence);
+  assert.equal(anchor.value.snapshot_digest, newSnapshot.snapshot_digest);
+
+  store.value = oldEnvelope;
+  await assert.rejects(() => persistence.read(), /rollback or incomplete commit/);
 });
 
 test("verified dispatch outcomes settle exact recovered attempts and keep uncertain status blocked", () => {
@@ -2708,6 +2755,50 @@ test("authenticated goal persistence shares a key-rotatable HMAC contract with P
   tampered.authentication.tag = "0".repeat(64);
   encoded = canonicalJson(tampered);
   await assert.rejects(() => rotatingPersistence.read(), /tag does not match/);
+});
+
+test("monotonic goal anchor rejects replay of an older valid signed snapshot", async () => {
+  const store = {
+    value: null,
+    read() { return this.value; },
+    write(value) { this.value = value; },
+    writeIfUnchanged(expected, value) {
+      const actual = this.value === null ? null : JSON.parse(this.value).snapshot_digest;
+      if (actual !== expected) return false;
+      this.value = value;
+      return true;
+    },
+  };
+  const anchor = {
+    value: null,
+    read() { return this.value === null ? null : structuredClone(this.value); },
+    writeIfUnchanged(expected, value) {
+      const actual = this.value?.anchor_digest ?? null;
+      if (actual !== expected) return false;
+      this.value = structuredClone(value);
+      return true;
+    },
+  };
+  const persistence = new MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalPersistence({
+    textStore: store,
+    anchor,
+    keys: new Map([["goal-v1", new Uint8Array(32).fill(0x67)]]),
+    active_key_id: "goal-v1",
+  });
+  const ledger = new InMemoryAutonomousGoalLedger({ clock: () => 123 });
+  ledger.create({ goal_id: "anchored-goal", task_digest: goalTaskDigest("anchored goal"), domain: "coding", now_ns: 123 });
+  const coordinator = new AutonomousGoalPersistenceCoordinator(ledger, persistence);
+  assert.equal(await coordinator.restore(), null);
+  const oldSnapshot = await coordinator.flush();
+  const oldEnvelope = store.value;
+
+  ledger.transition("anchored-goal", "running", { expected_revision: 0, now_ns: 124 });
+  const newSnapshot = await coordinator.flush();
+  assert.ok(newSnapshot.sequence > oldSnapshot.sequence);
+  assert.equal(anchor.value.snapshot_digest, newSnapshot.snapshot_digest);
+
+  store.value = oldEnvelope;
+  await assert.rejects(() => persistence.read(), /rollback or incomplete commit/);
 });
 
 test("migrated goal, journal, and checkpoint snapshots survive persistence and a live restart cycle", async () => {

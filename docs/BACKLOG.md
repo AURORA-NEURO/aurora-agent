@@ -66,9 +66,12 @@ than a general retrieval plane. Goal dispatch reconciliation now requires a depl
 verifier callback and exact configured verifier identity before journal or ledger mutation; each
 deployment still owns that verifier's trust roots and status authority. The shared worker journal
 and goal ledger now have cross-language HMAC-SHA256 snapshot adapters with key rotation and
-required store CAS. These authenticate snapshots but do not detect rollback to an older valid
-envelope; a trusted monotonic anchor remains deployment-owned. Both goal workers can also await a
-caller-owned `persist_dispatch_intent` barrier after journaling `dispatch_started` and before
+required store CAS. Optional anchor-aware adapters now bind sequence, head digest, and snapshot
+digest to a deployment-owned monotonic anchor CAS and reject replay of older valid envelopes when
+the anchor is outside the snapshot store's rollback domain. The anchor advances before snapshot CAS;
+interrupted commits fail closed and require explicit roll-forward. Tenant authorization, protected
+anchor storage, and concrete deployment integrations remain deployment-owned. Both goal workers can
+also await a caller-owned `persist_dispatch_intent` barrier after journaling `dispatch_started` and before
 executor entry, so a persistence refusal cannot silently cross the external effect boundary.
 The reviewed ClinicalTrials.gov adapter now adds bounded live registry metadata for the fixed
 glioblastoma and glioma lanes in Python and TypeScript. It binds a fixed field list and transport,
@@ -89,7 +92,7 @@ category counts after literal approval, binds transport/config/plan/response met
 and projects only digest references into autonomous evidence. This is a bounded cohort inventory,
 not case-level research or an exhaustive GDC search.
 Remaining work toward full autonomous external research is additional reviewed source/provider
-coverage, concrete tenant-authorized shared-store integrations with anti-rollback guarantees,
+coverage, concrete tenant-authorized shared-store and monotonic-anchor integrations,
 deployment-owned independent claim-quality authority over retrieved evidence, human-review
 settlement integrations, production scheduling integrations, and production retention/authorization
 policy.
