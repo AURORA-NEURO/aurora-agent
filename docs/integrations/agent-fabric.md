@@ -22,12 +22,16 @@ idempotency, receipts, and fault simulation.
 ## Invariants
 
 1. Task payloads are digest-bound at composition and checked before execution and at settlement.
-2. A task has at most one live lease. Lease epochs reject stale completions and releases.
-3. Every ready queue, driver hand-off channel, retry heap, and receipt ledger is bounded by an
+2. When a caller omits an idempotency key, the fabric derives one from the full payload and the
+   complete normalized capability set using a versioned, length-delimited encoding. A caller key
+   takes precedence; the automatic key is a 128-bit SHA-256 prefix, so its uniqueness is
+   probabilistic rather than an absolute guarantee.
+3. A task has at most one live lease. Lease epochs reject stale completions and releases.
+4. Every ready queue, driver hand-off channel, retry heap, and receipt ledger is bounded by an
    explicit configuration or retention limit.
-4. Cancellation is cooperative and monotone; a receipt records that cancellation raced execution
+5. Cancellation is cooperative and monotone; a receipt records that cancellation raced execution
    rather than rewriting the observed outcome.
-5. The simulator uses virtual time and seeded fault injection so crash, silent-drop, failed,
+6. The simulator uses virtual time and seeded fault injection so crash, silent-drop, failed,
    corrupt-result, retry, and expiry paths are replayable.
 
 ## Deliberate limitations

@@ -12,7 +12,7 @@
 //! receipt streams — asserted by tests, not claimed.
 
 use crate::cancel::CancelState;
-use crate::capability::{Capability, CapabilitySet};
+use crate::capability::CapabilitySet;
 use crate::digest::sha256;
 use crate::envelope::{Completion, DispatchJob, Outcome, Receipt, TaskEnvelope, Terminal};
 use crate::exec::{Driver, Enqueue};
@@ -225,14 +225,7 @@ impl Fabric {
         );
         self.metrics.submitted += 1;
 
-        let derived = IdempotencyKey::derive(
-            crate::ids::mix64(u64::from_be_bytes(
-                sha256(&payload).as_bytes()[..8]
-                    .try_into()
-                    .expect("8 bytes"),
-            )),
-            crate::ids::mix64(caps.primary().map(Capability::as_str).unwrap_or("").len() as u64),
-        );
+        let derived = derive_submission_key(&payload, &caps);
         let key = key.unwrap_or(derived);
         if let Some(existing) = self.idem.get(&key) {
             self.metrics.duplicate_submissions += 1;
@@ -744,6 +737,51 @@ impl Fabric {
     }
 }
 
+/// Derives an implicit idempotency key from the complete logical submission identity.
+///
+/// The full payload digest and length are included without copying a potentially large payload
+/// into a temporary buffer. Length prefixes make the capability encoding unambiguous, while the
+/// versioned domain separates these keys from other uses of SHA-256 in the fabric. Capabilities
+/// are normalized, sorted, and deduplicated by `CapabilitySet`, so equivalent sets produce the
+/// same key independent of caller spelling or order.
+fn derive_submission_key(payload: &[u8], caps: &CapabilitySet) -> IdempotencyKey {
+    let payload_digest = sha256(payload);
+    let mut preimage = Vec::with_capacity(
+        b"aurora.agent-fabric.submit-idempotency.v1\0".len()
+            + 8
+            + payload_digest.as_bytes().len()
+            + 8
+            + caps.len() * 8
+            + caps.iter().map(|cap| cap.as_str().len()).sum::<usize>(),
+    );
+    preimage.extend_from_slice(b"aurora.agent-fabric.submit-idempotency.v1\0");
+    preimage.extend_from_slice(
+        &u64::try_from(payload.len())
+            .expect("payload size fits the u64 task format")
+            .to_be_bytes(),
+    );
+    preimage.extend_from_slice(payload_digest.as_bytes());
+    preimage.extend_from_slice(
+        &u64::try_from(caps.len())
+            .expect("capability count fits the u64 task format")
+            .to_be_bytes(),
+    );
+    for capability in caps.iter() {
+        let value = capability.as_str().as_bytes();
+        preimage.extend_from_slice(
+            &u64::try_from(value.len())
+                .expect("capability length fits the u64 task format")
+                .to_be_bytes(),
+        );
+        preimage.extend_from_slice(value);
+    }
+
+    let digest = sha256(&preimage);
+    let mut key = [0; 16];
+    key.copy_from_slice(&digest.as_bytes()[..16]);
+    IdempotencyKey::from_bytes(key)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemStats {
     pub queued_ready: usize,
@@ -752,4 +790,72 @@ pub struct MemStats {
     pub in_flight: usize,
     pub in_flight_high_water: usize,
     pub retained_receipts: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cancel::CancelState;
+    use crate::capability::Capability;
+    use crate::envelope::Outcome;
+    use crate::exec::{FnHandler, InlineDriver};
+    use std::sync::Arc;
+
+    fn caps(names: &[&str]) -> CapabilitySet {
+        CapabilitySet::from_caps(
+            names
+                .iter()
+                .map(|name| Capability::parse(name).expect("valid test capability"))
+                .collect(),
+        )
+    }
+
+    fn fabric() -> Fabric {
+        let cancels = CancelState::new();
+        let driver = InlineDriver::new(
+            Arc::new(FnHandler(|_: &crate::envelope::DispatchJob| {
+                Outcome::Succeeded { result: Vec::new() }
+            })),
+            cancels.clone(),
+        );
+        Fabric::new(FabricConfig::default(), Box::new(driver), cancels)
+    }
+
+    fn accepted(fabric: &mut Fabric, payload: &[u8], capabilities: CapabilitySet) -> TaskId {
+        match fabric.submit(payload.to_vec(), capabilities, None) {
+            Submission::Accepted { task } => task,
+            other => panic!("expected a new submission, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn implicit_idempotency_key_uses_the_full_payload_and_capability_set() {
+        let mut fabric = fabric();
+        let base = accepted(&mut fabric, b"same-prefix-a", caps(&["compute"]));
+        let distinct_payload = accepted(&mut fabric, b"same-prefix-b", caps(&["compute"]));
+        let distinct_capability = accepted(&mut fabric, b"same-prefix-a", caps(&["storage"]));
+
+        assert_ne!(base, distinct_payload);
+        assert_ne!(base, distinct_capability);
+        assert_eq!(fabric.metrics().duplicate_submissions, 0);
+    }
+
+    #[test]
+    fn implicit_idempotency_key_is_stable_for_equivalent_normalized_capabilities() {
+        let mut fabric = fabric();
+        let original = accepted(
+            &mut fabric,
+            b"same task",
+            caps(&["Genomics.Align", "compute", "compute"]),
+        );
+
+        let replay = fabric.submit(
+            b"same task".to_vec(),
+            caps(&["compute", "genomics.align"]),
+            None,
+        );
+
+        assert!(matches!(replay, Submission::Duplicate { task } if task == original));
+        assert_eq!(fabric.metrics().duplicate_submissions, 1);
+    }
 }

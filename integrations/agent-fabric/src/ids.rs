@@ -76,9 +76,10 @@ impl fmt::Display for LeaseEpoch {
     }
 }
 
-/// Deduplication key for submissions. Callers may supply one; otherwise the fabric derives it
-/// from task identity and payload digest, so a retried *submission* (same key) is recognized as
-/// a duplicate while a genuinely new submission is not.
+/// Deduplication key for submissions. Callers may supply one; otherwise the fabric derives a
+/// 128-bit key from the full payload and normalized capability set, so replaying the same logical
+/// submission is recognized as a duplicate while different content or requirements remain
+/// distinct, subject to the collision resistance of truncated SHA-256.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct IdempotencyKey([u8; 16]);
 
