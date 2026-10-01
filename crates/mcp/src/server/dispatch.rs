@@ -254,6 +254,26 @@ impl Server {
                 self.glioma_multimodal_operating_cycle(&arguments)
             }
             "glioma_computation_execute" => self.glioma_computation_execute(&arguments),
+            "glioma_release_shareability_check" => {
+                self.glioma_release_shareability_check(&arguments)
+            }
+            "glioma_compute_environment_lock" => self.glioma_compute_environment_lock(&arguments),
+            "glioma_environment_resolution" => self.glioma_environment_resolution(&arguments),
+            "glioma_reproducible_task_submit" => self.glioma_reproducible_task_submit(&arguments),
+            "glioma_computation_event_stream" => self.glioma_computation_event_stream(&arguments),
+            "glioma_decision_budget_snapshot" => self.glioma_decision_budget_snapshot(&arguments),
+            "glioma_registry_artifact_resolve" => self.glioma_registry_artifact_resolve(&arguments),
+            "glioma_compute_cache_govern" => self.glioma_compute_cache_govern(&arguments),
+            "glioma_multistudy_cache_partition" => {
+                self.glioma_multistudy_cache_partition(&arguments)
+            }
+            "glioma_compute_capacity_plan" => self.glioma_compute_capacity_plan(&arguments),
+            "glioma_reproducibility_completeness_score" => {
+                self.glioma_reproducibility_completeness_score(&arguments)
+            }
+            "glioma_reproducibility_bundle_compile" => {
+                self.glioma_reproducibility_bundle_compile(&arguments)
+            }
             "glioma_computation_lineage" => self.glioma_computation_lineage(&arguments),
             "glioma_computation_reproducibility" => {
                 self.glioma_computation_reproducibility(&arguments)

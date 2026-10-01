@@ -663,6 +663,13 @@ use bioprism_research::{
     synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, verify_glioma_evidence,
     verify_glioma_local_release_signature, verify_glioma_multimodal_quality_recovery,
+    compile_glioma_decision_budget_snapshot, compile_glioma_reproducibility_bundle,
+    evaluate_glioma_release_shareability,
+    govern_glioma_compute_cache, lock_glioma_compute_environment,
+    partition_glioma_multistudy_cache, plan_glioma_compute_capacity,
+    resolve_glioma_compute_environment, resolve_glioma_registry_artifact,
+    score_glioma_reproducibility_completeness, stream_glioma_computation_events,
+    submit_glioma_reproducible_task,
     AcquisitionFeedbackRequest, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
     ActiveLearningCandidate, ActiveLearningObservation, ActiveLearningRequest,
     AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
@@ -688,6 +695,11 @@ use bioprism_research::{
     ComputationInterpretationFrontierRequest, ComputationLineageRequest,
     ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
     ComputationRecoveryRequest, ComputationReproducibilityRequest, ComputationReproducibilityRun,
+    ComputationEventStreamRequest, ComputeCacheGovernorRequest, ComputeCapacityRequest,
+    ComputeEnvironmentLockRequest, DecisionBudgetRequest, EnvironmentResolutionRequest,
+    ArtifactRegistryResolutionRequest, MultiStudyCachePartitionRequest,
+    ReproducibilityBundleRequest, ReproducibilityCompletenessRequest,
+    ReproducibleTaskSubmission, ReleaseShareabilityRequest,
     ConcordanceRequest, ConsensusRequest, ContinualPromotionRequest,
     ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
     ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
@@ -1142,6 +1154,7 @@ mod glioma_mechanism;
 mod glioma_missions;
 mod glioma_multimodal;
 mod glioma_orchestration;
+mod glioma_release;
 mod hub;
 mod ids;
 mod lab;

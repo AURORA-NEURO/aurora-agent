@@ -3,6 +3,274 @@
 use super::*;
 
 impl Server {
+    /// Resolve and freeze a reproducible, policy-qualified local compute environment.
+    pub(super) fn glioma_compute_environment_lock(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ComputeEnvironmentLockRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_compute_environment_lock requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma compute environment lock request: {error}"))?;
+        let lock = lock_glioma_compute_environment(&request)
+            .map_err(|error| format!("glioma compute environment lock refused: {error}"))?;
+        Ok(json!({
+            "lock": lock,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "dependency source, build, ABI, architecture, trust, portability, and host identity are bound into a content-addressed lock",
+                "unavailable, mutable, compromised, unsigned, or incompatible dependencies cannot silently qualify",
+                "locking performs no package installation, external execution, or data movement"
+            ]
+        }))
+    }
+
+    /// Propose bounded dependency repairs while preserving the original environment lock.
+    pub(super) fn glioma_environment_resolution(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EnvironmentResolutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_environment_resolution requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma environment resolution request: {error}"))?;
+        let proposal = resolve_glioma_compute_environment(&request)
+            .map_err(|error| format!("glioma environment resolution refused: {error}"))?;
+        Ok(json!({
+            "proposal": proposal,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "candidate changes are bounded by explicit approval, version/source-change policy, cost, and change-count limits",
+                "the resulting environment is requalified against the complete lock policy",
+                "the MCP route proposes changes only and never installs dependencies"
+            ]
+        }))
+    }
+
+    /// Admit a reproducible local task and return its idempotent execution handle.
+    pub(super) fn glioma_reproducible_task_submit(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ReproducibleTaskSubmission = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_reproducible_task_submit requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma reproducible task request: {error}"))?;
+        let exchange = submit_glioma_reproducible_task(&request)
+            .map_err(|error| format!("glioma reproducible task admission refused: {error}"))?;
+        Ok(json!({
+            "exchange": exchange,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "task admission requires a qualified environment lock, explicit local policy grant, and bounded resources",
+                "idempotency keys bind retries to one replayable request digest",
+                "admission returns a handle only; no computation is dispatched"
+            ]
+        }))
+    }
+
+    /// Produce a filtered, redacted, access-controlled computation event batch.
+    pub(super) fn glioma_computation_event_stream(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ComputationEventStreamRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_computation_event_stream requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma computation event stream request: {error}"))?;
+        let batch = stream_glioma_computation_events(&request)
+            .map_err(|error| format!("glioma computation event stream refused: {error}"))?;
+        Ok(json!({
+            "batch": batch,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "events are ordered and replay-bound, with cursor gaps and recovery markers preserved",
+                "authorization, event-class access, and payload redaction are applied before return",
+                "the stream contains event metadata only and starts no computation"
+            ]
+        }))
+    }
+
+    /// Snapshot declared decision budgets, observed consumption, and forecast pressure.
+    pub(super) fn glioma_decision_budget_snapshot(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: DecisionBudgetRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_budget_snapshot requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision budget request: {error}"))?;
+        let snapshot = compile_glioma_decision_budget_snapshot(&request)
+            .map_err(|error| format!("glioma decision budget snapshot refused: {error}"))?;
+        Ok(json!({
+            "snapshot": snapshot,
+            "dispatch": "not_started",
+            "guarantees": [
+                "approved budgets, consumption events, forecasts, branch plans, and threshold warnings remain separately inspectable",
+                "budget status is descriptive and does not authorize spending or experimental action"
+            ]
+        }))
+    }
+
+    /// Resolve an artifact reference against trust, access, locality, and freshness policy.
+    pub(super) fn glioma_registry_artifact_resolve(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ArtifactRegistryResolutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_registry_artifact_resolve requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma artifact registry request: {error}"))?;
+        let resolution = resolve_glioma_registry_artifact(&request)
+            .map_err(|error| format!("glioma artifact resolution refused: {error}"))?;
+        Ok(json!({
+            "resolution": resolution,
+            "dispatch": "not_started",
+            "guarantees": [
+                "candidate identity, digest, schema, license, trusted source, access grant, freshness, and locality are checked",
+                "the result returns a verified handle and metadata only; artifact bytes are not fetched or moved"
+            ]
+        }))
+    }
+
+    /// Govern local compute cache reuse and bounded eviction from replay-bound keys.
+    pub(super) fn glioma_compute_cache_govern(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputeCacheGovernorRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_compute_cache_govern requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma compute cache request: {error}"))?;
+        let decision = govern_glioma_compute_cache(&request)
+            .map_err(|error| format!("glioma compute cache governance refused: {error}"))?;
+        Ok(json!({
+            "decision": decision,
+            "dispatch": "not_started",
+            "guarantees": [
+                "cache reuse requires exact task, input, code, environment, policy, version, and output-schema identity",
+                "locality and retention limits are enforced and eviction decisions are explicit",
+                "cache governance does not read artifact contents or dispatch work"
+            ]
+        }))
+    }
+
+    /// Apply study isolation and deidentification policy to a proposed cache reuse.
+    pub(super) fn glioma_multistudy_cache_partition(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MultiStudyCachePartitionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multistudy_cache_partition requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multistudy cache request: {error}"))?;
+        let decision = partition_glioma_multistudy_cache(&request)
+            .map_err(|error| format!("glioma multistudy cache partition refused: {error}"))?;
+        Ok(json!({
+            "decision": decision,
+            "dispatch": "not_started",
+            "guarantees": [
+                "cache reuse is scoped by study, deidentification scope, sensitivity, policy, and expiry",
+                "cross-study protected entries fail closed unless explicitly permitted by policy",
+                "the route returns a governance decision without exposing artifact payloads"
+            ]
+        }))
+    }
+
+    /// Allocate local compute capacity from fresh telemetry and explicit resource budgets.
+    pub(super) fn glioma_compute_capacity_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputeCapacityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_compute_capacity_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma compute capacity request: {error}"))?;
+        let plan = plan_glioma_compute_capacity(&request)
+            .map_err(|error| format!("glioma compute capacity planning refused: {error}"))?;
+        Ok(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "fresh telemetry, concurrency, memory, accelerator, age, budget, duration, and fairness constraints gate placement",
+                "scheduled, deferred, rejected, and capacity-limited jobs remain explicit",
+                "planning never submits jobs to an external scheduler"
+            ]
+        }))
+    }
+
+    /// Score the evidence coverage and replay completeness of a research object.
+    pub(super) fn glioma_reproducibility_completeness_score(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ReproducibilityCompletenessRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_reproducibility_completeness_score requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma reproducibility completeness request: {error}")
+            })?;
+        let profile = score_glioma_reproducibility_completeness(&request).map_err(|error| {
+            format!("glioma reproducibility completeness scoring refused: {error}")
+        })?;
+        Ok(json!({
+            "profile": profile,
+            "dispatch": "not_started",
+            "guarantees": [
+                "required evidence dimensions, evidence quality, coverage, replay count, and negative-outcome accounting are evaluated independently",
+                "missing or weak reproducibility evidence lowers completeness rather than being inferred",
+                "the score is a release-readiness input and does not itself release or publish an object"
+            ]
+        }))
+    }
+
+    /// Compile an offline reproducibility bundle after validating dependency closure and release permission.
+    pub(super) fn glioma_reproducibility_bundle_compile(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ReproducibilityBundleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_reproducibility_bundle_compile requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma reproducibility bundle request: {error}"))?;
+        let bundle = compile_glioma_reproducibility_bundle(&request).map_err(|error| {
+            format!("glioma reproducibility bundle compilation refused: {error}")
+        })?;
+        Ok(json!({
+            "bundle": bundle,
+            "dispatch": "not_started",
+            "guarantees": [
+                "bundle members are dependency-closed, path-bounded, digest-bound, and limited by the requested member cap",
+                "release permissions, export rights, and local-only constraints must already be satisfied",
+                "the route compiles a manifest only and does not copy, publish, or transmit artifact bytes"
+            ]
+        }))
+    }
+
     /// Execute a typed multimodal computation DAG through the deterministic synthetic worker.
     /// Production containers, GPUs, and schedulers remain caller-owned through the Rust SDK seam.
     pub(super) fn glioma_computation_execute(&self, arguments: &Value) -> Result<Value, String> {

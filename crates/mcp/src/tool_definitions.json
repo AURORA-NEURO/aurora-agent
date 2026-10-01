@@ -28193,5 +28193,209 @@
         }
       }
     }
+  },
+  {
+    "name": "glioma_compute_environment_lock",
+    "description": "Qualify and content-address a complete local compute environment before reproducible glioma task admission.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ComputeEnvironmentLockRequest1@1 with workflow identity, host architecture, trusted sources, and typed dependency attestations."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_environment_resolution",
+    "description": "Propose bounded, policy-gated dependency repairs and requalify the resulting compute environment.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "EnvironmentResolutionRequest1@1 with a base lock request, candidate repairs, approval state, and strict change and cost limits."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_reproducible_task_submit",
+    "description": "Admit a replayable local computation task under a qualified environment lock, explicit policy grant, and resource budget.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReproducibleTaskSubmission1@1 with task, environment lock, access policy, idempotency key, prior submissions, and resource bounds."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_computation_event_stream",
+    "description": "Return an access-controlled, replay-bound, optionally redacted batch of local computation events.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ComputationEventStreamRequest1@1 with run identity, events, optional cursor, filter bounds, and site access scope."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_decision_budget_snapshot",
+    "description": "Summarize approved resource budgets, observed consumption, forecasts, and branch plans for a research campaign.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "DecisionBudgetRequest1@1 with bounded budget buckets, consumption events, forecasts, branch plans, and time horizon."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_registry_artifact_resolve",
+    "description": "Resolve a typed artifact reference using source trust, authorization, locality, licensing, and freshness policy.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ArtifactRegistryResolutionRequest1@1 with artifact reference, candidate metadata, trust rules, access grant, and current tick."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_compute_cache_govern",
+    "description": "Decide exact replay-keyed local cache reuse, admission, retention, and bounded eviction.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ComputeCacheGovernorRequest1@1 with exact cache key, existing entries, optional incoming entry, cache policy, and current tick."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_multistudy_cache_partition",
+    "description": "Decide whether a cache entry may be reused across study boundaries under sensitivity and deidentification policy.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "MultiStudyCachePartitionRequest1@1 with requesting study scope, candidate cache entries, cache partition policy, and current tick."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_compute_capacity_plan",
+    "description": "Plan fair local compute capacity assignments from fresh telemetry and explicit resource limits.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ComputeCapacityRequest1@1 with candidate jobs, runtime observations, capacity telemetry, scheduling policy, and planning horizon."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_reproducibility_completeness_score",
+    "description": "Score research object reproducibility evidence and independent replay completeness for release readiness.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReproducibilityCompletenessRequest1@1 with research manifest, dimension-specific evidence, required dimensions, replay policy, and thresholds."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_reproducibility_bundle_compile",
+    "description": "Compile a dependency-closed offline reproducibility bundle manifest after release rights and shareability checks.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReproducibilityBundleRequest1@1 with research manifest, shareability decision, bounded members, workflow and environment digests, and replay instructions."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_release_shareability_check",
+    "description": "Check the complete dependency closure for release rights, license compatibility, locality, embargo, audience, and sensitive content before preparing an export.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReleaseShareabilityRequest1@1 with candidate manifest digest, dependency closure, requested fields, rights attestations, audience, license policy, and current epoch."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
   }
 ]
