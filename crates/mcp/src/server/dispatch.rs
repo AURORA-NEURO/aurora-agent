@@ -321,6 +321,9 @@ impl Server {
                 self.glioma_computation_portfolio_plan(&arguments)
             }
             "glioma_computation_placement" => self.glioma_computation_placement(&arguments),
+            "glioma_computation_placement_stress_evaluate" => {
+                self.glioma_computation_placement_stress_evaluate(&arguments)
+            }
             "glioma_computation_portfolio_execute" => {
                 self.glioma_computation_portfolio_execute(&arguments)
             }

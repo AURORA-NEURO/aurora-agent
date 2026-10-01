@@ -431,6 +431,33 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma computation placement: {error}"))
     }
 
+    /// Evaluate placement resilience across bounded worker-loss and transfer-cost scenarios.
+    pub(super) fn glioma_computation_placement_stress_evaluate(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ComputationPlacementStressEvaluationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_placement_stress_evaluate requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma computation placement stress request: {error}")
+            })?;
+        let evaluation = evaluate_glioma_computation_placement_stress(&request)
+            .map_err(|error| format!("glioma computation placement stress refused: {error}"))?;
+        serde_json::to_value(json!({
+            "evaluation": evaluation,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "worker loss, transfer pressure, budget pressure, and mission-window pressure are evaluated against the same typed placement request",
+                "scenario ordering and degradation evidence are deterministic and replayable",
+                "stress evaluation never dispatches workers, moves payloads, or starts computation"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation placement stress evaluation: {error}"))
+    }
+
     /// Plan and execute a selected computation portfolio through the deterministic sandbox
     /// worker. Institution-local callers can replace the worker through the Rust executor seam.
     pub(super) fn glioma_computation_portfolio_execute(

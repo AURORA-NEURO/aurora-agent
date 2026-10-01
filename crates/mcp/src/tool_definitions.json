@@ -28771,5 +28771,22 @@
         "request"
       ]
     }
+  },
+  {
+    "name": "glioma_computation_placement_stress_evaluate",
+    "description": "Evaluate a reproducible computation placement plan under worker loss and bounded transfer, budget, and mission-window stress scenarios.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ComputationPlacementStressEvaluationRequest1@1 with a typed base placement request, bounded worker-loss and resource-pressure scenarios, and a non-degradation policy."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
   }
 ]

@@ -56,12 +56,12 @@ mod tests {
             .expect("small-stack catalogue test thread starts")
             .join()
             .expect("embedded catalogue parses without a large activation record");
-        assert_eq!(definitions.len(), 938);
+        assert_eq!(definitions.len(), 939);
         assert_eq!(
             bioprism_ids::ContentHash::of_value(&Value::Array(definitions))
                 .expect("catalogue canonicalizes")
                 .to_string(),
-            "98d4d62dce6401212bfe339d0c65344155fe5de22a2159d3169ae1c95a31f5bb"
+            "714421b24032504ac1d21a7f2e651dea664fa55061dce790d5704efdf0a34fb7"
         );
     }
 
