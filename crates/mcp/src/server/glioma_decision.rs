@@ -36,6 +36,78 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma decision context: {error}"))
     }
 
+    /// Query a bounded, capability-authorized page from a typed decision-context record set.
+    pub(super) fn glioma_decision_context_query(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionContextQueryRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_context_query requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision context query: {error}"))?;
+        let result = query_glioma_decision_context(&request)
+            .map_err(|error| format!("glioma decision context query refused: {error}"))?;
+        Ok(json!({
+            "result": result,
+            "dispatch": "not_started",
+            "guarantees": [
+                "scope, capability digest, revocation, expiry, field access, page size, and result budget are checked before records are returned",
+                "omissions and uncertainty follow separate capability grants",
+                "query results are typed, bounded, and read-only"
+            ]
+        }))
+    }
+
+    /// Apply a bounded, replay-checked event page to a decision-context snapshot.
+    pub(super) fn glioma_decision_context_update(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: DecisionContextUpdateRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_context_update requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision context update: {error}"))?;
+        let result = update_glioma_decision_context(&request)
+            .map_err(|error| format!("glioma decision context update refused: {error}"))?;
+        Ok(json!({
+            "result": result,
+            "dispatch": "not_started",
+            "guarantees": [
+                "event ordering, digest binding, duplicate sequence, anchor context, and update bounds are validated",
+                "negative, contradicted, expired, and invalidated actions remain distinct and update the final context deterministically",
+                "updates return a proposed new context and do not dispatch its actions"
+            ]
+        }))
+    }
+
+    /// Store and prune a bounded study-local decision-context snapshot index.
+    pub(super) fn glioma_decision_context_snapshot_store(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: DecisionContextSnapshotStoreRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_decision_context_snapshot_store requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma decision context snapshot store request: {error}")
+            })?;
+        let index = store_glioma_decision_context_snapshots(&request)
+            .map_err(|error| format!("glioma decision context snapshot store refused: {error}"))?;
+        Ok(json!({
+            "index": index,
+            "dispatch": "not_started",
+            "guarantees": [
+                "snapshot study identity, parent lineage, epoch order, event references, pinning, and retention bounds are checked",
+                "pinned, referenced, and recovery snapshots are protected from pruning",
+                "the route compiles a snapshot index and performs no external persistence"
+            ]
+        }))
+    }
+
     /// Materialize a local P04 context into the portable typed artifact consumed by agents,
     /// workbenches, SDKs, and MCP clients. The artifact contains metadata and action contracts
     /// only; raw evidence remains in the institution-local store.

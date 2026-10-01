@@ -28669,5 +28669,56 @@
         "request"
       ]
     }
+  },
+  {
+    "name": "glioma_decision_context_query",
+    "description": "Read a bounded page of decision-context records under digest-bound, expiring capability and field-level omission permissions.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "DecisionContextQueryRequest1@1 with context identity, scope prefix, requested fields, cursor, page and result bounds, capability, current tick, and typed records."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_decision_context_update",
+    "description": "Apply a bounded sequence of digest-bound evidence and action events to a decision context and expose invalidated actions.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "DecisionContextUpdateRequest1@1 with base context, ordered events, replay cursor, event cap, and current tick."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_decision_context_snapshot_store",
+    "description": "Build a bounded study-local snapshot index with parent lineage, retention, pinning, and recovery selection.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "DecisionContextSnapshotStoreRequest1@1 with study identity, snapshot cap, ordered snapshots, references, and optional recovery snapshot."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
   }
 ]

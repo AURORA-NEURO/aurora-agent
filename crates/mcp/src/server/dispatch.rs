@@ -239,6 +239,11 @@ impl Server {
             "glioma_decision_context_campaign_execute" => {
                 self.glioma_decision_context_campaign_execute(&arguments)
             }
+            "glioma_decision_context_query" => self.glioma_decision_context_query(&arguments),
+            "glioma_decision_context_update" => self.glioma_decision_context_update(&arguments),
+            "glioma_decision_context_snapshot_store" => {
+                self.glioma_decision_context_snapshot_store(&arguments)
+            }
             "glioma_decision_branch_campaign_execute" => {
                 self.glioma_decision_branch_campaign_execute(&arguments)
             }
