@@ -18,7 +18,7 @@ use crate::envelope::{Completion, DispatchJob, Outcome, Receipt, TaskEnvelope, T
 use crate::exec::{Driver, Enqueue};
 use crate::ids::{AgentId, IdempotencyKey, ShardId, TaskId};
 use crate::lease::{ExpiredLease, LeaseError, LeaseHandle, LeaseTable};
-use crate::queue::{Backpressure, BoundedQueue};
+use crate::queue::{Backpressure, BackpressureResource, BoundedQueue};
 use crate::quota::{QuotaLedger, QuotaSpec};
 use crate::retry::{RetryDecision, RetryPolicy};
 use crate::router::{AgentState, Router};
@@ -32,6 +32,8 @@ pub struct FabricConfig {
     pub shards: u64,
     /// Capacity of each shard's ready queue.
     pub per_shard_queue_cap: usize,
+    /// Maximum number of admitted tasks across ready queues, retries, and execution.
+    pub max_pending_tasks: usize,
     /// Global ceiling on simultaneously executing attempts.
     pub max_in_flight: usize,
     pub default_lease_ttl_ticks: u64,
@@ -46,6 +48,7 @@ impl Default for FabricConfig {
         Self {
             shards: 8,
             per_shard_queue_cap: 256,
+            max_pending_tasks: 4096,
             max_in_flight: 128,
             default_lease_ttl_ticks: 32,
             retry: RetryPolicy::default(),
@@ -91,6 +94,7 @@ pub struct Metrics {
     pub submitted: u64,
     pub duplicate_submissions: u64,
     pub backpressure_rejections: u64,
+    pub pending_limit_rejections: u64,
     pub admitted: u64,
     pub dispatched: u64,
     pub retried: u64,
@@ -109,6 +113,7 @@ pub struct Metrics {
     pub idempotency_evictions: u64,
     pub cancellations_requested: u64,
     pub ready_high_water: usize,
+    pub pending_high_water: usize,
     pub in_flight_high_water: usize,
 }
 
@@ -159,6 +164,10 @@ pub struct Fabric {
 
 impl Fabric {
     pub fn new(cfg: FabricConfig, driver: Box<dyn Driver>, cancels: CancelState) -> Self {
+        assert!(
+            cfg.max_pending_tasks > 0,
+            "pending-work limit must be positive"
+        );
         let n = cfg.shards;
         let cap = cfg.per_shard_queue_cap;
         Self {
@@ -232,6 +241,17 @@ impl Fabric {
             return Submission::Duplicate { task: *existing };
         }
 
+        if self.tasks.len() >= self.cfg.max_pending_tasks {
+            self.metrics.backpressure_rejections += 1;
+            self.metrics.pending_limit_rejections += 1;
+            return Submission::Rejected {
+                pressure: Backpressure {
+                    capacity: self.cfg.max_pending_tasks,
+                    resource: BackpressureResource::PendingWork,
+                },
+            };
+        }
+
         self.next_task += 1;
         let task = TaskId::new(self.next_task);
         let env = TaskEnvelope::compose(
@@ -258,6 +278,8 @@ impl Fabric {
                 self.idem.insert(key, task);
                 self.tasks.insert(task, meta);
                 self.metrics.admitted += 1;
+                self.metrics.pending_high_water =
+                    self.metrics.pending_high_water.max(self.tasks.len());
                 let queued_total: usize = self.queues.iter().map(BoundedQueue::len).sum();
                 self.metrics.ready_high_water = self.metrics.ready_high_water.max(queued_total);
                 Submission::Accepted { task }
@@ -301,6 +323,7 @@ impl Fabric {
         }
         Err(Backpressure {
             capacity: self.cfg.per_shard_queue_cap,
+            resource: BackpressureResource::ReadyQueue,
         })
     }
 
@@ -725,6 +748,9 @@ impl Fabric {
         MemStats {
             queued_ready: self.queues.iter().map(BoundedQueue::len).sum(),
             queue_capacity_total: self.cfg.per_shard_queue_cap * self.queues.len(),
+            retry_pending: self.retry_heap.len(),
+            pending_tasks: self.tasks.len(),
+            pending_capacity: self.cfg.max_pending_tasks,
             queue_high_water: self.metrics.ready_high_water,
             in_flight: self.in_flight.len(),
             in_flight_high_water: self.metrics.in_flight_high_water,
@@ -786,6 +812,9 @@ fn derive_submission_key(payload: &[u8], caps: &CapabilitySet) -> IdempotencyKey
 pub struct MemStats {
     pub queued_ready: usize,
     pub queue_capacity_total: usize,
+    pub retry_pending: usize,
+    pub pending_tasks: usize,
+    pub pending_capacity: usize,
     pub queue_high_water: usize,
     pub in_flight: usize,
     pub in_flight_high_water: usize,
@@ -811,6 +840,10 @@ mod tests {
     }
 
     fn fabric() -> Fabric {
+        fabric_with_config(FabricConfig::default())
+    }
+
+    fn fabric_with_config(config: FabricConfig) -> Fabric {
         let cancels = CancelState::new();
         let driver = InlineDriver::new(
             Arc::new(FnHandler(|_: &crate::envelope::DispatchJob| {
@@ -818,7 +851,7 @@ mod tests {
             })),
             cancels.clone(),
         );
-        Fabric::new(FabricConfig::default(), Box::new(driver), cancels)
+        Fabric::new(config, Box::new(driver), cancels)
     }
 
     fn accepted(fabric: &mut Fabric, payload: &[u8], capabilities: CapabilitySet) -> TaskId {
@@ -856,6 +889,60 @@ mod tests {
         );
 
         assert!(matches!(replay, Submission::Duplicate { task } if task == original));
+        assert_eq!(fabric.metrics().duplicate_submissions, 1);
+    }
+
+    #[test]
+    fn global_pending_limit_bounds_unroutable_tasks_moved_to_the_retry_heap() {
+        let mut fabric = fabric_with_config(FabricConfig {
+            shards: 1,
+            per_shard_queue_cap: 4,
+            max_pending_tasks: 2,
+            ..FabricConfig::default()
+        });
+        let capabilities = caps(&["unroutable"]);
+        accepted(&mut fabric, b"first", capabilities.clone());
+        accepted(&mut fabric, b"second", capabilities.clone());
+
+        fabric.step_to(0);
+
+        let stats = fabric.memory_stats();
+        assert_eq!(stats.queued_ready, 0);
+        assert_eq!(stats.retry_pending, 2);
+        assert_eq!(stats.pending_tasks, 2);
+        assert_eq!(stats.pending_capacity, 2);
+        assert!(stats.retry_pending <= stats.pending_capacity);
+
+        assert!(matches!(
+            fabric.submit(b"third".to_vec(), capabilities, None),
+            Submission::Rejected {
+                pressure: Backpressure {
+                    capacity: 2,
+                    resource: BackpressureResource::PendingWork,
+                }
+            }
+        ));
+        assert_eq!(fabric.metrics().pending_limit_rejections, 1);
+        assert_eq!(fabric.metrics().backpressure_rejections, 1);
+        assert_eq!(fabric.metrics().pending_high_water, 2);
+    }
+
+    #[test]
+    fn idempotent_replay_is_recognized_even_when_the_pending_limit_is_full() {
+        let mut fabric = fabric_with_config(FabricConfig {
+            max_pending_tasks: 1,
+            ..FabricConfig::default()
+        });
+        let key = IdempotencyKey::from_bytes([7; 16]);
+        let first = match fabric.submit(b"same".to_vec(), caps(&["compute"]), Some(key)) {
+            Submission::Accepted { task } => task,
+            other => panic!("expected acceptance, got {other:?}"),
+        };
+
+        let replay = fabric.submit(b"different".to_vec(), caps(&["storage"]), Some(key));
+
+        assert!(matches!(replay, Submission::Duplicate { task } if task == first));
+        assert_eq!(fabric.metrics().pending_limit_rejections, 0);
         assert_eq!(fabric.metrics().duplicate_submissions, 1);
     }
 }

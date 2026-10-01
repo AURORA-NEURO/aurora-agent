@@ -76,6 +76,7 @@ pub use digest::Digest;
 pub use envelope::{Completion, DispatchJob, Outcome, Receipt, TaskEnvelope};
 pub use exec::{Driver, Handler, InlineDriver, ThreadDriver};
 pub use ids::{AgentId, IdempotencyKey, LeaseEpoch, ShardId, TaskId};
+pub use queue::{Backpressure, BackpressureResource};
 pub use retry::RetryPolicy;
 pub use scheduler::{Fabric, FabricConfig, Metrics, Submission};
 

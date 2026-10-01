@@ -8,7 +8,8 @@ idempotency, receipts, and fault simulation.
 ## Supported surfaces
 
 - The scheduler is deterministic and in-process. Logical agent count is not a thread count; the
-  driver owns the real concurrency bound.
+  driver owns the real concurrency bound. Each shard queue has its own capacity, and
+  `max_pending_tasks` bounds all accepted work across queues, retries, and execution.
 - MCP stdio uses newline-delimited JSON-RPC 2.0 and implements `initialize`, `ping`, `tools/list`,
   and `tools/call` for `fabric.submit` and `fabric.cancel`. Oversized or malformed frames fail
   before dispatch.
@@ -27,8 +28,10 @@ idempotency, receipts, and fault simulation.
    takes precedence; the automatic key is a 128-bit SHA-256 prefix, so its uniqueness is
    probabilistic rather than an absolute guarantee.
 3. A task has at most one live lease. Lease epochs reject stale completions and releases.
-4. Every ready queue, driver hand-off channel, retry heap, and receipt ledger is bounded by an
-   explicit configuration or retention limit.
+4. Every ready queue, driver hand-off channel, retry heap, receipt ledger, and aggregate pending
+   task set is bounded by an explicit configuration or retention limit. The pending-task limit
+   prevents unroutable or deferred tasks from escaping the per-shard queue bounds into unbounded
+   retry state; backpressure identifies whether a shard queue or the aggregate limit was reached.
 5. Cancellation is cooperative and monotone; a receipt records that cancellation raced execution
    rather than rewriting the observed outcome.
 6. The simulator uses virtual time and seeded fault injection so crash, silent-drop, failed,
