@@ -957,17 +957,30 @@ fn normalize_to_shares(values: &[u128]) -> Vec<u32> {
     shares
 }
 
-fn build_operator(
-    arm: &str,
-    states: &[String],
-    samples: &[Fit],
-    full: &Fit,
+struct OperatorBuildInput<'a> {
+    arm: &'a str,
+    states: &'a [String],
+    samples: &'a [Fit],
+    full: &'a Fit,
     units: usize,
     lineages: usize,
     training_pairs: usize,
     confidence: u16,
     max_coefficient_ppm: u64,
-) -> LineagePropagationOperator {
+}
+
+fn build_operator(input: OperatorBuildInput<'_>) -> LineagePropagationOperator {
+    let OperatorBuildInput {
+        arm,
+        states,
+        samples,
+        full,
+        units,
+        lineages,
+        training_pairs,
+        confidence,
+        max_coefficient_ppm,
+    } = input;
     let count = states.len();
     let boundary_count = (0..count * count)
         .filter(|index| {
@@ -1389,17 +1402,17 @@ pub fn analyze_glioma_lineage_propagation(
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
-        let operator = build_operator(
+        let operator = build_operator(OperatorBuildInput {
             arm,
-            &request.state_order,
-            &samples,
-            &full,
+            states: &request.state_order,
+            samples: &samples,
+            full: &full,
             units,
             lineages,
-            training_rows.len(),
-            request.confidence_level_milli,
-            request.max_coefficient_ppm,
-        );
+            training_pairs: training_rows.len(),
+            confidence: request.confidence_level_milli,
+            max_coefficient_ppm: request.max_coefficient_ppm,
+        });
         // Keep this assertion close to the fitting boundary: every eligible replicate must
         // actually contribute at least one pre-holdout source observation.
         let weighted = unit_set

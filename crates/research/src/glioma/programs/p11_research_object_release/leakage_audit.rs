@@ -238,6 +238,126 @@ fn path_allowed(path: &str, prefixes: &[String]) -> bool {
     prefixes.iter().any(|prefix| path.starts_with(prefix))
 }
 
+struct LeakageTraversal<'a> {
+    request: &'a ReleaseDependencyLeakageRequest,
+    node_map: &'a BTreeMap<String, &'a ReleaseDependencyNode>,
+    traversal: BTreeSet<String>,
+    findings: Vec<ReleaseLeakFinding>,
+    omitted: BTreeSet<String>,
+    finding_sequence: usize,
+}
+
+impl LeakageTraversal<'_> {
+    fn emit(
+        &mut self,
+        node_id: &str,
+        path: &[String],
+        kind: LeakageKind,
+        severity: LeakageSeverity,
+        reason: String,
+    ) {
+        self.finding_sequence += 1;
+        self.findings.push(ReleaseLeakFinding {
+            finding_id: format!("leak-{:06}", self.finding_sequence),
+            kind,
+            severity,
+            node_id: node_id.into(),
+            dependency_path: path.to_vec(),
+            reason,
+        });
+    }
+
+    fn visit(&mut self, node_id: &str, path: &mut Vec<String>, depth: usize) {
+        if depth > self.request.max_depth {
+            self.emit(
+                node_id,
+                path,
+                LeakageKind::DepthExceeded,
+                LeakageSeverity::Critical,
+                "dependency traversal exceeded the configured depth".into(),
+            );
+            return;
+        }
+        if path.iter().any(|ancestor| ancestor == node_id) {
+            self.emit(
+                node_id,
+                path,
+                LeakageKind::DependencyCycle,
+                LeakageSeverity::Critical,
+                "dependency cycle prevents a finite export closure".into(),
+            );
+            return;
+        }
+        let Some(node) = self.node_map.get(node_id).map(|node| (*node).clone()) else {
+            self.emit(
+                node_id,
+                path,
+                LeakageKind::MissingDependency,
+                LeakageSeverity::Critical,
+                "declared dependency is absent from the candidate graph".into(),
+            );
+            return;
+        };
+        path.push(node_id.into());
+        self.traversal.insert(node_id.into());
+        if node.requested_export && node.export_scope == DependencyExportScope::LocalOnly {
+            self.emit(
+                &node.node_id,
+                path,
+                LeakageKind::LocalOnlyReference,
+                LeakageSeverity::Critical,
+                "local-only node is requested for export".into(),
+            );
+        }
+        if node.requested_export && node.contains_human_data {
+            self.emit(
+                &node.node_id,
+                path,
+                LeakageKind::ProtectedPayload,
+                LeakageSeverity::Critical,
+                "human-data flag is present on an exported node".into(),
+            );
+        }
+        if node.requested_export && node.contains_direct_identifiers {
+            self.emit(
+                &node.node_id,
+                path,
+                LeakageKind::DirectIdentifier,
+                LeakageSeverity::Critical,
+                "direct-identifier flag is present on an exported node".into(),
+            );
+        }
+        if node.requested_export && node.embedded_secret {
+            self.emit(
+                &node.node_id,
+                path,
+                LeakageKind::EmbeddedSecret,
+                LeakageSeverity::Critical,
+                "secret scanner marked an exported node".into(),
+            );
+        }
+        if node.requested_export
+            && (node.symlink_escape
+                || !path_allowed(&node.path, &self.request.allowed_export_prefixes))
+        {
+            self.emit(
+                &node.node_id,
+                path,
+                LeakageKind::PathEscape,
+                LeakageSeverity::Critical,
+                "export path escapes the declared allow-list".into(),
+            );
+        }
+        if !node.requested_export && node.export_scope == DependencyExportScope::LocalOnly {
+            self.omitted.insert(node.node_id.clone());
+        }
+        for dependency in &node.dependency_order {
+            self.visit(dependency, path, depth + 1);
+        }
+        path.pop();
+    }
+}
+
 /// Traverse an export candidate's dependency graph and fail closed on transitive leakage.
 pub fn audit_glioma_release_dependency_leakage(
     request: &ReleaseDependencyLeakageRequest,
@@ -248,139 +368,20 @@ pub fn audit_glioma_release_dependency_leakage(
         .iter()
         .map(|node| (node.node_id.clone(), node))
         .collect::<BTreeMap<_, _>>();
-    let mut traversal = BTreeSet::new();
-    let mut findings = Vec::new();
-    let mut omitted = BTreeSet::new();
-    let mut finding_sequence = 0usize;
-    fn visit(
-        node_id: &str,
-        path: &mut Vec<String>,
-        depth: usize,
-        request: &ReleaseDependencyLeakageRequest,
-        node_map: &BTreeMap<String, &ReleaseDependencyNode>,
-        traversal: &mut BTreeSet<String>,
-        findings: &mut Vec<ReleaseLeakFinding>,
-        omitted: &mut BTreeSet<String>,
-        finding_sequence: &mut usize,
-    ) {
-        if depth > request.max_depth {
-            *finding_sequence += 1;
-            findings.push(ReleaseLeakFinding {
-                finding_id: format!("leak-{finding_sequence:06}"),
-                kind: LeakageKind::DepthExceeded,
-                severity: LeakageSeverity::Critical,
-                node_id: node_id.into(),
-                dependency_path: path.clone(),
-                reason: "dependency traversal exceeded the configured depth".into(),
-            });
-            return;
-        }
-        if path.iter().any(|ancestor| ancestor == node_id) {
-            *finding_sequence += 1;
-            findings.push(ReleaseLeakFinding {
-                finding_id: format!("leak-{finding_sequence:06}"),
-                kind: LeakageKind::DependencyCycle,
-                severity: LeakageSeverity::Critical,
-                node_id: node_id.into(),
-                dependency_path: path.clone(),
-                reason: "dependency cycle prevents a finite export closure".into(),
-            });
-            return;
-        }
-        let Some(node) = node_map.get(node_id) else {
-            *finding_sequence += 1;
-            findings.push(ReleaseLeakFinding {
-                finding_id: format!("leak-{finding_sequence:06}"),
-                kind: LeakageKind::MissingDependency,
-                severity: LeakageSeverity::Critical,
-                node_id: node_id.into(),
-                dependency_path: path.clone(),
-                reason: "declared dependency is absent from the candidate graph".into(),
-            });
-            return;
-        };
-        path.push(node_id.into());
-        traversal.insert(node_id.into());
-        let mut emit = |kind: LeakageKind, severity: LeakageSeverity, reason: String| {
-            *finding_sequence += 1;
-            findings.push(ReleaseLeakFinding {
-                finding_id: format!("leak-{finding_sequence:06}"),
-                kind,
-                severity,
-                node_id: node.node_id.clone(),
-                dependency_path: path.clone(),
-                reason,
-            });
-        };
-        if node.requested_export && node.export_scope == DependencyExportScope::LocalOnly {
-            emit(
-                LeakageKind::LocalOnlyReference,
-                LeakageSeverity::Critical,
-                "local-only node is requested for export".into(),
-            );
-        }
-        if node.requested_export && node.contains_human_data {
-            emit(
-                LeakageKind::ProtectedPayload,
-                LeakageSeverity::Critical,
-                "human-data flag is present on an exported node".into(),
-            );
-        }
-        if node.requested_export && node.contains_direct_identifiers {
-            emit(
-                LeakageKind::DirectIdentifier,
-                LeakageSeverity::Critical,
-                "direct-identifier flag is present on an exported node".into(),
-            );
-        }
-        if node.requested_export && node.embedded_secret {
-            emit(
-                LeakageKind::EmbeddedSecret,
-                LeakageSeverity::Critical,
-                "secret scanner marked an exported node".into(),
-            );
-        }
-        if node.requested_export
-            && (node.symlink_escape || !path_allowed(&node.path, &request.allowed_export_prefixes))
-        {
-            emit(
-                LeakageKind::PathEscape,
-                LeakageSeverity::Critical,
-                "export path escapes the declared allow-list".into(),
-            );
-        }
-        if !node.requested_export && node.export_scope == DependencyExportScope::LocalOnly {
-            omitted.insert(node.node_id.clone());
-        }
-        let dependencies = node.dependency_order.clone();
-        for dependency in dependencies {
-            visit(
-                &dependency,
-                path,
-                depth + 1,
-                request,
-                node_map,
-                traversal,
-                findings,
-                omitted,
-                finding_sequence,
-            );
-        }
-        path.pop();
-    }
+    let mut audit = LeakageTraversal {
+        request,
+        node_map: &node_map,
+        traversal: BTreeSet::new(),
+        findings: Vec::new(),
+        omitted: BTreeSet::new(),
+        finding_sequence: 0,
+    };
     for root in &request.root_order {
-        visit(
-            root,
-            &mut Vec::new(),
-            0,
-            request,
-            &node_map,
-            &mut traversal,
-            &mut findings,
-            &mut omitted,
-            &mut finding_sequence,
-        );
+        audit.visit(root, &mut Vec::new(), 0);
     }
+    let traversal = audit.traversal;
+    let mut findings = audit.findings;
+    let omitted = audit.omitted;
     findings.sort_by(|left, right| left.finding_id.cmp(&right.finding_id));
     let critical = findings
         .iter()

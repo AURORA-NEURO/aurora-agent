@@ -108,31 +108,33 @@ fn canonical(values: &[String]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
-fn signature_payload(
-    manifest_digest: &ContentHash,
-    build_provenance_digest: &ContentHash,
-    release_gate_digest: &ContentHash,
-    issuer: &str,
-    signer_id: &str,
-    key_id: &str,
-    algorithm: &str,
-    policy_scope: &str,
+struct SignaturePayload<'a> {
+    manifest_digest: &'a ContentHash,
+    build_provenance_digest: &'a ContentHash,
+    release_gate_digest: &'a ContentHash,
+    issuer: &'a str,
+    signer_id: &'a str,
+    key_id: &'a str,
+    algorithm: &'a str,
+    policy_scope: &'a str,
     issued_at_epoch: u64,
     release_gate_status: ReleaseGateStatus,
-    verification_order: &[String],
-) -> serde_json::Value {
+    verification_order: &'a [String],
+}
+
+fn signature_payload(payload: SignaturePayload<'_>) -> serde_json::Value {
     serde_json::json!({
-        "manifest_digest": manifest_digest,
-        "build_provenance_digest": build_provenance_digest,
-        "release_gate_digest": release_gate_digest,
-        "issuer": issuer,
-        "signer_id": signer_id,
-        "key_id": key_id,
-        "algorithm": algorithm,
-        "policy_scope": policy_scope,
-        "issued_at_epoch": issued_at_epoch,
-        "release_gate_status": release_gate_status,
-        "verification_order": verification_order,
+        "manifest_digest": payload.manifest_digest,
+        "build_provenance_digest": payload.build_provenance_digest,
+        "release_gate_digest": payload.release_gate_digest,
+        "issuer": payload.issuer,
+        "signer_id": payload.signer_id,
+        "key_id": payload.key_id,
+        "algorithm": payload.algorithm,
+        "policy_scope": payload.policy_scope,
+        "issued_at_epoch": payload.issued_at_epoch,
+        "release_gate_status": payload.release_gate_status,
+        "verification_order": payload.verification_order,
     })
 }
 
@@ -283,19 +285,19 @@ pub fn attest_glioma_release(
         "manifest_digest": manifest_digest,
     }))
     .map_err(|error| SignedAttestationError::Digest(error.to_string()))?;
-    let signature_digest = ContentHash::of_value(&signature_payload(
-        &manifest_digest,
-        &request.build_provenance_digest,
-        &request.release_gate_digest,
-        &request.authority.authority_id,
-        &request.signer_id,
-        &request.authority.key_id,
-        &request.authority.algorithm,
-        &request.policy_scope,
-        request.issued_at_epoch,
-        request.release_gate_status,
-        &verification_order,
-    ))
+    let signature_digest = ContentHash::of_value(&signature_payload(SignaturePayload {
+        manifest_digest: &manifest_digest,
+        build_provenance_digest: &request.build_provenance_digest,
+        release_gate_digest: &request.release_gate_digest,
+        issuer: &request.authority.authority_id,
+        signer_id: &request.signer_id,
+        key_id: &request.authority.key_id,
+        algorithm: &request.authority.algorithm,
+        policy_scope: &request.policy_scope,
+        issued_at_epoch: request.issued_at_epoch,
+        release_gate_status: request.release_gate_status,
+        verification_order: &verification_order,
+    }))
     .map_err(|error| SignedAttestationError::Digest(error.to_string()))?;
     let status = if request.authority.revoked {
         AttestationStatus::Revoked

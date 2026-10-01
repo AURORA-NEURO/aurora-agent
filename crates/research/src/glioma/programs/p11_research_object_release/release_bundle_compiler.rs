@@ -224,6 +224,51 @@ fn validate_request(request: &ReproducibilityBundleRequest) -> Result<(), Releas
     Ok(())
 }
 
+struct BundleGraphWalk<'a> {
+    members: &'a BTreeMap<String, &'a BundleMember>,
+    allowed_fields: &'a BTreeSet<String>,
+    included: BTreeSet<String>,
+    omissions: Vec<BundleOmission>,
+    missing: BTreeSet<String>,
+    cycles: BTreeSet<String>,
+    visiting: BTreeSet<String>,
+    visited: BTreeSet<String>,
+}
+
+impl BundleGraphWalk<'_> {
+    fn walk(&mut self, id: &str) {
+        if self.visiting.contains(id) {
+            self.cycles.insert(id.to_owned());
+            return;
+        }
+        if !self.visited.insert(id.to_owned()) {
+            return;
+        }
+        let Some(member) = self.members.get(id) else {
+            self.missing.insert(id.to_owned());
+            return;
+        };
+        let permitted =
+            member.export_permitted && !member.local_only && self.allowed_fields.contains(id);
+        let dependencies = member.dependency_order.clone();
+        if !permitted {
+            self.omissions.push(BundleOmission {
+                artifact_id: id.to_owned(),
+                reason: "shareability-or-locality-policy-excludes-member".into(),
+                replay_boundary:
+                    "reproduce-at-originating-institution-or-use-an-approved-aggregate".into(),
+            });
+            return;
+        }
+        self.visiting.insert(id.to_owned());
+        for dependency in &dependencies {
+            self.walk(dependency);
+        }
+        self.visiting.remove(id);
+        self.included.insert(id.to_owned());
+    }
+}
+
 /// Compile a deterministic offline bundle plan from local, already-authorized metadata.
 pub fn compile_glioma_reproducibility_bundle(
     request: &ReproducibilityBundleRequest,
@@ -240,12 +285,16 @@ pub fn compile_glioma_reproducibility_bundle(
         .iter()
         .filter_map(|id| id.split_once(':').map(|(artifact, _)| artifact.to_owned()))
         .collect::<BTreeSet<_>>();
-    let mut omissions = Vec::new();
-    let mut missing = BTreeSet::new();
-    let mut cycles = BTreeSet::new();
-    let mut included = BTreeSet::new();
-    let mut visiting = BTreeSet::new();
-    let mut visited = BTreeSet::new();
+    let mut graph = BundleGraphWalk {
+        members: &members,
+        allowed_fields: &allowed_fields,
+        included: BTreeSet::new(),
+        omissions: Vec::new(),
+        missing: BTreeSet::new(),
+        cycles: BTreeSet::new(),
+        visiting: BTreeSet::new(),
+        visited: BTreeSet::new(),
+    };
     let mut network_requirements = BTreeSet::new();
     let mut limitations = request
         .manifest
@@ -254,67 +303,16 @@ pub fn compile_glioma_reproducibility_bundle(
         .cloned()
         .collect::<BTreeSet<_>>();
 
-    fn walk(
-        id: &str,
-        members: &BTreeMap<String, &BundleMember>,
-        allowed_fields: &BTreeSet<String>,
-        included: &mut BTreeSet<String>,
-        omissions: &mut Vec<BundleOmission>,
-        missing: &mut BTreeSet<String>,
-        cycles: &mut BTreeSet<String>,
-        visiting: &mut BTreeSet<String>,
-        visited: &mut BTreeSet<String>,
-    ) {
-        if visiting.contains(id) {
-            cycles.insert(id.to_owned());
-            return;
-        }
-        if !visited.insert(id.to_owned()) {
-            return;
-        }
-        let Some(member) = members.get(id) else {
-            missing.insert(id.to_owned());
-            return;
-        };
-        if !member.export_permitted || member.local_only || !allowed_fields.contains(id) {
-            omissions.push(BundleOmission {
-                artifact_id: id.to_owned(),
-                reason: "shareability-or-locality-policy-excludes-member".into(),
-                replay_boundary:
-                    "reproduce-at-originating-institution-or-use-an-approved-aggregate".into(),
-            });
-            return;
-        }
-        visiting.insert(id.to_owned());
-        for dependency in &member.dependency_order {
-            walk(
-                dependency,
-                members,
-                allowed_fields,
-                included,
-                omissions,
-                missing,
-                cycles,
-                visiting,
-                visited,
-            );
-        }
-        visiting.remove(id);
-        included.insert(id.to_owned());
-    }
     for root in &request.manifest.artifact_order {
-        walk(
-            root,
-            &members,
-            &allowed_fields,
-            &mut included,
-            &mut omissions,
-            &mut missing,
-            &mut cycles,
-            &mut visiting,
-            &mut visited,
-        );
+        graph.walk(root);
     }
+    let BundleGraphWalk {
+        included,
+        mut omissions,
+        missing,
+        cycles,
+        ..
+    } = graph;
     for member in request.members.iter().filter(|member| member.local_only) {
         network_requirements.insert(format!("local-input:{}", member.artifact_id));
     }
