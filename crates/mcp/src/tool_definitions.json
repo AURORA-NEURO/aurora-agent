@@ -22933,6 +22933,74 @@
     }
   },
   {
+    "name": "glioma_cross_model_claim_envelope",
+    "description": "Assess a preclinical claim across declared model systems and independent studies. The envelope keeps model-specific effects, evidence quality, uncertainty, and transportability limits explicit and does not promote a claim to clinical use.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "CrossModelClaimEnvelopeRequest1@1 with bounded model-system coverage, study counts, practical-effect and hidden-bias limits, and artifact-bound estimates."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_cross_model_replication_frontier",
+    "description": "Select a bounded, diverse portfolio of cross-model replication and uncertainty-reduction actions from a qualified or partial claim envelope. Outputs P07-typed candidates for review without executing a study or granting authority.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "CrossModelReplicationFrontierRequest1@1 with source envelope, typed follow-up candidates, budget, risk, information, and action-count bounds."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_cross_model_replication_mission",
+    "description": "Compile the cross-model replication frontier into the P07 autonomous scheduler. The mission preserves dependencies, budget, risk, autonomy, instrument, and federation gates and returns a plan without executing experiments.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "CrossModelReplicationMissionRequest1@1 with a bounded frontier, completed actions, observations, budget, authority switches, and selection policy."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_cross_model_replication_mission_execute",
+    "description": "Rehearse the selected cross-model replication mission through a deterministic synthetic local executor. Synthetic artifacts and negative evidence remain explicit; the route invokes no institution-owned worker or physical experiment.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "CrossModelReplicationMissionExecutionRequest1@1 with the bounded mission, local artifact references, retry policy, and artifact requirement."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
     "name": "glioma_temporal_spatial_alignment",
     "description": "Align caller-declared longitudinal multimodal glioma states to robustly registered spatial cells and a bounded lineage-aware propagation simulation. The product reports separate temporal, registration, propagation, and alignment gates; quantifies spatial coverage and temporal/spatial state gaps; and emits typed follow-up actions for missing timepoints, registration shortfalls, non-convergent propagation, and mismatches. It never invents an unobserved timepoint, moves raw artifacts, executes an assay, or makes a clinical decision.",
     "inputSchema": {

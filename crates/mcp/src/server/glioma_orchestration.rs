@@ -18,6 +18,119 @@ fn dry_run_stage_workers(
 }
 
 impl Server {
+    /// Build a bounded cross-model claim envelope from independent local preclinical estimates.
+    pub(super) fn glioma_cross_model_claim_envelope(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: CrossModelClaimEnvelopeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_cross_model_claim_envelope requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid cross-model claim-envelope request: {error}"))?;
+        let envelope = analyze_glioma_cross_model_claim_envelope(&request)
+            .map_err(|error| format!("cross-model claim envelope refused: {error}"))?;
+        Ok(json!({
+            "envelope": envelope,
+            "dispatch": "analysis_only",
+            "simulation_only": true,
+            "guarantees": [
+                "claim qualification is scoped to the declared model systems and independent studies",
+                "model-system disagreement and between-system range remain explicit",
+                "the envelope consumes only caller-supplied local summaries and makes no clinical claim"
+            ]
+        }))
+    }
+
+    /// Rank a bounded portfolio of diverse cross-model follow-up actions without executing them.
+    pub(super) fn glioma_cross_model_replication_frontier(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: CrossModelReplicationFrontierRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_cross_model_replication_frontier requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid cross-model replication frontier request: {error}"))?;
+        let frontier = plan_glioma_cross_model_replication_frontier(&request)
+            .map_err(|error| format!("cross-model replication frontier refused: {error}"))?;
+        let action_candidates = materialize_glioma_cross_model_replication_actions(&request, &frontier)
+            .map_err(|error| format!("cross-model replication action materialization refused: {error}"))?;
+        Ok(json!({
+            "frontier": frontier,
+            "action_candidates": action_candidates,
+            "dispatch": "planning_only",
+            "simulation_only": true,
+            "guarantees": [
+                "selected follow-ups respect the caller's cost, action-count, risk, information, and range bounds",
+                "scientific candidates are materialized as typed P07 actions without granting authority",
+                "no study, assay, instrument, federation, or clinical operation is executed"
+            ]
+        }))
+    }
+
+    /// Compile a cross-model scientific frontier into the P07 adaptive scheduler plan.
+    pub(super) fn glioma_cross_model_replication_mission(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: CrossModelReplicationMissionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_cross_model_replication_mission requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid cross-model replication mission request: {error}"))?;
+        let mission = plan_glioma_cross_model_replication_mission(&request)
+            .map_err(|error| format!("cross-model replication mission refused: {error}"))?;
+        Ok(json!({
+            "mission": mission,
+            "dispatch": "planning_only",
+            "simulation_only": true,
+            "guarantees": [
+                "the P10 replication frontier is bound into the P07 typed action scheduler",
+                "budget, dependency, risk, autonomy, instrument, and federation gates remain visible",
+                "planning does not execute studies or grant institution-local authority"
+            ]
+        }))
+    }
+
+    /// Run the cross-model replication mission through its synthetic local executor.
+    pub(super) fn glioma_cross_model_replication_mission_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: CrossModelReplicationMissionExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_cross_model_replication_mission_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid cross-model replication execution request: {error}"))?;
+        let run = execute_glioma_cross_model_replication_mission_dry_run(&request)
+            .map_err(|error| format!("cross-model replication dry-run refused: {error}"))?;
+        Ok(json!({
+            "run": run,
+            "dispatch": "dry_run_only",
+            "simulation_only": true,
+            "guarantees": [
+                "the default MCP executor emits synthetic local artifacts only",
+                "every synthetic result retains explicit negative evidence and uncertainty",
+                "no institution-owned worker, assay, instrument, federation, or clinical effect is invoked"
+            ]
+        }))
+    }
+
     /// Evaluate the autonomous engine's selection policy against held-out utility without
     /// dispatching a provider, instrument, federation, or biological operation.
     pub(super) fn glioma_autonomous_research_engine_evaluate(

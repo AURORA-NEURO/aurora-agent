@@ -327,6 +327,18 @@ impl Server {
             "glioma_temporal_multimodal_mechanism_fusion" => {
                 self.glioma_temporal_multimodal_mechanism_fusion(&arguments)
             }
+            "glioma_cross_model_claim_envelope" => {
+                self.glioma_cross_model_claim_envelope(&arguments)
+            }
+            "glioma_cross_model_replication_frontier" => {
+                self.glioma_cross_model_replication_frontier(&arguments)
+            }
+            "glioma_cross_model_replication_mission" => {
+                self.glioma_cross_model_replication_mission(&arguments)
+            }
+            "glioma_cross_model_replication_mission_execute" => {
+                self.glioma_cross_model_replication_mission_execute(&arguments)
+            }
             "glioma_autonomous_program_cycle" => self.glioma_autonomous_program_cycle(&arguments),
             "glioma_adaptive_workflow" => self.glioma_adaptive_workflow(&arguments),
             "glioma_interpretation_synthesize" => self.glioma_interpretation_synthesize(&arguments),
