@@ -67,6 +67,10 @@ impl<T> BoundedQueue<T> {
         self.buf.is_empty()
     }
 
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
+        self.buf.iter()
+    }
+
     /// Highest length ever reached. Monotone; the observable for "the bound was never exceeded".
     pub fn high_water(&self) -> usize {
         self.hwm

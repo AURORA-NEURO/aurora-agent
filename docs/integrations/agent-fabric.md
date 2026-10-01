@@ -15,6 +15,8 @@ idempotency, receipts, and fault simulation.
   before dispatch.
 - The HTTP adapter accepts one HTTP/1.1 request at a time. `POST /mcp` routes to the same MCP
   server, `GET /health` is a liveness response, and responses always use `Content-Length`.
+- `Fabric::checkpoint` exports versioned scheduler state and `Fabric::from_checkpoint` restores it
+  without dispatching. Capture fails while any attempt still owns a lease.
 - A2A conversion is an explicitly labelled wire-shape profile. It preserves task id,
   capabilities, payload hex, and the payload digest, but it is not A2A discovery, authentication,
   remote execution, streaming, or a distributed task service.
@@ -39,10 +41,15 @@ idempotency, receipts, and fault simulation.
 
 ## Deliberate limitations
 
-There is no cross-process distribution, durable journal, TLS termination, HTTP/2, chunked transfer,
-async runtime, authentication, authorization boundary, A2A/ACP implementation, or restart
-recovery. Quotas are admission control, not security. A production deployment must put the adapter
-behind an authenticated transport and add a durable, versioned coordination layer before claiming
+There is no automatic durable store or write-ahead journal. The caller must store checkpoints
+atomically and protect them because they contain task payloads. A checkpoint checksum detects
+accidental corruption, not forgery, and checkpoints do not capture a live attempt or resolve an
+uncertain external effect. Restoring can therefore replay work that ran after the last checkpoint;
+handlers with external effects need caller-enforced idempotency or reconciliation. Cross-process
+distribution, TLS termination, HTTP/2, chunked transfer, async runtime, authentication,
+authorization boundaries, and executable A2A/ACP support are also outside this crate. Quotas are
+admission control, not security. A production deployment must put the adapter behind an
+authenticated transport and add a durable, versioned coordination layer before claiming
 multi-host semantics.
 
 ## Verification

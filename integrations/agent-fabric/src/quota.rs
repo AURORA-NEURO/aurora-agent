@@ -58,17 +58,17 @@ impl fmt::Display for Take {
 }
 
 #[derive(Debug)]
-struct Bucket {
-    tokens: u64,
-    last_synced_tick: u64,
+pub(crate) struct Bucket {
+    pub(crate) tokens: u64,
+    pub(crate) last_synced_tick: u64,
 }
 
 /// Ledger of one bucket per registered agent. Lazily refilled on `take` by advancing each
 /// touched bucket to the current tick in exact period steps.
 #[derive(Debug)]
 pub struct QuotaLedger {
-    spec: QuotaSpec,
-    buckets: BTreeMap<AgentId, Bucket>,
+    pub(crate) spec: QuotaSpec,
+    pub(crate) buckets: BTreeMap<AgentId, Bucket>,
 }
 
 impl QuotaLedger {

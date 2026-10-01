@@ -75,7 +75,7 @@ pub struct ExpiredLease {
 #[derive(Debug, Default)]
 pub struct LeaseTable {
     by_task: BTreeMap<TaskId, Active>,
-    next_epoch: u64,
+    pub(crate) next_epoch: u64,
 }
 
 impl LeaseTable {

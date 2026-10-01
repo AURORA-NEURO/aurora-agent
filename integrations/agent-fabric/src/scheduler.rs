@@ -74,16 +74,16 @@ impl fmt::Debug for Submission {
     }
 }
 
-struct TaskMeta {
-    env: TaskEnvelope,
-    submitted_tick: u64,
-    attempts_done: u32,
-    last_agent: Option<AgentId>,
-    cancel_requested: bool,
-    key: IdempotencyKey,
+pub(crate) struct TaskMeta {
+    pub(crate) env: TaskEnvelope,
+    pub(crate) submitted_tick: u64,
+    pub(crate) attempts_done: u32,
+    pub(crate) last_agent: Option<AgentId>,
+    pub(crate) cancel_requested: bool,
+    pub(crate) key: IdempotencyKey,
 }
 
-struct InFlight {
+pub(crate) struct InFlight {
     agent: AgentId,
     attempt: u32,
     epoch: crate::ids::LeaseEpoch,
@@ -134,32 +134,32 @@ pub struct AssignmentSpan {
     pub ended_tick: Option<u64>,
 }
 
-enum QueueEntry {
+pub(crate) enum QueueEntry {
     Ready(TaskId),
 }
 
 /// The fabric itself.
 pub struct Fabric {
-    cfg: FabricConfig,
-    router: Router,
-    queues: Vec<BoundedQueue<QueueEntry>>,
-    leases: LeaseTable,
-    quotas: QuotaLedger,
-    cancels: CancelState,
-    idem: BTreeMap<IdempotencyKey, TaskId>,
-    tasks: BTreeMap<TaskId, TaskMeta>,
-    retry_heap: std::collections::BinaryHeap<std::cmp::Reverse<(u64, u64, TaskId)>>,
-    in_flight: BTreeMap<TaskId, InFlight>,
-    busy_agents: BTreeSet<AgentId>,
-    receipts: std::collections::VecDeque<Receipt>,
-    assignments: Vec<AssignmentSpan>,
-    driver: Box<dyn Driver>,
-    metrics: Metrics,
-    clock: u64,
-    next_task: u64,
-    seq: u64,
-    shard_cursor: usize,
-    record_assignments: bool,
+    pub(crate) cfg: FabricConfig,
+    pub(crate) router: Router,
+    pub(crate) queues: Vec<BoundedQueue<QueueEntry>>,
+    pub(crate) leases: LeaseTable,
+    pub(crate) quotas: QuotaLedger,
+    pub(crate) cancels: CancelState,
+    pub(crate) idem: BTreeMap<IdempotencyKey, TaskId>,
+    pub(crate) tasks: BTreeMap<TaskId, TaskMeta>,
+    pub(crate) retry_heap: std::collections::BinaryHeap<std::cmp::Reverse<(u64, u64, TaskId)>>,
+    pub(crate) in_flight: BTreeMap<TaskId, InFlight>,
+    pub(crate) busy_agents: BTreeSet<AgentId>,
+    pub(crate) receipts: std::collections::VecDeque<Receipt>,
+    pub(crate) assignments: Vec<AssignmentSpan>,
+    pub(crate) driver: Box<dyn Driver>,
+    pub(crate) metrics: Metrics,
+    pub(crate) clock: u64,
+    pub(crate) next_task: u64,
+    pub(crate) seq: u64,
+    pub(crate) shard_cursor: usize,
+    pub(crate) record_assignments: bool,
 }
 
 impl Fabric {
@@ -760,6 +760,37 @@ impl Fabric {
 
     pub fn shutdown_driver(&mut self) {
         self.driver.shutdown();
+    }
+
+    /// Captures a versioned recovery checkpoint when no attempt still owns a live lease.
+    ///
+    /// Ready and delayed tasks, routing state, quota balances, receipts, and counters are retained.
+    /// Driver completions already available are settled before capture. If an attempt remains in
+    /// flight, the method refuses the checkpoint because its external effect may be uncertain.
+    /// The returned JSON contains task payloads and must be stored with the caller's data controls.
+    pub fn checkpoint(&mut self) -> Result<String, crate::snapshot::SnapshotError> {
+        for completion in self.driver.poll() {
+            self.settle_completion(completion);
+        }
+        if !self.in_flight.is_empty() || self.leases.live() != 0 || !self.busy_agents.is_empty() {
+            return Err(crate::snapshot::SnapshotError::new(
+                "cannot checkpoint while an attempt or lease is active",
+            ));
+        }
+        crate::snapshot::encode(self)
+    }
+
+    /// Restores a checkpoint without dispatching its queued or retrying tasks.
+    ///
+    /// The driver must be constructed with the same dedicated `CancelState` passed here. Restore
+    /// resets that state to the checkpoint's queued cancellations; callers should use a fresh
+    /// cancellation registry for recovery.
+    pub fn from_checkpoint(
+        bytes: &str,
+        driver: Box<dyn Driver>,
+        cancels: CancelState,
+    ) -> Result<Self, crate::snapshot::SnapshotError> {
+        crate::snapshot::decode(bytes, driver, cancels)
     }
 }
 
