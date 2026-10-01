@@ -28892,5 +28892,35 @@
       "properties": {"request": {"type": "object", "description": "OperatorApprovalRequest1@1 with plan and scope digests, operator authority, interlock observations, confirmation, expiry, use policy, and stop path."}},
       "required": ["request"]
     }
+  },
+  {
+    "name": "glioma_qualification_preservation_audit",
+    "description": "Verify that a research-object release preserves required qualifications, evidence lineage, claim support, and negative evidence without weakening their strength.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "QualificationPreservationRequest1@1 with research-object digest, qualification records, claims, and required qualification kinds."}},
+      "required": ["request"]
+    }
+  },
+  {
+    "name": "glioma_artifact_integrity_scan",
+    "description": "Check release artifact identity, paths, digests, media types, metadata, byte and memory limits, links, and executable payload policy before export.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "ArtifactIntegrityRequest1@1 with candidate manifest, release root, required artifact order, candidate metadata, export limits, and stream bounds."}},
+      "required": ["request"]
+    }
+  },
+  {
+    "name": "glioma_replay_fidelity_execute",
+    "description": "Compare a reproducibility bundle with a reference research object using a bounded synthetic replay executor and explicit fidelity gates.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "ReplayFidelityRequest1@1 with candidate manifest, replay bundle, task DAG, environment digests, resource cap, retries, and required coverage."}},
+      "required": ["request"]
+    }
   }
 ]

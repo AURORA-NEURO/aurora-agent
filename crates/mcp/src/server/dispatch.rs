@@ -262,6 +262,11 @@ impl Server {
             "glioma_release_shareability_check" => {
                 self.glioma_release_shareability_check(&arguments)
             }
+            "glioma_qualification_preservation_audit" => {
+                self.glioma_qualification_preservation_audit(&arguments)
+            }
+            "glioma_artifact_integrity_scan" => self.glioma_artifact_integrity_scan(&arguments),
+            "glioma_replay_fidelity_execute" => self.glioma_replay_fidelity_execute(&arguments),
             "glioma_release_metadata_normalize" => {
                 self.glioma_release_metadata_normalize(&arguments)
             }

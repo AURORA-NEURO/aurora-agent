@@ -3,6 +3,82 @@
 use super::*;
 
 impl Server {
+    /// Preserve and verify release qualifications, including negative evidence and claim support.
+    pub(super) fn glioma_qualification_preservation_audit(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: QualificationPreservationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_qualification_preservation_audit requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma qualification-preservation request: {error}")
+            })?;
+        let audit = audit_glioma_qualification_preservation(&request)
+            .map_err(|error| format!("glioma qualification-preservation audit refused: {error}"))?;
+        Ok(json!({
+            "audit": audit,
+            "dispatch": "not_started",
+            "guarantees": [
+                "required qualifications, source and release digests, preservation strength, claim support, and evidence lineage are checked",
+                "missing or weakened negative evidence remains a blocking qualification and is never silently dropped"
+            ]
+        }))
+    }
+
+    /// Stream-check release artifacts against manifest identity, byte limits, and export policy.
+    pub(super) fn glioma_artifact_integrity_scan(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ArtifactIntegrityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_artifact_integrity_scan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma artifact-integrity request: {error}"))?;
+        let report = scan_glioma_artifact_integrity(&request)
+            .map_err(|error| format!("glioma artifact-integrity scan refused: {error}"))?;
+        Ok(json!({
+            "report": report,
+            "dispatch": "not_started",
+            "guarantees": [
+                "manifest identity, relative paths, content digests, byte counts, media types, metadata, link targets, and executable payloads are checked",
+                "memory, total-byte, and streaming-chunk bounds are enforced before an artifact is accepted for export",
+                "the route inspects caller-provided metadata and does not read files or export artifacts"
+            ]
+        }))
+    }
+
+    /// Replay a signed research bundle through the bounded synthetic fidelity executor.
+    pub(super) fn glioma_replay_fidelity_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ReplayFidelityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replay_fidelity_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replay-fidelity request: {error}"))?;
+        let mut executor = DryRunReplayFidelityExecutor;
+        let report = execute_glioma_prospective_replay_fidelity(&request, &mut executor)
+            .map_err(|error| format!("glioma replay-fidelity execution refused: {error}"))?;
+        Ok(json!({
+            "report": report,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the candidate manifest, reproducibility bundle, reference and replay environment identities, task DAG, metrics, uncertainty, and negative evidence are compared",
+                "resource and retry bounds are enforced and fidelity gaps remain explicit",
+                "MCP uses only the synthetic local executor and does not execute released research code"
+            ]
+        }))
+    }
+
     /// Plan retention actions from immutable version lineage, storage health, and policy.
     pub(super) fn glioma_version_retention_plan(&self, arguments: &Value) -> Result<Value, String> {
         let request: RetentionGovernorRequest = serde_json::from_value(
