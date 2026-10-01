@@ -1,5 +1,3 @@
-#![allow(clippy::all)]
-
 //! Policy, privacy and information-flow fibers.
 //!
 //! Implements blueprint 43.33 (policy, privacy and information-flow fibers), together with the
