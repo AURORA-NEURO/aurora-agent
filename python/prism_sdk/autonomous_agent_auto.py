@@ -44,6 +44,16 @@ from .autonomy import (
     content_digest,
 )
 
+
+def _provider_approval(kwargs: Mapping[str, Any]) -> bool:
+    """Reject truthy non-booleans at the provider approval boundary."""
+
+    approval = kwargs.get("approve_provider_call", False)
+    if not isinstance(approval, bool):
+        raise BrainRunError("approve_provider_call must be a boolean")
+    return approval
+
+
 class AutonomousAgentAutoMixin:
     def run_auto(
         self,
@@ -138,6 +148,7 @@ class AutonomousAgentAutoMixin:
 
         # Bind the persistent prompt learner before routing or provider-assisted planning so the
         # automatic path cannot silently use a different prompt state than direct execution.
+        approve_provider_call = _provider_approval(kwargs)
         kwargs = self._prompt_learning_options(kwargs)
         if decision_cycle_store is None and decision_cycle_id is not None and self.decision_cycle_persistence is not None:
             decision_cycle_store = self.decision_cycle_persistence.store
@@ -452,7 +463,7 @@ class AutonomousAgentAutoMixin:
                 max_cost_per_million_tokens=semantic_max_cost_per_million_tokens,
                 max_latency_ms=semantic_max_latency_ms,
                 min_quality=semantic_min_quality,
-                approve_provider_call=bool(kwargs.get("approve_provider_call", False)),
+                approve_provider_call=approve_provider_call,
                 run_id=semantic_run_id,
                 max_output_tokens=semantic_max_output_tokens,
                 temperature=semantic_temperature,
@@ -1004,6 +1015,7 @@ class AutonomousAgentAutoMixin:
         envelope never stores that private value.
         """
 
+        approve_provider_call = _provider_approval(kwargs)
         if not isinstance(task, str) or not task.strip():
             raise BrainRunError("automatic decision-cycle task must be non-empty text")
         if not isinstance(semantic_routing, bool):
@@ -1126,7 +1138,7 @@ class AutonomousAgentAutoMixin:
                 max_cost_per_million_tokens=semantic_max_cost_per_million_tokens,
                 max_latency_ms=semantic_max_latency_ms,
                 min_quality=semantic_min_quality,
-                approve_provider_call=bool(kwargs.get("approve_provider_call", False)),
+                approve_provider_call=approve_provider_call,
                 run_id=semantic_run_id,
                 max_output_tokens=semantic_max_output_tokens,
                 temperature=semantic_temperature,
@@ -1340,6 +1352,7 @@ class AutonomousAgentAutoMixin:
         restarts after a provider boundary.
         """
 
+        approve_provider_call = _provider_approval(kwargs)
         if not isinstance(task, str) or not task.strip():
             raise BrainRunError("automatic replan task must be non-empty text")
         if not isinstance(evaluator, (BrainOutcomeEvaluator, DomainEvaluatorRegistry)):
@@ -1395,7 +1408,7 @@ class AutonomousAgentAutoMixin:
                 max_cost_per_million_tokens=kwargs.pop("semantic_max_cost_per_million_tokens", None),
                 max_latency_ms=kwargs.pop("semantic_max_latency_ms", None),
                 min_quality=kwargs.pop("semantic_min_quality", None),
-                approve_provider_call=kwargs.get("approve_provider_call", False),
+                approve_provider_call=approve_provider_call,
                 run_id=kwargs.pop("semantic_run_id", None),
                 max_output_tokens=kwargs.pop("semantic_max_output_tokens", 1_024),
                 temperature=kwargs.pop("semantic_temperature", None),
@@ -1437,7 +1450,7 @@ class AutonomousAgentAutoMixin:
                 "route_override": route,
                 "decision_cycle_id": decision_cycle_id,
                 "decision_cycle_store": decision_cycle_store,
-                "approve_provider_call": call_options.get("approve_provider_call", False),
+                "approve_provider_call": approve_provider_call,
             }
         )
         if call_options.get("bandit_state") is None:

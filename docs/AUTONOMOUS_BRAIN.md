@@ -13427,6 +13427,10 @@ semantic route, then chooses the single-domain or cross-domain execution path fr
 route. Callers no longer need to duplicate route-shape logic or risk classifying the task again
 after a provider response.
 
+Python validates `approve_provider_call` and `approve_mission_dispatch` as booleans at both the
+automatic facade and brain-kernel boundaries. Truthy strings and numbers are rejected before
+provider invocation or mission dispatch; they are never interpreted as approval.
+
 ```python
 cycle = agent.run_auto_cycle(
     task="compare the data pipeline with the experimental evidence",
