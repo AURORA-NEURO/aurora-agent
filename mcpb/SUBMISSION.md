@@ -60,7 +60,9 @@ Non-negotiable gates from the published review criteria:
   source (the whole repo, or a carve-out that genuinely builds the server).
 - **Privacy policy in three places**: a "Privacy Policy" section in README, a
   `privacy_policies` array of HTTPS URLs in `manifest.json`, and the hosted
-  policy itself. (The server touches no external services — say exactly that.)
+  policy itself. State that there is no telemetry or background networking;
+  explicit source HTTP is default-deny and requires both operator startup
+  configuration and caller-plan opt-in.
 - **Windows AND macOS testing**: the current bundle is `win32`-only. A macOS
   listing needs a darwin build of `bioprism-mcp` wired via
   `server.mcp_config.platform_overrides`. A win32-only submission is

@@ -14,7 +14,7 @@ use bioprism_residue::{
 #[test]
 fn the_register_explains_the_whole_backlog_and_nothing_else() {
     let register = residue().expect("well formed");
-    assert_eq!(register.len(), 48);
+    assert_eq!(register.len(), 44);
     assert_eq!(register.sections().len(), 9);
 }
 
@@ -32,7 +32,7 @@ fn every_module_carries_at_least_one_verdict_and_every_verdict_carries_a_source(
 }
 
 #[test]
-fn exactly_one_of_the_forty_eight_still_carries_work_on_any_reading() {
+fn exactly_one_of_the_forty_four_still_carries_work_on_any_reading() {
     // This fell from twenty-six to one when four crates landed, and the fall is the register doing
     // its job rather than an embarrassment to it: twenty-five of the twenty-six left the backlog
     // outright. The survivor is the sandbox, which no crate can build and every crate says so. If a
@@ -41,7 +41,7 @@ fn exactly_one_of_the_forty_eight_still_carries_work_on_any_reading() {
     let register = residue().expect("well formed");
     let distribution = Distribution::of(&register);
     assert_eq!(distribution.work_remaining, 1);
-    assert_eq!(distribution.modules.total(), 48);
+    assert_eq!(distribution.modules.total(), 44);
     // Zero by *primary* verdict: no module's first-listed reading is that work remains. The one
     // survivor is a second reading beside a discharge, which is exactly the case a register holding
     // one verdict per module would have lost.
@@ -53,15 +53,15 @@ fn exactly_one_of_the_forty_eight_still_carries_work_on_any_reading() {
 fn the_verdict_distribution_over_modules_is_the_one_reported() {
     let register = residue().expect("well formed");
     let counts = Distribution::of(&register).modules;
-    assert_eq!(counts.process, 37);
-    assert_eq!(counts.foreign_artifact, 4);
+    assert_eq!(counts.process, 35);
+    assert_eq!(counts.foreign_artifact, 2);
     assert_eq!(counts.discharged_elsewhere, 7);
     assert_eq!(counts.genuinely_uncovered, 0);
     assert_eq!(
         counts.block_level_split, 0,
         "no module's primary verdict is a split"
     );
-    assert_eq!(counts.total(), 48);
+    assert_eq!(counts.total(), 44);
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn a_foreign_artifact_verdict_never_says_the_work_is_done_here() {
             )
         })
         .collect();
-    assert_eq!(foreign.len(), 4);
+    assert_eq!(foreign.len(), 2);
     for entry in foreign {
         assert!(!entry.primary().classification().is_work_remaining());
     }
@@ -396,17 +396,14 @@ fn no_single_section_holds_a_majority_of_the_residue() {
 #[test]
 fn a_module_leaving_the_backlog_is_a_deletion_and_touches_nothing_else() {
     let mut register = residue().expect("well formed");
-    let key = ModuleKey::new(11, 4).expect("in range");
+    let key = ModuleKey::new(11, 17).expect("in range");
     assert!(register.get(key).is_some());
     assert!(register.without(key));
-    assert_eq!(register.len(), 47);
+    assert_eq!(register.len(), 43);
     assert!(register.get(key).is_none());
     assert!(!register.without(key), "removing it twice is a no-op");
     // Nothing else moved: the remaining entries hold no cross-references to each other.
-    assert!(register.find("Python Sdk").is_none());
-    assert!(register.find("Python Benchmark Authoring Sdk").is_none());
-    assert!(register.find("Evaluator Oracle And Mutation Sdk").is_none());
-    assert!(register.find("Environment And Pack Authoring Sdk").is_none());
+    assert!(register.find("Authoring Studio").is_none());
 }
 
 #[test]

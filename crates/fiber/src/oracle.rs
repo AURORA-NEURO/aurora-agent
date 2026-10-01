@@ -9,11 +9,13 @@
 //! * temporal — a label derived from evidence that postdates the training cut;
 //! * preprocessing — a transform fit across all subjects before the split was drawn.
 //!
-//! Two behaviours here are bug-compatible with the CPython reference and flagged as such:
-//! temporal comparison is lexicographic on the raw strings rather than on parsed instants, and
-//! a missing split assignment among aliased subjects is an error rather than a silent skip.
+//! A missing split assignment among aliased subjects is an error rather than a silent skip. The
+//! temporal check compares day-precision values only with other dates, and timezone-qualified
+//! timestamps as absolute instants. Mixed precision is refused because a date without a timezone
+//! cannot be ordered against a point in time without inventing a boundary.
 
 use crate::error::FiberError;
+use bioprism_scope::Timestamp;
 use bioprism_section::{LeakageWitness, OracleVerdict};
 use bioprism_world::{Fact, World};
 use serde_json::{Map, Value};
@@ -25,6 +27,51 @@ use std::collections::{BTreeMap, BTreeSet};
 /// needs a `Value` it can keep. Borrowing is what lets [`evaluate_facts`] judge a selection
 /// without deep-cloning the selected evidence, which the minimizer does once per removal.
 type ValueRefs<'a> = BTreeMap<&'a str, &'a Value>;
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct CivilDate {
+    year: u16,
+    month: u8,
+    day: u8,
+}
+
+#[derive(Clone, Copy)]
+enum OracleTime {
+    Day(CivilDate),
+    Instant(Timestamp),
+}
+
+impl OracleTime {
+    fn is_after(self, earlier: Self) -> Option<bool> {
+        match (self, earlier) {
+            (Self::Day(later), Self::Day(earlier)) => Some(later > earlier),
+            (Self::Instant(later), Self::Instant(earlier)) => Some(later > earlier),
+            _ => None,
+        }
+    }
+}
+
+fn parse_oracle_time(input: &str) -> Option<OracleTime> {
+    let bytes = input.as_bytes();
+    let is_date = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit());
+    if is_date {
+        // Reuse the strict calendar validation without interpreting this civil date as midnight
+        // UTC; it remains a day-precision value and is only comparable to another date.
+        Timestamp::parse(&format!("{input}T00:00:00Z")).ok()?;
+        return Some(OracleTime::Day(CivilDate {
+            year: input.get(0..4)?.parse().ok()?,
+            month: input.get(5..7)?.parse().ok()?,
+            day: input.get(8..10)?.parse().ok()?,
+        }));
+    }
+    Timestamp::parse(input).ok().map(OracleTime::Instant)
+}
 
 /// The six variables the reference oracle reads.
 ///
@@ -238,32 +285,52 @@ fn site_witnesses(values: &ValueRefs<'_>) -> Vec<LeakageWitness> {
 
 /// A label derived from evidence that postdates the training decision time.
 ///
-/// The comparison is lexicographic on the raw timestamp strings, matching the reference. For the
-/// zero-offset `...Z` form used throughout the packs this agrees with instant ordering; for
-/// mixed offsets or differing precision it does not, which is recorded as a known limitation on
-/// every certificate rather than silently corrected here.
+/// Day-only training cuts and label dates retain their declared precision. Full timestamps are
+/// parsed as absolute instants, which handles mixed UTC offsets and fractional-second precision.
+/// Mixed day/instant comparisons fail closed because the date has no timezone or time-of-day.
 fn temporal_witnesses(values: &ValueRefs<'_>) -> Result<Vec<LeakageWitness>, FiberError> {
     let Some(cut) = values.get("training_decision_time").copied() else {
         return Ok(Vec::new());
     };
     let Some(cut) = cut.as_str() else {
+        return Err(FiberError::WrongOracleFieldType {
+            field: "training_decision_time",
+            expected: "ISO date or timezone-qualified timestamp string",
+        });
+    };
+    let cut_time = parse_oracle_time(cut).ok_or_else(|| FiberError::InvalidOracleTimestamp {
+        field: "training_decision_time",
+        value: cut.to_string(),
+    })?;
+
+    let Some(label_times) = values.get("label_source_time").copied() else {
         return Ok(Vec::new());
     };
-    if cut.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let Some(label_times) = object(values, "label_source_time") else {
-        return Ok(Vec::new());
+    let Some(label_times) = label_times.as_object() else {
+        return Err(FiberError::WrongOracleFieldType {
+            field: "label_source_time",
+            expected: "object mapping subject identifiers to ISO dates or timezone-qualified timestamp strings",
+        });
     };
 
     let mut future: BTreeMap<String, String> = BTreeMap::new();
     for (subject, recorded) in label_times {
-        let recorded = recorded.as_str().ok_or(FiberError::WrongQueryFieldType {
+        let recorded = recorded.as_str().ok_or(FiberError::WrongOracleFieldType {
             field: "label_source_time",
-            expected: "object of timestamp strings",
+            expected: "object mapping subject identifiers to ISO dates or timezone-qualified timestamp strings",
         })?;
-        if recorded > cut {
+        let recorded_time =
+            parse_oracle_time(recorded).ok_or_else(|| FiberError::InvalidOracleTimestamp {
+                field: "label_source_time",
+                value: recorded.to_string(),
+            })?;
+        let is_future = recorded_time.is_after(cut_time).ok_or_else(|| {
+            FiberError::IncomparableOracleTimePrecision {
+                decision_time: cut.to_string(),
+                label_source_time: recorded.to_string(),
+            }
+        })?;
+        if is_future {
             future.insert(subject.clone(), recorded.to_string());
         }
     }

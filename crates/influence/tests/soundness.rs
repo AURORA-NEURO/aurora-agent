@@ -42,10 +42,21 @@ fn a_reported_bound_is_never_exceeded_by_the_true_influence() {
             let reported = analysis
                 .estimate
                 .bound()
-                .unwrap_or_else(|| panic!("{} / {id}: a region with potentials must be bounded", spec.label()))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} / {id}: a region with potentials must be bounded",
+                        spec.label()
+                    )
+                })
                 .value();
-            let truth = maximum_influence(&region, std::slice::from_ref(&id), &Perturbation::Removal, 0, 0)
-                .expect("removal has exactly one realisation");
+            let truth = maximum_influence(
+                &region,
+                std::slice::from_ref(&id),
+                &Perturbation::Removal,
+                0,
+                0,
+            )
+            .expect("removal has exactly one realisation");
             assert!(truth.exhaustive);
             assert!(
                 truth.found_influence <= reported + FLOAT_REORDERING,
@@ -56,7 +67,10 @@ fn a_reported_bound_is_never_exceeded_by_the_true_influence() {
             checked += 1;
         }
     }
-    assert!(checked >= 200, "only {checked} factor removals were checked");
+    assert!(
+        checked >= 200,
+        "only {checked} factor removals were checked"
+    );
 }
 
 #[test]
@@ -69,9 +83,15 @@ fn every_method_that_answered_is_individually_sound_not_merely_their_minimum() {
             let analysis = analyzer
                 .analyse_factor(&region, &id, &Perturbation::Removal)
                 .expect("the region is well formed");
-            let truth = maximum_influence(&region, std::slice::from_ref(&id), &Perturbation::Removal, 0, 0)
-                .expect("removal has exactly one realisation")
-                .found_influence;
+            let truth = maximum_influence(
+                &region,
+                std::slice::from_ref(&id),
+                &Perturbation::Removal,
+                0,
+                0,
+            )
+            .expect("removal has exactly one realisation")
+            .found_influence;
             for outcome in &analysis.attempted {
                 if let Some(value) = outcome.value {
                     assert!(
@@ -110,7 +130,13 @@ fn a_reported_bound_is_never_exceeded_under_a_stated_multiplicative_range() {
                 .bound()
                 .expect("a stated range always yields a bound")
                 .value();
-            match maximum_influence(&region, std::slice::from_ref(&id), &perturbation, 32, spec.seed) {
+            match maximum_influence(
+                &region,
+                std::slice::from_ref(&id),
+                &perturbation,
+                32,
+                spec.seed,
+            ) {
                 Ok(truth) => {
                     assert!(!truth.exhaustive);
                     assert!(
@@ -126,7 +152,10 @@ fn a_reported_bound_is_never_exceeded_under_a_stated_multiplicative_range() {
             }
         }
     }
-    assert!(checked >= 100, "only {checked} range perturbations were searched");
+    assert!(
+        checked >= 100,
+        "only {checked} range perturbations were searched"
+    );
 }
 
 #[test]
@@ -221,7 +250,14 @@ fn the_exact_removal_bound_is_tight_against_brute_force() {
         );
         let looseness = analysis.looseness().expect("an exact method ran");
         assert_eq!(looseness, 0.0);
-        let truth = maximum_influence(&region, std::slice::from_ref(&id), &Perturbation::Removal, 0, 0).unwrap();
+        let truth = maximum_influence(
+            &region,
+            std::slice::from_ref(&id),
+            &Perturbation::Removal,
+            0,
+            0,
+        )
+        .unwrap();
         assert!(
             (truth.found_influence - analysis.estimate.bound().unwrap().value()).abs()
                 < FLOAT_REORDERING
@@ -308,8 +344,16 @@ fn removing_a_constant_factor_moves_the_normalised_answer_by_exactly_zero() {
     let region = QueryRegion::builder("constant")
         .observed_variable("a", 2)
         .observed_variable("b", 2)
-        .factor(RegionFactor::with_table("f.ab", vec!["a", "b"], vec![1.0, 2.0, 3.0, 4.0]))
-        .factor(RegionFactor::with_table("f.const", vec!["a"], vec![0.5, 0.5]))
+        .factor(RegionFactor::with_table(
+            "f.ab",
+            vec!["a", "b"],
+            vec![1.0, 2.0, 3.0, 4.0],
+        ))
+        .factor(RegionFactor::with_table(
+            "f.const",
+            vec!["a"],
+            vec![0.5, 0.5],
+        ))
         .free("b")
         .build()
         .unwrap();
@@ -359,10 +403,7 @@ fn brute_force_refuses_rather_than_sampling_when_the_space_is_too_large() {
     let ids = factor_ids(&region);
     let perturbation = Perturbation::relative_tolerance(0.1).unwrap();
     let error = maximum_influence(&region, &ids, &perturbation, 0, 0).unwrap_err();
-    assert!(matches!(
-        error,
-        InfluenceError::BruteForceTooLarge { .. }
-    ));
+    assert!(matches!(error, InfluenceError::BruteForceTooLarge { .. }));
 }
 
 #[test]
@@ -371,8 +412,16 @@ fn a_vacuous_bound_is_still_never_exceeded() {
     let region = QueryRegion::builder("zero-entry")
         .observed_variable("a", 2)
         .observed_variable("b", 2)
-        .factor(RegionFactor::with_table("f.ab", vec!["a", "b"], vec![1.0, 2.0, 3.0, 4.0]))
-        .factor(RegionFactor::with_table("f.gate", vec!["a"], vec![0.0, 1.0]))
+        .factor(RegionFactor::with_table(
+            "f.ab",
+            vec!["a", "b"],
+            vec![1.0, 2.0, 3.0, 4.0],
+        ))
+        .factor(RegionFactor::with_table(
+            "f.gate",
+            vec!["a"],
+            vec![0.0, 1.0],
+        ))
         .free("b")
         .build()
         .unwrap();
@@ -382,11 +431,20 @@ fn a_vacuous_bound_is_still_never_exceeded() {
         .unwrap();
     let reported = analysis.estimate.bound().unwrap();
     assert!(reported.is_vacuous());
-    let truth = maximum_influence(&region, &["f.gate".to_string()], &Perturbation::Removal, 0, 0)
-        .unwrap()
-        .found_influence;
+    let truth = maximum_influence(
+        &region,
+        &["f.gate".to_string()],
+        &Perturbation::Removal,
+        0,
+        0,
+    )
+    .unwrap()
+    .found_influence;
     assert!(truth <= reported.value());
-    assert!(truth > 0.0, "the fixture should have real influence to bound");
+    assert!(
+        truth > 0.0,
+        "the fixture should have real influence to bound"
+    );
 }
 
 #[test]

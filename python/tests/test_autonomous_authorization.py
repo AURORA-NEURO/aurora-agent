@@ -7,6 +7,7 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_AUTHORIZATION_OPERATIONS,
     AUTONOMOUS_DOMAIN_NAMES,
+    AutonomousAuthorizationError,
     AutonomousAuthorizationContext,
     AutonomousAuthorizationLedger,
     AutonomousAuthorizationGate,
@@ -86,6 +87,26 @@ def test_authorization_is_scoped_idempotent_and_bounded() -> None:
     assert ledger.authorize(_request(request_id="request-3"), now=1_203).status == "exhausted"
     assert len(ledger.events()) == 4
     assert ledger.verify_integrity()["domain_coverage"]["coding"] == 1
+
+
+def test_event_capacity_failures_do_not_partially_mutate_the_ledger() -> None:
+    ledger = AutonomousAuthorizationLedger(max_grants=2, max_events=1)
+    issued = _grant(ledger, max_uses=None)
+
+    with pytest.raises(AutonomousAuthorizationError, match="event capacity"):
+        ledger.authorize(_request(), now=1_200)
+    assert ledger.get(issued.grant_id) == issued
+
+    with pytest.raises(AutonomousAuthorizationError, match="event capacity"):
+        ledger.revoke(issued.grant_id, revoked_at=1_300)
+    assert ledger.get(issued.grant_id) == issued
+
+    with pytest.raises(AutonomousAuthorizationError, match="event capacity"):
+        _grant(ledger, grant_id="grant-2")
+    assert ledger.get("grant-2") is None
+    assert len(ledger.events()) == 1
+    snapshot = ledger.snapshot()
+    assert validate_autonomous_authorization_snapshot(snapshot)["snapshot_digest"] == snapshot["snapshot_digest"]
 
 
 def test_authorization_context_mints_fresh_domain_bound_provider_requests() -> None:

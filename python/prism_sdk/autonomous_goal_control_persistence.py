@@ -15,11 +15,19 @@ import json
 import re
 from typing import Any, Protocol
 
-from .authoring import canonical_json, content_digest
+from .authoring import canonical_json, content_digest, utf8_scalar_byte_length
 from .goals import AutonomousGoalError
+from .goal_time import (
+    AutonomousGoalLegacyTimestampUnit,
+    AutonomousGoalTimeError,
+    migrate_legacy_autonomous_goal_timestamp_ns,
+    normalize_autonomous_goal_timestamp_ns,
+    require_autonomous_goal_timestamp_ns_wire,
+)
 
 
-AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA = "bioprism-autonomous-goal-control-checkpoint/0.1"
+AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01 = "bioprism-autonomous-goal-control-checkpoint/0.1"
+AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA = "bioprism-autonomous-goal-control-checkpoint/0.2"
 AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_RETENTION = "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained"
 AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_CYCLES = 128
 AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_RUNS = 8_192
@@ -44,7 +52,10 @@ def _integer(value: Any, *, name: str, minimum: int, maximum: int) -> int:
 
 
 def _text(value: Any, *, name: str, maximum: int = 256) -> str:
-    if not isinstance(value, str) or not value.strip() or "\x00" in value or len(value.encode("utf-8")) > maximum:
+    if not isinstance(value, str) or not value.strip() or "\x00" in value:
+        _fail(f"{name} is outside its text bounds")
+    byte_length = utf8_scalar_byte_length(value)
+    if byte_length is None or byte_length > maximum:
         _fail(f"{name} is outside its text bounds")
     return value.strip()
 
@@ -62,6 +73,27 @@ def _digest(value: Any, *, name: str, allow_none: bool = False) -> str | None:
     if not isinstance(value, str) or _DIGEST.fullmatch(value) is None:
         _fail(f"{name} must be a lowercase SHA-256 digest")
     return value
+
+
+def _timestamp(value: Any, *, name: str) -> str:
+    try:
+        return normalize_autonomous_goal_timestamp_ns(value, name=name)
+    except AutonomousGoalTimeError as error:
+        _fail(str(error))
+
+
+def _timestamp_wire(value: Any, *, name: str) -> str:
+    try:
+        return require_autonomous_goal_timestamp_ns_wire(value, name=name)
+    except AutonomousGoalTimeError as error:
+        _fail(str(error))
+
+
+def _migrate_timestamp(value: Any, source_unit: AutonomousGoalLegacyTimestampUnit, *, name: str) -> str:
+    try:
+        return migrate_legacy_autonomous_goal_timestamp_ns(value, source_unit, name=name)
+    except AutonomousGoalTimeError as error:
+        _fail(str(error))
 
 
 def _number(value: Any, *, name: str, minimum: float, maximum: float) -> float | int:
@@ -87,7 +119,7 @@ def _counts(value: Any, *, name: str, maximum: int) -> dict[str, int]:
     return dict(sorted(result.items()))
 
 
-def _signal(value: Any, *, index: int) -> dict[str, Any]:
+def _signal(value: Any, *, index: int, legacy: bool = False) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         _fail(f"signal {index} is malformed")
     expected = {"goal_id", "priority", "urgency", "deadline_ns", "estimated_cost", "dependencies"}
@@ -98,7 +130,10 @@ def _signal(value: Any, *, index: int) -> dict[str, Any]:
     normalized_dependencies = sorted({_identifier(item, name=f"signal {index} dependency") for item in dependencies})
     deadline = value["deadline_ns"]
     if deadline is not None:
-        deadline = _integer(deadline, name=f"signal {index} deadline_ns", minimum=0, maximum=2**63 - 1)
+        deadline = (
+            _integer(deadline, name=f"signal {index} deadline_ns", minimum=0, maximum=2**63 - 1)
+            if legacy else _timestamp_wire(deadline, name=f"signal {index} deadline_ns")
+        )
     return {
         "goal_id": _identifier(value["goal_id"], name=f"signal {index} goal_id"),
         "priority": _number(value["priority"], name=f"signal {index} priority", minimum=0, maximum=1),
@@ -226,17 +261,18 @@ def _bandit(value: Any) -> dict[str, Any]:
     return {**body, "state_digest": value["state_digest"]}
 
 
-def _normalize(value: Mapping[str, Any], *, require_digest: bool) -> dict[str, Any]:
+def _normalize(value: Mapping[str, Any], *, require_digest: bool, legacy: bool = False) -> dict[str, Any]:
     required = {
         "schema", "run_id", "next_cycle", "cycle_summaries", "previous_cycle", "completed_cycles", "total_selected",
         "total_claimed", "total_runs", "status_counts", "domain_counts", "evaluation_count", "evaluation_digests",
         "learning_state_digest", "learned_signals", "learner_state", "stop_reason", "generation", "previous_snapshot_digest",
         "retention", "secret_material",
     }
-    allowed = required | {"snapshot_digest"}
+    allowed = required | {"snapshot_digest"} | (set() if legacy else {"migration"})
     if not isinstance(value, Mapping) or set(value).difference(allowed) or not required.issubset(value) or (require_digest and "snapshot_digest" not in value):
         _fail("snapshot has unsupported or missing fields")
-    if value["schema"] != AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA or value["retention"] != AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_RETENTION or value["secret_material"] != "never_returned":
+    expected_schema = AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01 if legacy else AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA
+    if value["schema"] != expected_schema or value["retention"] != AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_RETENTION or value["secret_material"] != "never_returned":
         _fail("snapshot markers are invalid")
     run_id = _identifier(value["run_id"], name="run_id")
     next_cycle = _integer(value["next_cycle"], name="next_cycle", minimum=1, maximum=AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_CYCLES + 1)
@@ -267,7 +303,7 @@ def _normalize(value: Mapping[str, Any], *, require_digest: bool) -> dict[str, A
     raw_signals = value["learned_signals"]
     if not isinstance(raw_signals, Sequence) or isinstance(raw_signals, (str, bytes, bytearray)) or len(raw_signals) > AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SIGNALS:
         _fail("learned_signals are outside their bounds")
-    signals = [_signal(raw, index=index) for index, raw in enumerate(raw_signals)]
+    signals = [_signal(raw, index=index, legacy=legacy) for index, raw in enumerate(raw_signals)]
     learner_state = None if value["learner_state"] is None else _bandit(value["learner_state"])
     if value["stop_reason"] not in _STOP_REASONS:
         _fail("stop_reason is invalid")
@@ -282,6 +318,20 @@ def _normalize(value: Mapping[str, Any], *, require_digest: bool) -> dict[str, A
         "learned_signals": signals, "learner_state": learner_state, "stop_reason": value["stop_reason"], "generation": generation,
         "previous_snapshot_digest": previous_snapshot_digest, "retention": value["retention"], "secret_material": value["secret_material"],
     }
+    if not legacy and "migration" in value:
+        migration = value["migration"]
+        migration_keys = {"source_schema", "source_timestamp_unit", "source_snapshot_digest"}
+        if not isinstance(migration, Mapping) or set(migration) != migration_keys:
+            _fail("migration provenance is malformed")
+        if migration.get("source_schema") != AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01:
+            _fail("migration source schema is unsupported")
+        if migration.get("source_timestamp_unit") not in {"milliseconds", "nanoseconds"}:
+            _fail("migration timestamp unit is invalid")
+        body["migration"] = {
+            "source_schema": AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01,
+            "source_timestamp_unit": migration["source_timestamp_unit"],
+            "source_snapshot_digest": _digest(migration["source_snapshot_digest"], name="migration source snapshot digest"),
+        }
     if require_digest:
         supplied = _digest(value.get("snapshot_digest"), name="snapshot_digest")
         if supplied != content_digest(body):
@@ -309,6 +359,38 @@ def validate_autonomous_goal_control_loop_snapshot(value: Mapping[str, Any]) -> 
     return normalized
 
 
+def migrate_legacy_autonomous_goal_control_loop_snapshot(
+    value: Mapping[str, Any], source_unit: AutonomousGoalLegacyTimestampUnit,
+) -> dict[str, Any]:
+    """Verify an old control checkpoint and explicitly convert its persisted deadlines to ns."""
+
+    if source_unit not in {"milliseconds", "nanoseconds"}:
+        _fail("legacy checkpoint migration requires milliseconds or nanoseconds as the source unit")
+    try:
+        source_size = len(canonical_json(dict(value)).encode("utf-8"))
+    except (TypeError, ValueError) as error:
+        raise AutonomousGoalError("autonomous goal control checkpoint legacy snapshot is not canonical JSON") from error
+    if source_size > AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SNAPSHOT_BYTES:
+        _fail("legacy snapshot exceeds its byte bound")
+    normalized = _normalize(value, require_digest=True, legacy=True)
+    source_snapshot_digest = normalized["snapshot_digest"]
+    descriptor = {key: item for key, item in normalized.items() if key != "snapshot_digest"}
+    descriptor["schema"] = AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA
+    descriptor["learned_signals"] = [
+        {
+            **signal,
+            "deadline_ns": None if signal["deadline_ns"] is None else _migrate_timestamp(signal["deadline_ns"], source_unit, name="legacy checkpoint signal deadline_ns"),
+        }
+        for signal in normalized["learned_signals"]
+    ]
+    descriptor["migration"] = {
+        "source_schema": AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01,
+        "source_timestamp_unit": source_unit,
+        "source_snapshot_digest": source_snapshot_digest,
+    }
+    return seal_autonomous_goal_control_loop_snapshot(descriptor)
+
+
 class AutonomousGoalControlLoopSnapshotTextStore(Protocol):
     def read(self) -> str | None: ...
 
@@ -334,7 +416,8 @@ class JsonAutonomousGoalControlLoopSnapshotPersistence:
         encoded = self.store.read()
         if encoded is None:
             return None
-        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+        encoded_bytes = utf8_scalar_byte_length(encoded) if isinstance(encoded, str) else None
+        if encoded_bytes is None or encoded_bytes > self.max_bytes:
             _fail("stored JSON exceeds its byte bound")
         try:
             raw = json.loads(encoded)

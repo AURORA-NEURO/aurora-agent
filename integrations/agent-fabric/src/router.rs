@@ -48,12 +48,12 @@ pub struct AgentRecord {
 
 #[derive(Debug, Default)]
 pub struct Router {
-    shard_count: u64,
-    agents: BTreeMap<AgentId, AgentRecord>,
-    agent_shard: BTreeMap<AgentId, ShardId>,
-    by_primary_cap: BTreeMap<Capability, Vec<AgentId>>,
-    next_agent: u64,
-    cursors: BTreeMap<(ShardId, Capability), usize>,
+    pub(crate) shard_count: u64,
+    pub(crate) agents: BTreeMap<AgentId, AgentRecord>,
+    pub(crate) agent_shard: BTreeMap<AgentId, ShardId>,
+    pub(crate) by_primary_cap: BTreeMap<Capability, Vec<AgentId>>,
+    pub(crate) next_agent: u64,
+    pub(crate) cursors: BTreeMap<(ShardId, Capability), usize>,
 }
 
 impl Router {

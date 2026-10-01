@@ -3,11 +3,12 @@
 //! report digests, and the drive loop over a fake dispatcher.
 
 use bioprism_autopilot::{
-    build_autopilot_report, classify_step_result, drive_instantiation, drive_mission,
-    drive_mission_with_checkpoint, drive_mission_with_schedule, plan_next_action,
-    preview_first_action, resume_mission_with_checkpoint, seal_autopilot_checkpoint,
-    validate_autopilot_checkpoint, verify_autopilot_report, AttemptKind, AttemptRecord,
-    AutonomyGrant, AutopilotCheckpointPersistence, AutopilotCheckpointStore, AutopilotError,
+    build_autopilot_report, classify_step_result, drive_instantiation, drive_instantiation_bounded,
+    drive_mission, drive_mission_with_checkpoint, drive_mission_with_schedule, plan_next_action,
+    preview_first_action, restore_drive_history, resume_instantiation_bounded,
+    resume_mission_with_checkpoint, seal_autopilot_checkpoint, validate_autopilot_checkpoint,
+    verify_autopilot_report, AttemptKind, AttemptRecord, AutonomyGrant,
+    AutopilotCheckpointPersistence, AutopilotCheckpointStore, AutopilotError, BoundedDriveOptions,
     DriveHistory, FinalDisposition, FinalStatus, GrantError, JsonAutopilotCheckpointPersistence,
     NextAction, RetryClass, RetrySchedule, StepClass,
     TransactionalAutopilotCheckpointPersistenceCoordinator, TransactionalAutopilotCheckpointStore,
@@ -67,12 +68,13 @@ fn binding_for(step_ids: &[&str]) -> Value {
             .collect::<Vec<_>>()
     });
     let digest = ContentHash::of_value(&plan).unwrap().to_string();
+    let domain_contract_digest = ContentHash::of_value(&json!({})).unwrap().to_string();
     let zeros = "0".repeat(64);
     json!({
         "workflow_id": "wf-1",
         "workflow_digest": zeros,
         "catalog_digest": zeros,
-        "domain_contract_digest": zeros,
+        "domain_contract_digest": domain_contract_digest,
         "domain_contract": {},
         "evidence_plan": plan,
         "evidence_plan_digest": digest,
@@ -85,7 +87,26 @@ fn mission_of(steps: Vec<Value>, binding: Option<Value>) -> Value {
         "goal": "drive the workflow",
         "steps": steps,
     });
-    if let Some(binding) = binding {
+    if let Some(mut binding) = binding {
+        // Keep compact fixture authoring while satisfying the strict binding contract: evidence
+        // rows carry the corresponding mission tool and a digest over the resulting plan.
+        if let (Some(mission_steps), Some(plan_steps)) = (
+            mission["steps"].as_array(),
+            binding
+                .get_mut("evidence_plan")
+                .and_then(Value::as_object_mut)
+                .and_then(|plan| plan.get_mut("steps"))
+                .and_then(Value::as_array_mut),
+        ) {
+            for (plan_step, mission_step) in plan_steps.iter_mut().zip(mission_steps) {
+                if let Some(tool) = mission_step.get("tool") {
+                    plan_step["tool"] = tool.clone();
+                }
+            }
+            let plan = binding.get("evidence_plan").unwrap();
+            binding["evidence_plan_digest"] =
+                json!(ContentHash::of_value(plan).unwrap().to_string());
+        }
         mission["workflow_binding"] = binding;
     }
     mission
@@ -188,9 +209,14 @@ fn report_for(
     let refused = results.iter().filter(|r| r.status == "refused").count();
     let blocked = results.iter().filter(|r| r.status == "blocked").count();
     let cancelled = results.iter().filter(|r| r.status == "cancelled").count();
+    let returned_bytes = results
+        .iter()
+        .filter(|result| result.status == "succeeded" || result.wire.is_some())
+        .map(|result| result.bytes)
+        .sum();
     let required_failures = results
         .iter()
-        .filter(|r| r.required && r.status != "succeeded")
+        .filter(|r| r.required && matches!(r.status.as_str(), "refused" | "blocked"))
         .count();
     let mission_status = status_override.unwrap_or(if required_failures > 0 {
         "failed"
@@ -199,6 +225,11 @@ fn report_for(
     } else {
         "succeeded"
     });
+    let claim_lineage = bioprism_devplat::mission_claim_lineage_with_review(
+        &request.claim_requests,
+        &results,
+        request.evaluator_review.as_ref(),
+    );
     let report = MissionReport {
         schema_version: MISSION_SCHEMA_VERSION.into(),
         plan,
@@ -209,13 +240,13 @@ fn report_for(
         blocked,
         cancelled,
         required_failures,
-        returned_bytes: 0,
+        returned_bytes,
         results,
         execution_trace_schema_version: MISSION_TRACE_SCHEMA_VERSION.into(),
         execution_trace: Vec::new(),
-        claim_requests: Vec::new(),
-        evaluator_review: None,
-        claim_lineage: json!({}),
+        claim_requests: request.claim_requests.clone(),
+        evaluator_review: request.evaluator_review.clone(),
+        claim_lineage,
         trace_observer: None,
         guarantees: Vec::new(),
         limitations: Vec::new(),
@@ -224,12 +255,30 @@ fn report_for(
 }
 
 fn complete_reconciliation() -> Value {
-    json!({
+    let mut record = json!({
         "present": true,
-        "reconciliation_digest": "a".repeat(64),
-        "completion": { "status": "complete" },
-        "integrity": { "valid": true },
-    })
+        "ok": true,
+        "workflow": "domain_workflow_reconcile",
+        "schema": bioprism_devplat::DOMAIN_WORKFLOW_RECONCILE_SCHEMA_VERSION,
+        "execution": "not_started",
+        "source": "mission_report",
+        "workflow_id": "workflow-a",
+        "mission_id": "mission-a",
+        "workflow_digest": "a".repeat(64),
+        "catalog_digest": "b".repeat(64),
+        "domain_contract_digest": "c".repeat(64),
+        "mission_plan_digest": "d".repeat(64),
+        "completion": {
+            "status": "complete",
+            "ready": true,
+            "review_required": true,
+            "claims_posture": "review_required_before_claims",
+        },
+        "evidence": { "evidence_valid": true },
+        "integrity": { "valid": true, "finding_count": 0, "findings": [] },
+    });
+    record["reconciliation_digest"] = json!(ContentHash::of_value(&record).unwrap().to_string());
+    record
 }
 
 fn expect_full_dispatch(grant: &AutonomyGrant, history: &DriveHistory) -> Value {
@@ -1038,15 +1087,31 @@ mod planner {
     }
 
     #[test]
-    fn a_repair_dispatch_discloses_the_claim_ids_it_strips() {
+    fn a_repair_carries_only_claims_whose_entire_evidence_basis_is_in_its_subset() {
         let grant = default_grant(&["tool_a", "tool_b", "tool_c"]);
         let mut mission = three_step_mission();
-        mission["claim_requests"] = json!([{
-            "id": "claim-1",
-            "claim": "step a produced its value",
-            "domains": ["metrics"],
-            "requires_steps": ["a"],
-        }]);
+        mission["claim_requests"] = json!([
+            {
+                "id": "claim-1",
+                "claim": "step a produced its value",
+                "domains": ["metrics"],
+                "requires_steps": ["a"],
+            },
+            {
+                "id": "claim-2",
+                "claim": "step b produced its value",
+                "domains": ["metrics"],
+                "requires_steps": ["b"],
+                "evaluator_bindings": [{
+                    "id": "binding-1",
+                    "adapter_id": "metrics.value",
+                    "domain": "metrics",
+                    "step_id": "b",
+                    "output_pointer": "/value",
+                    "required": true,
+                }],
+            },
+        ]);
         let mut history = DriveHistory::new(mission).unwrap();
         push_full(
             &grant,
@@ -1066,7 +1131,18 @@ mod planner {
                 ..
             } => {
                 assert_eq!(dropped_claim_ids, vec!["claim-1".to_string()]);
-                assert_eq!(mission["claim_requests"], json!([]));
+                assert_eq!(
+                    mission["claim_requests"][0]["id"],
+                    json!("claim-2"),
+                    "a claim whose only evidence step is re-dispatched must retain its lineage"
+                );
+                assert_eq!(
+                    mission["claim_requests"][0]["evaluator_bindings"][0]["step_id"],
+                    json!("b"),
+                    "subset-scoped evaluator bindings must remain attached to their step"
+                );
+                assert_eq!(mission["evaluator_review"], Value::Null);
+                assert_eq!(mission["route_review"], Value::Null);
             }
             other => panic!("expected a repair dispatch, got {other:?}"),
         }
@@ -1081,13 +1157,16 @@ mod planner {
             AttemptRecord::undelivered(AttemptKind::Full, mission, "connection reset".into())
                 .unwrap(),
         );
-        let accounting = expect_exhausted(&grant, &history);
-        assert_eq!(accounting["reason"], json!("dispatch_transport_error"));
-        let rows = accounting["unresolved_steps"].as_array().unwrap();
+        let outcome_unknown = match plan_next_action(&grant, &history).unwrap() {
+            NextAction::StopOutcomeUnknown { outcome_unknown } => outcome_unknown,
+            other => panic!("expected an outcome-unknown stop, got {other:?}"),
+        };
+        assert_eq!(outcome_unknown["reason"], json!("dispatch_transport_error"));
+        let rows = outcome_unknown["unresolved_steps"].as_array().unwrap();
         assert_eq!(
             rows.len(),
             3,
-            "an undelivered dispatch leaves every step unresolved and the accounting must say \
+            "an undelivered dispatch leaves every step unresolved and the stop detail must say \
              so: {rows:?}"
         );
     }
@@ -1161,6 +1240,69 @@ mod planner {
         let grant = default_grant(&["tool_a", "tool_b", "tool_c"]);
         let action = preview_first_action(&grant, three_step_mission()).unwrap();
         assert!(matches!(action, NextAction::DispatchFull { .. }));
+    }
+}
+
+mod history {
+    use super::*;
+
+    #[test]
+    fn a_mission_receipt_must_bind_claim_inputs_and_lineage_to_its_dispatch() {
+        let mut mission = three_step_mission();
+        mission["claim_requests"] = json!([{
+            "id": "claim-b",
+            "claim": "step b produced its value",
+            "domains": ["metrics"],
+            "requires_steps": ["b"],
+        }]);
+        let grant = default_grant(&["tool_a", "tool_b", "tool_c"]);
+        let history = DriveHistory::new(mission).unwrap();
+        let dispatched = expect_full_dispatch(&grant, &history);
+        let results = vec![ok_result("a", "tool_a", Some(&json!({ "value": 7 })))];
+        let mut report = report_for(&dispatched, results, None);
+
+        report["claim_requests"][0]["claim"] = json!("a different claim");
+        let attempt =
+            AttemptRecord::delivered(AttemptKind::Full, dispatched.clone(), report, None, None)
+                .unwrap();
+        assert!(
+            attempt
+                .report_validation_error()
+                .unwrap()
+                .contains("claim requests do not match"),
+            "a returned report cannot replace the caller's claim"
+        );
+
+        let mut report = report_for(
+            &dispatched,
+            vec![ok_result("a", "tool_a", Some(&json!({ "value": 7 })))],
+            None,
+        );
+        report["claim_lineage"] = json!({ "claims": [] });
+        let attempt =
+            AttemptRecord::delivered(AttemptKind::Full, dispatched.clone(), report, None, None)
+                .unwrap();
+        let validation_error = attempt.report_validation_error().unwrap_or("");
+        assert!(
+            validation_error.contains("claim lineage does not match"),
+            "a returned report cannot forge claim evidence: {validation_error}"
+        );
+
+        let mut report = report_for(
+            &dispatched,
+            vec![ok_result("a", "tool_a", Some(&json!({ "value": 7 })))],
+            None,
+        );
+        report["evaluator_review"] = json!({ "review_id": "foreign-review" });
+        let attempt =
+            AttemptRecord::delivered(AttemptKind::Full, dispatched, report, None, None).unwrap();
+        assert!(
+            attempt
+                .report_validation_error()
+                .unwrap()
+                .contains("evaluator review does not match"),
+            "a returned report cannot substitute review provenance"
+        );
     }
 }
 
@@ -1281,6 +1423,13 @@ mod drive {
     #[test]
     fn the_drive_repairs_a_declared_retryable_failure_and_chains_receipts() {
         let grant = default_grant(&["tool_a", "tool_b", "tool_c"]);
+        let mut mission = three_step_mission();
+        mission["claim_requests"] = json!([{
+            "id": "claim-b",
+            "claim": "step b produced its value",
+            "domains": ["metrics"],
+            "requires_steps": ["b"],
+        }]);
         let mut calls: Vec<Value> = Vec::new();
         let outcome = {
             let mut dispatcher = |mission: &Value| -> Result<Value, String> {
@@ -1309,11 +1458,16 @@ mod drive {
                     Ok(report)
                 }
             };
-            drive_mission(&grant, three_step_mission(), &mut dispatcher).unwrap()
+            drive_mission(&grant, mission, &mut dispatcher).unwrap()
         };
         assert_eq!(outcome.final_status, FinalStatus::Succeeded);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[1]["steps"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            calls[1]["claim_requests"][0]["id"],
+            json!("claim-b"),
+            "the driver must send subset-scoped claims with the repair mission"
+        );
         assert_eq!(calls[1]["steps"][0]["arguments"]["seed"], json!(7));
         let verification = verify_autopilot_report(&outcome.report).unwrap();
         assert_eq!(verification["valid"], json!(true));
@@ -1388,16 +1542,219 @@ mod drive {
                 |_mission: &Value| -> Result<Value, String> { Err("connection reset".into()) };
             drive_mission(&grant, three_step_mission(), &mut dispatcher).unwrap()
         };
-        assert_eq!(outcome.final_status, FinalStatus::Exhausted);
+        assert_eq!(outcome.final_status, FinalStatus::OutcomeUnknown);
         assert_eq!(outcome.report["totals"]["attempts_used"], json!(1));
         assert_eq!(
             outcome.report["attempts"][0]["dispatch_error"],
             json!("connection reset")
         );
         assert_eq!(
-            outcome.report["accounting"]["reason"],
+            outcome.report["outcome_unknown"]["reason"],
             json!("dispatch_transport_error")
         );
+    }
+
+    #[test]
+    fn a_panicking_dispatch_is_checkpointed_as_unknown_and_never_retried() {
+        let grant = default_grant(&["tool_a", "tool_b", "tool_c"]);
+        let dispatches = std::cell::Cell::new(0);
+        let mut dispatcher = |_mission: &Value| -> Result<Value, String> {
+            dispatches.set(dispatches.get() + 1);
+            panic!("private dispatcher panic payload");
+        };
+        let mut checkpoints = Vec::new();
+        let outcome = drive_mission_with_checkpoint(
+            &grant,
+            three_step_mission(),
+            &mut dispatcher,
+            |history| {
+                checkpoints.push(history.dispatches_used());
+                Ok(())
+            },
+        )
+        .expect("a caught dispatcher panic becomes a conservative stop report");
+
+        assert_eq!(
+            dispatches.get(),
+            1,
+            "an unknown effect must never be retried"
+        );
+        assert_eq!(
+            checkpoints,
+            vec![1],
+            "the uncertain attempt must be checkpointed"
+        );
+        assert_eq!(outcome.final_status, FinalStatus::OutcomeUnknown);
+        assert_eq!(outcome.report["totals"]["attempts_used"], json!(1));
+        assert_eq!(
+            outcome.report["attempts"][0]["dispatch_error"],
+            json!("mission dispatcher panicked; dispatch outcome is unknown")
+        );
+        assert_eq!(
+            outcome.report["outcome_unknown"]["reason"],
+            json!("dispatch_transport_error")
+        );
+        assert!(
+            !outcome
+                .report
+                .to_string()
+                .contains("private dispatcher panic payload"),
+            "panic payloads must not leak into the public report"
+        );
+        assert_eq!(
+            verify_autopilot_report(&outcome.report).unwrap()["valid"],
+            json!(true)
+        );
+    }
+
+    #[test]
+    fn unknown_dispatch_after_a_repair_lists_only_the_still_unresolved_steps_in_plan_order() {
+        let grant = grant_of(json!({
+            "allowed_tools": ["tool_a", "tool_b", "tool_c"],
+            "max_attempts": 3,
+            "retry": { "retry_unknown": true },
+        }));
+        let mut calls = 0;
+        let mut dispatcher = |mission: &Value| -> Result<Value, String> {
+            calls += 1;
+            if calls == 1 {
+                Ok(report_for(
+                    mission,
+                    vec![
+                        ok_result("a", "tool_a", Some(&json!({ "value": 7 }))),
+                        refused_tool("b", "tool_b", "temporary tool failure without a decision"),
+                        blocked_result("c", "tool_c"),
+                    ],
+                    None,
+                ))
+            } else {
+                Err("connection reset during repair".into())
+            }
+        };
+
+        let outcome = drive_mission(&grant, three_step_mission(), &mut dispatcher)
+            .expect("the uncertain repair result becomes a valid terminal report");
+        assert_eq!(calls, 2);
+        assert_eq!(outcome.final_status, FinalStatus::OutcomeUnknown);
+        assert_eq!(outcome.report["totals"]["attempts_used"], json!(2));
+        assert_eq!(
+            outcome.report["outcome_unknown"]["unresolved_steps"],
+            json!([
+                {
+                    "step_id": "b",
+                    "state": "unknown",
+                    "signal": "unrecognised_status",
+                    "reason": "the attempt dispatched this step but its report holds no result row for it",
+                    "attempt_index": 2,
+                    "exclusion": null,
+                },
+                {
+                    "step_id": "c",
+                    "state": "unknown",
+                    "signal": "unrecognised_status",
+                    "reason": "the attempt dispatched this step but its report holds no result row for it",
+                    "attempt_index": 2,
+                    "exclusion": null,
+                },
+            ])
+        );
+        assert_eq!(
+            verify_autopilot_report(&outcome.report).unwrap()["valid"],
+            true
+        );
+    }
+
+    #[test]
+    fn an_invalid_returned_report_is_checkpointed_and_never_re_dispatched() {
+        let grant = default_grant(&["tool_a", "tool_b", "tool_c"]);
+        let raw_report = json!({ "unexpected": "not a mission report" });
+        let expected_report_digest = ContentHash::of_value(&raw_report).unwrap().to_string();
+        let dispatches = std::cell::Cell::new(0);
+        let mut dispatcher = |_mission: &Value| -> Result<Value, String> {
+            dispatches.set(dispatches.get() + 1);
+            Ok(raw_report.clone())
+        };
+        let mut checkpoints = Vec::new();
+        let mut checkpoint_snapshot = None;
+        let mut retained_attempts = None;
+        let outcome = drive_mission_with_checkpoint(
+            &grant,
+            three_step_mission(),
+            &mut dispatcher,
+            |history| {
+                checkpoints.push(history.dispatches_used());
+                checkpoint_snapshot = Some(
+                    seal_autopilot_checkpoint(&grant, history, 1, None)
+                        .expect("malformed response remains checkpointable"),
+                );
+                retained_attempts = Some(history.attempts().to_vec());
+                Ok(())
+            },
+        )
+        .expect("a malformed response becomes a retained stop report");
+
+        assert_eq!(
+            dispatches.get(),
+            1,
+            "an ambiguous completed dispatch is never retried"
+        );
+        assert_eq!(
+            checkpoints,
+            vec![1],
+            "the malformed response is checkpointed"
+        );
+        assert_eq!(outcome.final_status, FinalStatus::OutcomeUnknown);
+        assert_eq!(
+            outcome.report["outcome_unknown"]["reason"],
+            "invalid_mission_report"
+        );
+        let stop_detail = outcome.report["outcome_unknown"]["detail"]
+            .as_str()
+            .expect("an invalid report needs a readable stop detail");
+        assert!(stop_detail.contains("mission-report contract"));
+        assert!(stop_detail.contains("side effects"));
+        assert!(
+            !stop_detail.contains('+'),
+            "patch markers must not escape into reports"
+        );
+        assert_eq!(
+            outcome.report["attempts"][0]["report_digest"],
+            expected_report_digest
+        );
+        assert_eq!(
+            outcome.report["attempts"][0]["outcome_summary"],
+            Value::Null
+        );
+        assert!(outcome.report["attempts"][0]["report_validation_error"]
+            .as_str()
+            .is_some_and(|error| !error.is_empty()));
+        assert_eq!(outcome.report["attempts"][0]["dispatch_error"], Value::Null);
+        assert_eq!(
+            outcome.report["attempts"][0]["classification_table"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            verify_autopilot_report(&outcome.report).unwrap()["valid"],
+            true
+        );
+
+        let mut resumed_dispatcher = |_mission: &Value| -> Result<Value, String> {
+            panic!("resume must stop on the retained malformed response")
+        };
+        let resumed = resume_mission_with_checkpoint(
+            &grant,
+            &checkpoint_snapshot.expect("the dispatch checkpoint was captured"),
+            three_step_mission(),
+            retained_attempts.expect("the raw response was retained for rehydration"),
+            &mut resumed_dispatcher,
+            |_| Ok(()),
+        )
+        .expect("resume recognizes the malformed attempt and stops");
+        assert_eq!(resumed.final_status, FinalStatus::OutcomeUnknown);
+        assert_eq!(resumed.report["totals"]["attempts_used"], 1);
     }
 
     #[test]
@@ -1537,6 +1894,27 @@ mod drive {
 
 mod persistence {
     use super::*;
+
+    fn as_legacy_checkpoint(mut checkpoint: Value) -> Value {
+        checkpoint["schema"] = json!("bioprism-autopilot-checkpoint/0.1");
+        for attempt in checkpoint["attempts"].as_array_mut().unwrap() {
+            attempt["reconciliation"]
+                .as_object_mut()
+                .unwrap()
+                .remove("digest_verified");
+        }
+        checkpoint["history_digest"] = json!(ContentHash::of_value(&json!({
+            "base_mission_digest": checkpoint["base_mission_digest"],
+            "attempts": checkpoint["attempts"],
+        }))
+        .unwrap()
+        .to_string());
+        let mut unsigned = checkpoint.clone();
+        unsigned.as_object_mut().unwrap().remove("snapshot_digest");
+        checkpoint["snapshot_digest"] =
+            json!(ContentHash::of_value(&unsigned).unwrap().to_string());
+        checkpoint
+    }
 
     /// The snapshot's retained *values*, without the structural vocabulary that names them.
     ///
@@ -1717,6 +2095,96 @@ mod persistence {
     }
 
     #[test]
+    fn bounded_instantiation_drive_pauses_with_a_resumeable_checkpoint() {
+        let grant = grant_of(json!({
+            "allowed_tools": ["tool_a"],
+            "max_attempts": 3,
+            "require_reconciliation_complete": false,
+            "retry": { "retry_unknown": true },
+        }));
+        let mission = mission_of(vec![step("a", "tool_a", &[], json!({}), json!([]))], None);
+        let instantiation = json!({
+            "ok": true,
+            "workflow": "domain_workflow_instantiate",
+            "mission": mission.clone(),
+        });
+        let mut checkpoint = None;
+        let mut attempts = Vec::new();
+        let first = drive_instantiation_bounded(
+            &grant,
+            &instantiation,
+            &mut |dispatched: &Value| {
+                Ok(report_for(
+                    dispatched,
+                    vec![refused_tool("a", "tool_a", "temporary result unavailable")],
+                    Some("failed"),
+                ))
+            },
+            BoundedDriveOptions::new(1, |_| Ok(())),
+            |history| {
+                checkpoint = Some(seal_autopilot_checkpoint(
+                    &grant,
+                    history,
+                    history.dispatches_used() as u64,
+                    None,
+                )?);
+                attempts = history.attempts().to_vec();
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(first.final_status, FinalStatus::Paused);
+        assert_eq!(first.report["final_status"], "paused");
+        assert_eq!(
+            verify_autopilot_report(&first.report).unwrap()["valid"],
+            true
+        );
+        let checkpoint = checkpoint.expect("one dispatch creates a checkpoint");
+        assert_eq!(checkpoint["attempts_used"], 1);
+
+        let mut next_checkpoint = None;
+        let resumed = resume_instantiation_bounded(
+            &grant,
+            &checkpoint,
+            &instantiation,
+            attempts,
+            &mut |dispatched: &Value| {
+                Ok(report_for(
+                    dispatched,
+                    vec![ok_result("a", "tool_a", Some(&json!({ "value": true })))],
+                    None,
+                ))
+            },
+            BoundedDriveOptions::new(1, |_| Ok(())),
+            |history| {
+                next_checkpoint = Some(seal_autopilot_checkpoint(
+                    &grant,
+                    history,
+                    history.dispatches_used() as u64,
+                    checkpoint["snapshot_digest"].as_str(),
+                )?);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(resumed.final_status, FinalStatus::Succeeded);
+        assert_eq!(resumed.report["totals"]["attempts_used"], 2);
+        assert_eq!(next_checkpoint.unwrap()["attempts_used"], 2);
+
+        let invalid_limit = drive_instantiation_bounded(
+            &grant,
+            &instantiation,
+            &mut |_mission: &Value| Err("must not dispatch".into()),
+            BoundedDriveOptions::new(0, |_| Ok(())),
+            |_| Ok(()),
+        );
+        assert!(matches!(
+            invalid_limit,
+            Err(AutopilotError::InvalidInvocationDispatchLimit { value: 0, .. })
+        ));
+    }
+
+    #[test]
     fn checkpoint_store_is_canonical_and_stale_writers_are_rejected() {
         let grant = grant_of(json!({
             "allowed_tools": ["tool_a"],
@@ -1733,7 +2201,8 @@ mod persistence {
             )],
             None,
         );
-        let attempt_mission = mission.clone();
+        let history = DriveHistory::new(mission.clone()).unwrap();
+        let attempt_mission = expect_full_dispatch(&grant, &history);
         let report = report_for(
             &attempt_mission,
             vec![ok_result("a", "tool_a", Some(&json!({ "result": true })))],
@@ -1772,6 +2241,50 @@ mod persistence {
         checkpoint["attempts_used"] = json!(1);
         let error = validate_autopilot_checkpoint(&checkpoint).unwrap_err();
         assert!(matches!(error, AutopilotError::InvalidCheckpoint { .. }));
+    }
+
+    #[test]
+    fn checkpoint_0_1_remains_readable_but_cannot_resume_reconciliation_authority() {
+        let grant = grant_of(json!({
+            "allowed_tools": ["tool_a"],
+            "max_attempts": 2,
+            "require_reconciliation_complete": true,
+        }));
+        let mission = mission_of(
+            vec![step("a", "tool_a", &[], json!({}), json!([]))],
+            Some(binding_for(&["a"])),
+        );
+        let empty_history = DriveHistory::new(mission.clone()).unwrap();
+        let legacy_empty = as_legacy_checkpoint(
+            seal_autopilot_checkpoint(&grant, &empty_history, 1, None).unwrap(),
+        );
+        validate_autopilot_checkpoint(&legacy_empty).unwrap();
+        restore_drive_history(&grant, &legacy_empty, mission.clone(), Vec::new()).unwrap();
+
+        let dispatched = expect_full_dispatch(&grant, &empty_history);
+        let attempt = AttemptRecord::delivered(
+            AttemptKind::Full,
+            dispatched.clone(),
+            report_for(
+                &dispatched,
+                vec![ok_result("a", "tool_a", Some(&json!({ "ok": true })))],
+                None,
+            ),
+            Some(complete_reconciliation()),
+            None,
+        )
+        .unwrap();
+        let history = DriveHistory::from_attempts(mission.clone(), vec![attempt.clone()]).unwrap();
+        let legacy_with_reconciliation =
+            as_legacy_checkpoint(seal_autopilot_checkpoint(&grant, &history, 1, None).unwrap());
+        validate_autopilot_checkpoint(&legacy_with_reconciliation).unwrap();
+        let error =
+            restore_drive_history(&grant, &legacy_with_reconciliation, mission, vec![attempt])
+                .unwrap_err();
+        assert!(matches!(error, AutopilotError::InvalidCheckpoint { .. }));
+        assert!(error
+            .to_string()
+            .contains("does not retain reconciliation digest verification"));
     }
 
     #[test]
@@ -1818,10 +2331,12 @@ mod persistence {
             .iter()
             .map(|step| ok_result(&step.id, &step.tool, Some(&json!({ "ok": true }))))
             .collect();
+        let history = DriveHistory::new(mission.clone()).unwrap();
+        let dispatched = expect_full_dispatch(&grant, &history);
         let attempt = AttemptRecord::delivered(
             AttemptKind::Full,
-            mission.clone(),
-            report_for(&mission, results, None),
+            dispatched.clone(),
+            report_for(&dispatched, results, None),
             None,
             None,
         )

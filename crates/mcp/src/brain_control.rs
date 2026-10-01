@@ -467,7 +467,7 @@ impl BrainControlState {
         let job_id = text(object, "job_id", MAX_ID_BYTES)?;
         let worker_id = text(object, "worker_id", MAX_ID_BYTES)?;
         let lease_ms = bounded_u64(object, "lease_ms", MIN_LEASE_MS, MAX_LEASE_MS, 60_000)?;
-        let now = control_now_ns();
+        let now = control_now_ns()?;
         self.recover_expired_lease(&job_id, now)?;
         let current = self
             .jobs
@@ -555,7 +555,7 @@ impl BrainControlState {
         reject_unknown(object, &["worker_id", "lease_ms"])?;
         let worker_id = text(object, "worker_id", MAX_ID_BYTES)?;
         let lease_ms = bounded_u64(object, "lease_ms", MIN_LEASE_MS, MAX_LEASE_MS, 60_000)?;
-        let now = control_now_ns();
+        let now = control_now_ns()?;
         let expired = self
             .jobs
             .values()
@@ -617,7 +617,7 @@ impl BrainControlState {
         let job_id = text(object, "job_id", MAX_ID_BYTES)?;
         let worker_id = text(object, "worker_id", MAX_ID_BYTES)?;
         let lease_ms = bounded_u64(object, "lease_ms", MIN_LEASE_MS, MAX_LEASE_MS, 60_000)?;
-        let now = control_now_ns();
+        let now = control_now_ns()?;
         let current = self
             .jobs
             .get(&job_id)
@@ -663,7 +663,7 @@ impl BrainControlState {
         let boundary = text_with_default(object, "side_effect_boundary", "not_started", 32)?;
         validate_side_effect_boundary(&boundary)?;
         let waiting_for_approval = bool_with_default(object, "waiting_for_approval", false)?;
-        let now = control_now_ns();
+        let now = control_now_ns()?;
         let current = self
             .jobs
             .get(&job_id)
@@ -719,7 +719,7 @@ impl BrainControlState {
             .get(&job_id)
             .cloned()
             .ok_or_else(|| format!("unknown brain job_id {job_id:?}"))?;
-        require_active_lease(&current, &worker_id, control_now_ns())?;
+        require_active_lease(&current, &worker_id, control_now_ns()?)?;
         let event = self.append_event(
             &job_id,
             "job_completed",
@@ -754,7 +754,7 @@ impl BrainControlState {
             .get(&job_id)
             .cloned()
             .ok_or_else(|| format!("unknown brain job_id {job_id:?}"))?;
-        require_active_lease(&current, &worker_id, control_now_ns())?;
+        require_active_lease(&current, &worker_id, control_now_ns()?)?;
         let reason_digest = digest_value(&json!(reason))?;
         let (state, event_type) = if matches!(
             current.side_effect_boundary.as_str(),
@@ -1478,11 +1478,13 @@ impl BrainControlState {
     }
 }
 
-fn control_now_ns() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos().min(u64::MAX as u128) as u64)
-        .unwrap_or(0)
+fn control_now_ns() -> Result<u64, String> {
+    let duration = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| {
+        "system clock is before the Unix epoch; brain job leases are unavailable".to_string()
+    })?;
+    u64::try_from(duration.as_nanos()).map_err(|_| {
+        "system clock exceeds the supported nanosecond range for brain job leases".to_string()
+    })
 }
 
 fn validate_side_effect_boundary(boundary: &str) -> Result<(), String> {
@@ -1944,497 +1946,4 @@ fn durability_posture() -> Value {
         "restart": "caller_must_rehydrate_from_durable_job_store",
         "secrets": "never_retained",
     })
-}
-
-pub(crate) fn tool_definitions() -> Vec<Value> {
-    vec![
-        json!({
-            "name": "brain_job_submit",
-            "description": "Admit a rehydratable autonomous-brain job identity into the bounded MCP control plane. Accepts only metadata and digests; never accepts a prompt, task payload, provider response, credential, or API key. Idempotency is bound to the spec digest.",
-            "inputSchema": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "job_id": {"type": "string", "maxLength": 256},
-                    "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
-                    "spec_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-                    "domain": {"type": "string", "maxLength": 256},
-                    "capability": {"type": "string", "maxLength": 256},
-                    "risk_class": {"type": "string", "maxLength": 256},
-                    "priority": {"type": "integer", "minimum": 0, "maximum": 255},
-                    "max_attempts": {"type": "integer", "minimum": 1, "maximum": 8},
-                    "checkpoint_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
-                },
-                "required": ["idempotency_key", "spec_digest", "domain", "capability", "risk_class"]
-            }
-        }),
-        json!({
-            "name": "brain_job_status",
-            "description": "Read one value-only autonomous-brain job status. The task, prompt, plan, provider response, credential, and lease secret are never returned.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}}, "required": ["job_id"]}
-        }),
-        json!({
-            "name": "brain_job_events",
-            "description": "Read a bounded cursor page from the metadata-only hash-chained brain journal. Events contain digests and state transitions, not raw work or secrets.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "after": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 256}}, "required": []}
-        }),
-        json!({
-            "name": "brain_job_approval",
-            "description": "Request, approve, or deny a job's approval checkpoint. Approve and deny require a caller-authenticated authorization proof digest; this transport does not verify identity and never dispatches execution.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "action": {"type": "string", "enum": ["request", "approve", "deny"]}, "reason": {"type": "string", "maxLength": 2048}, "authorization_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "required": ["job_id", "action"]}
-        }),
-        json!({
-            "name": "brain_job_claim",
-            "description": "Atomically claim a queued metadata-only brain job for a bounded worker lease. Expired work before dispatch is requeued; expired work at or after dispatch is quarantined for reconciliation. Worker identifiers are digested in the event journal and never authorize provider access.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "lease_ms": {"type": "integer", "minimum": 100, "maximum": 86400000}}, "required": ["job_id", "worker_id"]}
-        }),
-        json!({
-            "name": "brain_job_claim_next",
-            "description": "Atomically claim the highest-priority queued metadata-only brain job for a bounded worker lease. Selection is priority-descending, then creation-sequence ascending, then job-id ascending; an empty queue returns claimed=false without inventing work.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"worker_id": {"type": "string", "maxLength": 256}, "lease_ms": {"type": "integer", "minimum": 100, "maximum": 86400000}}, "required": ["worker_id"]}
-        }),
-        json!({
-            "name": "brain_job_renew",
-            "description": "Renew an active brain job lease only for its current worker owner. Renewal never changes the side-effect boundary and refuses expired or mismatched leases.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "lease_ms": {"type": "integer", "minimum": 100, "maximum": 86400000}}, "required": ["job_id", "worker_id"]}
-        }),
-        json!({
-            "name": "brain_job_checkpoint",
-            "description": "Persist a digest-bound execution phase and monotonic side-effect boundary for an owned job. Checkpoint payloads remain caller-owned. waiting_for_approval releases the lease and prevents dispatch until approval returns the job to queued.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "phase": {"type": "string", "maxLength": 128}, "checkpoint_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "side_effect_boundary": {"type": "string", "enum": ["not_started", "preflight", "dispatched", "unknown"]}, "waiting_for_approval": {"type": "boolean"}}, "required": ["job_id", "worker_id", "phase", "checkpoint_digest"]}
-        }),
-        json!({
-            "name": "brain_job_complete",
-            "description": "Complete an owned active job with a digest-bound caller-owned result. The result body and provider response never cross this value-only control-plane boundary.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "result_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "required": ["job_id", "worker_id", "result_digest"]}
-        }),
-        json!({
-            "name": "brain_job_fail",
-            "description": "Record a bounded worker failure. Retryable failures before external dispatch return to queued; failures at or after dispatch enter reconciliation_required; exhausted attempts dead-letter without replay.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "worker_id": {"type": "string", "maxLength": 256}, "reason": {"type": "string", "maxLength": 2048}, "retryable": {"type": "boolean"}}, "required": ["job_id", "worker_id", "reason"]}
-        }),
-        json!({
-            "name": "brain_job_reconcile",
-            "description": "Resolve an uncertain external effect with caller-supplied evidence digest and bounded operator metadata. succeeded/failed close the job; not_executed can requeue only with effect_absent=true; unknown records a deferred decision and remains quarantined.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "outcome": {"type": "string", "enum": ["succeeded", "failed", "not_executed", "unknown"]}, "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "evidence_kind": {"type": "string", "maxLength": 128}, "operator": {"type": "string", "maxLength": 256}, "reason": {"type": "string", "maxLength": 2048}, "effect_absent": {"type": "boolean"}}, "required": ["job_id", "outcome", "evidence_digest"]}
-        }),
-        json!({
-            "name": "brain_job_cancel",
-            "description": "Cancel a job before external dispatch. A cancellation request at or after dispatched/unknown is quarantined in reconciliation_required instead of pretending the external effect was absent.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"job_id": {"type": "string", "maxLength": 256}, "reason": {"type": "string", "maxLength": 2048}}, "required": ["job_id"]}
-        }),
-        json!({
-            "name": "brain_model_health",
-            "description": "Record or inspect bounded provider/model health. Only status, latency, quality, usage counts, registration posture, and credential readiness booleans are accepted; no credential material or provider payload is accepted.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"operation": {"type": "string", "enum": ["snapshot", "record"]}, "provider": {"type": "string", "maxLength": 256}, "model": {"type": "string", "maxLength": 256}, "status": {"type": "string", "enum": ["success", "failure", "timeout", "rate_limited", "circuit_open", "unknown"]}, "latency_ms": {"type": "integer", "minimum": 0, "maximum": 600000}, "quality": {"type": "number", "minimum": 0, "maximum": 1}, "tokens": {"type": "integer", "minimum": 0, "maximum": 1000000000}, "registered": {"type": "boolean"}, "credential_ready": {"type": "boolean"}, "eligible": {"type": "boolean"}}, "required": []}
-        }),
-        json!({
-            "name": "brain_replay_evaluate",
-            "description": "Run a deterministic offline evaluator over caller-normalized bounded signals for engineering, research, operations, data, biomedical, or an explicitly supplied domain profile. The evidence digest must bind the exact signal packet. No provider, task, prompt, raw evidence, credential, or domain tool is invoked.",
-            "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"case_id": {"type": "string", "maxLength": 256}, "domain": {"type": "string", "maxLength": 256}, "capability": {"type": "string", "maxLength": 256}, "risk_class": {"type": "string", "maxLength": 256}, "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "signals": {"type": "object", "maxProperties": 64}, "references": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "limitations": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 2048}}, "required_signals": {"type": "array", "maxItems": 64, "items": {"type": "string", "maxLength": 128}}, "signal_weights": {"type": "object", "maxProperties": 64}, "pass_threshold": {"type": "number", "minimum": 0, "maximum": 1}}, "required": ["case_id", "domain", "capability", "risk_class", "evidence_digest", "signals"]}
-        }),
-    ]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn submission_is_idempotent_and_approval_requires_external_proof() {
-        let mut state = BrainControlState::default();
-        let arguments = json!({
-            "idempotency_key": "request-001",
-            "spec_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "domain": "engineering",
-            "capability": "code_change",
-            "risk_class": "reversible",
-        });
-        let first = state.submit_job(&arguments).unwrap();
-        assert_eq!(first["created"], json!(true));
-        let job_id = first["job"]["job_id"].as_str().unwrap().to_string();
-        assert!(first["job"].get("prompt").is_none());
-        let second = state.submit_job(&arguments).unwrap();
-        assert_eq!(second["idempotent"], json!(true));
-        assert_eq!(second["job"]["job_id"], json!(job_id.clone()));
-
-        let requested = state
-            .job_approval(&json!({"job_id": job_id, "action": "request"}))
-            .unwrap();
-        assert_eq!(requested["job"]["state"], json!("waiting_approval"));
-        assert!(state
-            .job_approval(&json!({"job_id": job_id, "action": "approve"}))
-            .is_err());
-    }
-
-    #[test]
-    fn lifecycle_claim_checkpoint_retry_reconcile_and_complete_are_fail_closed() {
-        let mut state = BrainControlState::default();
-        let submitted = state
-            .submit_job(&json!({
-                "idempotency_key": "lifecycle-001",
-                "spec_digest": "a".repeat(64),
-                "domain": "engineering",
-                "capability": "code_change",
-                "risk_class": "reversible",
-                "max_attempts": 3,
-            }))
-            .unwrap();
-        let job_id = submitted["job"]["job_id"].as_str().unwrap().to_string();
-        let claim = state
-            .job_claim(&json!({
-                "job_id": job_id,
-                "worker_id": "worker-a",
-                "lease_ms": 100,
-            }))
-            .unwrap();
-        assert_eq!(claim["job"]["state"], json!("leased"));
-        assert_eq!(claim["job"]["attempts"], json!(1));
-        assert!(state
-            .job_renew(&json!({
-                "job_id": claim["job"]["job_id"],
-                "worker_id": "worker-b",
-                "lease_ms": 100,
-            }))
-            .is_err());
-        let checkpoint = state
-            .job_checkpoint(&json!({
-                "job_id": claim["job"]["job_id"],
-                "worker_id": "worker-a",
-                "phase": "preflight",
-                "checkpoint_digest": "b".repeat(64),
-                "side_effect_boundary": "preflight",
-            }))
-            .unwrap();
-        assert_eq!(checkpoint["job"]["state"], json!("running"));
-        let retry = state
-            .job_fail(&json!({
-                "job_id": claim["job"]["job_id"],
-                "worker_id": "worker-a",
-                "reason": "provider timeout before dispatch",
-                "retryable": true,
-            }))
-            .unwrap();
-        assert_eq!(retry["job"]["state"], json!("queued"));
-
-        let second_claim = state
-            .job_claim(&json!({
-                "job_id": claim["job"]["job_id"],
-                "worker_id": "worker-c",
-                "lease_ms": 100,
-            }))
-            .unwrap();
-        state
-            .job_checkpoint(&json!({
-                "job_id": second_claim["job"]["job_id"],
-                "worker_id": "worker-c",
-                "phase": "dispatch",
-                "checkpoint_digest": "c".repeat(64),
-                "side_effect_boundary": "dispatched",
-            }))
-            .unwrap();
-        let quarantined = state
-            .job_fail(&json!({
-                "job_id": second_claim["job"]["job_id"],
-                "worker_id": "worker-c",
-                "reason": "worker lost response after dispatch",
-                "retryable": true,
-            }))
-            .unwrap();
-        assert_eq!(
-            quarantined["job"]["state"],
-            json!("reconciliation_required")
-        );
-        assert!(state
-            .job_reconcile(&json!({
-                "job_id": second_claim["job"]["job_id"],
-                "outcome": "not_executed",
-                "evidence_digest": "d".repeat(64),
-            }))
-            .is_err());
-        let requeued = state
-            .job_reconcile(&json!({
-                "job_id": second_claim["job"]["job_id"],
-                "outcome": "not_executed",
-                "evidence_digest": "d".repeat(64),
-                "effect_absent": true,
-            }))
-            .unwrap();
-        assert_eq!(requeued["job"]["state"], json!("queued"));
-        assert_eq!(
-            requeued["job"]["side_effect_boundary"],
-            json!("not_started")
-        );
-
-        let final_claim = state
-            .job_claim(&json!({
-                "job_id": second_claim["job"]["job_id"],
-                "worker_id": "worker-d",
-                "lease_ms": 100,
-            }))
-            .unwrap();
-        let completed = state
-            .job_complete(&json!({
-                "job_id": final_claim["job"]["job_id"],
-                "worker_id": "worker-d",
-                "result_digest": "e".repeat(64),
-            }))
-            .unwrap();
-        assert_eq!(completed["job"]["state"], json!("succeeded"));
-        assert_eq!(completed["job"]["result_digest"], json!("e".repeat(64)));
-        assert_eq!(completed["job"]["lease_owner"], Value::Null);
-    }
-
-    #[test]
-    fn claim_next_is_priority_ordered_and_cancel_preserves_effect_boundaries() {
-        let mut state = BrainControlState::default();
-        let submit = |state: &mut BrainControlState, key: &str, priority: u64| {
-            let spec_digest = match key {
-                "claim-low" => "a".repeat(64),
-                "claim-high" => "b".repeat(64),
-                _ => "c".repeat(64),
-            };
-            state
-                .submit_job(&json!({
-                    "idempotency_key": key,
-                    "spec_digest": spec_digest,
-                    "domain": "engineering",
-                    "capability": "code_change",
-                    "risk_class": "reversible",
-                    "priority": priority,
-                }))
-                .unwrap()
-        };
-        let low = submit(&mut state, "claim-low", 10);
-        let high = submit(&mut state, "claim-high", 200);
-
-        let first = state
-            .job_claim_next(&json!({"worker_id": "scheduler-a", "lease_ms": 100}))
-            .unwrap();
-        assert_eq!(first["operation"], json!("claim_next"));
-        assert_eq!(first["claimed"], json!(true));
-        assert_eq!(first["job"]["job_id"], high["job"]["job_id"]);
-
-        let second = state
-            .job_claim_next(&json!({"worker_id": "scheduler-a", "lease_ms": 100}))
-            .unwrap();
-        assert_eq!(second["job"]["job_id"], low["job"]["job_id"]);
-        let empty = state
-            .job_claim_next(&json!({"worker_id": "scheduler-a", "lease_ms": 100}))
-            .unwrap();
-        assert_eq!(empty["claimed"], json!(false));
-        assert_eq!(empty["job"], Value::Null);
-
-        let cancelled = state
-            .job_cancel(&json!({
-                "job_id": low["job"]["job_id"],
-                "reason": "operator stopped before dispatch",
-            }))
-            .unwrap();
-        assert_eq!(cancelled["operation"], json!("cancel"));
-        assert_eq!(cancelled["cancelled"], json!(true));
-        assert_eq!(cancelled["job"]["state"], json!("cancelled"));
-        assert!(cancelled.to_string().contains("reason_digest"));
-        assert!(!cancelled.to_string().contains("operator stopped"));
-        let repeated = state
-            .job_cancel(&json!({"job_id": low["job"]["job_id"]}))
-            .unwrap();
-        assert_eq!(repeated["idempotent"], json!(true));
-        assert_eq!(repeated["event"], Value::Null);
-
-        let dispatched = submit(&mut state, "cancel-dispatched", 100);
-        let leased = state
-            .job_claim_next(&json!({"worker_id": "scheduler-b", "lease_ms": 100}))
-            .unwrap();
-        assert_eq!(leased["job"]["job_id"], dispatched["job"]["job_id"]);
-        state
-            .job_checkpoint(&json!({
-                "job_id": dispatched["job"]["job_id"],
-                "worker_id": "scheduler-b",
-                "phase": "provider_dispatch",
-                "checkpoint_digest": "c".repeat(64),
-                "side_effect_boundary": "dispatched",
-            }))
-            .unwrap();
-        let quarantined = state
-            .job_cancel(&json!({
-                "job_id": dispatched["job"]["job_id"],
-                "reason": "provider cancellation requested",
-            }))
-            .unwrap();
-        assert_eq!(quarantined["operation"], json!("cancel_quarantine"));
-        assert_eq!(quarantined["cancelled"], json!(false));
-        assert_eq!(quarantined["reconciliation_required"], json!(true));
-        assert_eq!(
-            quarantined["job"]["state"],
-            json!("reconciliation_required")
-        );
-        assert!(!quarantined
-            .to_string()
-            .contains("provider cancellation requested"));
-    }
-
-    #[test]
-    fn replay_digest_matches_python_canonical_value_and_rejects_unknown_fields() {
-        let mut signals = BTreeMap::new();
-        signals.insert("schema_valid", 1.0);
-        signals.insert("tests_passed", 1.0);
-        signals.insert("evidence_complete", 1.0);
-        let evidence = json!({
-            "schema": DOMAIN_EVALUATOR_SCHEMA,
-            "domain": "engineering",
-            "capability": "code_change",
-            "risk_class": "reversible",
-            "signals": signals,
-            "references": [],
-            "limitations": [],
-            "retention": "value_only_digests_and_signal_scores",
-        });
-        let evidence_digest = digest_value(&evidence).unwrap();
-        let replay = BrainControlState::default()
-            .replay_evaluate(&json!({
-                "case_id": "case-001",
-                "domain": "engineering",
-                "capability": "code_change",
-                "risk_class": "reversible",
-                "evidence_digest": evidence_digest,
-                "signals": {
-                    "schema_valid": true,
-                    "tests_passed": true,
-                    "evidence_complete": true,
-                },
-            }))
-            .unwrap();
-        assert_eq!(replay["passed"], json!(true));
-        assert!(BrainControlState::default()
-            .replay_evaluate(&json!({
-                "case_id": "case-002",
-                "domain": "engineering",
-                "capability": "code_change",
-                "risk_class": "reversible",
-                "evidence_digest": evidence_digest,
-                "signals": {
-                    "schema_valid": true,
-                    "tests_passed": true,
-                    "evidence_complete": true,
-                },
-                "api_key": "refused",
-            }))
-            .is_err());
-    }
-
-    #[test]
-    fn health_observations_are_hash_chained_and_project_provider_posture() {
-        let mut state = BrainControlState::default();
-        let result = state
-            .model_health(&json!({
-                "operation": "record",
-                "provider": "openai",
-                "model": "gpt-test",
-                "status": "success",
-                "latency_ms": 100,
-                "quality": 0.9,
-                "credential_ready": true,
-            }))
-            .unwrap();
-        assert_eq!(result["health"][0]["provider"], json!("openai"));
-        let events = state.job_events(&json!({"limit": 4})).unwrap();
-        assert_eq!(events["events"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            events["events"][0]["event_type"],
-            json!("model_health_observed")
-        );
-        assert_eq!(events["chain"], json!("sha256_prev_digest"));
-        assert_eq!(
-            state
-                .health_snapshot(json!({"operation": "snapshot"}).as_object().unwrap())
-                .unwrap()["provider_health"]["openai"]["credential_ready"],
-            json!(true)
-        );
-    }
-
-    #[test]
-    fn keyed_outcome_record_replays_without_double_credit_and_rejects_contract_changes() {
-        let mut state = BrainControlState::default();
-        let arguments = json!({
-            "run": {
-                "run_id": "run-001",
-                "selection_digest": "a".repeat(64),
-                "prompt_digest": "b".repeat(64),
-                "plan_digest": "c".repeat(64),
-                "provider": "openai",
-                "model": "test-model",
-                "outcome_digest": "d".repeat(64)
-            },
-            "assessment": {
-                "evaluator_id": "quality",
-                "evaluator_version": "1",
-                "reward": 0.8,
-                "passed": true,
-                "failed": false
-            },
-            "bandit_state": {
-                "schema": "bioprism-brain-bandit/0.1",
-                "generation": 0,
-                "arms": [{
-                    "arm_id": "openai/test-model",
-                    "pulls": 0,
-                    "reward_sum": 0.0,
-                    "failures": 0,
-                    "disabled": false
-                }]
-            },
-            "arm_id": "openai/test-model",
-            "idempotency_key": "episode:run-001"
-        });
-        let first = state.outcome_record(&arguments).unwrap();
-        assert_eq!(first["idempotent"], json!(false));
-        let mut retry = arguments.clone();
-        retry["bandit_state"] = first["next_state"].clone();
-        let replay = state.outcome_record(&retry).unwrap();
-        assert_eq!(replay["idempotent"], json!(true));
-        assert_eq!(replay["next_state"], first["next_state"]);
-
-        retry["assessment"]["reward"] = json!(0.2);
-        assert!(state.outcome_record(&retry).is_err());
-    }
-
-    #[test]
-    fn first_outcome_record_hydrates_an_unseen_arm_at_the_mcp_boundary() {
-        let mut state = BrainControlState::default();
-        let arguments = json!({
-            "run": {
-                "run_id": "run-first-seen",
-                "selection_digest": "a".repeat(64),
-                "prompt_digest": "b".repeat(64),
-                "plan_digest": "c".repeat(64),
-                "provider": "anthropic",
-                "model": "new-model",
-                "outcome_digest": "d".repeat(64)
-            },
-            "assessment": {
-                "evaluator_id": "quality",
-                "evaluator_version": "1",
-                "reward": 0.6,
-                "passed": true,
-                "failed": false
-            },
-            "bandit_state": {
-                "schema": "bioprism-brain-bandit/0.1",
-                "generation": 0,
-                "arms": []
-            },
-            "arm_id": "anthropic/new-model"
-        });
-
-        let result = state.outcome_record(&arguments).unwrap();
-        assert_eq!(result["learning_evidence"]["next_generation"], json!(1));
-        assert_eq!(result["next_state"]["generation"], json!(1));
-        assert_eq!(
-            result["next_state"]["arms"][0]["arm_id"],
-            json!("anthropic/new-model")
-        );
-        assert_eq!(result["next_state"]["arms"][0]["pulls"], json!(1));
-        assert_eq!(result["next_state"]["arms"][0]["reward_sum"], json!(0.6));
-    }
 }

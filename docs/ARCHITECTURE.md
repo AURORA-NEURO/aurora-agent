@@ -16,28 +16,45 @@ reaches something that can act on it.
 
 ## Layers
 
+This is a responsibility map, not the complete crate dependency graph. The workspace has 88 crates;
+Cargo manifests are authoritative for dependency edges. Python and TypeScript packages expose typed
+facades over selected Rust contracts rather than mirroring every Rust type.
+
+For every direct Rust workspace edge, including optional and development dependencies, see the
+[generated workspace dependency index](WORKSPACE_DEPENDENCIES.md). Regenerate it with
+`python tools/sync_workspace_dependencies.py --write`; CI checks that it matches Cargo metadata.
+
 ```
                         ┌───────────────────────────────┐
-   agent surface        │  cli          mcp             │
+   agent interfaces     │  cli   mcp   api   SDKs       │
                         └──────────────┬────────────────┘
                                        │
-   evaluation           ┌──────────────┴────────────────┐
-                        │  prism   baseline   mutation  │
-                        │  registry                     │
+   autonomous work      ┌──────────────┴────────────────┐
+                        │ brain  autopilot  research    │
+                        │ neurosurgery  runtime  factory │
+                        └──────────────┬────────────────┘
+                                       │
+   policy and evidence  ┌──────────────┴────────────────┐
+                        │ policy  safety  bundle  ledger│
+                        │ registry  conformance  ops     │
                         └──────────────┬────────────────┘
                                        │
    composition          ┌──────────────┴────────────────┐
-                        │  weave                        │
+                        │ weave  fabric  choreography   │
+                        └──────────────┬────────────────┘
+                                       │
+   evaluation           ┌─────────────┴─────────────────┐
+                        │ prism baseline mutation eval  │
                         └──────────────┬────────────────┘
                                        │
    compilation          ┌──────────────┴────────────────┐
-                        │  fiber    section    domain   │
-                        │  project   repair             │
+                        │ fiber  section  domain        │
+                        │ project  repair  obligation    │
                         └──────────────┬────────────────┘
                                        │
-   world and storage    ┌──────────────┴────────────────┐
-                        │  world  store  worldgen       │
-                        │  adapter  bioir  onco  oracle │
+   world and biology    ┌──────────────┴────────────────┐
+                        │ world store worldgen adapter  │
+                        │ bioir onco oracle modalities  │
                         └──────────────┬────────────────┘
                                        │
    foundation           ┌──────────────┴────────────────┐
@@ -51,6 +68,15 @@ reaches something that can act on it.
 hard — matching CPython required reproducing its `repr` float threshold, exponent zero-padding and
 JSON object iteration order. One canonical implementation at the root of the graph means one place
 where that can go wrong. See [ADR-001](ADR-001-language-strategy.md).
+
+When deriving canonical bytes or hashes from typed serializable data, Rust code should use
+`to_canonical_bytes_serializable` or `ContentHash::of_serializable` before converting it to
+`serde_json::Value`. The typed path rejects NaN and infinities instead of letting an earlier JSON
+conversion turn them into `null`; the `Value`-based helpers remain for values already parsed or
+constructed as JSON, where the original numeric type is no longer available. The core receipt paths
+in `ids`, `brain`, `section`, `fiber`, `registry`, and `store` use the typed path; other legacy
+conversion-then-hash call sites remain candidates for migration when those surfaces are next
+changed.
 
 **`section` depends on neither `world` nor `fiber`.** A consumer — an MCP client, a CI gate, an
 auditor — must be able to read and *verify* a compiled context without linking the engine that
@@ -118,9 +144,56 @@ These are the properties that would be easy to lose in a refactor, so each is pi
 
 ## What is not here
 
-No network layer, no multi-tenancy, no signing keys, no hosted execution — local-first only. The
-backend portfolio of 43.19–43.24 (FAQ/InsideOut, worst-case-optimal joins, tensor networks,
-decision diagrams) is enumerated in `section::plan::Backend` so plans stay honest about which
-engine ran, but only `backward_factor_slice_reference` exists. Heavy biological formats — DICOM,
-BIDS/NIfTI, AnnData/Zarr, VCF — belong in a Python layer per ADR-001, where the mature libraries
-live; the Rust side owns the adapter *contract*, not the parsers.
+The workspace is local-first, but it does contain network-facing components. `bioprism-api` serves a
+bounded local HTTP/REST and JSON-RPC gateway, and selected Python/TypeScript research adapters make
+explicit, allow-listed public-source requests. These are not a hosted multi-tenant service: TLS
+termination, deployment identity, distributed storage, external workers, and production scheduling
+remain outside the workspace. See [HTTP_API.md](HTTP_API.md) and the source-specific adapter
+contracts in the backlog.
+
+The API router keeps request dispatch and shared state in
+[`router.rs`](../crates/api/src/router.rs), with mission lifecycle routes in
+[`router/missions.rs`](../crates/api/src/router/missions.rs), evidence and artifact registry routes in
+[`router/evidence.rs`](../crates/api/src/router/evidence.rs), developer workbench and CI evidence
+registries in [`router/developer_artifact_routes.rs`](../crates/api/src/router/developer_artifact_routes.rs),
+domain workflows and capability routes in [`router/domain_routes.rs`](../crates/api/src/router/domain_routes.rs),
+workflow reconciliation in [`router/reconciliation_routes.rs`](../crates/api/src/router/reconciliation_routes.rs),
+and operator snapshots and gate reviews in [`router/operations.rs`](../crates/api/src/router/operations.rs).
+Mission checkpoint serialization and restart projections live in
+[`router/mission_state.rs`](../crates/api/src/router/mission_state.rs).
+Health, API discovery, and REST/JSON-RPC ingress handlers live in
+[`router/transport_routes.rs`](../crates/api/src/router/transport_routes.rs).
+Webhook subscription and delivery lifecycle handlers live in
+[`router/webhook_routes.rs`](../crates/api/src/router/webhook_routes.rs); event pages, streaming,
+metrics, delivery receipts, and route-review history live in
+[`router/event_routes.rs`](../crates/api/src/router/event_routes.rs). Bounded local checkpoint adapters
+live in [`router/persistence.rs`](../crates/api/src/router/persistence.rs). These modules share one
+router instance and do not create separate dispatch or persistence authorities.
+Router white-box tests stay under `router/tests.rs` and are grouped by transport, mission,
+operations, events, registries, and domain workflows so private route behavior remains testable
+without keeping every contract in the router implementation file.
+
+The MCP protocol integration target keeps its shared server fixtures in
+[`tests/protocol.rs`](../crates/mcp/tests/protocol.rs), with contract tests grouped under
+[`tests/protocol/`](../crates/mcp/tests/protocol/). The top-level groups separate transport,
+agent workflows, domain evidence, developer operations, evaluation, runtime infrastructure,
+context and repository tools, research modeling, governance and safety, and cross-crate contracts.
+Glioma workflow contracts are further grouped by research pipeline, experiments, computation,
+federation, release, and related operating areas. The groups are child modules of the integration
+target, so their tests keep access to the same private fixtures and exercise the same MCP server.
+
+Signed bundles, signed webhook envelopes, and caller-supplied key-registry policy are present; the
+workspace does not own production key custody or deployment trust roots. `DockerSandbox` provides a
+separate opt-in Docker command boundary for a pinned Linux image. It resolves and pins the selected
+local daemon endpoint and refuses remote contexts because bind-mount paths are interpreted by the
+daemon host. `DockerProcessSource` can route explicitly policy-authorized `ProcessSpawn` effects
+through that runner and retain outputs in per-run quarantine, but it is not wired into the SDK plugin
+dispatcher or trial `ContainerProvider`. Artifact scanning and independent release review, image
+review, credential isolation, and deployment policy remain explicit responsibilities. See
+[OCI_SANDBOX.md](OCI_SANDBOX.md).
+
+The backend portfolio for FAQ/InsideOut, worst-case-optimal joins, tensor networks, and decision
+diagrams is enumerated in `section::plan::Backend` so plans stay honest about which engine ran, but
+only `backward_factor_slice_reference` exists. Heavy biological formats — DICOM, BIDS/NIfTI,
+AnnData/Zarr, VCF — belong in a Python layer per ADR-001, where the mature libraries live; the Rust
+side owns the adapter *contract*, not the parsers.

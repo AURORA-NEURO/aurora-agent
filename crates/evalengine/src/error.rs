@@ -46,6 +46,31 @@ pub enum EvalError {
     #[error("parent `{parent}` in sample `{label}` contributes no instances")]
     EmptyCluster { label: String, parent: String },
 
+    /// Non-finite scores cannot support an interpretable mean or variance estimate.
+    #[error("parent `{parent}` in sample `{label}` contains non-finite score `{value}`")]
+    NonFiniteClusterValue {
+        label: String,
+        parent: String,
+        value: String,
+    },
+
+    /// A finite input can still overflow a floating-point aggregate.
+    #[error("sample `{label}` produced a non-finite {statistic}")]
+    NonFiniteClusterAggregate { label: String, statistic: String },
+
+    /// A serialized or manually constructed clustered aggregate violates its count/statistic
+    /// invariants and cannot be treated as evidence.
+    #[error("clustered estimate `{label}` is invalid: {detail}")]
+    InvalidClusteredEstimate { label: String, detail: String },
+
+    /// A serialized or manually constructed capability vector contains malformed evidence.
+    #[error("capability posterior is invalid: {detail}")]
+    InvalidCapabilityPosterior { detail: String },
+
+    /// A serialized or manually constructed release gate has an unusable claim or threshold.
+    #[error("release gate `{gate}` is invalid: {detail}")]
+    InvalidReleaseGate { gate: String, detail: String },
+
     /// A release gate was declared without saying why the scalar is the right one.
     ///
     /// Blueprint 07.05 permits a scalar "for a specific release gate only with its formula,

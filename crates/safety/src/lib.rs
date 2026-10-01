@@ -17,9 +17,12 @@
 //! beyond allocation. It **cannot** sandbox a pack, isolate a tenant, verify a signature, stop an
 //! egress, revoke a credential, quarantine an artifact or detect an injection.
 //!
-//! Every one of those is a control section 13 requires and this workspace does not have. The
-//! deliberate design decision is that a type here may *model* such a control, and no type here may
-//! *claim* one:
+//! The workspace does not apply those controls automatically. `bioprism-runtime` now exposes an
+//! opt-in Docker command boundary with a digest-pinned image, disabled networking, read-only root
+//! and input filesystems, dropped Linux capabilities, no-new-privileges, and bounded resources.
+//! It is not wired into SDK plugin dispatch or the trial provider, and a declaration does not prove
+//! that a caller used it. This crate therefore keeps the threat entry as declared-only until a
+//! deployment supplies and records that enforcement path. No type here may *claim* a control:
 //!
 //! | The control section 13 asks for | What this crate offers instead |
 //! |---|---|

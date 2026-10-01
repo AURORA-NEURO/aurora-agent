@@ -287,6 +287,7 @@ def _compact_grounded_tool_hits(
             "molecular_description",
             "study_type",
             "last_update",
+            "guideline_updated_date",
         ):
             value = raw.get(key)
             if isinstance(value, str) and value:
@@ -3798,6 +3799,7 @@ class RealDataQueryHit(TypedDict):
     intervention_names: NotRequired[list[str]]
     sample_count: NotRequired[int | None]
     publication_date: NotRequired[str | None]
+    guideline_updated_date: NotRequired[str | None]
     genomic_data_type_counts: NotRequired[list["GenomicProjectDataTypeCount"]]
 
 

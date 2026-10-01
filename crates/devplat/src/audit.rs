@@ -75,7 +75,7 @@ pub struct DevPlatReport {
     pub implemented: Vec<String>,
     /// Everything else, by title and bucket. Never by id.
     pub not_implemented: Vec<(String, String)>,
-    /// The subjects whose artifact is in another language and another repository.
+    /// The complete blueprint artifacts whose remaining surface is outside this repository.
     pub foreign_subjects: Vec<String>,
     pub walkthroughs: Vec<WalkthroughSummary>,
     /// Claims across all walkthroughs that no test here will ever guard.
@@ -248,7 +248,7 @@ pub fn catalogues_are_disjoint(cookbook: &Cookbook, walkthroughs: &[Walkthrough]
 
 /// Titles of everything in scope this crate did not implement, for a caller writing a status line.
 ///
-/// Sixteen of twenty. Returned from [`classification`] rather than from a second list, so the
+/// Fifteen of twenty. Returned from [`classification`] rather than from a second list, so the
 /// number cannot drift from the classification it summarises.
 pub fn unimplemented_titles() -> Vec<&'static str> {
     classification()

@@ -10,6 +10,7 @@
 //! construction; a [`Declined`] is a well-formed query this backend should not run.
 
 use bioprism_section::{Backend, FallbackReason};
+use bioprism_world::WorldSourceError;
 use thiserror::Error;
 
 /// A backend's refusal to run a query.
@@ -133,6 +134,9 @@ impl Declined {
 /// the non-negative reals. Checking once at construction keeps the inner loop free of guards.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum RegionError {
+    #[error(transparent)]
+    WorldSource(#[from] WorldSourceError),
+
     #[error("factor {factor:?} names variable {variable:?}, which the region does not declare")]
     UnknownVariable { factor: String, variable: String },
 

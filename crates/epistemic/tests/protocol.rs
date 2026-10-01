@@ -1,6 +1,8 @@
 //! Blueprint 43.30 (continuations), 43.32 (query patterns) and 43.47 (the guarantee gate).
 
-use bioprism_epistemic::continuation::{conservation, rebase, Checkpoint, ConservationBreach, Rebase};
+use bioprism_epistemic::continuation::{
+    conservation, rebase, Checkpoint, ConservationBreach, Rebase,
+};
 use bioprism_epistemic::decision::{Belief, DecisionProblem};
 use bioprism_epistemic::evidence::{EvidenceItem, EvidencePool};
 use bioprism_epistemic::patterns::{
@@ -62,7 +64,10 @@ fn a_stale_world_cut_is_rejected_before_any_regret_is_computed() {
     .expect("classifiable");
 
     assert!(matches!(outcome, Rebase::Stale { .. }));
-    assert!(!outcome.resumable(), "stale continuations never silently execute");
+    assert!(
+        !outcome.resumable(),
+        "stale continuations never silently execute"
+    );
 }
 
 #[test]
@@ -199,10 +204,9 @@ fn a_child_holding_a_capability_its_parent_lacked_is_a_conservation_breach() {
     child.budget_remaining = 10.0;
 
     let breaches = conservation(&parent, &[child]);
-    assert!(breaches.iter().any(|b| matches!(
-        b,
-        ConservationBreach::AuthorityExpanded { .. }
-    )));
+    assert!(breaches
+        .iter()
+        .any(|b| matches!(b, ConservationBreach::AuthorityExpanded { .. })));
 }
 
 #[test]
@@ -253,9 +257,9 @@ fn no_query_pattern_can_round_trip_through_fiber_query_0_1() {
             .map(|g| &g.pattern)
             .collect::<Vec<_>>()
     );
-    assert!(gaps
-        .iter()
-        .all(|gap| gap.unrepresentable.contains(&"permitted_actions".to_string())));
+    assert!(gaps.iter().all(|gap| gap
+        .unrepresentable
+        .contains(&"permitted_actions".to_string())));
 }
 
 #[test]

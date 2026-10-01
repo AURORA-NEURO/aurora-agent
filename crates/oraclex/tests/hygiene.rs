@@ -35,6 +35,13 @@ fn numeric_constants(file: &str, source: &str) -> Vec<String> {
         let Some((declaration, value)) = code.split_once('=') else {
             continue;
         };
+        // Metadata constants are strings, even when their contract/version identifiers contain
+        // digits (for example `.../1.0`). Only numeric-typed constants can encode a biological
+        // threshold or default. Keep the scanner focused on those values rather than rejecting
+        // harmless product identifiers.
+        if declaration.contains("&str") {
+            continue;
+        }
         if !value.chars().any(|character| character.is_ascii_digit()) {
             continue;
         }
@@ -60,6 +67,14 @@ fn the_hardcoded_constant_scanner_can_actually_see_one() {
         numeric_constants("synthetic.rs", "pub const ALL: [Family; 12] = [").is_empty(),
         "an array length is not a biological constant"
     );
+    assert!(
+        numeric_constants(
+            "synthetic.rs",
+            "pub const CONTRACT_VERSION: &str = \"1.0\";"
+        )
+        .is_empty(),
+        "a versioned string identifier is not a biological constant"
+    );
 }
 
 #[test]
@@ -82,7 +97,12 @@ fn no_biological_constant_is_hardcoded() {
 /// does have a seeded generator to keep clear of.
 fn ambient_inputs(file: &str, source: &str) -> Vec<String> {
     let forbidden = [
-        "SystemTime", "Instant", "rand", "thread_rng", "now()", "std::env",
+        "SystemTime",
+        "Instant",
+        "rand",
+        "thread_rng",
+        "now()",
+        "std::env",
     ];
     let mut offenders: Vec<String> = Vec::new();
     for (number, line) in source.lines().enumerate() {
@@ -350,4 +370,3 @@ fn a_determination_serialises_the_same_way_every_time() {
     assert_eq!(first, second);
     assert!(first.starts_with(r#"{"determination":"unresolved""#));
 }
-

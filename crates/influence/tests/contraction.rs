@@ -4,11 +4,11 @@
 //! longest path would produce a number that is not a bound, and a certificate carrying it would
 //! license omitting evidence that mattered.
 
+use bioprism_backends::{QueryRegion, RegionFactor};
 use bioprism_influence::{
     chain_of, dobrushin_coefficients, dynamic_range_bound, smallworld, BoundMethod, Family,
     InfluenceAnalyzer, Perturbation, SmallWorldSpec, UnknownReason,
 };
-use bioprism_backends::{QueryRegion, RegionFactor};
 
 fn spec(family: Family, size: usize, cardinality: usize) -> SmallWorldSpec {
     SmallWorldSpec {
@@ -54,7 +54,9 @@ fn a_star_is_refused_because_the_centre_branches() {
     let error = chain_of(&region(Family::Star, 3, 2)).unwrap_err();
     let detail = refusal_detail(&error);
     assert!(
-        detail.contains("arity-one factors") || detail.contains("degree") || detail.contains("transitions over"),
+        detail.contains("arity-one factors")
+            || detail.contains("degree")
+            || detail.contains("transitions over"),
         "the refusal should name the structural clause that failed, got {detail:?}"
     );
 }
@@ -94,7 +96,11 @@ fn a_chain_whose_transitions_are_not_stochastic_is_refused() {
     let region = QueryRegion::builder("unnormalised")
         .observed_variable("a", 2)
         .observed_variable("b", 2)
-        .factor(RegionFactor::with_table("f.prior", vec!["a"], vec![0.5, 0.5]))
+        .factor(RegionFactor::with_table(
+            "f.prior",
+            vec!["a"],
+            vec![0.5, 0.5],
+        ))
         .factor(RegionFactor::with_table(
             "f.ab",
             vec!["a", "b"],
@@ -112,7 +118,11 @@ fn a_query_with_two_free_variables_is_refused() {
     let region = QueryRegion::builder("two-free")
         .observed_variable("a", 2)
         .observed_variable("b", 2)
-        .factor(RegionFactor::with_table("f.prior", vec!["a"], vec![0.5, 0.5]))
+        .factor(RegionFactor::with_table(
+            "f.prior",
+            vec!["a"],
+            vec![0.5, 0.5],
+        ))
         .factor(RegionFactor::with_table(
             "f.ab",
             vec!["a", "b"],
@@ -134,7 +144,10 @@ fn a_dobrushin_coefficient_lies_in_the_unit_interval() {
         let coefficients = dobrushin_coefficients(&region, &chain).unwrap();
         assert_eq!(coefficients.len(), chain.length());
         for delta in coefficients {
-            assert!((0.0..=1.0).contains(&delta), "delta {delta} is out of range");
+            assert!(
+                (0.0..=1.0).contains(&delta),
+                "delta {delta} is out of range"
+            );
         }
     }
 }
@@ -144,7 +157,11 @@ fn a_kernel_with_identical_rows_has_a_dobrushin_coefficient_of_zero() {
     let region = QueryRegion::builder("forgetful")
         .observed_variable("a", 2)
         .observed_variable("b", 2)
-        .factor(RegionFactor::with_table("f.prior", vec!["a"], vec![0.9, 0.1]))
+        .factor(RegionFactor::with_table(
+            "f.prior",
+            vec!["a"],
+            vec![0.9, 0.1],
+        ))
         .factor(RegionFactor::with_table(
             "f.ab",
             vec!["a", "b"],
@@ -162,7 +179,11 @@ fn a_forgetful_kernel_annihilates_all_upstream_influence() {
     let region = QueryRegion::builder("forgetful")
         .observed_variable("a", 2)
         .observed_variable("b", 2)
-        .factor(RegionFactor::with_table("f.prior", vec!["a"], vec![0.9, 0.1]))
+        .factor(RegionFactor::with_table(
+            "f.prior",
+            vec!["a"],
+            vec![0.9, 0.1],
+        ))
         .factor(RegionFactor::with_table(
             "f.ab",
             vec!["a", "b"],
@@ -242,7 +263,11 @@ fn a_group_with_a_member_off_the_chain_refuses_the_contraction_rule() {
     let group = vec!["f.prior".to_string(), "f.not_here".to_string()];
     let analysis = InfluenceAnalyzer::default()
         .structural_only()
-        .analyse_group(&region, &group, &Perturbation::relative_tolerance(0.1).unwrap())
+        .analyse_group(
+            &region,
+            &group,
+            &Perturbation::relative_tolerance(0.1).unwrap(),
+        )
         .unwrap();
     let refusal = analysis
         .attempted
@@ -262,7 +287,11 @@ fn the_chain_union_bound_beats_the_multiplicative_one_on_a_mixing_chain() {
         .collect();
     let analysis = InfluenceAnalyzer::default()
         .structural_only()
-        .analyse_group(&region, &group, &Perturbation::relative_tolerance(0.2).unwrap())
+        .analyse_group(
+            &region,
+            &group,
+            &Perturbation::relative_tolerance(0.2).unwrap(),
+        )
         .unwrap();
     let composition = analysis
         .attempted

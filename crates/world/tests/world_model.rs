@@ -146,7 +146,7 @@ fn the_tag_index_answers_what_a_full_corpus_scan_answers() {
             .chain(["absent-from-this-world".to_string()].iter())
         {
             assert_eq!(
-                WorldSource::count_with_tag(world, tag),
+                WorldSource::count_with_tag(world, tag).expect("world source is available"),
                 scan_count(world, tag),
                 "count for tag {tag}"
             );
@@ -171,7 +171,7 @@ fn the_tag_index_answers_what_a_full_corpus_scan_answers() {
 
         for tags in &queries {
             assert_eq!(
-                WorldSource::fact_ids_with_any_tag(world, tags),
+                WorldSource::fact_ids_with_any_tag(world, tags).expect("world source is available"),
                 scan_ids(world, tags),
                 "ids for tags {tags:?}"
             );
@@ -401,15 +401,23 @@ fn a_shadowed_fact_stays_reachable_through_the_index_rather_than_being_lost() {
         "the later fact still wins, because the reference runtime's semantics are the contract"
     );
     assert_eq!(
-        world.shadowed_provider_ids("risk_score"),
+        world
+            .shadowed_provider_ids("risk_score")
+            .expect("world source is available"),
         vec!["fact.first".to_string()],
         "and the displaced one is now nameable"
     );
     assert!(
-        world.shadowed_provider_ids("cohort_id").is_empty(),
+        world
+            .shadowed_provider_ids("cohort_id")
+            .expect("world source is available")
+            .is_empty(),
         "an unshadowed variable has no losers"
     );
-    assert!(world.shadowed_provider_ids("no_such_variable").is_empty());
+    assert!(world
+        .shadowed_provider_ids("no_such_variable")
+        .expect("world source is available")
+        .is_empty());
 
     let report = validate(&world, &DimensionRegistry::default());
     assert_eq!(

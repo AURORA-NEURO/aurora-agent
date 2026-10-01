@@ -52,7 +52,10 @@ fn a_declared_range_bounds_every_reference_factor_without_executing_anything() {
     let bound = measurement
         .hypothetical_bound()
         .expect("a stated range always bounds");
-    assert!((bound - 0.050_125_628_933_800_51).abs() < 1e-12, "bound was {bound}");
+    assert!(
+        (bound - 0.050_125_628_933_800_51).abs() < 1e-12,
+        "bound was {bound}"
+    );
     for finding in &measurement.hypothetical_stated_range {
         assert_eq!(
             finding.bounded_at(),

@@ -1,5 +1,3 @@
-#![allow(clippy::all)]
-
 //! The physical backend portfolio.
 //!
 //! Implements blueprint 43.18 (elimination order, compiled width and cost model), 43.19 (functional

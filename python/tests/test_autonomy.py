@@ -3584,6 +3584,7 @@ def test_agent_run_learning_is_the_explicit_facade_for_evaluator_backed_online_l
         memory.close()
         server.shutdown()
         thread.join(timeout=2)
+        server.server_close()
 
 
 def test_automatic_memory_recall_uses_task_facets_instead_of_recent_unrelated_episodes(tmp_path: Path):
@@ -3906,6 +3907,7 @@ def test_selection_weights_are_normalized_and_conflicts_fail_closed():
     finally:
         server.shutdown()
         thread.join(timeout=2)
+        server.server_close()
 
 
 def test_run_autonomous_tool_loop_learning_records_loop_metadata_only(tmp_path: Path):
@@ -3964,6 +3966,7 @@ def test_run_autonomous_tool_loop_learning_records_loop_metadata_only(tmp_path: 
         memory.close()
         server.shutdown()
         thread.join(timeout=2)
+        server.server_close()
         server.server_close()
 
 
@@ -5179,6 +5182,7 @@ def test_run_workflow_propagates_adaptive_prompt_selection_through_every_builtin
     finally:
         server.shutdown()
         thread.join(timeout=2)
+        server.server_close()
 
 
 def test_agent_persistent_prompt_learner_rehydrates_high_level_direct_and_cross_domain_runs():

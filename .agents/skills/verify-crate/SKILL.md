@@ -35,6 +35,10 @@ Caused by:
   An Application Control policy has blocked this file. (os error 4551)
 ```
 
+Rustdoc doctests can report the same block inline as `Couldn't run the test: An Application
+Control policy has blocked this file. (os error 4551)` without Cargo's `never executed` wording.
+Count both forms; `tools/status.sh --tests` includes both in its blocked-process count.
+
 **A suite that never ran looks exactly like a suite that failed.** Worse, `cargo test` continues to
 the next binary, so a naive sum silently under-reports — this has already produced a wrong count
 once (27 reported where the true figure was 75).
@@ -46,8 +50,8 @@ touch crates/<crate>/tests/*.rs
 cargo test -p bioprism-<crate> --offline
 ```
 
-If a per-crate count looks lower than expected, check for `never executed` before concluding
-anything about the code.
+If a per-crate count looks lower than expected, check for `never executed` and rustdoc's inline
+Application Control diagnostic before concluding anything about the code.
 
 ### It bites the workspace sum harder than any single crate
 
@@ -85,7 +89,7 @@ prints a warning naming the shortfall, which is why the README's test count is g
 typed.
 
 **Do not trust the sum alone.** Check the per-binary `Running ...` lines against the crate list —
-`ls crates | wc -l` is 77 — rather than accepting a total that has no way to tell you what is missing
+`ls crates | wc -l` is 88 — rather than accepting a total that has no way to tell you what is missing
 from it. A crate whose binaries are all absent from the output looks identical to a crate with no
 tests.
 

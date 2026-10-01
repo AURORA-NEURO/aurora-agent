@@ -224,8 +224,16 @@ pub fn elimination_order(region: &QueryRegion, strategy: OrderStrategy) -> Elimi
     let retained: BTreeSet<String> = region.free_variables().clone();
 
     let (order, used, bound_kind) = match strategy {
-        OrderStrategy::MinDegree => (greedy_order(&graph, &bound, Cost::Degree), strategy, Bound::HeuristicUpperBound),
-        OrderStrategy::MinFill => (greedy_order(&graph, &bound, Cost::Fill), strategy, Bound::HeuristicUpperBound),
+        OrderStrategy::MinDegree => (
+            greedy_order(&graph, &bound, Cost::Degree),
+            strategy,
+            Bound::HeuristicUpperBound,
+        ),
+        OrderStrategy::MinFill => (
+            greedy_order(&graph, &bound, Cost::Fill),
+            strategy,
+            Bound::HeuristicUpperBound,
+        ),
         OrderStrategy::ExactMinimumWidth => match exact_order(&graph, &bound) {
             Some(order) => (order, strategy, Bound::Exact),
             None => (

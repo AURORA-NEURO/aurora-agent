@@ -17,7 +17,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-bioworlds-P03-F20";
 pub const CONTRACT_VERSION: &str = "bioworlds-federated-continual-context-research-workbench/1.0";
-pub const CONTENT_TYPE: &str = "application/vnd.aurora.bioworlds-federated-context-research-workbench+json";
+pub const CONTENT_TYPE: &str =
+    "application/vnd.aurora.bioworlds-federated-context-research-workbench+json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedContextWorkbenchPeer {
@@ -189,7 +190,8 @@ impl FederatedContextWorkbenchReceipt {
             }
         }
         if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("view:federated-context-workbench:") && effect != "block:unsafe-release"
+            !effect.starts_with("view:federated-context-workbench:")
+                && effect != "block:unsafe-release"
         }) {
             return Err(FederatedContextWorkbenchError::Invalid(
                 "federated assurance effect is outside the governed release gate".into(),
@@ -202,9 +204,7 @@ impl FederatedContextWorkbenchReceipt {
 
     pub fn digest(&self) -> Result<ContentHash, FederatedContextWorkbenchError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| FederatedContextWorkbenchError::Artifact(error.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|error| FederatedContextWorkbenchError::Artifact(error.to_string()))
     }
 }
@@ -650,4 +650,3 @@ mod tests {
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
     }
 }
-

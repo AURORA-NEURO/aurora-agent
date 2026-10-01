@@ -10,6 +10,8 @@ import {
   LLMRuntime,
   evaluateAutonomousSelectionPolicy,
   evaluateAutonomousSelectionPromotion,
+  validateAutonomousSelectionLifecycleSnapshot,
+  validateAutonomousSelectionLifecycleState,
 } from "../dist/index.js";
 
 function request(domain) {
@@ -88,6 +90,30 @@ test("selection lifecycle applies hold, admission, rollback, and durable restore
   assert.equal(rolledBack.active_promotion_digest, null);
   assert.equal(rolledBack.rollback_count, 1);
   assert.equal(JSON.stringify(rolledBack).includes("private lifecycle task"), false);
+});
+
+test("selection lifecycle rejects rollback reasons outside the bounded text contract", () => {
+  const lifecycle = new AutonomousSelectionPromotionLifecycle({ lifecycleId: "selection-lifecycle-invalid-rollback", clock: () => 100 });
+
+  for (const reason of [null, "", " \t ", "bad\u0000reason", "é".repeat(1_001)]) {
+    assert.throws(() => lifecycle.rollback(reason), /autonomous selection lifecycle last_reason is invalid/);
+  }
+});
+
+test("selection lifecycle restore rejects unknown state and snapshot fields", async () => {
+  const lifecycle = new AutonomousSelectionPromotionLifecycle({ lifecycleId: "selection-lifecycle-strict-restore", clock: () => 100 });
+  assert.throws(
+    () => validateAutonomousSelectionLifecycleState({ ...lifecycle.state, unrecognized_extension: true }),
+    /autonomous selection lifecycle state contains unsupported fields/,
+  );
+
+  const store = new AutonomousSelectionPromotionLifecycleStore();
+  await store.save(lifecycle.state);
+  const snapshot = await store.snapshot();
+  assert.throws(
+    () => validateAutonomousSelectionLifecycleSnapshot({ ...snapshot, unrecognized_extension: true }),
+    /autonomous selection lifecycle snapshot contains unsupported fields/,
+  );
 });
 
 test("selection lifecycle joins all-domain readiness and gates the learner until admission", async () => {

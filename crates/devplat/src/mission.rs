@@ -868,10 +868,10 @@ impl MissionPolicy {
         let mut allowed = BTreeSet::new();
         let mut allowed_keys = BTreeSet::new();
         for tool in &self.allowed_tools {
-            require_text("policy.allowed_tools", tool)?;
             if !valid_tool_name(tool) {
                 return Err(MissionError::UnsafeTool { tool: tool.clone() });
             }
+            require_text("policy.allowed_tools", tool)?;
             if is_mission_tool(tool) {
                 return Err(MissionError::RecursiveTool);
             }
@@ -974,12 +974,12 @@ impl MissionStep {
         require_text("step.domain", &self.domain)?;
         require_text("step.capability", &self.capability)?;
         require_text("step.objective", &self.objective)?;
-        require_text("step.tool", &self.tool)?;
         if !valid_tool_name(&self.tool) {
             return Err(MissionError::UnsafeTool {
                 tool: self.tool.clone(),
             });
         }
+        require_text("step.tool", &self.tool)?;
         if is_mission_tool(&self.tool) {
             return Err(MissionError::RecursiveTool);
         }
@@ -1391,7 +1391,6 @@ fn validate_evaluator_review(
             })?;
         for (field, expected_value) in [
             ("id", binding.id.as_str()),
-            ("claim_id", claim.id.as_str()),
             ("adapter_id", binding.adapter_id.as_str()),
             ("domain", binding.domain.as_str()),
             ("step_id", binding.step_id.as_str()),

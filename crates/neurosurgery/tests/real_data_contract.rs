@@ -109,6 +109,82 @@ fn extended_real_snapshot_adds_tcga_lgg_without_collapsing_provenance() {
 }
 
 #[test]
+fn guideline_update_dates_are_optional_for_old_snapshots_and_bound_into_source_hashes() {
+    let mut data = bundle();
+    data.validate()
+        .expect("older snapshots without a source update date remain valid");
+    let serialized = serde_json::to_value(&data).expect("snapshot serializes");
+    assert!(serialized["references"][0].get("updated_date").is_none());
+
+    let source_id = data.references[0].source_id.clone();
+    let old_source_digest = data
+        .canonical_source_hashes()
+        .expect("old source hash computes")[&source_id]
+        .clone();
+    data.references[0].updated_date = Some("2025-03-28".to_string());
+    let source_digests = data
+        .canonical_source_hashes()
+        .expect("updated guideline source hash computes");
+    assert_ne!(source_digests[&source_id], old_source_digest);
+    data.sources
+        .iter_mut()
+        .find(|source| source.source_id == source_id)
+        .expect("PDQ source exists")
+        .content_sha256 = source_digests[&source_id].clone();
+    data.validate()
+        .expect("a source-reported calendar update date is valid");
+    let query = RealDataQuery {
+        record_kind: Some(RealDataRecordKind::GuidelineReference),
+        limit: 1,
+        ..RealDataQuery::default()
+    };
+    let result = data.query(&query).expect("PDQ reference can be queried");
+    assert_eq!(
+        result.hits[0].guideline_updated_date.as_deref(),
+        Some("2025-03-28")
+    );
+    result
+        .validate_for_inputs(&data)
+        .expect("guideline update date is preserved by exact query replay");
+    let mut tampered_result = result.clone();
+    tampered_result.hits[0].record_kind = RealDataRecordKind::PortalStudy;
+    assert!(tampered_result.validate_integrity().is_err());
+
+    let reasoning_context = NeurosurgicalAgent::default()
+        .real_data_reasoning_context(
+            &data,
+            &RealDataReasoningContextQuery {
+                packet: RealDataEvidencePacketQuery {
+                    query: query.clone(),
+                    ..RealDataEvidencePacketQuery::default()
+                },
+                ..RealDataReasoningContextQuery::default()
+            },
+        )
+        .expect("reasoning context composes the dated guideline hit");
+    assert!(reasoning_context
+        .context_text
+        .contains("guideline_updated_date: 2025-03-28"));
+    reasoning_context
+        .validate_integrity()
+        .expect("context digest binds the source update date");
+
+    data.references[0].updated_date = Some("2025-02-30".to_string());
+    let source_digests = data
+        .canonical_source_hashes()
+        .expect("malformed dates still have canonical bytes");
+    data.sources
+        .iter_mut()
+        .find(|source| source.source_id == source_id)
+        .expect("PDQ source exists")
+        .content_sha256 = source_digests[&source_id].clone();
+    assert!(
+        data.validate().is_err(),
+        "invalid dates must not be hash-blessed"
+    );
+}
+
+#[test]
 fn natural_language_intake_can_route_real_dicom_and_fhir_imports_together() {
     let agent = NeurosurgicalAgent::default();
     let real_data = extended_bundle();
@@ -712,6 +788,64 @@ fn real_data_reasoning_context_exposes_gdc_availability_without_molecular_values
     report
         .validate_for_inputs(&extended_bundle())
         .expect("GDC context should replay against the exact extended snapshot");
+}
+
+#[test]
+fn real_data_reasoning_context_preserves_bounded_source_metadata_per_record() {
+    let data = bundle();
+    let agent = NeurosurgicalAgent::default();
+    let context_for = |record_kind| {
+        agent
+            .real_data_reasoning_context(
+                &data,
+                &RealDataReasoningContextQuery {
+                    packet: RealDataEvidencePacketQuery {
+                        query: RealDataQuery {
+                            record_kind: Some(record_kind),
+                            limit: 8,
+                            ..RealDataQuery::default()
+                        },
+                        ..RealDataEvidencePacketQuery::default()
+                    },
+                    ..RealDataReasoningContextQuery::default()
+                },
+            )
+            .expect("source metadata context builds from the validated snapshot")
+    };
+
+    let trials = context_for(RealDataRecordKind::ClinicalTrial);
+    assert!(trials.context_text.contains("phases: "));
+    assert!(trials.context_text.contains("last_update: "));
+    assert!(trials.context_text.contains("study_type: "));
+    assert!(trials.context_text.contains("enrollment_count: "));
+    assert!(trials.context_text.contains("intervention_names: "));
+
+    let portal_studies = context_for(RealDataRecordKind::PortalStudy);
+    assert!(portal_studies.context_text.contains("sample_count: "));
+
+    let publications = context_for(RealDataRecordKind::LiteratureArticle);
+    assert!(publications.context_text.contains("publication_date: "));
+
+    let genomic = NeurosurgicalAgent::default()
+        .real_data_reasoning_context(
+            &extended_bundle(),
+            &RealDataReasoningContextQuery {
+                packet: RealDataEvidencePacketQuery {
+                    query: RealDataQuery {
+                        record_kind: Some(RealDataRecordKind::GenomicProject),
+                        limit: 2,
+                        ..RealDataQuery::default()
+                    },
+                    ..RealDataEvidencePacketQuery::default()
+                },
+                ..RealDataReasoningContextQuery::default()
+            },
+        )
+        .expect("GDC metadata context builds from the extended snapshot");
+    assert!(genomic.context_text.contains("genomic_data_type_counts: "));
+    assert!(genomic
+        .context_text
+        .contains("Annotated Somatic Mutation=4822"));
 }
 
 #[test]

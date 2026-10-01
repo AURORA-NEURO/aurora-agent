@@ -5,7 +5,8 @@
 //! runs rather than after it produces a mislabelled result. The orchestrator tests are about
 //! finalizing honestly — idempotently, and naming the evidence a cancellation cost.
 
-use bioprism_ids::RunId;
+use bioprism_ids::{ContentHash, RunId};
+use bioprism_runtime::effect::{Effect, EffectOutcome, EffectRequest};
 use bioprism_runtime::{
     AttemptId, Capabilities, ContainerProvider, EffectKind, EffectPolicy, ExecutionPlan,
     ExecutorProvider, InProcessProvider, InProcessWorld, RetryClass, RunState, RuntimeError,
@@ -76,21 +77,22 @@ fn an_unavailable_provider_advertises_no_capabilities_so_nothing_selects_it() {
 #[test]
 fn the_in_process_provider_declares_only_the_capabilities_it_has() {
     let capabilities = InProcessProvider::new().capabilities();
-
-    assert!(
-        !capabilities.container_isolation,
-        "there is no container here"
+    assert_eq!(
+        capabilities,
+        Capabilities {
+            process_isolation: false,
+            container_isolation: false,
+            gpu: false,
+            network_fixtures: true,
+            filesystem_snapshots: true,
+            process_checkpoints: false,
+            live_streaming: true,
+            nested_forks: true,
+            state_merge: false,
+            cache_reuse: true,
+        },
+        "the provider may advertise only behavior its implementation supplies"
     );
-    assert!(
-        !capabilities.process_isolation,
-        "there is no process boundary here"
-    );
-    assert!(!capabilities.process_checkpoints);
-    assert!(
-        capabilities.nested_forks,
-        "forking a tape needs no provider help"
-    );
-    assert!(capabilities.network_fixtures);
 }
 
 #[test]
@@ -344,7 +346,65 @@ fn collect_reports_what_was_created_and_what_was_only_read() {
 
     assert_eq!(created, vec!["/work/out.txt"]);
     assert_eq!(read_only, vec!["/work/in.txt"]);
+    assert_eq!(artifacts[0].bytes, 1);
+    assert_eq!(artifacts[0].digest, ContentHash::of_bytes(b"x").as_str());
     assert_eq!(artifacts[1].bytes, "written".len() as u64);
+    assert_eq!(
+        artifacts[1].digest,
+        ContentHash::of_bytes(b"written").as_str()
+    );
+}
+
+#[test]
+fn collected_read_artifact_distinguishes_missing_from_empty_content() {
+    let mut provider = InProcessProvider::new();
+    let handle = provider
+        .prepare(&plan("trial-read-artifact"))
+        .expect("supported");
+    provider.start(&handle).expect("known");
+
+    let mut host = provider
+        .open(
+            &handle,
+            InProcessWorld::new().with_base_file("/work/empty.txt", ""),
+        )
+        .expect("started");
+    host.read_file("/work/missing.txt").expect("allowed");
+    host.read_file("/work/empty.txt").expect("allowed");
+    provider.commit(&handle, host.into_tape()).expect("known");
+
+    let artifacts = provider.collect(&handle).expect("known");
+    assert_eq!(artifacts.len(), 2);
+    assert_eq!(artifacts[0].path, "/work/empty.txt");
+    assert_eq!(artifacts[0].bytes, 0);
+    assert_eq!(artifacts[0].digest, ContentHash::of_bytes(b"").as_str());
+    assert_eq!(artifacts[1].path, "/work/missing.txt");
+    assert_eq!(artifacts[1].bytes, 0);
+    assert!(artifacts[1].digest.is_empty());
+}
+
+#[test]
+fn malformed_performed_read_outcomes_are_not_reported_as_missing_files() {
+    let mut provider = InProcessProvider::new();
+    let handle = provider
+        .prepare(&plan("trial-malformed-read"))
+        .expect("supported");
+    provider.start(&handle).expect("known");
+
+    let mut tape = WorldTape::new(run("run-1"));
+    tape.append(Effect::performed(
+        EffectRequest::FileRead {
+            path: "/work/input.txt".into(),
+        },
+        EffectOutcome::new(serde_json::Value::Null),
+    ))
+    .expect("well-formed effect chain");
+    provider.commit(&handle, tape).expect("known");
+
+    assert!(matches!(
+        provider.collect(&handle),
+        Err(RuntimeError::InvariantViolation { .. })
+    ));
 }
 
 #[test]

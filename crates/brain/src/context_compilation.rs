@@ -237,9 +237,7 @@ impl ResearchContextCompilationReceipt {
     }
     pub fn digest(&self) -> Result<ContentHash, ContextCompilationError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| ContextCompilationError::Artifact(error.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|error| ContextCompilationError::Artifact(error.to_string()))
     }
 }

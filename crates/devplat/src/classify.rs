@@ -4,15 +4,15 @@
 //! declaration, `bioprism-devx` took diagnostics and the retryability taxonomy, `bioprism-cookbook`
 //! took the verifiable recipes and `bioprism-examples` took the vertical slices. Applying one test
 //! to each — *is the detailed design a set of predicates over an artifact, or a description of what
-//! people do?* — splits them four ways, and only four of the twenty are things this crate could
-//! honestly implement.
+//! people do?* — splits them four ways, and five of the twenty now have checkable in-tree
+//! implementations.
 //!
 //! | verdict | count |
 //! |---|---|
 //! | [`Verdict::Process`] — the design describes what a person does at an interface | 3 |
-//! | [`Verdict::ForeignArtifact`] — code-bearing, but not Rust and not in this repository | 3 |
+//! | [`Verdict::ForeignArtifact`] — code-bearing, but not in this repository | 2 |
 //! | [`Verdict::CoveredElsewhere`] — an existing crate already owns the substance | 10 |
-//! | [`Verdict::ImplementedHere`] — predicates over an artifact this crate defines | 4 |
+//! | [`Verdict::ImplementedHere`] — predicates over an artifact this repository defines | 5 |
 //!
 //! # The citation rule, in the type system
 //!
@@ -28,7 +28,8 @@
 //! [`Verdict::CoveredElsewhere`] is not a synonym for "someone else's problem". It is a claim with
 //! a named referent: the crate that holds the substance, and the sentence saying what would be
 //! duplicated if this crate implemented it anyway. Six of the twenty land here, which is the
-//! reason a section can read as two-thirds unimplemented while the platform underneath it is not.
+//! reason a section can look mostly unimplemented in this crate while the platform underneath it
+//! is not: ten of the twenty are already owned by workspace crates.
 
 use serde::{Deserialize, Serialize};
 
@@ -54,12 +55,12 @@ pub enum Verdict {
         crates: Vec<&'static str>,
         because: &'static str,
     },
-    /// Predicates over an artifact this crate defines. The only variant that carries an id.
+    /// Predicates over an artifact this repository defines. The only variant that carries an id.
     ImplementedHere {
         /// The blueprint module id, which this crate is entitled to cite.
         module_id: &'static str,
-        /// The module of this crate that holds it.
-        rust_module: &'static str,
+        /// The in-tree artifact path or owning Rust module.
+        in_tree_artifact: &'static str,
     },
 }
 
@@ -104,8 +105,8 @@ impl ModuleVerdict {
         match &self.verdict {
             Verdict::ImplementedHere {
                 module_id,
-                rust_module,
-            } => format!("{} [{module_id}] -> {rust_module}", self.title),
+                in_tree_artifact,
+            } => format!("{} [{module_id}] -> {in_tree_artifact}", self.title),
             other => format!("{} -> {}", self.title, other.as_str()),
         }
     }
@@ -116,7 +117,7 @@ const REFERENCE_EXAMPLES: u8 = 19;
 
 /// The twenty modules, classified.
 ///
-/// The order is section then blueprint order. The three [`Verdict::ForeignArtifact`] rows take
+/// The order is section then blueprint order. The two [`Verdict::ForeignArtifact`] rows take
 /// their surfaces from [`foreign_subjects`], so the census and the classification cannot drift
 /// apart — a test asserts the two agree.
 pub fn classification() -> Vec<ModuleVerdict> {
@@ -239,7 +240,10 @@ pub fn classification() -> Vec<ModuleVerdict> {
         ModuleVerdict {
             section: DEVELOPER_PLATFORM,
             title: "GitHub Action for Consumer Repositories",
-            verdict: foreign_row("GitHub Action for Consumer Repositories"),
+            verdict: Verdict::ImplementedHere {
+                module_id: "11.21",
+                in_tree_artifact: ".github/actions/autonomous-run/action.yml + tools/autonomous_agent_action.py",
+            },
         },
         ModuleVerdict {
             section: DEVELOPER_PLATFORM,
@@ -251,7 +255,7 @@ pub fn classification() -> Vec<ModuleVerdict> {
             title: "Reporting and Export Formats",
             verdict: Verdict::ImplementedHere {
                 module_id: "11.23",
-                rust_module: "bioprism_devplat::report",
+                in_tree_artifact: "bioprism_devplat::report",
             },
         },
         ModuleVerdict {
@@ -270,7 +274,7 @@ pub fn classification() -> Vec<ModuleVerdict> {
             title: "Reference Case - Scientific Figure Reproduction and Claim Trace",
             verdict: Verdict::ImplementedHere {
                 module_id: "19.12",
-                rust_module: "bioprism_devplat::repro",
+                in_tree_artifact: "bioprism_devplat::repro",
             },
         },
         ModuleVerdict {
@@ -291,7 +295,7 @@ pub fn classification() -> Vec<ModuleVerdict> {
             title: "Reference Case - Evaluator Exploit and Security Cell",
             verdict: Verdict::ImplementedHere {
                 module_id: "19.17",
-                rust_module: "bioprism_devplat::exploit",
+                in_tree_artifact: "bioprism_devplat::exploit",
             },
         },
         ModuleVerdict {
@@ -311,7 +315,7 @@ pub fn classification() -> Vec<ModuleVerdict> {
             title: "Reference Example - Scientific Reproduction Capability Molecule",
             verdict: Verdict::ImplementedHere {
                 module_id: "19.22",
-                rust_module: "bioprism_devplat::repro",
+                in_tree_artifact: "bioprism_devplat::repro",
             },
         },
     ]
@@ -319,7 +323,7 @@ pub fn classification() -> Vec<ModuleVerdict> {
 
 /// The module ids this crate implemented, and is therefore entitled to write down.
 ///
-/// Four. This is the declared set that [`crate::citations::audit`] checks the source against.
+/// Five. This is the declared set that [`crate::citations::audit`] checks the source against.
 pub fn implemented_module_ids() -> Vec<&'static str> {
     let mut ids: Vec<&'static str> = classification()
         .iter()
@@ -332,7 +336,7 @@ pub fn implemented_module_ids() -> Vec<&'static str> {
 
 /// Modules deliberately not implemented, by title, with the reason.
 ///
-/// Sixteen rows. Returned as data rather than left in a doc comment so that a caller assembling a
+/// Fifteen rows. Returned as data rather than left in a doc comment so that a caller assembling a
 /// status report cannot summarise the section as "in progress".
 pub fn not_implemented() -> Vec<(&'static str, &'static str, &'static str)> {
     classification()

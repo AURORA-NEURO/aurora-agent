@@ -7,7 +7,8 @@
 //! paths disagreeing, and these tests are what notices.
 
 use bioprism_fiber::oracle;
-use bioprism_section::OracleVerdict;
+use bioprism_fiber::FiberError;
+use bioprism_section::{LeakageWitness, OracleVerdict};
 use bioprism_world::{Fact, World};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -97,6 +98,185 @@ fn a_selection_naming_an_unknown_fact_is_judged_on_the_facts_that_exist() {
     let with_phantom = oracle::evaluate_selected(&world, &ids).expect("selection still evaluates");
 
     assert_eq!(with_phantom, known);
+}
+
+#[test]
+fn temporal_leakage_compares_absolute_instants_across_utc_offsets() {
+    let values = BTreeMap::from([
+        (
+            "training_decision_time".to_string(),
+            json!("2025-01-01T00:30:00+01:00"),
+        ),
+        (
+            "label_source_time".to_string(),
+            json!({"subject:s1": "2025-01-01T00:00:00Z"}),
+        ),
+    ]);
+
+    let verdict = oracle::evaluate(&values).expect("timestamps parse");
+    assert!(verdict.witnesses.iter().any(|witness| matches!(
+        witness,
+        LeakageWitness::TemporalLeakage { future_label_sources, .. }
+            if future_label_sources.contains_key("subject:s1")
+    )));
+}
+
+#[test]
+fn equal_instants_with_different_offsets_do_not_create_temporal_leakage() {
+    let values = BTreeMap::from([
+        (
+            "training_decision_time".to_string(),
+            json!("2025-01-01T00:00:00Z"),
+        ),
+        (
+            "label_source_time".to_string(),
+            json!({"subject:s1": "2025-01-01T01:00:00+01:00"}),
+        ),
+    ]);
+
+    let verdict = oracle::evaluate(&values).expect("timestamps parse");
+    assert!(!verdict
+        .witnesses
+        .iter()
+        .any(|witness| matches!(witness, LeakageWitness::TemporalLeakage { .. })));
+}
+
+#[test]
+fn day_precision_dates_compare_without_being_promoted_to_instants() {
+    let values = BTreeMap::from([
+        ("training_decision_time".to_string(), json!("2025-01-01")),
+        (
+            "label_source_time".to_string(),
+            json!({
+                "subject:earlier": "2024-12-31",
+                "subject:same_day": "2025-01-01",
+                "subject:later": "2025-01-02"
+            }),
+        ),
+    ]);
+
+    let verdict = oracle::evaluate(&values).expect("civil dates compare at day precision");
+    assert!(verdict.witnesses.iter().any(|witness| matches!(
+        witness,
+        LeakageWitness::TemporalLeakage { future_label_sources, .. }
+            if future_label_sources.len() == 1
+                && future_label_sources.contains_key("subject:later")
+    )));
+}
+
+#[test]
+fn an_impossible_calendar_date_is_not_accepted_as_day_precision() {
+    let values = BTreeMap::from([
+        ("training_decision_time".to_string(), json!("2025-02-29")),
+        (
+            "label_source_time".to_string(),
+            json!({"subject:s1": "2025-03-01"}),
+        ),
+    ]);
+
+    assert!(matches!(
+        oracle::evaluate(&values),
+        Err(FiberError::InvalidOracleTimestamp {
+            field: "training_decision_time",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn mixed_day_and_instant_precision_is_rejected_in_either_direction() {
+    for (cut, label) in [
+        ("2025-01-01", "2025-01-02T00:00:00Z"),
+        ("2025-01-01T00:00:00Z", "2025-01-02"),
+    ] {
+        let values = BTreeMap::from([
+            ("training_decision_time".to_string(), json!(cut)),
+            (
+                "label_source_time".to_string(),
+                json!({"subject:s1": label}),
+            ),
+        ]);
+
+        assert!(matches!(
+            oracle::evaluate(&values),
+            Err(FiberError::IncomparableOracleTimePrecision { .. })
+        ));
+    }
+}
+
+#[test]
+fn malformed_temporal_values_fail_closed_with_a_typed_error() {
+    let invalid_cut = BTreeMap::from([
+        (
+            "training_decision_time".to_string(),
+            json!("not-a-timestamp"),
+        ),
+        (
+            "label_source_time".to_string(),
+            json!({"subject:s1": "2025-01-02T00:00:00Z"}),
+        ),
+    ]);
+
+    assert!(matches!(
+        oracle::evaluate(&invalid_cut),
+        Err(FiberError::InvalidOracleTimestamp {
+            field: "training_decision_time",
+            ..
+        })
+    ));
+
+    let invalid_label_time = BTreeMap::from([
+        (
+            "training_decision_time".to_string(),
+            json!("2025-01-01T00:00:00Z"),
+        ),
+        (
+            "label_source_time".to_string(),
+            json!({"subject:s1": "not-a-timestamp"}),
+        ),
+    ]);
+    assert!(matches!(
+        oracle::evaluate(&invalid_label_time),
+        Err(FiberError::InvalidOracleTimestamp {
+            field: "label_source_time",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn malformed_temporal_field_shapes_fail_closed_as_world_errors() {
+    let invalid_cut = BTreeMap::from([
+        ("training_decision_time".to_string(), json!(42)),
+        (
+            "label_source_time".to_string(),
+            json!({"subject:s1": "2025-01-02T00:00:00Z"}),
+        ),
+    ]);
+    assert!(matches!(
+        oracle::evaluate(&invalid_cut),
+        Err(FiberError::WrongOracleFieldType {
+            field: "training_decision_time",
+            ..
+        })
+    ));
+
+    for label_source_time in [json!("not-an-object"), json!({"subject:s1": 42})] {
+        let invalid_label_shape = BTreeMap::from([
+            (
+                "training_decision_time".to_string(),
+                json!("2025-01-01T00:00:00Z"),
+            ),
+            ("label_source_time".to_string(), label_source_time),
+        ]);
+        assert!(matches!(
+            oracle::evaluate(&invalid_label_shape),
+            Err(FiberError::WrongOracleFieldType {
+                field: "label_source_time",
+                ..
+            })
+        ));
+    }
 }
 
 /// The shadowed-evidence reference fixture: two facts, one variable, document order the tiebreak.

@@ -448,6 +448,58 @@ def test_auto_decision_cycle_covers_every_builtin_domain_and_review_boundaries()
     assert len(calls) == before_review
 
 
+@pytest.mark.parametrize("method", ["run_auto", "run_auto_cycle", "run_auto_replan_cycle"])
+@pytest.mark.parametrize("approval", ["false", 1])
+def test_automatic_semantic_routing_rejects_truthy_non_boolean_approval(method: str, approval: Any) -> None:
+    calls: list[str] = []
+    agent = _agent(calls)
+    options: dict[str, Any] = {
+        "task": "debug this repository implementation",
+        "credentials": {},
+        "model_candidates": [_candidate()],
+        "semantic_routing": True,
+        "approve_provider_call": approval,
+    }
+    if method == "run_auto_replan_cycle":
+        options["evaluator"] = _evaluator([])
+
+    with pytest.raises(BrainRunError, match="approve_provider_call must be a boolean"):
+        getattr(agent, method)(**options)
+
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("method", "approval_options", "message"),
+    [
+        ("run", {"approve_provider_call": "false"}, "approve_provider_call"),
+        ("run_tool_loop", {"approve_provider_call": 1}, "approve_provider_call"),
+        ("run_mission", {"approve_provider_call": "false"}, "approve_provider_call"),
+        ("run_mission", {"approve_mission_dispatch": 1}, "approve_mission_dispatch"),
+    ],
+)
+def test_brain_provider_and_mission_approvals_require_booleans(
+    method: str, approval_options: dict[str, Any], message: str
+) -> None:
+    calls: list[str] = []
+    brain = _agent(calls).brain
+    options: dict[str, Any] = {
+        "task": "debug this repository implementation",
+        "model_selection": {},
+        "prompt": {},
+        "plan": {},
+        "credentials": {},
+        **approval_options,
+    }
+    if method == "run_mission":
+        options["mission_policy"] = {}
+
+    with pytest.raises(BrainRunError, match=message):
+        getattr(brain, method)(**options)
+
+    assert calls == []
+
+
 def test_auto_decision_cycle_rehydrates_private_result_without_reinvoking_provider() -> None:
     calls: list[str] = []
     agent = _agent(calls)

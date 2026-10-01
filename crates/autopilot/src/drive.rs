@@ -6,7 +6,9 @@
 //! same boundary the transport uses — and tests supply fakes. This crate never links the MCP
 //! server: keeping the dispatcher on the caller's side of the boundary is what lets the whole
 //! kernel stay pure and lets a reviewer read the drive loop as "call [`plan_next_action`],
-//! record what came back, repeat".
+//! record what came back, repeat". When Rust unwinding is enabled, a panic from the dispatch seam
+//! is retained as an undelivered attempt and stops with an unknown outcome; aborting panic
+//! strategies cannot be recovered this way.
 //!
 //! # Where reconciliation comes from
 //!
@@ -33,6 +35,7 @@ use crate::report::{build_autopilot_report, FinalDisposition, FinalStatus};
 use crate::schedule::AutopilotWait;
 use bioprism_devplat::reconcile_domain_workflow;
 use serde_json::{json, Value};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// The one effect this crate performs, supplied by the caller.
 ///
@@ -40,6 +43,8 @@ use serde_json::{json, Value};
 /// mission report JSON, or an error string when no report exists at all. Implemented for any
 /// `FnMut(&Value) -> Result<Value, String>`.
 pub trait MissionDispatch {
+    /// A panic is treated as an undelivered dispatch while unwinding is enabled, because side
+    /// effects may have occurred before the panic.
     fn dispatch(&mut self, mission: &Value) -> Result<Value, String>;
 }
 
@@ -57,6 +62,21 @@ where
 pub struct DriveOutcome {
     pub final_status: FinalStatus,
     pub report: Value,
+}
+
+/// Per-invocation bounds and caller-owned retry waiting for a chunked drive.
+pub struct BoundedDriveOptions<W> {
+    max_dispatches_this_call: usize,
+    waiter: W,
+}
+
+impl<W> BoundedDriveOptions<W> {
+    pub fn new(max_dispatches_this_call: usize, waiter: W) -> Self {
+        Self {
+            max_dispatches_this_call,
+            waiter,
+        }
+    }
 }
 
 fn lift_auto_attached_reconciliation(report: &Value) -> Option<Value> {
@@ -175,7 +195,9 @@ fn drive_loop<
     dispatcher: &mut D,
     waiter: &mut W,
     checkpoint: &mut C,
+    max_dispatches_this_call: Option<usize>,
 ) -> Result<DriveOutcome, AutopilotError> {
+    let dispatches_at_start = history.dispatches_used();
     let disposition = loop {
         match plan_next_action(grant, &history)? {
             NextAction::DispatchFull { mission, .. } => {
@@ -184,6 +206,12 @@ fn drive_loop<
                 {
                     break FinalDisposition::Exhausted {
                         accounting: reconciliation_unavailable_accounting(grant, &history),
+                    };
+                }
+                if invocation_limit_reached(max_dispatches_this_call, dispatches_at_start, &history)
+                {
+                    break FinalDisposition::Paused {
+                        continuation: continuation_detail(grant, &history),
                     };
                 }
                 dispatch_once(
@@ -196,6 +224,12 @@ fn drive_loop<
                 checkpoint(&history)?;
             }
             NextAction::DispatchRepair { mission, .. } => {
+                if invocation_limit_reached(max_dispatches_this_call, dispatches_at_start, &history)
+                {
+                    break FinalDisposition::Paused {
+                        continuation: continuation_detail(grant, &history),
+                    };
+                }
                 let delay = grant.schedule().delay_for_retry(history.dispatches_used());
                 if delay > 0 {
                     waiter
@@ -217,12 +251,18 @@ fn drive_loop<
             NextAction::StopExhausted { accounting } => {
                 break FinalDisposition::Exhausted { accounting };
             }
+            NextAction::StopOutcomeUnknown { outcome_unknown } => {
+                break FinalDisposition::OutcomeUnknown { outcome_unknown };
+            }
             NextAction::StopRefused {
                 first_terminal_refusal,
             } => {
                 break FinalDisposition::Refused {
                     first_terminal_refusal,
                 };
+            }
+            NextAction::StopRepairRefused { refusal } => {
+                break FinalDisposition::RepairRefused { refusal };
             }
         }
     };
@@ -231,6 +271,43 @@ fn drive_loop<
         final_status: disposition.status(),
         report,
     })
+}
+
+fn invocation_limit_reached(
+    maximum: Option<usize>,
+    dispatches_at_start: usize,
+    history: &DriveHistory,
+) -> bool {
+    maximum.is_some_and(|maximum| {
+        history
+            .dispatches_used()
+            .saturating_sub(dispatches_at_start)
+            >= maximum
+    })
+}
+
+fn continuation_detail(grant: &AutonomyGrant, history: &DriveHistory) -> Value {
+    json!({
+        "reason": "invocation_dispatch_limit",
+        "attempts_used": history.dispatches_used(),
+        "max_attempts": grant.max_attempts(),
+        "remaining_dispatch_budget": grant.max_attempts().saturating_sub(history.dispatches_used()),
+        "resume_required": true,
+        "private_attempt_material_required": true,
+    })
+}
+
+fn validate_invocation_dispatch_limit(
+    grant: &AutonomyGrant,
+    max_dispatches_this_call: usize,
+) -> Result<(), AutopilotError> {
+    if max_dispatches_this_call == 0 || max_dispatches_this_call > grant.max_attempts() {
+        return Err(AutopilotError::InvalidInvocationDispatchLimit {
+            value: max_dispatches_this_call,
+            maximum: grant.max_attempts(),
+        });
+    }
+    Ok(())
 }
 
 fn no_checkpoint(_: &DriveHistory) -> Result<(), AutopilotError> {
@@ -248,13 +325,25 @@ fn dispatch_once<D: MissionDispatch>(
     dispatcher: &mut D,
     history: &mut DriveHistory,
 ) -> Result<(), AutopilotError> {
-    let attempt = match dispatcher.dispatch(&mission) {
-        Ok(report) => {
-            let (reconciliation, note) =
-                reconciliation_for_attempt(kind, &mission, &report, instantiation);
-            AttemptRecord::delivered(kind, mission, report, reconciliation, note)?
+    let dispatched = catch_unwind(AssertUnwindSafe(|| dispatcher.dispatch(&mission)));
+    let attempt = match dispatched {
+        Err(_) => AttemptRecord::undelivered(
+            kind,
+            mission,
+            "mission dispatcher panicked; dispatch outcome is unknown".into(),
+        )?,
+        Ok(Ok(report)) => {
+            let attempt = AttemptRecord::delivered(kind, mission, report, None, None)?;
+            match (attempt.report_validation_error(), attempt.report()) {
+                (None, Some(report)) => {
+                    let (reconciliation, note) =
+                        reconciliation_for_attempt(kind, attempt.mission(), report, instantiation);
+                    attempt.with_reconciliation(reconciliation, note)
+                }
+                _ => attempt,
+            }
         }
-        Err(error) => AttemptRecord::undelivered(kind, mission, error)?,
+        Ok(Err(error)) => AttemptRecord::undelivered(kind, mission, error)?,
     };
     history.push(attempt);
     Ok(())
@@ -309,6 +398,7 @@ where
         dispatcher,
         &mut waiter,
         &mut checkpoint,
+        None,
     )
 }
 
@@ -361,6 +451,7 @@ where
         dispatcher,
         &mut waiter,
         &mut checkpoint,
+        None,
     )
 }
 
@@ -413,6 +504,43 @@ where
         dispatcher,
         &mut waiter,
         &mut checkpoint,
+        None,
+    )
+}
+
+/// Drive an accepted instantiation for at most `max_dispatches_this_call` new dispatches.
+///
+/// If another dispatch remains after that bound, the report ends with `final_status: "paused"`.
+/// The checkpoint callback receives the full private history after each dispatch; callers can
+/// seal it and persist the private attempt records separately before returning the continuation
+/// to their client.
+pub fn drive_instantiation_bounded<D, W, C>(
+    grant: &AutonomyGrant,
+    instantiation: &Value,
+    dispatcher: &mut D,
+    options: BoundedDriveOptions<W>,
+    mut checkpoint: C,
+) -> Result<DriveOutcome, AutopilotError>
+where
+    D: MissionDispatch,
+    W: AutopilotWait,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+{
+    let BoundedDriveOptions {
+        max_dispatches_this_call,
+        mut waiter,
+    } = options;
+    validate_invocation_dispatch_limit(grant, max_dispatches_this_call)?;
+    let base_mission = instantiation_mission(instantiation)?;
+    let history = DriveHistory::new(base_mission)?;
+    drive_loop(
+        grant,
+        history,
+        Some(instantiation),
+        dispatcher,
+        &mut waiter,
+        &mut checkpoint,
+        Some(max_dispatches_this_call),
     )
 }
 
@@ -465,6 +593,45 @@ where
         dispatcher,
         &mut waiter,
         &mut checkpoint,
+        None,
+    )
+}
+
+/// Resume an accepted instantiation for a bounded number of additional dispatches.
+///
+/// The sealed metadata checkpoint and caller-rehydrated private attempt records are validated
+/// before the planner can authorize another dispatch. If the per-call cap is reached while the
+/// plan remains actionable, this returns a sealed paused report so the caller can persist the
+/// next checkpoint and invoke this function again.
+pub fn resume_instantiation_bounded<D, W, C>(
+    grant: &AutonomyGrant,
+    checkpoint_snapshot: &Value,
+    instantiation: &Value,
+    attempts: Vec<AttemptRecord>,
+    dispatcher: &mut D,
+    options: BoundedDriveOptions<W>,
+    mut checkpoint: C,
+) -> Result<DriveOutcome, AutopilotError>
+where
+    D: MissionDispatch,
+    W: AutopilotWait,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+{
+    let BoundedDriveOptions {
+        max_dispatches_this_call,
+        mut waiter,
+    } = options;
+    validate_invocation_dispatch_limit(grant, max_dispatches_this_call)?;
+    let base_mission = instantiation_mission(instantiation)?;
+    let history = restore_drive_history(grant, checkpoint_snapshot, base_mission, attempts)?;
+    drive_loop(
+        grant,
+        history,
+        Some(instantiation),
+        dispatcher,
+        &mut waiter,
+        &mut checkpoint,
+        Some(max_dispatches_this_call),
     )
 }
 

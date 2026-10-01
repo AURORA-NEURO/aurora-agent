@@ -161,7 +161,10 @@ fn a_total_field_path_satisfies_all_three_lens_laws() {
     ];
     let report = check_laws(&lens, &corpus).expect("checkable");
 
-    assert!(report.lawful(), "field paths are the well-behaved case: {report:?}");
+    assert!(
+        report.lawful(),
+        "field paths are the well-behaved case: {report:?}"
+    );
     assert!(report.applicability().holds());
 }
 

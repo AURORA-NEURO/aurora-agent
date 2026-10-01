@@ -7,8 +7,9 @@
 //! itself is the autopilot crate's design, and this figure follows that document, not the
 //! blueprint.)
 //!
-//! An attempt without a parsed mission report is drawn as "no report", never as a failure: an
-//! undelivered dispatch leaves the outcome unknown at mission level, and unknown is not failed.
+//! An attempt without a parsed mission report is drawn as "no report" or "invalid report",
+//! never as a failure: an undelivered dispatch or malformed reply leaves the outcome unknown at
+//! mission level, and unknown is not failed.
 //!
 //! The caption's "attempts used N of M" is cross-checked against the attempts it draws below it,
 //! the way the baseline panel cross-checks `admissible` against the verdict fields it is defined
@@ -37,16 +38,20 @@ struct Attempt {
     kind: String,
     mission_status: Option<String>,
     transport_error: bool,
+    invalid_report: bool,
 }
 
 /// Render the drive-receipt sequence from an autopilot report document.
 pub fn autopilot_drive(input: &Value) -> Result<String, FigureError> {
     let final_status = str_field(input, "", "final_status")?;
-    if !matches!(final_status, "succeeded" | "exhausted" | "refused") {
+    if !matches!(
+        final_status,
+        "succeeded" | "exhausted" | "outcome_unknown" | "refused" | "paused"
+    ) {
         return Err(FigureError::Inconsistent {
             reason: format!(
                 "final_status is `{final_status}`, but an autopilot report may only end \
-                 succeeded, exhausted, or refused"
+                 succeeded, exhausted, outcome_unknown, refused, or paused"
             ),
         });
     }
@@ -85,11 +90,30 @@ pub fn autopilot_drive(input: &Value) -> Result<String, FigureError> {
                 })
             }
         };
+        let invalid_report = match attempt.get("report_validation_error") {
+            None | Some(Value::Null) => false,
+            Some(Value::String(error)) if !error.is_empty() => true,
+            Some(Value::String(_)) => false,
+            Some(_) => {
+                return Err(FigureError::WrongType {
+                    field: path(&parent, "report_validation_error"),
+                    expected: "a non-empty string or null",
+                })
+            }
+        };
+        if invalid_report && (mission_status.is_some() || transport_error) {
+            return Err(FigureError::Inconsistent {
+                reason: format!(
+                    "{parent} cannot have a parsed outcome or transport error and an invalid report"
+                ),
+            });
+        }
         attempts.push(Attempt {
             index: attempt_index,
             kind,
             mission_status,
             transport_error,
+            invalid_report,
         });
     }
 
@@ -148,7 +172,13 @@ pub fn autopilot_drive(input: &Value) -> Result<String, FigureError> {
         let x = 16.0 + col as f64 * X_PITCH;
         let y = BOXES_TOP + row as f64 * Y_PITCH;
         if col > 0 {
-            body.push_str(&label_middle(x - 11.0, y + BOX_H / 2.0 + 4.0, 12.0, MUTED, "→"));
+            body.push_str(&label_middle(
+                x - 11.0,
+                y + BOX_H / 2.0 + 4.0,
+                12.0,
+                MUTED,
+                "→",
+            ));
         }
         let style = match &attempt.mission_status {
             Some(status) if status == "succeeded" => {
@@ -177,9 +207,14 @@ pub fn autopilot_drive(input: &Value) -> Result<String, FigureError> {
                     &truncate_chars(status, 22),
                 ));
             }
-            None => {
-                body.push_str(&label_italic(x + 8.0, y + 33.0, 10.5, MUTED, "no report"));
-            }
+            None if attempt.invalid_report => body.push_str(&label_italic(
+                x + 8.0,
+                y + 33.0,
+                10.5,
+                MUTED,
+                "invalid report",
+            )),
+            None => body.push_str(&label_italic(x + 8.0, y + 33.0, 10.5, MUTED, "no report")),
         }
         if attempt.transport_error {
             body.push_str(&label_italic(
@@ -188,6 +223,14 @@ pub fn autopilot_drive(input: &Value) -> Result<String, FigureError> {
                 9.5,
                 MUTED,
                 "outcome unknown (transport)",
+            ));
+        } else if attempt.invalid_report {
+            body.push_str(&label_italic(
+                x + 8.0,
+                y + 47.0,
+                9.5,
+                MUTED,
+                "outcome unknown",
             ));
         }
     }

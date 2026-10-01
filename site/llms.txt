@@ -3,9 +3,9 @@
 > A local Model Context Protocol (MCP) server built on FIBER, a decision context compiler.
 > A typed decision query is compiled into the smallest decision-sufficient evidence region,
 > delivered as a Decision Section plus a Context Certificate stating exactly what was omitted
-> and whether the omission could have changed the decision. Rust workspace, 79 crates
-> (engine crates prefixed bioprism-), 259 MCP tools, Apache-2.0, fully local: no network
-> access, no data collection.
+> and whether the omission could have changed the decision. Rust workspace, 88 crates
+> (engine crates prefixed bioprism-), 983 MCP tools, Apache-2.0, local-first with no telemetry or
+> background network activity; explicit source HTTP is denied by default and needs operator and plan opt-in.
 
 Key measured facts:
 - Reference world: 761 facts; FIBER compiles the query to 11 facts (1.45%) and the

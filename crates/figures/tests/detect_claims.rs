@@ -249,11 +249,24 @@ fn a_document_declaring_a_schema_whose_required_keys_are_absent_is_refused() {
         classify(&dossier_liar),
         Err(FigureError::Inconsistent { .. })
     ));
-    let autopilot_liar = json!({ "schema": "bioprism-autopilot/report/0.1" });
-    assert!(matches!(
-        classify(&autopilot_liar),
-        Err(FigureError::Inconsistent { .. })
-    ));
+    for schema in [
+        "bioprism-autopilot/report/0.7",
+        "bioprism-autopilot/report/0.6",
+        "bioprism-autopilot/report/0.5",
+        "bioprism-autopilot/report/0.4",
+        "bioprism-autopilot/report/0.3",
+        "bioprism-autopilot/report/0.2",
+        "bioprism-autopilot/report/0.1",
+    ] {
+        let autopilot_liar = json!({ "schema": schema });
+        assert!(
+            matches!(
+                classify(&autopilot_liar),
+                Err(FigureError::Inconsistent { .. })
+            ),
+            "declaring {schema} requires the autopilot report shape"
+        );
+    }
 }
 
 #[test]

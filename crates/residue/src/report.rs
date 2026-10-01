@@ -3,8 +3,8 @@
 //! # Why there is no single percentage here
 //!
 //! `docs/COVERAGE.md` reports one figure and spends four sections explaining what it does not mean.
-//! A residue register invites the same collapse — *eighty-four left, seventy explained, that is
-//! most of it* — and the collapse destroys the distinction the whole crate is built on. Four of the
+//! A residue register invites the same collapse — *the headline is up, so the hard work is done* —
+//! and the collapse destroys the distinction the whole crate is built on. Four of the
 //! five verdicts mean the module will **never** move; one means it still can. Averaging them gives
 //! a number that improves when somebody reclassifies work as prose.
 //!

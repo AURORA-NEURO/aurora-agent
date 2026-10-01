@@ -7160,6 +7160,8 @@ class AutonomousBrain:
     ) -> BrainRunResult:
         if not isinstance(task, str) or not task.strip():
             raise BrainRunError("task must be a non-empty string")
+        if not isinstance(approve_provider_call, bool):
+            raise BrainRunError("approve_provider_call must be a boolean")
         if not isinstance(tools, Sequence) or isinstance(tools, (str, bytes)):
             raise BrainRunError("tools must be a sequence")
         if any(not isinstance(tool, ProviderTool) for tool in tools):
@@ -7425,6 +7427,10 @@ class AutonomousBrain:
         runtime never do so implicitly.
         """
 
+        if not isinstance(approve_provider_call, bool):
+            raise BrainRunError("approve_provider_call must be a boolean")
+        if not isinstance(approve_mission_dispatch, bool):
+            raise BrainRunError("approve_mission_dispatch must be a boolean")
         if authorize_and_execute is not None and not callable(authorize_and_execute):
             raise BrainRunError("authorize_and_execute must be callable")
         if attempt_state is not None and not isinstance(attempt_state, dict):
@@ -8100,6 +8106,10 @@ class AutonomousBrain:
         are not accepted from the model response.
         """
 
+        if not isinstance(approve_provider_call, bool):
+            raise BrainRunError("approve_provider_call must be a boolean")
+        if not isinstance(approve_mission_dispatch, bool):
+            raise BrainRunError("approve_mission_dispatch must be a boolean")
         if not isinstance(mission_policy, (MissionPolicy, Mapping)):
             raise BrainRunError("mission_policy must be a MissionPolicy or mapping")
         policy = (

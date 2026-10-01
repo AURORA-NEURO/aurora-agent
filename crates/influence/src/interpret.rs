@@ -99,11 +99,14 @@ pub fn interpret(
     schedule: RefinementSchedule,
 ) -> Result<Result<AbstractInterpretation, UnknownReason>, InfluenceError> {
     let selected = registry.get(domain_id).map_err(InfluenceError::Domain)?;
-    if selected.abstracts() != FactClass::AnswerDisplacement || domain_id.as_str() != DISPLACEMENT_DOMAIN
+    if selected.abstracts() != FactClass::AnswerDisplacement
+        || domain_id.as_str() != DISPLACEMENT_DOMAIN
     {
-        return Err(InfluenceError::Domain(DomainError::NoTransformerForDomain {
-            id: domain_id.clone(),
-        }));
+        return Err(InfluenceError::Domain(
+            DomainError::NoTransformerForDomain {
+                id: domain_id.clone(),
+            },
+        ));
     }
 
     let system = match gibbs::comparison_system(region, factor_ids, perturbation)? {
@@ -114,12 +117,14 @@ pub fn interpret(
     let inner = DisplacementDomain;
     let product = ProductDomain::new(inner, system.sites().len());
     let seed: Vec<Displacement> = vec![
-        Displacement::exactly(0.0).expect("zero is an admissible displacement");
+        Displacement::exactly(0.0)
+            .expect("zero is an admissible displacement");
         system.sites().len()
     ];
 
-    let fixed_point = solver::solve_from(&product, seed, |state| transfer(&system, state), schedule)
-        .map_err(InfluenceError::Domain)?;
+    let fixed_point =
+        solver::solve_from(&product, seed, |state| transfer(&system, state), schedule)
+            .map_err(InfluenceError::Domain)?;
 
     let value = read_out(&system, &fixed_point.value);
     let state: Vec<(String, Displacement)> = system
@@ -196,7 +201,8 @@ pub fn transfer(system: &ComparisonSystem, state: &[Displacement]) -> Vec<Displa
                 if *coefficient == 0.0 {
                     continue;
                 }
-                accumulated = displacement::add(accumulated, displacement::scale(*value, *coefficient));
+                accumulated =
+                    displacement::add(accumulated, displacement::scale(*value, *coefficient));
             }
             accumulated
         })

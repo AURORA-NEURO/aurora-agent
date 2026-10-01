@@ -492,8 +492,14 @@ fn remaining_quantity_accounts_for_every_draw_and_the_consumption() {
             .expect("section inserts");
     }
 
-    assert_eq!(with_consumption.drawn_from(&sid("blk-1")).unwrap().amount, 4.0);
-    assert_eq!(with_consumption.remaining(&sid("blk-1")).unwrap().amount, 5.0);
+    assert_eq!(
+        with_consumption.drawn_from(&sid("blk-1")).unwrap().amount,
+        4.0
+    );
+    assert_eq!(
+        with_consumption.remaining(&sid("blk-1")).unwrap().amount,
+        5.0
+    );
     assert!(with_consumption.validate().is_empty());
 }
 

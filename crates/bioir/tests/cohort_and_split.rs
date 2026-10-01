@@ -56,8 +56,7 @@ fn cohort(unit: UnitOfAnalysis, grouping: GroupingKey) -> CohortDefinition {
 }
 
 fn adult(id: &str, who: &str, site: &str, index: &str) -> Observation {
-    Observation::new(oid(id), subject(who), site, ts(index))
-        .with_attribute("age", json!(54))
+    Observation::new(oid(id), subject(who), site, ts(index)).with_attribute("age", json!(54))
 }
 
 #[test]
@@ -104,10 +103,9 @@ fn a_split_by_site_that_separates_one_subjects_repeated_measures_is_still_invali
 
     let findings = plan.validate(&definition, &assembly, &frame, None);
     assert!(
-        findings.iter().all(|finding| !matches!(
-            finding,
-            LeakageFinding::GroupSeparated { .. }
-        )),
+        findings
+            .iter()
+            .all(|finding| !matches!(finding, LeakageFinding::GroupSeparated { .. })),
         "the site split honours every site"
     );
     assert!(
@@ -174,10 +172,9 @@ fn declaring_repeated_measures_independent_keeps_the_duplicate_structure_visible
         LeakageFinding::RepeatedMeasuresDeclaredIndependent { .. }
     )));
     assert!(
-        findings.iter().all(|finding| !matches!(
-            finding,
-            LeakageFinding::RepeatedMeasuresSeparated { .. }
-        )),
+        findings
+            .iter()
+            .all(|finding| !matches!(finding, LeakageFinding::RepeatedMeasuresSeparated { .. })),
         "the declaration is honoured, not overruled"
     );
 }
@@ -207,7 +204,10 @@ fn a_frame_declared_one_row_per_subject_reports_the_subject_that_has_two() {
 
 #[test]
 fn a_single_row_per_subject_frame_split_by_subject_has_no_findings() {
-    let definition = cohort(UnitOfAnalysis::Subject, GroupingKey::by([SplitUnit::Subject]));
+    let definition = cohort(
+        UnitOfAnalysis::Subject,
+        GroupingKey::by([SplitUnit::Subject]),
+    );
     let frame = vec![
         adult("obs-1", "pt-1", "site-a", "2026-01-05T00:00:00Z"),
         adult("obs-2", "pt-2", "site-b", "2026-01-06T00:00:00Z"),
@@ -223,7 +223,10 @@ fn a_single_row_per_subject_frame_split_by_subject_has_no_findings() {
 
 #[test]
 fn splitting_on_observations_while_grouping_by_subject_is_refused_before_any_data() {
-    let definition = cohort(UnitOfAnalysis::Observation, GroupingKey::by([SplitUnit::Subject]));
+    let definition = cohort(
+        UnitOfAnalysis::Observation,
+        GroupingKey::by([SplitUnit::Subject]),
+    );
     let plan = SplitPlan::new(SplitUnit::Observation);
     assert_eq!(
         plan.validate_declaration(&definition),
@@ -237,7 +240,10 @@ fn splitting_on_observations_while_grouping_by_subject_is_refused_before_any_dat
 
 #[test]
 fn splitting_by_site_under_a_subject_grouping_is_not_a_declaration_error() {
-    let definition = cohort(UnitOfAnalysis::Observation, GroupingKey::by([SplitUnit::Subject]));
+    let definition = cohort(
+        UnitOfAnalysis::Observation,
+        GroupingKey::by([SplitUnit::Subject]),
+    );
     let plan = SplitPlan::new(SplitUnit::Site);
     assert_eq!(
         plan.validate_declaration(&definition),
@@ -264,9 +270,14 @@ fn exclusion_counts_partition_the_screened_frame() {
             .with_attribute("prior_radiation", json!(false)),
         adult("obs-2", "pt-2", "site-a", "2026-01-06T00:00:00Z")
             .with_attribute("prior_radiation", json!(true)),
-        Observation::new(oid("obs-3"), subject("pt-3"), "site-b", ts("2026-01-07T00:00:00Z"))
-            .with_attribute("age", json!(11))
-            .with_attribute("prior_radiation", json!(false)),
+        Observation::new(
+            oid("obs-3"),
+            subject("pt-3"),
+            "site-b",
+            ts("2026-01-07T00:00:00Z"),
+        )
+        .with_attribute("age", json!(11))
+        .with_attribute("prior_radiation", json!(false)),
     ];
 
     let assembly = definition.assemble(&frame).expect("rules execute");
@@ -289,8 +300,14 @@ fn a_missing_attribute_makes_eligibility_undecidable_rather_than_false() {
 
     let assembly = definition.assemble(&frame).expect("rules execute");
     assert!(assembly.included.is_empty());
-    assert!(assembly.excluded.is_empty(), "an unknown age is not an exclusion");
-    assert_eq!(assembly.undecidable.get(&oid("obs-1")), Some(&"adult".to_string()));
+    assert!(
+        assembly.excluded.is_empty(),
+        "an unknown age is not an exclusion"
+    );
+    assert_eq!(
+        assembly.undecidable.get(&oid("obs-1")),
+        Some(&"adult".to_string())
+    );
     assert!(assembly.reconciles());
 }
 
@@ -412,7 +429,7 @@ fn aliquots_of_one_block_split_across_folds_are_found_through_the_lineage_graph(
 fn omitting_the_lineage_graph_is_reported_rather_than_passed_over() {
     let definition = cohort(UnitOfAnalysis::Specimen, GroupingKey::default());
     let frame = vec![
-        adult("obs-1", "pt-1", "site-a", "2026-01-05T00:00:00Z").with_specimen(sid("blk-1.s1")),
+        adult("obs-1", "pt-1", "site-a", "2026-01-05T00:00:00Z").with_specimen(sid("blk-1.s1"))
     ];
     let assembly = definition.assemble(&frame).expect("rules execute");
     let plan = SplitPlan::new(SplitUnit::Specimen).assign(oid("obs-1"), "train");
@@ -473,8 +490,13 @@ fn a_fold_assignment_for_an_excluded_record_is_reported() {
     let definition = cohort(UnitOfAnalysis::Subject, GroupingKey::default());
     let frame = vec![
         adult("obs-1", "pt-1", "site-a", "2026-01-05T00:00:00Z"),
-        Observation::new(oid("obs-2"), subject("pt-2"), "site-a", ts("2026-01-06T00:00:00Z"))
-            .with_attribute("age", json!(9)),
+        Observation::new(
+            oid("obs-2"),
+            subject("pt-2"),
+            "site-a",
+            ts("2026-01-06T00:00:00Z"),
+        )
+        .with_attribute("age", json!(9)),
     ];
     let assembly = definition.assemble(&frame).expect("rules execute");
     let plan = SplitPlan::new(SplitUnit::Subject)

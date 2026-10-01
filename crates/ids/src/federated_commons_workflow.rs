@@ -205,9 +205,7 @@ impl IdsFederatedCommonsReceipt10 {
     }
     pub fn digest(&self) -> Result<ContentHash, FederatedCommonsError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| FederatedCommonsError::Report(error.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|error| FederatedCommonsError::Report(error.to_string()))
     }
 }

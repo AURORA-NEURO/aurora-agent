@@ -609,13 +609,7 @@ fn invalid_compatibility_floors_are_refused_instead_of_emptying_the_model_set() 
     let pool = pool_of(&[("evidence", [0.9, 0.1])]);
 
     assert!(matches!(
-        identification(
-            &problem,
-            &prior,
-            &pool,
-            0.0,
-            1.1,
-        ),
+        identification(&problem, &prior, &pool, 0.0, 1.1,),
         Err(EpistemicError::InadmissibleCompatibilityFloor { .. })
     ));
 }
@@ -624,10 +618,11 @@ fn invalid_compatibility_floors_are_refused_instead_of_emptying_the_model_set() 
 fn deserialized_evidence_items_are_revalidated_before_they_affect_a_frontier() {
     let problem = two_model_problem();
     let prior = Belief::uniform(2).expect("uniform");
-    let mut raw = serde_json::to_value(pool_of(&[("evidence", [0.9, 0.1])]))
-        .expect("pool serializes");
+    let mut raw =
+        serde_json::to_value(pool_of(&[("evidence", [0.9, 0.1])])).expect("pool serializes");
     raw["items"][0]["cost"] = json!(-1.0);
-    let pool: EvidencePool = serde_json::from_value(raw).expect("serde can construct the wire value");
+    let pool: EvidencePool =
+        serde_json::from_value(raw).expect("serde can construct the wire value");
 
     assert!(matches!(
         frontier(

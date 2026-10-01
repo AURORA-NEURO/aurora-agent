@@ -12,13 +12,13 @@
 //! receipt streams — asserted by tests, not claimed.
 
 use crate::cancel::CancelState;
-use crate::capability::{Capability, CapabilitySet};
+use crate::capability::CapabilitySet;
 use crate::digest::sha256;
 use crate::envelope::{Completion, DispatchJob, Outcome, Receipt, TaskEnvelope, Terminal};
 use crate::exec::{Driver, Enqueue};
 use crate::ids::{AgentId, IdempotencyKey, ShardId, TaskId};
 use crate::lease::{ExpiredLease, LeaseError, LeaseHandle, LeaseTable};
-use crate::queue::{Backpressure, BoundedQueue};
+use crate::queue::{Backpressure, BackpressureResource, BoundedQueue};
 use crate::quota::{QuotaLedger, QuotaSpec};
 use crate::retry::{RetryDecision, RetryPolicy};
 use crate::router::{AgentState, Router};
@@ -32,6 +32,8 @@ pub struct FabricConfig {
     pub shards: u64,
     /// Capacity of each shard's ready queue.
     pub per_shard_queue_cap: usize,
+    /// Maximum number of admitted tasks across ready queues, retries, and execution.
+    pub max_pending_tasks: usize,
     /// Global ceiling on simultaneously executing attempts.
     pub max_in_flight: usize,
     pub default_lease_ttl_ticks: u64,
@@ -46,6 +48,7 @@ impl Default for FabricConfig {
         Self {
             shards: 8,
             per_shard_queue_cap: 256,
+            max_pending_tasks: 4096,
             max_in_flight: 128,
             default_lease_ttl_ticks: 32,
             retry: RetryPolicy::default(),
@@ -71,16 +74,16 @@ impl fmt::Debug for Submission {
     }
 }
 
-struct TaskMeta {
-    env: TaskEnvelope,
-    submitted_tick: u64,
-    attempts_done: u32,
-    last_agent: Option<AgentId>,
-    cancel_requested: bool,
-    key: IdempotencyKey,
+pub(crate) struct TaskMeta {
+    pub(crate) env: TaskEnvelope,
+    pub(crate) submitted_tick: u64,
+    pub(crate) attempts_done: u32,
+    pub(crate) last_agent: Option<AgentId>,
+    pub(crate) cancel_requested: bool,
+    pub(crate) key: IdempotencyKey,
 }
 
-struct InFlight {
+pub(crate) struct InFlight {
     agent: AgentId,
     attempt: u32,
     epoch: crate::ids::LeaseEpoch,
@@ -91,6 +94,7 @@ pub struct Metrics {
     pub submitted: u64,
     pub duplicate_submissions: u64,
     pub backpressure_rejections: u64,
+    pub pending_limit_rejections: u64,
     pub admitted: u64,
     pub dispatched: u64,
     pub retried: u64,
@@ -109,6 +113,7 @@ pub struct Metrics {
     pub idempotency_evictions: u64,
     pub cancellations_requested: u64,
     pub ready_high_water: usize,
+    pub pending_high_water: usize,
     pub in_flight_high_water: usize,
 }
 
@@ -129,36 +134,40 @@ pub struct AssignmentSpan {
     pub ended_tick: Option<u64>,
 }
 
-enum QueueEntry {
+pub(crate) enum QueueEntry {
     Ready(TaskId),
 }
 
 /// The fabric itself.
 pub struct Fabric {
-    cfg: FabricConfig,
-    router: Router,
-    queues: Vec<BoundedQueue<QueueEntry>>,
-    leases: LeaseTable,
-    quotas: QuotaLedger,
-    cancels: CancelState,
-    idem: BTreeMap<IdempotencyKey, TaskId>,
-    tasks: BTreeMap<TaskId, TaskMeta>,
-    retry_heap: std::collections::BinaryHeap<std::cmp::Reverse<(u64, u64, TaskId)>>,
-    in_flight: BTreeMap<TaskId, InFlight>,
-    busy_agents: BTreeSet<AgentId>,
-    receipts: std::collections::VecDeque<Receipt>,
-    assignments: Vec<AssignmentSpan>,
-    driver: Box<dyn Driver>,
-    metrics: Metrics,
-    clock: u64,
-    next_task: u64,
-    seq: u64,
-    shard_cursor: usize,
-    record_assignments: bool,
+    pub(crate) cfg: FabricConfig,
+    pub(crate) router: Router,
+    pub(crate) queues: Vec<BoundedQueue<QueueEntry>>,
+    pub(crate) leases: LeaseTable,
+    pub(crate) quotas: QuotaLedger,
+    pub(crate) cancels: CancelState,
+    pub(crate) idem: BTreeMap<IdempotencyKey, TaskId>,
+    pub(crate) tasks: BTreeMap<TaskId, TaskMeta>,
+    pub(crate) retry_heap: std::collections::BinaryHeap<std::cmp::Reverse<(u64, u64, TaskId)>>,
+    pub(crate) in_flight: BTreeMap<TaskId, InFlight>,
+    pub(crate) busy_agents: BTreeSet<AgentId>,
+    pub(crate) receipts: std::collections::VecDeque<Receipt>,
+    pub(crate) assignments: Vec<AssignmentSpan>,
+    pub(crate) driver: Box<dyn Driver>,
+    pub(crate) metrics: Metrics,
+    pub(crate) clock: u64,
+    pub(crate) next_task: u64,
+    pub(crate) seq: u64,
+    pub(crate) shard_cursor: usize,
+    pub(crate) record_assignments: bool,
 }
 
 impl Fabric {
     pub fn new(cfg: FabricConfig, driver: Box<dyn Driver>, cancels: CancelState) -> Self {
+        assert!(
+            cfg.max_pending_tasks > 0,
+            "pending-work limit must be positive"
+        );
         let n = cfg.shards;
         let cap = cfg.per_shard_queue_cap;
         Self {
@@ -225,18 +234,22 @@ impl Fabric {
         );
         self.metrics.submitted += 1;
 
-        let derived = IdempotencyKey::derive(
-            crate::ids::mix64(u64::from_be_bytes(
-                sha256(&payload).as_bytes()[..8]
-                    .try_into()
-                    .expect("8 bytes"),
-            )),
-            crate::ids::mix64(caps.primary().map(Capability::as_str).unwrap_or("").len() as u64),
-        );
+        let derived = derive_submission_key(&payload, &caps);
         let key = key.unwrap_or(derived);
         if let Some(existing) = self.idem.get(&key) {
             self.metrics.duplicate_submissions += 1;
             return Submission::Duplicate { task: *existing };
+        }
+
+        if self.tasks.len() >= self.cfg.max_pending_tasks {
+            self.metrics.backpressure_rejections += 1;
+            self.metrics.pending_limit_rejections += 1;
+            return Submission::Rejected {
+                pressure: Backpressure {
+                    capacity: self.cfg.max_pending_tasks,
+                    resource: BackpressureResource::PendingWork,
+                },
+            };
         }
 
         self.next_task += 1;
@@ -265,6 +278,8 @@ impl Fabric {
                 self.idem.insert(key, task);
                 self.tasks.insert(task, meta);
                 self.metrics.admitted += 1;
+                self.metrics.pending_high_water =
+                    self.metrics.pending_high_water.max(self.tasks.len());
                 let queued_total: usize = self.queues.iter().map(BoundedQueue::len).sum();
                 self.metrics.ready_high_water = self.metrics.ready_high_water.max(queued_total);
                 Submission::Accepted { task }
@@ -308,6 +323,7 @@ impl Fabric {
         }
         Err(Backpressure {
             capacity: self.cfg.per_shard_queue_cap,
+            resource: BackpressureResource::ReadyQueue,
         })
     }
 
@@ -732,6 +748,9 @@ impl Fabric {
         MemStats {
             queued_ready: self.queues.iter().map(BoundedQueue::len).sum(),
             queue_capacity_total: self.cfg.per_shard_queue_cap * self.queues.len(),
+            retry_pending: self.retry_heap.len(),
+            pending_tasks: self.tasks.len(),
+            pending_capacity: self.cfg.max_pending_tasks,
             queue_high_water: self.metrics.ready_high_water,
             in_flight: self.in_flight.len(),
             in_flight_high_water: self.metrics.in_flight_high_water,
@@ -742,14 +761,219 @@ impl Fabric {
     pub fn shutdown_driver(&mut self) {
         self.driver.shutdown();
     }
+
+    /// Captures a versioned recovery checkpoint when no attempt still owns a live lease.
+    ///
+    /// Ready and delayed tasks, routing state, quota balances, receipts, and counters are retained.
+    /// Driver completions already available are settled before capture. If an attempt remains in
+    /// flight, the method refuses the checkpoint because its external effect may be uncertain.
+    /// The returned JSON contains task payloads and must be stored with the caller's data controls.
+    pub fn checkpoint(&mut self) -> Result<String, crate::snapshot::SnapshotError> {
+        for completion in self.driver.poll() {
+            self.settle_completion(completion);
+        }
+        if !self.in_flight.is_empty() || self.leases.live() != 0 || !self.busy_agents.is_empty() {
+            return Err(crate::snapshot::SnapshotError::new(
+                "cannot checkpoint while an attempt or lease is active",
+            ));
+        }
+        crate::snapshot::encode(self)
+    }
+
+    /// Restores a checkpoint without dispatching its queued or retrying tasks.
+    ///
+    /// The driver must be constructed with the same dedicated `CancelState` passed here. Restore
+    /// resets that state to the checkpoint's queued cancellations; callers should use a fresh
+    /// cancellation registry for recovery.
+    pub fn from_checkpoint(
+        bytes: &str,
+        driver: Box<dyn Driver>,
+        cancels: CancelState,
+    ) -> Result<Self, crate::snapshot::SnapshotError> {
+        crate::snapshot::decode(bytes, driver, cancels)
+    }
+}
+
+/// Derives an implicit idempotency key from the complete logical submission identity.
+///
+/// The full payload digest and length are included without copying a potentially large payload
+/// into a temporary buffer. Length prefixes make the capability encoding unambiguous, while the
+/// versioned domain separates these keys from other uses of SHA-256 in the fabric. Capabilities
+/// are normalized, sorted, and deduplicated by `CapabilitySet`, so equivalent sets produce the
+/// same key independent of caller spelling or order.
+fn derive_submission_key(payload: &[u8], caps: &CapabilitySet) -> IdempotencyKey {
+    let payload_digest = sha256(payload);
+    let mut preimage = Vec::with_capacity(
+        b"aurora.agent-fabric.submit-idempotency.v1\0".len()
+            + 8
+            + payload_digest.as_bytes().len()
+            + 8
+            + caps.len() * 8
+            + caps.iter().map(|cap| cap.as_str().len()).sum::<usize>(),
+    );
+    preimage.extend_from_slice(b"aurora.agent-fabric.submit-idempotency.v1\0");
+    preimage.extend_from_slice(
+        &u64::try_from(payload.len())
+            .expect("payload size fits the u64 task format")
+            .to_be_bytes(),
+    );
+    preimage.extend_from_slice(payload_digest.as_bytes());
+    preimage.extend_from_slice(
+        &u64::try_from(caps.len())
+            .expect("capability count fits the u64 task format")
+            .to_be_bytes(),
+    );
+    for capability in caps.iter() {
+        let value = capability.as_str().as_bytes();
+        preimage.extend_from_slice(
+            &u64::try_from(value.len())
+                .expect("capability length fits the u64 task format")
+                .to_be_bytes(),
+        );
+        preimage.extend_from_slice(value);
+    }
+
+    let digest = sha256(&preimage);
+    let mut key = [0; 16];
+    key.copy_from_slice(&digest.as_bytes()[..16]);
+    IdempotencyKey::from_bytes(key)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemStats {
     pub queued_ready: usize,
     pub queue_capacity_total: usize,
+    pub retry_pending: usize,
+    pub pending_tasks: usize,
+    pub pending_capacity: usize,
     pub queue_high_water: usize,
     pub in_flight: usize,
     pub in_flight_high_water: usize,
     pub retained_receipts: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cancel::CancelState;
+    use crate::capability::Capability;
+    use crate::envelope::Outcome;
+    use crate::exec::{FnHandler, InlineDriver};
+    use std::sync::Arc;
+
+    fn caps(names: &[&str]) -> CapabilitySet {
+        CapabilitySet::from_caps(
+            names
+                .iter()
+                .map(|name| Capability::parse(name).expect("valid test capability"))
+                .collect(),
+        )
+    }
+
+    fn fabric() -> Fabric {
+        fabric_with_config(FabricConfig::default())
+    }
+
+    fn fabric_with_config(config: FabricConfig) -> Fabric {
+        let cancels = CancelState::new();
+        let driver = InlineDriver::new(
+            Arc::new(FnHandler(|_: &crate::envelope::DispatchJob| {
+                Outcome::Succeeded { result: Vec::new() }
+            })),
+            cancels.clone(),
+        );
+        Fabric::new(config, Box::new(driver), cancels)
+    }
+
+    fn accepted(fabric: &mut Fabric, payload: &[u8], capabilities: CapabilitySet) -> TaskId {
+        match fabric.submit(payload.to_vec(), capabilities, None) {
+            Submission::Accepted { task } => task,
+            other => panic!("expected a new submission, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn implicit_idempotency_key_uses_the_full_payload_and_capability_set() {
+        let mut fabric = fabric();
+        let base = accepted(&mut fabric, b"same-prefix-a", caps(&["compute"]));
+        let distinct_payload = accepted(&mut fabric, b"same-prefix-b", caps(&["compute"]));
+        let distinct_capability = accepted(&mut fabric, b"same-prefix-a", caps(&["storage"]));
+
+        assert_ne!(base, distinct_payload);
+        assert_ne!(base, distinct_capability);
+        assert_eq!(fabric.metrics().duplicate_submissions, 0);
+    }
+
+    #[test]
+    fn implicit_idempotency_key_is_stable_for_equivalent_normalized_capabilities() {
+        let mut fabric = fabric();
+        let original = accepted(
+            &mut fabric,
+            b"same task",
+            caps(&["Genomics.Align", "compute", "compute"]),
+        );
+
+        let replay = fabric.submit(
+            b"same task".to_vec(),
+            caps(&["compute", "genomics.align"]),
+            None,
+        );
+
+        assert!(matches!(replay, Submission::Duplicate { task } if task == original));
+        assert_eq!(fabric.metrics().duplicate_submissions, 1);
+    }
+
+    #[test]
+    fn global_pending_limit_bounds_unroutable_tasks_moved_to_the_retry_heap() {
+        let mut fabric = fabric_with_config(FabricConfig {
+            shards: 1,
+            per_shard_queue_cap: 4,
+            max_pending_tasks: 2,
+            ..FabricConfig::default()
+        });
+        let capabilities = caps(&["unroutable"]);
+        accepted(&mut fabric, b"first", capabilities.clone());
+        accepted(&mut fabric, b"second", capabilities.clone());
+
+        fabric.step_to(0);
+
+        let stats = fabric.memory_stats();
+        assert_eq!(stats.queued_ready, 0);
+        assert_eq!(stats.retry_pending, 2);
+        assert_eq!(stats.pending_tasks, 2);
+        assert_eq!(stats.pending_capacity, 2);
+        assert!(stats.retry_pending <= stats.pending_capacity);
+
+        assert!(matches!(
+            fabric.submit(b"third".to_vec(), capabilities, None),
+            Submission::Rejected {
+                pressure: Backpressure {
+                    capacity: 2,
+                    resource: BackpressureResource::PendingWork,
+                }
+            }
+        ));
+        assert_eq!(fabric.metrics().pending_limit_rejections, 1);
+        assert_eq!(fabric.metrics().backpressure_rejections, 1);
+        assert_eq!(fabric.metrics().pending_high_water, 2);
+    }
+
+    #[test]
+    fn idempotent_replay_is_recognized_even_when_the_pending_limit_is_full() {
+        let mut fabric = fabric_with_config(FabricConfig {
+            max_pending_tasks: 1,
+            ..FabricConfig::default()
+        });
+        let key = IdempotencyKey::from_bytes([7; 16]);
+        let first = match fabric.submit(b"same".to_vec(), caps(&["compute"]), Some(key)) {
+            Submission::Accepted { task } => task,
+            other => panic!("expected acceptance, got {other:?}"),
+        };
+
+        let replay = fabric.submit(b"different".to_vec(), caps(&["storage"]), Some(key));
+
+        assert!(matches!(replay, Submission::Duplicate { task } if task == first));
+        assert_eq!(fabric.metrics().pending_limit_rejections, 0);
+        assert_eq!(fabric.metrics().duplicate_submissions, 1);
+    }
 }

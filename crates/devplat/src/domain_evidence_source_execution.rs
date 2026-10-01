@@ -2,9 +2,10 @@
 //!
 //! The planner deliberately does not fetch anything. This module is the small, auditable
 //! execution kernel that can consume a retained plan without turning a locator into provenance:
-//! local files are confined to a caller-owned root, plain HTTP is opt-in and host-allowlisted,
-//! redirects and HTTPS are refused because this offline workspace has no TLS client, and every
-//! accepted byte stream receives both a raw-byte digest and a bounded JSON response projection.
+//! local files are confined to a caller-owned root, plain HTTP requires both an operator-owned
+//! exact-origin allow-list and a matching caller-plan host allow-list, redirects and HTTPS are
+//! refused because this offline workspace has no TLS client, and every accepted byte stream
+//! receives both a raw-byte digest and a bounded JSON response projection.
 //! Unsupported connector families become explicit `refused` outcomes instead of pretending that
 //! a future provider adapter ran.
 
@@ -13,6 +14,7 @@ use crate::domain_evidence_source::{
 };
 use bioprism_ids::ContentHash;
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -25,6 +27,62 @@ pub const DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION: &str =
 pub const DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW: &str = "domain_evidence_source_execute";
 pub const MAX_DOMAIN_EVIDENCE_SOURCE_EXECUTION_HEADER_BYTES: usize = 64 * 1024;
 pub const MAX_DOMAIN_EVIDENCE_SOURCE_EXECUTION_PREVIEW_BYTES: usize = 1024 * 1024;
+
+/// Operator-owned exact HTTP origins that the source executor may contact.
+///
+/// A retained source plan also carries its own host list, but a plan is caller-controlled data and
+/// cannot authorize its own network access. The effective permission is the intersection of this
+/// set and the plan's host list.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DomainEvidenceSourceHttpPolicy {
+    allowed_origins: BTreeSet<(String, u16)>,
+}
+
+impl DomainEvidenceSourceHttpPolicy {
+    /// Create an operator allow-list from `host` or `host:port` entries. A host without a port
+    /// authorizes only plain HTTP's default port 80. Schemes, paths, credentials, and IPv6
+    /// literals are refused; this connector currently supports only plain HTTP.
+    pub fn new<I, S>(origins: I) -> Result<Self, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut allowed_origins = BTreeSet::new();
+        for origin in origins {
+            let origin = origin.as_ref();
+            if origin.is_empty() || origin.trim() != origin {
+                return Err(
+                    "HTTP origins must be non-empty and have no surrounding whitespace".into(),
+                );
+            }
+            let (host, port) = match origin.rsplit_once(':') {
+                Some((host, port)) if !host.is_empty() && !port.is_empty() => {
+                    let port = port
+                        .parse::<u16>()
+                        .map_err(|_| format!("HTTP origin {origin:?} has an invalid port"))?;
+                    (host, port)
+                }
+                Some(_) => {
+                    return Err(format!(
+                        "HTTP origin {origin:?} has an invalid host or port"
+                    ));
+                }
+                None => (origin, 80),
+            };
+            let host = canonical_http_host(host)
+                .ok_or_else(|| format!("HTTP origin {origin:?} has an invalid host"))?;
+            if port == 0 {
+                return Err(format!("HTTP origin {origin:?} must use a non-zero port"));
+            }
+            allowed_origins.insert((host, port));
+        }
+        Ok(Self { allowed_origins })
+    }
+
+    fn allows(&self, host: &str, port: u16) -> bool {
+        self.allowed_origins.contains(&(host.to_string(), port))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DomainEvidenceSourceExecutionError {
@@ -61,6 +119,24 @@ enum FetchResult {
 pub fn execute_domain_evidence_source(
     root: &Path,
     plan: &Value,
+) -> Result<Value, DomainEvidenceSourceExecutionError> {
+    execute_domain_evidence_source_with_http_policy(
+        root,
+        plan,
+        &DomainEvidenceSourceHttpPolicy::default(),
+    )
+}
+
+/// Execute a retained plan under the embedding server's operator-owned HTTP policy.
+///
+/// HTTP is permitted only when the plan enables networking and names a host that the operator
+/// allow-listed at the exact requested port. The default
+/// [`execute_domain_evidence_source`] entry point installs an empty policy and refuses all
+/// outbound HTTP.
+pub fn execute_domain_evidence_source_with_http_policy(
+    root: &Path,
+    plan: &Value,
+    http_policy: &DomainEvidenceSourceHttpPolicy,
 ) -> Result<Value, DomainEvidenceSourceExecutionError> {
     validate_domain_evidence_source_plan(plan)
         .map_err(|error| DomainEvidenceSourceExecutionError::InvalidPlan(error.to_string()))?;
@@ -119,7 +195,9 @@ pub fn execute_domain_evidence_source(
     } else {
         match (connector_kind, locator_kind) {
             ("file", "path") => fetch_file(root, locator, max_bytes),
-            ("generic_http", "uri") => fetch_http(locator, policy, max_bytes, timeout_ms),
+            ("generic_http", "uri") => {
+                fetch_http(locator, policy, http_policy, max_bytes, timeout_ms)
+            }
             ("file", _) => FetchResult::Refused {
                 reason: "file connector requires locator_kind=path".into(),
             },
@@ -214,7 +292,7 @@ pub fn execute_domain_evidence_source(
         "readiness_claimed": false,
         "guarantees": [
             "accepted local bytes were read under the retained max_bytes bound and confined to the caller-owned root",
-            "accepted network bytes used an explicit enabled policy, exact host allow-list, bounded timeout, and no redirect following",
+            "accepted network bytes used explicit caller and operator allow-lists, a bounded timeout, and no redirect following",
             "raw content and the bounded JSON response projection have separate exact SHA-256 identities"
         ],
         "does_not_claim": [
@@ -301,11 +379,12 @@ fn resolve_file(root: &Path, locator: &str) -> Result<PathBuf, String> {
 
 fn fetch_http(
     locator: &str,
-    policy: &serde_json::Map<String, Value>,
+    retrieval_policy: &serde_json::Map<String, Value>,
+    http_policy: &DomainEvidenceSourceHttpPolicy,
     max_bytes: usize,
     timeout_ms: u64,
 ) -> FetchResult {
-    if policy.get("network").and_then(Value::as_str) != Some("enabled") {
+    if retrieval_policy.get("network").and_then(Value::as_str) != Some("enabled") {
         return FetchResult::Refused {
             reason: "network connector requires retrieval_policy.network=enabled".into(),
         };
@@ -320,16 +399,26 @@ fn fetch_http(
                 .into(),
         };
     }
-    let allowed_hosts = policy
+    let allowed_hosts = retrieval_policy
         .get("allowed_hosts")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
-    if !allowed_hosts.iter().any(|allowed| *allowed == host) {
+    if !allowed_hosts
+        .iter()
+        .any(|allowed| canonical_http_host(allowed) == Some(host.clone()))
+    {
         return FetchResult::Refused {
             reason: format!("HTTP host {host:?} is not in retrieval_policy.allowed_hosts"),
+        };
+    }
+    if !http_policy.allows(&host, port) {
+        return FetchResult::Refused {
+            reason: format!(
+                "HTTP origin {host:?}:{port} is not approved by the operator's server-level allow-list"
+            ),
         };
     }
     let timeout = Duration::from_millis(timeout_ms);
@@ -492,17 +581,39 @@ fn parse_http_locator(locator: &str) -> Result<(String, u16, String, bool), Stri
     } else {
         (authority.to_ascii_lowercase(), if tls { 443 } else { 80 })
     };
-    let host = host.trim_end_matches('.').to_string();
-    if host.is_empty()
-        || host.contains(['/', '?', '#', ' ', '[', ']', ':', '\\'])
-        || host.chars().any(char::is_control)
-    {
+    let Some(host) = canonical_http_host(&host) else {
         return Err("HTTP locator host is invalid".into());
-    }
+    };
     if target.chars().any(char::is_control) || target.contains('\\') || !target.starts_with('/') {
         return Err("HTTP locator target is invalid".into());
     }
     Ok((host, port, target, tls))
+}
+
+fn canonical_http_host(host: &str) -> Option<String> {
+    if host.is_empty()
+        || host.contains(['/', '?', '#', ' ', '[', ']', ':', '\\', '@'])
+        || host.chars().any(char::is_control)
+    {
+        return None;
+    }
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if host.is_empty() || host.len() > 253 {
+        return None;
+    }
+    if host.parse::<std::net::Ipv4Addr>().is_ok() {
+        return Some(host);
+    }
+    let valid_dns_name = host.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && label.as_bytes()[0].is_ascii_alphanumeric()
+            && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    });
+    valid_dns_name.then_some(host)
 }
 
 fn parse_http_status(status_line: &str) -> Result<u16, String> {
@@ -892,6 +1003,87 @@ mod tests {
     }
 
     #[test]
+    fn a_caller_plan_cannot_authorize_its_own_http_origin() {
+        let plan = plan_domain_evidence_source(&json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-execution-server-policy",
+            "source_tool": "modality_catalog",
+            "connector_kind": "generic_http",
+            "locator_kind": "uri",
+            "locator": "http://example.org/data",
+            "retrieval_mode": "content",
+            "retrieval_policy": {
+                "network": "enabled",
+                "allowed_hosts": ["example.org"],
+                "max_bytes": 4096
+            },
+            "does_not_claim": ["source truth"]
+        }))
+        .unwrap();
+
+        let result = execute_domain_evidence_source(Path::new("."), &plan).unwrap();
+        assert_eq!(result["outcome"], "refused");
+        assert!(result["response"]["retrieval"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("operator's server-level allow-list"));
+    }
+
+    #[test]
+    fn operator_allowlist_matches_the_exact_origin_port() {
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let plan = plan_domain_evidence_source(&json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-execution-origin-port",
+            "source_tool": "modality_catalog",
+            "connector_kind": "generic_http",
+            "locator_kind": "uri",
+            "locator": format!("http://127.0.0.1:{}/payload", address.port()),
+            "retrieval_mode": "content",
+            "retrieval_policy": {
+                "network": "enabled",
+                "allowed_hosts": ["127.0.0.1"],
+                "max_bytes": 4096
+            },
+            "does_not_claim": ["source truth"]
+        }))
+        .unwrap();
+        let policy = DomainEvidenceSourceHttpPolicy::new(["127.0.0.1"]).unwrap();
+
+        let result =
+            execute_domain_evidence_source_with_http_policy(Path::new("."), &plan, &policy)
+                .unwrap();
+        assert_eq!(result["outcome"], "refused");
+        assert!(result["response"]["retrieval"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("operator's server-level allow-list"));
+    }
+
+    #[test]
+    fn operator_http_origins_reject_schemes_paths_and_zero_ports() {
+        for origin in [
+            "https://example.org",
+            "example.org/path",
+            "example.org:0",
+            "user@example.org",
+            "[::1]:8080",
+        ] {
+            assert!(
+                DomainEvidenceSourceHttpPolicy::new([origin]).is_err(),
+                "accepted unsafe operator origin {origin:?}"
+            );
+        }
+        assert!(DomainEvidenceSourceHttpPolicy::new(["EXAMPLE.ORG."]).is_ok());
+        assert!(DomainEvidenceSourceHttpPolicy::new(["127.0.0.1:8123"]).is_ok());
+    }
+
+    #[test]
     fn http_locator_parser_rejects_ambiguous_authorities_and_targets() {
         for locator in [
             "http://example.org:0/data",
@@ -969,7 +1161,11 @@ mod tests {
             "does_not_claim": ["source truth"]
         }))
         .unwrap();
-        let result = execute_domain_evidence_source(Path::new("."), &plan).unwrap();
+        let http_policy =
+            DomainEvidenceSourceHttpPolicy::new([format!("127.0.0.1:{}", address.port())]).unwrap();
+        let result =
+            execute_domain_evidence_source_with_http_policy(Path::new("."), &plan, &http_policy)
+                .unwrap();
         worker.join().unwrap();
         assert_eq!(result["outcome"], "observed");
         assert_eq!(result["http_status"], 200);
@@ -1012,7 +1208,11 @@ mod tests {
             "does_not_claim": ["source truth"]
         }))
         .unwrap();
-        let result = execute_domain_evidence_source(Path::new("."), &plan).unwrap();
+        let http_policy =
+            DomainEvidenceSourceHttpPolicy::new([format!("127.0.0.1:{}", address.port())]).unwrap();
+        let result =
+            execute_domain_evidence_source_with_http_policy(Path::new("."), &plan, &http_policy)
+                .unwrap();
         worker.join().unwrap();
         assert_eq!(result["outcome"], "refused");
         assert!(result["response"]["retrieval"]["reason"]

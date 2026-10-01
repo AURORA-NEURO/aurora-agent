@@ -338,7 +338,11 @@ fn observe_refusal(error: &FiberError) -> RefusalObservation {
         | FiberError::InvalidAdaptiveAcquisitionContract(_) => {
             (RefusalCode::MalformedQuery, None, None)
         }
-        FiberError::World(_) => (RefusalCode::MalformedWorld, None, None),
+        FiberError::InvalidOracleTimestamp { .. }
+        | FiberError::IncomparableOracleTimePrecision { .. }
+        | FiberError::WrongOracleFieldType { .. }
+        | FiberError::World(_) => (RefusalCode::MalformedWorld, None, None),
+        FiberError::WorldSource(_) => (RefusalCode::MalformedWorld, None, None),
         FiberError::Policy(_) => (RefusalCode::PolicyRefused, None, None),
     };
 

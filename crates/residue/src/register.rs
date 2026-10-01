@@ -1,4 +1,4 @@
-//! The forty-eight, transcribed.
+//! The forty-four, transcribed.
 //!
 //! Every module `docs/BACKLOG.md` lists, with the verdict a classifying crate reached about it and
 //! the file that verdict was written in. Nothing here is a new judgement about a module a crate
@@ -122,11 +122,11 @@ pub fn residue() -> Result<Register, RegisterError> {
     Register::new(entries)
 }
 
-/// §11's remaining modules, all classified by `crates/devplat`.
+/// §11's two still-uncited modules, classified by `crates/devplat`.
 ///
-/// The largest single bucket of foreign artifacts in the workspace and the reason the vocabulary
-/// needs the category at all: five of these specify a real, precise, testable artifact that is
-/// simply not a Rust crate. Calling them process would be as wrong as implementing them.
+/// One is a process description and one is an external GitHub Action integration surface. Four
+/// other rows left this register after the current tree gained citations; that tracks attention,
+/// not implementation completeness.
 fn developer_platform() -> Result<Vec<Entry>, RegisterError> {
     let foreign_row = |needle: &str, reasoning: &str, surface: ForeignSurface| {
         transcribed(
@@ -141,18 +141,6 @@ fn developer_platform() -> Result<Vec<Entry>, RegisterError> {
     Ok(vec![
         entry(
             11,
-            4,
-            "Python Sdk",
-            vec![foreign_row(
-                "title: \"Python SDK\",",
-                "A Python distribution with nine importable packages. Precise, code-bearing and \
-                 unwritable here: no Rust type can be the module, and nothing in this repository \
-                 can look for `prism.compiler.mine` now or ever.",
-                ForeignSurface::PythonPackage,
-            )?],
-        )?,
-        entry(
-            11,
             17,
             "Authoring Studio",
             vec![transcribed(
@@ -163,46 +151,6 @@ fn developer_platform() -> Result<Vec<Entry>, RegisterError> {
                  boundary, a minimisation panel, an oracle lab, a release checklist. Every \
                  sentence is an action a person takes at a screen.",
                 Classification::Process,
-            )?],
-        )?,
-        entry(
-            11,
-            18,
-            "Authoring Studio And Notebook Workflow",
-            vec![transcribed(
-                "bioprism-devplat",
-                DEVPLAT,
-                "title: \"Authoring Studio and Notebook Workflow\",",
-                "An eight-arrow workflow diagram plus reviewer collaboration and notebook \
-                 etiquette. Its one real rule — every edit produces a deterministic artifact in a \
-                 working tree — is a property of an exporter that exists in no language here.",
-                Classification::Process,
-            )?],
-        )?,
-        entry(
-            11,
-            20,
-            "Capability Dashboard And Query",
-            vec![transcribed(
-                "bioprism-devplat",
-                DEVPLAT,
-                "title: \"Capability Dashboard and Query Layer\",",
-                "Charts, filters, keyboard navigation and colour-independent status. Its one \
-                 clause with teeth constrains the sampler that produced the results, not the page \
-                 that draws them.",
-                Classification::Process,
-            )?],
-        )?,
-        entry(
-            11,
-            21,
-            "Github Action For Consumer Repositories",
-            vec![foreign_row(
-                "title: \"GitHub Action for Consumer Repositories\",",
-                "A composite action evaluated by a runner in somebody else's repository. Its \
-                 inputs, outputs and failure modes are precise; none of them is observable from a \
-                 library compiled into its caller.",
-                ForeignSurface::GitHubAction,
             )?],
         )?,
         entry(
@@ -811,14 +759,20 @@ fn engineering_contracts() -> Result<Vec<Entry>, RegisterError> {
 /// the crate that read the modules and took a position.
 ///
 /// `crates/bioethics` calls the shared ground *perimeter infrastructure a sibling already
-/// positioned*. Both modules ask for controls at a boundary — a process boundary, a network stack, a
-/// scanner, an independent team — and in both cases `bioprism-safety` already states the
-/// workspace's position under a section-13 id.
+/// positioned*. Both modules ask for controls at a boundary — process isolation, network policy,
+/// scanning, an independent team — and in both cases `bioprism-safety` already states the
+/// workspace's position under a section-13 id. `bioprism-runtime::DockerSandbox` now provides an
+/// opt-in direct-command boundary and a policy-controlled `ProcessSpawn` effect adapter with
+/// per-run quarantine, but no generic declaration or trial path invokes them, and they do not
+/// implement artifact scanning, independent review/release, secret, or deployment controls.
 ///
 /// The sandboxing module carries a second verdict and the red-team module does not, and the
 /// difference is real rather than editorial. What is left of the red-team module after the discharge
 /// is a clause the blueprint never defines, so nobody could build it from the specification. What is
-/// left of the sandboxing module is a control that would work if somebody built it, and nobody has.
+/// left of the sandboxing module is a wider integrated control set: one partial command boundary now
+/// exists, and the explicit process-effect path now carries policy decisions into that boundary and
+/// stores outputs in quarantine. Its declared requirements still lack SDK/provider wiring, artifact
+/// scanning and review/release, secret isolation, and deployment-owned enforcement.
 fn biology_governance() -> Result<Vec<Entry>, RegisterError> {
     let bioethics = |needle: &str, reasoning: &str, classification: Classification| {
         transcribed(
@@ -837,7 +791,7 @@ fn biology_governance() -> Result<Vec<Entry>, RegisterError> {
             "Sandboxing Untrusted Code And Research Artifacts",
             vec![
                 bioethics(
-                    "Implementing it here would produce a second threat model",
+                    "Implementing a second control registry here would produce a",
                     "`crates/bioethics` read the module and declined it: `bioprism-safety` states \
                      the workspace's position on every one of its controls under four section-13 \
                      ids, and `bioprism-sdk` holds the isolation-request ladder with its single \
@@ -848,20 +802,27 @@ fn biology_governance() -> Result<Vec<Entry>, RegisterError> {
                 inferred(
                     "bioprism-bioethics",
                     BIOETHICS,
-                    "All thirteen need a process boundary, a network stack or a scanner.",
+                    "These controls cross process or deployment boundaries.",
                     "`crates/bioethics` classified this module as positioned by a sibling and did \
                      not classify it as work remaining. This register reads its own sentence — that \
                      all thirteen required controls need a process boundary, a network stack or a \
-                     scanner — as saying the control exists nowhere, and records that separately so \
-                     a reader does not come away thinking a sandbox exists. The same crate reports \
-                     six enforced safeguards and thirty-six declared, and states that not one of \
-                     the six defends a perimeter.",
+                     scanner — as evidence that the module's controls cross external boundaries. A \
+                     narrow opt-in Docker command runner and a policy-controlled process-effect \
+                     adapter with per-run quarantine now exist, but the SDK declaration path and \
+                     trial provider do not invoke them; scanning, independent review/release, secret \
+                     isolation, and deployment egress policy remain absent. The second verdict \
+                     records that incomplete integrated control set rather than claiming no \
+                     container API exists. \
+                     The same crate reports six enforced safeguards and thirty-six declared, and \
+                     states that not one of the six defends a perimeter.",
                     Classification::GenuinelyUncovered {
                         standing: UncoveredStanding::real_work_not_done(
-                            "isolation, egress control and artifact scanning need a process \
-                             boundary, a network stack or a scanner, and this workspace has none \
-                             of the three; every safeguard covering them is declared rather than \
-                             enforced",
+                            "the opt-in Docker command runner has an explicit policy-controlled \
+                             `ProcessSpawn` effect adapter with per-run quarantine, but is not wired \
+                             to the SDK declaration path or trial provider. Artifact scanning, \
+                             independent review and release, secret isolation, and deployment egress \
+                             policy remain unimplemented; the \
+                             module's required control set is therefore incomplete",
                         )?,
                     },
                 )?,

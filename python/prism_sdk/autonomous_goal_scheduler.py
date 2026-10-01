@@ -18,13 +18,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
-from .goals import AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord, GoalStatus
+from .goals import MAX_GOALS, AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord, GoalStatus
+from .goal_time import AutonomousGoalTimeError, normalize_autonomous_goal_timestamp_ns, require_autonomous_goal_timestamp_ns_wire
 
 
-GOAL_SCHEDULE_SCHEMA = "bioprism-autonomous-goal-schedule/0.1"
-GOAL_CLAIM_SCHEMA = "bioprism-autonomous-goal-claim/0.1"
+GOAL_SCHEDULE_SCHEMA = "bioprism-autonomous-goal-schedule/0.2"
+GOAL_CLAIM_SCHEMA = "bioprism-autonomous-goal-claim/0.2"
 GOAL_SCHEDULE_RETENTION = "metadata_only_goal_admission;task_text_and_payloads_not_retained"
-MAX_GOAL_SCHEDULE_GOALS = 4_096
+MAX_GOAL_SCHEDULE_GOALS = MAX_GOALS
 MAX_GOAL_SCHEDULE_SIGNALS = 4_096
 MAX_GOAL_SCHEDULE_DEPENDENCIES = 64
 MAX_GOAL_SCHEDULE_SELECTED = 128
@@ -59,6 +60,13 @@ def _integer(value: Any, *, name: str, minimum: int, maximum: int) -> int:
     return value
 
 
+def _timestamp(value: Any, *, name: str) -> str:
+    try:
+        return normalize_autonomous_goal_timestamp_ns(value, name=name)
+    except AutonomousGoalTimeError as error:
+        raise AutonomousGoalError(f"autonomous goal scheduler {error}") from error
+
+
 def _digest(value: Any) -> str:
     try:
         encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -91,7 +99,7 @@ class AutonomousGoalSchedulingSignal:
     goal_id: str
     priority: float = 0.5
     urgency: float = 0.0
-    deadline_ns: int | None = None
+    deadline_ns: str | None = None
     estimated_cost: int = 1
     dependencies: tuple[str, ...] = ()
 
@@ -100,7 +108,7 @@ class AutonomousGoalSchedulingSignal:
         object.__setattr__(self, "priority", _number(self.priority, name="signal.priority", minimum=0, maximum=1))
         object.__setattr__(self, "urgency", _number(self.urgency, name="signal.urgency", minimum=0, maximum=1))
         if self.deadline_ns is not None:
-            _integer(self.deadline_ns, name="signal.deadline_ns", minimum=0, maximum=2**63 - 1)
+            object.__setattr__(self, "deadline_ns", _timestamp(self.deadline_ns, name="signal.deadline_ns"))
         object.__setattr__(self, "estimated_cost", _integer(self.estimated_cost, name="signal.estimated_cost", minimum=1, maximum=1_000_000))
         if not isinstance(self.dependencies, Sequence) or isinstance(self.dependencies, (str, bytes, bytearray)) or len(self.dependencies) > MAX_GOAL_SCHEDULE_DEPENDENCIES:
             _fail("signal.dependencies is outside its bounds")
@@ -133,7 +141,7 @@ class AutonomousGoalScheduleRow:
     max_attempts: int
     priority: float
     urgency: float
-    deadline_ns: int | None
+    deadline_ns: str | None
     estimated_cost: int
     age_score: float
     deadline_score: float
@@ -158,7 +166,7 @@ class AutonomousGoalScheduleRow:
 
 @dataclass(frozen=True, slots=True)
 class AutonomousGoalSchedule:
-    now_ns: int
+    now_ns: str
     max_selected: int
     max_concurrent: int
     max_cost: int
@@ -204,14 +212,28 @@ class AutonomousGoalClaimResult:
         return {**body, "claim_digest": self.claim_digest}
 
 
-def _score(goal: AutonomousGoalRecord, signal: AutonomousGoalSchedulingSignal, *, now_ns: int, aging_window_ns: int) -> dict[str, Any]:
-    age_score = _rounded(min(1.0, max(0, now_ns - goal.updated_ns) / aging_window_ns))
+def _rounded_ratio(numerator: int, denominator: int) -> float | int:
+    if numerator <= 0:
+        return 0
+    if numerator >= denominator:
+        return 1
+    quotient, remainder = divmod(numerator * 10_000, denominator)
+    if remainder * 2 >= denominator:
+        quotient += 1
+    rounded = quotient / 10_000
+    return 0 if rounded == 0 else rounded
+
+
+def _score(goal: AutonomousGoalRecord, signal: AutonomousGoalSchedulingSignal, *, now_ns: str, aging_window_ns: str) -> dict[str, Any]:
+    now_exact = int(now_ns)
+    aging_exact = int(aging_window_ns)
+    age_score = _rounded_ratio(now_exact - goal.updated_ns, aging_exact)
     if signal.deadline_ns is None:
         deadline_score = 0
-    elif signal.deadline_ns <= now_ns:
+    elif int(signal.deadline_ns) <= now_exact:
         deadline_score = 1
     else:
-        deadline_score = _rounded(min(1.0, aging_window_ns / (signal.deadline_ns - now_ns + aging_window_ns)))
+        deadline_score = _rounded_ratio(aging_exact, int(signal.deadline_ns) - now_exact + aging_exact)
     retry_pressure = _rounded(min(1.0, goal.attempt / max(1, goal.max_attempts)))
     score = _rounded(max(0.0, min(1.0, 0.45 * signal.priority + 0.25 * signal.urgency + 0.20 * deadline_score + 0.10 * age_score - 0.05 * retry_pressure)))
     return {"priority": _zero_normalized(signal.priority), "urgency": _zero_normalized(signal.urgency), "deadline_ns": signal.deadline_ns, "estimated_cost": signal.estimated_cost, "age_score": age_score, "deadline_score": deadline_score, "retry_pressure": retry_pressure, "score": score, "efficiency": _rounded(score / signal.estimated_cost)}
@@ -221,8 +243,14 @@ def _lifecycle(goal: AutonomousGoalRecord, *, allow_failed_retry: bool, include_
     if goal.status == "running":
         return False, "active", "already_running"
     if goal.status == "ready":
+        if goal.attempt >= goal.max_attempts:
+            return False, "ineligible", "retry_budget_exhausted"
         return True, "defer", "eligible"
     if goal.status == "paused":
+        if "required_goal_criteria_review" in goal.blockers:
+            return False, "ineligible", "required_goal_criteria_review"
+        if goal.attempt >= goal.max_attempts:
+            return False, "ineligible", "retry_budget_exhausted"
         return (True, "defer", "eligible") if include_paused else (False, "ineligible", "paused_excluded_by_policy")
     if goal.status == "failed":
         if not allow_failed_retry:
@@ -253,7 +281,10 @@ def _validate_options(options: Mapping[str, Any]) -> dict[str, Any]:
     include_paused = options.get("include_paused", True)
     if not isinstance(allow_failed_retry, bool) or not isinstance(include_paused, bool):
         _fail("retry and pause policies must be boolean")
-    return {"now_ns": _integer(options.get("now_ns", time.time_ns()), name="now_ns", minimum=0, maximum=2**63 - 1), "max_selected": _integer(options.get("max_selected", 1), name="max_selected", minimum=1, maximum=MAX_GOAL_SCHEDULE_SELECTED), "max_concurrent": _integer(options.get("max_concurrent", options.get("max_selected", 1)), name="max_concurrent", minimum=1, maximum=MAX_GOAL_SCHEDULE_SELECTED), "max_cost": _integer(options.get("max_cost", 1_000_000), name="max_cost", minimum=1, maximum=1_000_000_000), "aging_window_ns": _integer(options.get("aging_window_ns", 86_400_000), name="aging_window_ns", minimum=1, maximum=2**63 - 1), "allow_failed_retry": allow_failed_retry, "include_paused": include_paused, "required_domains": tuple(sorted(required_domains, key=AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS.index)), "domain_quotas": normalized_quotas}
+    aging_window_ns = _timestamp(options.get("aging_window_ns", 86_400_000_000_000), name="aging_window_ns")
+    if aging_window_ns == "0":
+        _fail("aging_window_ns must be positive")
+    return {"now_ns": _timestamp(options.get("now_ns", time.time_ns()), name="now_ns"), "max_selected": _integer(options.get("max_selected", 1), name="max_selected", minimum=1, maximum=MAX_GOAL_SCHEDULE_SELECTED), "max_concurrent": _integer(options.get("max_concurrent", options.get("max_selected", 1)), name="max_concurrent", minimum=1, maximum=MAX_GOAL_SCHEDULE_SELECTED), "max_cost": _integer(options.get("max_cost", 1_000_000), name="max_cost", minimum=1, maximum=1_000_000_000), "aging_window_ns": aging_window_ns, "allow_failed_retry": allow_failed_retry, "include_paused": include_paused, "required_domains": tuple(sorted(required_domains, key=AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS.index)), "domain_quotas": normalized_quotas}
 
 
 def _signal_map(goals: Mapping[str, AutonomousGoalRecord], signals: Sequence[AutonomousGoalSchedulingSignal | Mapping[str, Any]]) -> dict[str, AutonomousGoalSchedulingSignal]:
@@ -278,7 +309,10 @@ def validate_goal_schedule(value: Mapping[str, Any]) -> dict[str, Any]:
         _fail("schedule contains unsupported fields")
     if value.get("retention") != GOAL_SCHEDULE_RETENTION or value.get("secret_material") != "never_returned":
         _fail("schedule retention posture is invalid")
-    _integer(value.get("now_ns"), name="schedule.now_ns", minimum=0, maximum=2**63 - 1)
+    try:
+        now_ns = require_autonomous_goal_timestamp_ns_wire(value.get("now_ns"), name="schedule.now_ns")
+    except AutonomousGoalTimeError as error:
+        raise AutonomousGoalError(f"autonomous goal scheduler {error}") from error
     _integer(value.get("max_selected"), name="schedule.max_selected", minimum=1, maximum=MAX_GOAL_SCHEDULE_SELECTED)
     _integer(value.get("max_concurrent"), name="schedule.max_concurrent", minimum=1, maximum=MAX_GOAL_SCHEDULE_SELECTED)
     _integer(value.get("max_cost"), name="schedule.max_cost", minimum=1, maximum=1_000_000_000)
@@ -292,8 +326,22 @@ def validate_goal_schedule(value: Mapping[str, Any]) -> dict[str, Any]:
         _fail("schedule selected_goal_ids are outside their bounds")
     rows: list[dict[str, Any]] = []
     row_ids: set[str] = set()
+    row_fields = {"goal_id", "domain", "status", "revision", "attempt", "max_attempts", "priority", "urgency", "deadline_ns", "estimated_cost", "age_score", "deadline_score", "retry_pressure", "score", "efficiency", "dependencies", "unmet_dependencies", "decision", "reason", "expected_revision"}
     for raw in raw_rows:
-        row = AutonomousGoalScheduleRow.from_mapping(raw)
+        if not isinstance(raw, Mapping):
+            _fail("schedule row is malformed")
+        if set(raw).difference(row_fields):
+            _fail("schedule row contains unsupported fields")
+        normalized_row = dict(raw)
+        deadline_ns = normalized_row.get("deadline_ns")
+        if deadline_ns is None:
+            normalized_row["deadline_ns"] = None
+        else:
+            try:
+                normalized_row["deadline_ns"] = require_autonomous_goal_timestamp_ns_wire(deadline_ns, name="schedule row deadline_ns")
+            except AutonomousGoalTimeError as error:
+                raise AutonomousGoalError(f"autonomous goal scheduler {error}") from error
+        row = AutonomousGoalScheduleRow.from_mapping(normalized_row)
         if row.goal_id in row_ids:
             _fail("schedule contains duplicate goal rows")
         row_ids.add(row.goal_id)
@@ -312,6 +360,8 @@ def validate_goal_schedule(value: Mapping[str, Any]) -> dict[str, Any]:
     coverage = value.get("coverage")
     if not isinstance(coverage, Mapping):
         _fail("schedule coverage is malformed")
+    if set(coverage).difference({"required_domains", "selected_domains", "missing_domains"}):
+        _fail("schedule coverage contains unsupported fields")
     for key in ("required_domains", "selected_domains", "missing_domains"):
         values = coverage.get(key)
         if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
@@ -321,7 +371,7 @@ def validate_goal_schedule(value: Mapping[str, Any]) -> dict[str, Any]:
     schedule_digest = value.get("schedule_digest")
     if not isinstance(schedule_digest, str) or len(schedule_digest) != 64 or any(char not in "0123456789abcdef" for char in schedule_digest):
         _fail("schedule_digest is malformed")
-    normalized = {"schema": GOAL_SCHEDULE_SCHEMA, "now_ns": value["now_ns"], "max_selected": value["max_selected"], "max_concurrent": value["max_concurrent"], "max_cost": value["max_cost"], "active_count": value["active_count"], "used_cost": value["used_cost"], "selected_goal_ids": selected_ids, "rows": sorted(rows, key=lambda row: row["goal_id"]), "coverage": {"required_domains": list(coverage["required_domains"]), "selected_domains": list(coverage["selected_domains"]), "missing_domains": list(coverage["missing_domains"])}, "retention": GOAL_SCHEDULE_RETENTION, "secret_material": "never_returned"}
+    normalized = {"schema": GOAL_SCHEDULE_SCHEMA, "now_ns": now_ns, "max_selected": value["max_selected"], "max_concurrent": value["max_concurrent"], "max_cost": value["max_cost"], "active_count": value["active_count"], "used_cost": value["used_cost"], "selected_goal_ids": selected_ids, "rows": sorted(rows, key=lambda row: row["goal_id"]), "coverage": {"required_domains": list(coverage["required_domains"]), "selected_domains": list(coverage["selected_domains"]), "missing_domains": list(coverage["missing_domains"])}, "retention": GOAL_SCHEDULE_RETENTION, "secret_material": "never_returned"}
     if _digest(normalized) != schedule_digest:
         _fail("schedule_digest does not match schedule content")
     if len(json.dumps({**normalized, "schedule_digest": schedule_digest}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")) > MAX_GOAL_SCHEDULE_BYTES:
@@ -360,24 +410,36 @@ def schedule_autonomous_goals(goals: Sequence[AutonomousGoalRecord | Mapping[str
             eligible.add(goal.goal_id)
         rows[goal.goal_id] = {"goal_id": goal.goal_id, "domain": _domain(goal.domain), "status": goal.status, "revision": goal.revision, "attempt": goal.attempt, "max_attempts": goal.max_attempts, **_score(goal, signal, now_ns=limits["now_ns"], aging_window_ns=limits["aging_window_ns"]), "dependencies": list(signal.dependencies), "unmet_dependencies": [], "decision": decision, "reason": reason, "expected_revision": goal.revision}
     cycle_nodes: set[str] = set()
-    visiting: list[str] = []
     visited: set[str] = set()
-
-    def visit_cycle(goal_id: str) -> None:
-        if goal_id in visiting:
-            cycle_nodes.update(visiting[visiting.index(goal_id) :])
-            return
-        if goal_id in visited:
-            return
-        visited.add(goal_id)
-        visiting.append(goal_id)
-        for dependency in dependencies.get(goal_id, ()):
-            if dependency in rows:
-                visit_cycle(dependency)
-        visiting.pop()
-
-    for goal_id in rows:
-        visit_cycle(goal_id)
+    for root in rows:
+        if root in visited:
+            continue
+        path: list[str] = [root]
+        path_index = {root: 0}
+        stack: list[tuple[str, int]] = [(root, 0)]
+        visited.add(root)
+        while stack:
+            goal_id, dependency_index = stack[-1]
+            goal_dependencies = dependencies.get(goal_id, ())
+            if dependency_index >= len(goal_dependencies):
+                stack.pop()
+                path.pop()
+                del path_index[goal_id]
+                continue
+            dependency = goal_dependencies[dependency_index]
+            stack[-1] = (goal_id, dependency_index + 1)
+            if dependency not in rows:
+                continue
+            cycle_start = path_index.get(dependency)
+            if cycle_start is not None:
+                cycle_nodes.update(path[cycle_start:])
+                continue
+            if dependency in visited:
+                continue
+            visited.add(dependency)
+            path_index[dependency] = len(path)
+            path.append(dependency)
+            stack.append((dependency, 0))
     for goal_id in cycle_nodes:
         eligible.discard(goal_id)
         rows[goal_id]["decision"] = "ineligible"
@@ -386,18 +448,28 @@ def schedule_autonomous_goals(goals: Sequence[AutonomousGoalRecord | Mapping[str
     ordered_candidates = sorted((rows[goal_id] for goal_id in eligible), key=lambda row: (-row["efficiency"], -row["score"], row["goal_id"]))
     ordered: list[str] = []
     ordered_set: set[str] = set()
-
-    def visit_order(goal_id: str) -> None:
-        if goal_id in ordered_set or goal_id not in eligible:
-            return
-        for dependency in dependencies.get(goal_id, ()):
-            if dependency in eligible:
-                visit_order(dependency)
-        ordered_set.add(goal_id)
-        ordered.append(goal_id)
-
     for row in ordered_candidates:
-        visit_order(row["goal_id"])
+        root = row["goal_id"]
+        if root in ordered_set:
+            continue
+        stack: list[tuple[str, int]] = [(root, 0)]
+        active = {root}
+        while stack:
+            goal_id, dependency_index = stack[-1]
+            goal_dependencies = dependencies.get(goal_id, ())
+            if dependency_index >= len(goal_dependencies):
+                stack.pop()
+                active.remove(goal_id)
+                if goal_id not in ordered_set:
+                    ordered_set.add(goal_id)
+                    ordered.append(goal_id)
+                continue
+            dependency = goal_dependencies[dependency_index]
+            stack[-1] = (goal_id, dependency_index + 1)
+            if dependency not in eligible or dependency in ordered_set or dependency in active:
+                continue
+            active.add(dependency)
+            stack.append((dependency, 0))
     selected: set[str] = set()
     selected_goal_ids: list[str] = []
     selected_domain_counts: dict[str, int] = {}
@@ -435,26 +507,25 @@ def schedule_autonomous_goals(goals: Sequence[AutonomousGoalRecord | Mapping[str
     return AutonomousGoalSchedule(now_ns=body["now_ns"], max_selected=body["max_selected"], max_concurrent=body["max_concurrent"], max_cost=body["max_cost"], active_count=body["active_count"], used_cost=body["used_cost"], selected_goal_ids=tuple(selected_goal_ids), rows=tuple(AutonomousGoalScheduleRow.from_mapping(row) for row in body["rows"]), required_domains=required_domains, selected_domains=selected_domains, missing_domains=missing_domains, schedule_digest=_digest(body))
 
 
-def claim_autonomous_goals(ledger: AutonomousGoalLedger, schedule: AutonomousGoalSchedule | Mapping[str, Any], *, now_ns: int | None = None) -> AutonomousGoalClaimResult:
+def claim_autonomous_goals(ledger: AutonomousGoalLedger, schedule: AutonomousGoalSchedule | Mapping[str, Any], *, now_ns: int | str | None = None) -> AutonomousGoalClaimResult:
     if not isinstance(ledger, AutonomousGoalLedger):
         _fail("claim requires an AutonomousGoalLedger")
     normalized = validate_goal_schedule(schedule.to_dict() if isinstance(schedule, AutonomousGoalSchedule) else schedule)
     rows = {row["goal_id"]: row for row in normalized["rows"]}
     admitted = [rows[goal_id] for goal_id in normalized["selected_goal_ids"] if rows[goal_id]["decision"] == "admit"]
-    for row in admitted:
-        current = ledger.get(row["goal_id"])
-        if current is None or current.revision != row["expected_revision"] or current.status != row["status"] or current.status not in {"ready", "paused", "failed"}:
-            _fail(f"schedule is stale for goal {row['goal_id']}")
-    claims: list[AutonomousGoalClaim] = []
-    for row in admitted:
-        current = ledger.get(row["goal_id"])
-        assert current is not None
-        previous_status = current.status
-        previous_revision = current.revision
-        if current.status == "failed":
-            current = ledger.transition(current.goal_id, "ready", expected_revision=current.revision, now_ns=now_ns)
-        running = ledger.transition(current.goal_id, "running", expected_revision=current.revision, now_ns=now_ns)
-        claims.append(AutonomousGoalClaim(row["goal_id"], previous_status, previous_revision, running.revision, normalized["schedule_digest"]))
+    if len(admitted) > normalized["max_selected"]:
+        _fail("schedule exceeds its selected-goal budget")
+    if sum(row["estimated_cost"] for row in admitted) > normalized["max_cost"]:
+        _fail("schedule exceeds its estimated-cost budget")
+    running_records = ledger.claim_many(
+        tuple({"goal_id": row["goal_id"], "expected_revision": row["expected_revision"], "expected_status": row["status"], "expected_domain": row["domain"], "dependencies": row["dependencies"]} for row in admitted),
+        max_concurrent=normalized["max_concurrent"],
+        now_ns=now_ns,
+    ) if admitted else ()
+    claims = [
+        AutonomousGoalClaim(row["goal_id"], row["status"], row["expected_revision"], running.revision, normalized["schedule_digest"])
+        for row, running in zip(admitted, running_records)
+    ]
     body = {"schema": GOAL_CLAIM_SCHEMA, "schedule_digest": normalized["schedule_digest"], "claims": [claim.to_dict() for claim in claims], "retention": GOAL_SCHEDULE_RETENTION, "secret_material": "never_returned"}
     return AutonomousGoalClaimResult(normalized["schedule_digest"], tuple(claims), _digest(body))
 
@@ -465,5 +536,5 @@ class AutonomousGoalScheduler:
     def plan(self, goals: Sequence[AutonomousGoalRecord | Mapping[str, Any]], options: Mapping[str, Any] | None = None) -> AutonomousGoalSchedule:
         return schedule_autonomous_goals(goals, options)
 
-    def claim(self, ledger: AutonomousGoalLedger, schedule: AutonomousGoalSchedule | Mapping[str, Any], *, now_ns: int | None = None) -> AutonomousGoalClaimResult:
+    def claim(self, ledger: AutonomousGoalLedger, schedule: AutonomousGoalSchedule | Mapping[str, Any], *, now_ns: int | str | None = None) -> AutonomousGoalClaimResult:
         return claim_autonomous_goals(ledger, schedule, now_ns=now_ns)

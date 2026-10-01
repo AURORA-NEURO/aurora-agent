@@ -9,7 +9,10 @@ use thiserror::Error;
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum WorldError {
     #[error("unsupported world schema: expected {expected:?}, got {actual:?}")]
-    UnsupportedSchema { expected: &'static str, actual: String },
+    UnsupportedSchema {
+        expected: &'static str,
+        actual: String,
+    },
 
     #[error("duplicate fact id: {0}")]
     DuplicateFactId(String),
@@ -18,13 +21,19 @@ pub enum WorldError {
     DuplicateFactorId(String),
 
     #[error("factor {factor} has unknown inputs {missing:?}")]
-    UnknownFactorInputs { factor: String, missing: Vec<String> },
+    UnknownFactorInputs {
+        factor: String,
+        missing: Vec<String>,
+    },
 
     #[error("world is not a JSON object")]
     NotAnObject,
 
     #[error("missing required field {field:?} on {subject}")]
-    MissingField { field: &'static str, subject: String },
+    MissingField {
+        field: &'static str,
+        subject: String,
+    },
 
     #[error("field {field:?} on {subject} has the wrong type: expected {expected}")]
     WrongType {
@@ -45,4 +54,18 @@ pub enum WorldError {
 
     #[error("invalid identifier on {subject}: {message}")]
     Identifier { subject: String, message: String },
+}
+
+/// A physical world source could not complete a requested point lookup.
+///
+/// `None` is reserved for a valid lookup that found no record. Backends use these errors for a
+/// corrupt index or unavailable storage so a compiler cannot mistake a failed read for absent
+/// evidence.
+#[derive(Debug, Error, PartialEq, Eq, Clone)]
+pub enum WorldSourceError {
+    #[error("world source storage is unavailable: {0}")]
+    Unavailable(String),
+
+    #[error("world source data is corrupt: {0}")]
+    Corrupt(String),
 }

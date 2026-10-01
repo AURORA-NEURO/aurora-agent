@@ -93,8 +93,8 @@ fn removing_a_factor_leaves_it_present_with_a_uniform_table_rather_than_deleting
 #[test]
 fn replacing_a_table_of_the_wrong_size_is_rejected_rather_than_truncated() {
     let region = fixture();
-    let error =
-        perturbed::with_replaced_table(&region, "f.a", vec![1.0, 1.0, 1.0], "wrong size").unwrap_err();
+    let error = perturbed::with_replaced_table(&region, "f.a", vec![1.0, 1.0, 1.0], "wrong size")
+        .unwrap_err();
     assert!(matches!(
         error,
         InfluenceError::PerturbedRegionRejected { .. }
@@ -105,10 +105,7 @@ fn replacing_a_table_of_the_wrong_size_is_rejected_rather_than_truncated() {
 fn perturbing_an_absent_factor_is_a_caller_bug_not_an_unknown_influence() {
     let region = fixture();
     let error = perturbed::with_factor_removed(&region, "f.nope").unwrap_err();
-    assert!(matches!(
-        error,
-        InfluenceError::UnknownFactor { .. }
-    ));
+    assert!(matches!(error, InfluenceError::UnknownFactor { .. }));
 }
 
 #[test]
@@ -141,16 +138,12 @@ fn an_answer_with_zero_total_mass_has_no_normalised_form() {
 
 #[test]
 fn answers_over_different_scopes_are_incomparable_rather_than_far_apart() {
-    let left = bioprism_influence::AnswerDistribution::from_parts(
-        vec!["a".to_string()],
-        vec![0.5, 0.5],
-    )
-    .unwrap();
-    let right = bioprism_influence::AnswerDistribution::from_parts(
-        vec!["b".to_string()],
-        vec![0.5, 0.5],
-    )
-    .unwrap();
+    let left =
+        bioprism_influence::AnswerDistribution::from_parts(vec!["a".to_string()], vec![0.5, 0.5])
+            .unwrap();
+    let right =
+        bioprism_influence::AnswerDistribution::from_parts(vec!["b".to_string()], vec![0.5, 0.5])
+            .unwrap();
     let error = bioprism_influence::total_variation(&left, &right).unwrap_err();
     assert!(matches!(error, InfluenceError::IncomparableScopes { .. }));
 }

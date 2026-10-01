@@ -1,5 +1,3 @@
-#![allow(clippy::all)]
-
 //! Sound numeric influence bounds.
 //!
 //! Every Context Certificate this workspace emits carries one sentence, verbatim, from

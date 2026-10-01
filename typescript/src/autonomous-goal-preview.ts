@@ -1,12 +1,16 @@
 /** Durable, metadata-only operator decisions for autonomous goal previews. */
 
 import { ArgumentError, isObject } from "./errors.js";
-import { canonicalJson, digestJsonSync } from "./tooling.js";
+import { autonomousGoalTimestampNowNs, compareAutonomousGoalTimestampNs, normalizeAutonomousGoalTimestampNs, requireAutonomousGoalTimestampNsWire, type AutonomousGoalTimestampInput, type AutonomousGoalTimestampNs } from "./autonomous-goal-time.js";
+import { canonicalJson, digestJsonSync, isUnicodeScalarString } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 import type { AutonomousGoalControlLoopPreview } from "./autonomous-goal-control-loop.js";
+import { validateAutonomousGoalSchedule } from "./autonomous-goal-scheduler.js";
 
-export const AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA = "bioprism-autonomous-goal-preview-admission-record/0.1" as const;
-export const AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA = "bioprism-autonomous-goal-preview-admission-snapshot/0.1" as const;
+export const AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA_V01 = "bioprism-autonomous-goal-preview-admission-record/0.1" as const;
+export const AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA_V01 = "bioprism-autonomous-goal-preview-admission-snapshot/0.1" as const;
+export const AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA = "bioprism-autonomous-goal-preview-admission-record/0.2" as const;
+export const AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA = "bioprism-autonomous-goal-preview-admission-snapshot/0.2" as const;
 export const AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RETENTION = "metadata_only_goal_preview_approval;tasks_prompts_parameters_credentials_and_results_not_retained" as const;
 export const AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SECRET_MATERIAL = "never_returned" as const;
 export const AUTONOMOUS_GOAL_PREVIEW_ADMISSION_AUTHORITY = "caller_operator_review_only;does_not_authenticate_or_authorize_provider_source_tool_effect_or_credentials" as const;
@@ -30,8 +34,8 @@ export interface AutonomousGoalPreviewAdmissionRecord extends JsonObject {
   preview_digest: string;
   requested_by_digest: string | null;
   reviewer_digest: string | null;
-  issued_at_ns: number;
-  expires_at_ns: number;
+  issued_at_ns: AutonomousGoalTimestampNs;
+  expires_at_ns: AutonomousGoalTimestampNs;
   reason_digest: string | null;
   previous_record_digest: string | null;
   authority: typeof AUTONOMOUS_GOAL_PREVIEW_ADMISSION_AUTHORITY;
@@ -53,8 +57,8 @@ export interface AutonomousGoalPreviewAdmissionSnapshot extends JsonObject {
 
 export interface AutonomousGoalPreviewAdmissionRecordCreateOptions {
   admission_id: string;
-  issued_at_ns: number;
-  expires_at_ns: number;
+  issued_at_ns: AutonomousGoalTimestampInput;
+  expires_at_ns: AutonomousGoalTimestampInput;
   requested_by_digest?: string | null;
   reason?: string | null;
   previous_record_digest?: string | null;
@@ -108,7 +112,7 @@ function bytes(value: unknown): number {
 }
 
 function text(name: string, value: unknown, maximum = 256): string {
-  if (typeof value !== "string" || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > maximum) fail(`${name} is outside its text bound`);
+  if (typeof value !== "string" || !isUnicodeScalarString(value) || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > maximum) fail(`${name} is outside its text bound`);
   return value.trim();
 }
 
@@ -182,15 +186,11 @@ function normalizePreview(value: unknown): JsonObject {
   const statusCounts = counts("preview status_counts", value.status_counts);
   const blocked = sequence("preview dependency_blocked_goal_ids", value.dependency_blocked_goal_ids, MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORDS).map((item) => identifier("preview dependency_blocked_goal_id", item));
   const learning = digest("preview learning_state_digest", value.learning_state_digest, true);
-  if (!isObject(value.schedule)) fail("preview schedule is malformed");
-  digest("preview schedule_digest", value.schedule.schedule_digest);
-  sequence("preview selected_goal_ids", value.schedule.selected_goal_ids, 128).forEach((item) => identifier("preview selected_goal_id", item));
-  if (!isObject(value.schedule.coverage)) fail("preview schedule coverage is malformed");
-  for (const field of ["required_domains", "selected_domains", "missing_domains"] as const) sequence(`preview coverage ${field}`, value.schedule.coverage[field], 128).forEach((item) => identifier(`preview coverage ${field}`, item, 128));
+  const schedule = validateAutonomousGoalSchedule(value.schedule);
   safeMetadata(value);
   const body: JsonObject = {
     schema: value.schema,
-    schedule: clone(value.schedule) as unknown as JsonObject,
+    schedule: clone(schedule) as unknown as JsonObject,
     status: value.status as string,
     eligible_goal_count: value.eligible_goal_count as number,
     decision_counts: decisionCounts,
@@ -219,9 +219,11 @@ function recordBody(input: {
   reasonDigest: unknown;
   previousRecordDigest: unknown;
 }): Omit<AutonomousGoalPreviewAdmissionRecord, "record_digest"> {
-  const issued = integer("issued_at_ns", input.issuedAtNs, 0, Number.MAX_SAFE_INTEGER);
-  const expires = integer("expires_at_ns", input.expiresAtNs, 1, Number.MAX_SAFE_INTEGER);
-  if (expires <= issued || expires - issued > MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_TTL_NS) fail("approval expiry is outside its bounded lifetime");
+  const issued = normalizeAutonomousGoalTimestampNs(input.issuedAtNs, "issued_at_ns");
+  const expires = normalizeAutonomousGoalTimestampNs(input.expiresAtNs, "expires_at_ns");
+  const issuedExact = BigInt(issued);
+  const expiresExact = BigInt(expires);
+  if (expiresExact <= issuedExact || expiresExact - issuedExact > BigInt(MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_TTL_NS)) fail("approval expiry is outside its bounded lifetime");
   const requested = digest("requested_by_digest", input.requestedByDigest, true);
   const reviewer = digest("reviewer_digest", input.reviewerDigest, true);
   if (input.status === "pending_review" && reviewer !== null) fail("pending review cannot contain a reviewer");
@@ -251,12 +253,15 @@ export function validateAutonomousGoalPreviewAdmissionRecord(value: unknown): Au
   if (!isObject(value)) fail("record must be an object");
   exactKeys("record", value, [...RECORD_KEYS, "record_digest"]);
   safeMetadata(value);
+  if (value.schema === AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA_V01) fail("0.1 approval must be re-reviewed and re-issued with a current 0.2 preview");
   if (value.schema !== AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA || value.authority !== AUTONOMOUS_GOAL_PREVIEW_ADMISSION_AUTHORITY || value.retention !== AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RETENTION || value.execution !== AUTONOMOUS_GOAL_PREVIEW_ADMISSION_EXECUTION || value.secret_material !== AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SECRET_MATERIAL) fail("record markers are invalid");
   const preview = normalizePreview(value.preview);
   if (value.preview_digest !== preview.preview_digest) fail("record preview digest does not match the preview");
   const status = value.status as AutonomousGoalPreviewAdmissionStatus;
   const decision = value.decision as AutonomousGoalPreviewAdmissionDecision;
   if (!["pending_review", "approved", "rejected", "revoked"].includes(status) || !["submitted", "approved", "rejected", "revoked"].includes(decision) || (status === "pending_review" && decision !== "submitted") || (status === "approved" && decision !== "approved") || (status === "rejected" && decision !== "rejected") || (status === "revoked" && decision !== "revoked")) fail("record status or decision is invalid");
+  requireAutonomousGoalTimestampNsWire(value.issued_at_ns, "record issued_at_ns");
+  requireAutonomousGoalTimestampNsWire(value.expires_at_ns, "record expires_at_ns");
   const body = recordBody({ admissionId: value.admission_id, revision: value.revision, status, decision, preview, requestedByDigest: value.requested_by_digest, reviewerDigest: value.reviewer_digest, issuedAtNs: value.issued_at_ns, expiresAtNs: value.expires_at_ns, reasonDigest: value.reason_digest, previousRecordDigest: value.previous_record_digest });
   const supplied = digest("record_digest", value.record_digest)!;
   if (supplied !== digestJsonSync(body)) fail("record digest does not match metadata");
@@ -294,12 +299,13 @@ export function revokeAutonomousGoalPreviewAdmissionRecord(source: AutonomousGoa
   return clone({ ...body, record_digest: digestJsonSync(body) } as AutonomousGoalPreviewAdmissionRecord);
 }
 
-export function verifyAutonomousGoalPreviewApproval(source: AutonomousGoalPreviewAdmissionRecord, options: { current_preview_digest: string; now_ns: number; reviewer_digest?: string | null }): AutonomousGoalPreviewAdmissionRecord {
+export function verifyAutonomousGoalPreviewApproval(source: AutonomousGoalPreviewAdmissionRecord, options: { current_preview_digest: string; now_ns: AutonomousGoalTimestampInput; reviewer_digest?: string | null }): AutonomousGoalPreviewAdmissionRecord {
   const record = validateAutonomousGoalPreviewAdmissionRecord(source);
   if (record.status !== "approved") fail("preview admission is not approved");
   const currentDigest = digest("current_preview_digest", options.current_preview_digest)!;
-  const now = integer("now_ns", options.now_ns, 0, Number.MAX_SAFE_INTEGER);
-  if (now >= record.expires_at_ns) fail("preview admission has expired");
+  const now = normalizeAutonomousGoalTimestampNs(options.now_ns, "now_ns");
+  if (compareAutonomousGoalTimestampNs(now, record.issued_at_ns) < 0) fail("preview admission is not yet valid");
+  if (compareAutonomousGoalTimestampNs(now, record.expires_at_ns) >= 0) fail("preview admission has expired");
   if (record.preview_digest !== currentDigest) fail("preview admission does not match the current preview");
   if (options.reviewer_digest !== undefined && options.reviewer_digest !== null && record.reviewer_digest !== digest("reviewer_digest", options.reviewer_digest)) fail("preview admission reviewer does not match");
   return record;
@@ -309,6 +315,7 @@ export function validateAutonomousGoalPreviewAdmissionSnapshot(value: unknown): 
   if (!isObject(value)) fail("snapshot must be an object");
   exactKeys("snapshot", value, [...SNAPSHOT_KEYS, "snapshot_digest"]);
   safeMetadata(value);
+  if (value.schema === AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA_V01) fail("0.1 approval snapshot must be reviewed and re-issued with current 0.2 previews");
   if (value.schema !== AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA || value.retention !== AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RETENTION || value.secret_material !== AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SECRET_MATERIAL) fail("snapshot markers are invalid");
   const records = value.records;
   if (!Array.isArray(records) || records.length > MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORDS) fail("snapshot records exceed their bound");
@@ -414,7 +421,7 @@ export class JsonAutonomousGoalPreviewAdmissionSnapshotPersistence implements Au
   async read(): Promise<AutonomousGoalPreviewAdmissionSnapshot | null> {
     const encoded = await this.store.read();
     if (encoded === null) return null;
-    if (typeof encoded !== "string" || new TextEncoder().encode(encoded).byteLength > this.max_bytes) fail("stored JSON exceeds its byte bound");
+    if (typeof encoded !== "string" || !isUnicodeScalarString(encoded) || new TextEncoder().encode(encoded).byteLength > this.max_bytes) fail("stored JSON exceeds its byte bound");
     let raw: unknown;
     try { raw = JSON.parse(encoded); } catch { fail("stored JSON is invalid"); }
     const normalized = validateAutonomousGoalPreviewAdmissionSnapshot(raw);

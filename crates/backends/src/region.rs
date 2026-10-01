@@ -21,7 +21,7 @@
 
 use crate::error::RegionError;
 use crate::semiring::Semiring;
-use bioprism_world::WorldSource;
+use bioprism_world::{WorldSource, WorldSourceError};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -225,13 +225,15 @@ impl QueryRegion {
         let mut factors: Vec<RegionFactor> = Vec::new();
 
         while let Some(variable) = stack.pop() {
-            for factor_id in source.producer_ids(&variable) {
+            for factor_id in source.producer_ids(&variable)? {
                 if !selected.insert(factor_id.clone()) {
                     continue;
                 }
-                let Some(factor) = source.factor(&factor_id) else {
-                    continue;
-                };
+                let factor = source.factor(&factor_id)?.ok_or_else(|| {
+                    RegionError::WorldSource(WorldSourceError::Corrupt(format!(
+                        "producer index names missing factor `{factor_id}`"
+                    )))
+                })?;
                 let mut scope: Vec<String> = Vec::new();
                 for name in factor.inputs.iter().chain(factor.outputs.iter()) {
                     let name = name.as_str().to_string();
@@ -256,7 +258,7 @@ impl QueryRegion {
         let mut assumed = 0usize;
         let mut compiled_facts = 0usize;
         for variable in &variables {
-            match source.fact_providing(variable) {
+            match source.fact_providing(variable)? {
                 Some(fact) => {
                     compiled_facts += 1;
                     builder = builder.observed_variable(variable, policy.of_value(&fact.value));

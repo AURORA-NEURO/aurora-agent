@@ -109,18 +109,25 @@ fn step(id: &str, tool: &str, depends_on: &[&str]) -> Value {
 
 fn workflow_binding(step_ids: &[&str]) -> Value {
     let plan = json!({
-        "steps": step_ids.iter().map(|id| json!({ "step_id": id })).collect::<Vec<_>>()
+        "steps": step_ids
+            .iter()
+            .map(|id| json!({ "step_id": id, "tool": format!("tool_{id}") }))
+            .collect::<Vec<_>>()
     });
     let digest = ContentHash::of_value(&plan)
         .expect("the evidence plan canonicalises")
+        .to_string();
+    let domain_contract = json!({});
+    let domain_contract_digest = ContentHash::of_value(&domain_contract)
+        .expect("the domain contract canonicalises")
         .to_string();
     let zeros = "0".repeat(64);
     json!({
         "workflow_id": "workflow.audit",
         "workflow_digest": zeros,
         "catalog_digest": zeros,
-        "domain_contract_digest": zeros,
-        "domain_contract": {},
+        "domain_contract_digest": domain_contract_digest,
+        "domain_contract": domain_contract,
         "evidence_plan": plan,
         "evidence_plan_digest": digest,
     })
@@ -156,7 +163,15 @@ fn mission_report(dispatched: &Value, results: Vec<MissionStepResult>) -> Value 
     let request: MissionRequest =
         serde_json::from_value(dispatched.clone()).expect("the dispatched mission parses");
     let plan = plan_mission(&request).expect("the dispatched mission plans");
-    let succeeded = results.iter().filter(|row| row.status == "succeeded").count();
+    let succeeded = results
+        .iter()
+        .filter(|row| row.status == "succeeded")
+        .count();
+    let claim_lineage = bioprism_devplat::mission_claim_lineage_with_review(
+        &request.claim_requests,
+        &results,
+        request.evaluator_review.as_ref(),
+    );
     let report = MissionReport {
         schema_version: MISSION_SCHEMA_VERSION.into(),
         plan,
@@ -171,9 +186,9 @@ fn mission_report(dispatched: &Value, results: Vec<MissionStepResult>) -> Value 
         results,
         execution_trace_schema_version: MISSION_TRACE_SCHEMA_VERSION.into(),
         execution_trace: Vec::new(),
-        claim_requests: Vec::new(),
-        evaluator_review: None,
-        claim_lineage: json!({}),
+        claim_requests: request.claim_requests.clone(),
+        evaluator_review: request.evaluator_review.clone(),
+        claim_lineage,
         trace_observer: None,
         guarantees: Vec::new(),
         limitations: Vec::new(),
@@ -182,11 +197,44 @@ fn mission_report(dispatched: &Value, results: Vec<MissionStepResult>) -> Value 
 }
 
 fn complete_reconciliation() -> Value {
+    let mut canonical_record = json!({
+        "ok": true,
+        "workflow": "domain_workflow_reconcile",
+        "schema": bioprism_devplat::DOMAIN_WORKFLOW_RECONCILE_SCHEMA_VERSION,
+        "execution": "not_started",
+        "source": "mission_report",
+        "workflow_id": "workflow.audit",
+        "mission_id": "mission.audit",
+        "workflow_digest": "a".repeat(64),
+        "catalog_digest": "b".repeat(64),
+        "domain_contract_digest": "c".repeat(64),
+        "mission_plan_digest": "d".repeat(64),
+        "completion": {
+            "status": "complete",
+            "ready": true,
+            "review_required": true,
+            "claims_posture": "review_required_before_claims",
+        },
+        "evidence": { "evidence_valid": true },
+        "integrity": { "valid": true, "finding_count": 0, "findings": [] },
+    });
+    let reconciliation_digest = ContentHash::of_value(&canonical_record)
+        .expect("the canonical reconciliation hashes")
+        .to_string();
+    canonical_record["reconciliation_digest"] = json!(reconciliation_digest);
+    let registry_import = bioprism_devplat::DomainWorkflowReconciliationRegistry::new()
+        .import(&canonical_record)
+        .expect("the registry accepts the canonical reconciliation");
     json!({
         "present": true,
-        "reconciliation_digest": "4e".repeat(32),
-        "completion": { "status": "complete" },
-        "integrity": { "valid": true },
+        "automatic": true,
+        "reconciliation_digest": reconciliation_digest,
+        "canonical_record": canonical_record,
+        "workflow_id": "workflow.audit",
+        "mission_id": "mission.audit",
+        "completion": canonical_record["completion"].clone(),
+        "integrity": canonical_record["integrity"].clone(),
+        "registry_import": registry_import,
     })
 }
 
@@ -199,19 +247,18 @@ pub fn autopilot_report() -> Value {
         NextAction::DispatchFull { mission, .. } => mission,
         other => panic!("expected a full dispatch, got {other:?}"),
     };
-    let report = mission_report(
+    let mut report = mission_report(
         &dispatched,
-        vec![
-            succeeded_step("a", "tool_a"),
-            succeeded_step("b", "tool_b"),
-        ],
+        vec![succeeded_step("a", "tool_a"), succeeded_step("b", "tool_b")],
     );
+    let reconciliation = complete_reconciliation();
+    report["workflow_reconciliation"] = reconciliation.clone();
     history.push(
         AttemptRecord::delivered(
             AttemptKind::Full,
             dispatched,
             report,
-            Some(complete_reconciliation()),
+            Some(reconciliation),
             None,
         )
         .expect("the attempt records"),

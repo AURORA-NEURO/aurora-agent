@@ -19,7 +19,7 @@
 //! # The gate
 //!
 //! Evidence and surface are checked against each other at construction ([`ApiClaimDraft::seal`]).
-//! A Python API cannot carry in-tree evidence, and a crate in this workspace cannot be excused as
+//! An external Python API cannot carry in-tree evidence, and a local artifact cannot be excused as
 //! out of tree. The consequence is small and load bearing: [`Evidence::ResolvedInTree`] is a
 //! *true* statement about a file that exists, everywhere it appears.
 
@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
 
 use crate::error::ClaimError;
-use crate::surface::{Locale, Surface};
+use crate::surface::{is_normalized_repository_path, Locale, Surface};
 
 const MAX_CLAIM_TEXT_BYTES: usize = 4_096;
 
@@ -223,7 +223,7 @@ impl ApiClaimDraft {
                     Err(ClaimError::ResolvedWithoutFile {
                         api: self.api.as_str().to_string(),
                     })
-                } else if !valid_claim_text(file) {
+                } else if !valid_claim_text(file) || !is_normalized_repository_path(file) {
                     Err(ClaimError::InvalidEvidenceMetadata {
                         api: self.api.as_str().to_string(),
                         field: "file",

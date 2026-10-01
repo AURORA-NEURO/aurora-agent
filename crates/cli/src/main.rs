@@ -21,6 +21,8 @@
 //!   `bioprism_baseline::sweep` documents.
 
 mod args;
+mod autopilot_goal_recovery;
+mod autopilot_recovery;
 mod computational_execution_assurance;
 mod exit;
 mod experiment_design_assurance;
@@ -39,10 +41,15 @@ use args::{
     Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile,
     ProjectIngestOptions, ProjectPlanOptions,
 };
+use autopilot_goal_recovery::GoalControlRecoveryStore;
+use autopilot_recovery::AutopilotRecoveryStore;
 use bioprism_autopilot::{
-    drive::instantiation_mission, drive_instantiation, preview_first_action,
-    verify_autopilot_report, AutonomyGrant, AutonomyGrantDocument, FinalStatus, NextAction,
-    RetryPolicyDocument, RetryScheduleDocument,
+    drive::instantiation_mission, drive_goal, drive_instantiation_with_checkpoint,
+    preview_first_action, resume_goal_from_checkpoint, resume_instantiation_with_checkpoint,
+    seal_goal_control_checkpoint, validate_goal_control_checkpoint, verify_autopilot_report,
+    verify_goal_control_report, AutonomyGrant, AutonomyGrantDocument, AutopilotError, DriveHistory,
+    FinalStatus, GoalControlBudget, GoalControlContext, GoalControlStatus, GoalDecision,
+    GoalStopReason, NextAction, RetryPolicyDocument, RetryScheduleDocument,
 };
 use bioprism_devplat::{
     audit_domain_decision_readiness, build_domain_workflow_catalogue,
@@ -60,8 +67,8 @@ use bioprism_project::{
     AssemblyOptions, AuditOptions, AuditReport, Issue, ProjectScan, ProjectWorld, ScanOptions,
 };
 use bioprism_repair::{
-    plan_for_issue, predicate_from_json, verify, AcceptanceReport, DeclaredItem, ItemStatus,
-    Outcome as RepairOutcome, PlanOptions, RepairPlan,
+    plan_for_issue, predicate_from_json, verify, verify_successor, AcceptanceReport, DeclaredItem,
+    ItemStatus, Outcome as RepairOutcome, PlanOptions, RepairPlan, Succession,
 };
 use bioprism_research::{
     plan_protocol, render_report, run_research, verify_dossier, ProtocolStep, ResearchRequest,
@@ -71,9 +78,11 @@ use bioprism_scope::DimensionRegistry;
 use bioprism_section::{CertificateProfile, ContextCertificate, LeakageWitness, OracleStatus};
 use bioprism_world::{validate, Severity};
 use exit::{CliError, CliResult, ExitCode};
+use serde::Deserialize;
 use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 fn main() {
@@ -231,7 +240,14 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             plan,
             issues,
             decision_time,
-        } => project_verify(root, plan, issues.as_deref(), decision_time.as_deref()),
+            succession,
+        } => project_verify(
+            root,
+            plan,
+            issues.as_deref(),
+            decision_time.as_deref(),
+            succession.as_deref(),
+        ),
         Command::EvidenceBundleVerify { bundle } => evidence_bundle_verify(bundle),
         Command::EvidenceBundleImport {
             bundle,
@@ -500,8 +516,29 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             instantiation,
             grant,
             report_out,
+            recovery_dir,
             dry_run,
-        } => autopilot_run(instantiation, grant, report_out.as_deref(), *dry_run),
+        } => autopilot_run(
+            instantiation,
+            grant,
+            report_out.as_deref(),
+            recovery_dir.as_deref(),
+            *dry_run,
+        ),
+        Command::AutopilotResume {
+            instantiation,
+            grant,
+            recovery_dir,
+            report_out,
+        } => autopilot_resume(instantiation, grant, recovery_dir, report_out.as_deref()),
+        Command::AutopilotGoalStep {
+            request,
+            recovery_dir,
+            report_out,
+        } => autopilot_goal_step(request, recovery_dir, report_out.as_deref()),
+        Command::AutopilotGoalVerify { report, checkpoint } => {
+            autopilot_goal_verify(report.as_deref(), checkpoint.as_deref())
+        }
         Command::AutopilotVerify { report } => autopilot_verify(report),
         Command::ResearchTemplate => research_template(),
         Command::ResearchRun {
@@ -1979,6 +2016,7 @@ fn autopilot_run(
     instantiation_path: &Path,
     grant_path: &Path,
     report_out: Option<&Path>,
+    recovery_dir: Option<&Path>,
     dry_run: bool,
 ) -> CliResult<Outcome> {
     let instantiation = io::read_json(instantiation_path)?;
@@ -2020,6 +2058,9 @@ fn autopilot_run(
             "writes": "none",
             "grant_digest": grant_digest,
             "max_attempts": grant.max_attempts(),
+            "recovery_dir": recovery_dir
+                .map(|path| json!(path.display().to_string()))
+                .unwrap_or(Value::Null),
             "planned_first_action": {
                 "action": "dispatch_full",
                 "attempt_index": authorization.attempt_index(),
@@ -2046,17 +2087,542 @@ fn autopilot_run(
         return Ok(Outcome::ok(document, human));
     }
 
+    require_report_outside_recovery(report_out, recovery_dir)?;
+    let store = recovery_dir
+        .map(AutopilotRecoveryStore::create)
+        .transpose()
+        .map_err(CliError::from_autopilot)?;
+    let (outcome, store) =
+        execute_autopilot(&grant, &instantiation, store, None).map_err(|error| {
+            CliError::from_autopilot(error).about(instantiation_path.display().to_string())
+        })?;
+    finish_autopilot(
+        outcome,
+        grant_digest,
+        report_out,
+        recovery_dir,
+        store,
+        "autopilot_run",
+        false,
+    )
+}
+
+fn autopilot_resume(
+    instantiation_path: &Path,
+    grant_path: &Path,
+    recovery_dir: &Path,
+    report_out: Option<&Path>,
+) -> CliResult<Outcome> {
+    require_report_outside_recovery(report_out, Some(recovery_dir))?;
+    let instantiation = io::read_json(instantiation_path)?;
+    let grant = parse_autonomy_grant(grant_path)?;
+    let grant_digest = grant.digest().map_err(CliError::from_autopilot)?;
+    let mission = instantiation_mission(&instantiation).map_err(|error| {
+        CliError::from_autopilot(error).about(instantiation_path.display().to_string())
+    })?;
+    let recovered = AutopilotRecoveryStore::restore(recovery_dir, &grant, &mission)
+        .map_err(CliError::from_autopilot)?;
+    let (outcome, store) = execute_autopilot(
+        &grant,
+        &instantiation,
+        Some(recovered.store),
+        Some((recovered.checkpoint, recovered.attempts)),
+    )
+    .map_err(|error| CliError::from_autopilot(error).about(recovery_dir.display().to_string()))?;
+    finish_autopilot(
+        outcome,
+        grant_digest,
+        report_out,
+        Some(recovery_dir),
+        store,
+        "autopilot_resume",
+        true,
+    )
+}
+
+const MAX_GOAL_STEP_REQUEST_BYTES: u64 = 20_000_000;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AutopilotGoalStepRequest {
+    goal_id: String,
+    grant: AutonomyGrant,
+    #[serde(default)]
+    budget: Option<AutopilotGoalBudgetRequest>,
+    decision: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AutopilotGoalBudgetRequest {
+    max_cycles: usize,
+    max_total_dispatches: usize,
+}
+
+fn validate_restored_goal_budget(
+    request: Option<&AutopilotGoalBudgetRequest>,
+    stored: GoalControlBudget,
+    has_checkpoint: bool,
+) -> CliResult<()> {
+    if has_checkpoint && request.is_some() {
+        return Err(CliError::invalid(
+            "a resumed goal reuses the checkpoint budget; omit budget from its request",
+        ));
+    }
+    if let Some(request) = request {
+        let supplied = GoalControlBudget::new(request.max_cycles, request.max_total_dispatches)
+            .map_err(|error| CliError::invalid(format!("invalid goal budget: {error}")))?;
+        if supplied != stored {
+            return Err(CliError::invalid(
+                "an identity-only recovery retry must use its original stored budget",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn parse_goal_decision(value: &Value) -> CliResult<GoalDecision> {
+    let kind = value
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| CliError::invalid("goal decision kind must be a string"))?;
+    let fields = |expected: &[&str]| -> CliResult<()> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| CliError::invalid("goal decision must be a JSON object"))?;
+        if object.len() != expected.len() || expected.iter().any(|key| !object.contains_key(*key)) {
+            return Err(CliError::invalid(
+                "goal decision has missing or unsupported fields",
+            ));
+        }
+        Ok(())
+    };
+    match kind {
+        "run_mission" => {
+            fields(&["kind", "mission"])?;
+            if !value["mission"].is_object() {
+                return Err(CliError::invalid("goal mission must be a JSON object"));
+            }
+            Ok(GoalDecision::RunMission(value["mission"].clone()))
+        }
+        "complete" => {
+            fields(&["kind", "evaluator_id", "evidence_sha256"])?;
+            let evaluator_id = value["evaluator_id"]
+                .as_str()
+                .ok_or_else(|| CliError::invalid("evaluator_id must be a string"))?;
+            let evidence_sha256 = value["evidence_sha256"]
+                .as_str()
+                .ok_or_else(|| CliError::invalid("evidence_sha256 must be a string"))?;
+            Ok(GoalDecision::Complete {
+                evaluator_id: evaluator_id.to_owned(),
+                evidence_sha256: evidence_sha256.to_owned(),
+            })
+        }
+        "stop" => {
+            fields(&["kind", "reason"])?;
+            let reason = match value["reason"].as_str() {
+                Some("no_admissible_work") => GoalStopReason::NoAdmissibleWork,
+                Some("needs_review") => GoalStopReason::NeedsReview,
+                Some("cancelled") => GoalStopReason::Cancelled,
+                Some("abandoned") => GoalStopReason::Abandoned,
+                _ => return Err(CliError::invalid("goal stop reason is unsupported")),
+            };
+            Ok(GoalDecision::Stop(reason))
+        }
+        _ => Err(CliError::invalid(
+            "goal decision kind must be run_mission, complete, or stop",
+        )),
+    }
+}
+
+fn autopilot_goal_step(
+    request_path: &Path,
+    recovery_dir: &Path,
+    report_out: Option<&Path>,
+) -> CliResult<Outcome> {
+    require_report_outside_recovery(report_out, Some(recovery_dir))?;
+    let metadata =
+        std::fs::metadata(request_path).map_err(|error| CliError::io(request_path, error))?;
+    if !metadata.is_file() || metadata.len() > MAX_GOAL_STEP_REQUEST_BYTES {
+        return Err(CliError::invalid(format!(
+            "goal request must be a regular JSON file no larger than {MAX_GOAL_STEP_REQUEST_BYTES} bytes"
+        ))
+        .about(request_path.display().to_string()));
+    }
+    let request_value = io::read_json(request_path)?;
+    let request: AutopilotGoalStepRequest =
+        serde_json::from_value(request_value).map_err(|error| {
+            CliError::invalid(format!("invalid goal-step request: {error}"))
+                .about(request_path.display().to_string())
+        })?;
+    if request.goal_id.trim().is_empty()
+        || request.goal_id.trim() != request.goal_id
+        || request.goal_id.contains('\0')
+        || request.goal_id.len() > 256
+    {
+        return Err(CliError::invalid(
+            "goal_id must be a trimmed, non-empty identifier of at most 256 bytes",
+        ));
+    }
+    let decision = parse_goal_decision(&request.decision)?;
+    let grant_sha256 = request.grant.digest().map_err(CliError::from_autopilot)?;
+    let has_recovery_entries = if recovery_dir.exists() {
+        if !recovery_dir.is_dir() {
+            return Err(CliError::invalid("--recovery-dir must name a directory"));
+        }
+        std::fs::read_dir(recovery_dir)
+            .map_err(|error| CliError::io(recovery_dir, error))?
+            .next()
+            .transpose()
+            .map_err(|error| CliError::io(recovery_dir, error))?
+            .is_some()
+    } else {
+        false
+    };
+
+    if !has_recovery_entries && matches!(&decision, GoalDecision::Complete { .. }) {
+        return Err(CliError::invalid(
+            "a new goal cannot be completed before a mission produces evidence",
+        ));
+    }
+
+    let (mut store, checkpoint, previous_report, budget, resumed) = if has_recovery_entries {
+        let restored =
+            GoalControlRecoveryStore::restore(recovery_dir, &request.goal_id, &grant_sha256)
+                .map_err(CliError::invalid)?;
+        let resumed = restored.checkpoint.is_some();
+        let previous_report = restored.store.last_report().cloned();
+        let budget = restored.store.budget();
+        validate_restored_goal_budget(request.budget.as_ref(), budget, resumed)?;
+        (
+            restored.store,
+            restored.checkpoint,
+            previous_report,
+            budget,
+            resumed,
+        )
+    } else {
+        let budget_request = request.budget.as_ref().ok_or_else(|| {
+            CliError::invalid("a new goal requires an explicit budget in its request")
+        })?;
+        let budget = GoalControlBudget::new(
+            budget_request.max_cycles,
+            budget_request.max_total_dispatches,
+        )
+        .map_err(|error| CliError::invalid(format!("invalid goal budget: {error}")))?;
+        let store =
+            GoalControlRecoveryStore::create(recovery_dir, &request.goal_id, &grant_sha256, budget)
+                .map_err(CliError::invalid)?;
+        (store, None, None, budget, false)
+    };
+
     let server = Server::new(
         std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
     );
     let cancellation = AtomicBool::new(false);
-    let mut dispatcher = |mission: &Value| -> Result<Value, String> {
+    let mut next_decision = Some(decision);
+    let mut controller = move |_: &GoalControlContext<'_>| {
+        Ok(next_decision
+            .take()
+            .unwrap_or(GoalDecision::Stop(GoalStopReason::NoAdmissibleWork)))
+    };
+    let mut dispatcher = |mission: &Value| {
+        store.mark_pending(mission)?;
         server.execute_agent_mission_with_cancellation(mission, &cancellation)
     };
-    let outcome =
-        drive_instantiation(&grant, &instantiation, &mut dispatcher).map_err(|error| {
-            CliError::from_autopilot(error).about(instantiation_path.display().to_string())
-        })?;
+    let outcome = match checkpoint.as_ref() {
+        Some(checkpoint) => resume_goal_from_checkpoint(
+            checkpoint,
+            previous_report,
+            &request.grant,
+            &mut controller,
+            &mut dispatcher,
+        )
+        .map_err(|error| CliError::invalid(format!("goal resume refused: {error}")))?,
+        None => drive_goal(
+            &request.goal_id,
+            &request.grant,
+            budget,
+            &mut controller,
+            &mut dispatcher,
+        )
+        .map_err(|error| CliError::invalid(format!("goal step refused: {error}")))?,
+    };
+    drop(dispatcher);
+    drop(controller);
+
+    let report_verification = verify_goal_control_report(&outcome.report).map_err(|error| {
+        CliError::internal(format!("generated goal report did not verify: {error}"))
+    })?;
+    let safe_stop = outcome.final_status == GoalControlStatus::Stopped
+        && matches!(
+            outcome
+                .report
+                .pointer("/disposition/reason")
+                .and_then(Value::as_str),
+            Some("no_admissible_work" | "needs_review")
+        );
+    let goal_checkpoint = if safe_stop {
+        let generation = store.generation() + 1;
+        let predecessor = store
+            .checkpoint()
+            .and_then(|checkpoint| checkpoint["snapshot_digest"].as_str());
+        let checkpoint =
+            seal_goal_control_checkpoint(&outcome.report, generation as u64, predecessor).map_err(
+                |error| CliError::invalid(format!("cannot seal goal checkpoint: {error}")),
+            )?;
+        store
+            .commit_safe_stop(&checkpoint, outcome.cycle_reports.last())
+            .map_err(CliError::invalid)?;
+        Some(checkpoint)
+    } else {
+        if !store.has_pending() {
+            store
+                .commit_terminal(&outcome.report)
+                .map_err(CliError::invalid)?;
+        }
+        None
+    };
+
+    let report_sha256 = outcome.report["report_sha256"].clone();
+    let current_dispatches = outcome.dispatches_this_call;
+    let goal_status = outcome.final_status.as_str();
+    let checkpoint_generation = goal_checkpoint
+        .as_ref()
+        .map(|checkpoint| checkpoint["generation"].clone())
+        .unwrap_or(Value::Null);
+    let recovery_state = if goal_checkpoint.is_some() {
+        "safe_stop_checkpointed"
+    } else if store.has_pending() {
+        "outcome_unknown_locked"
+    } else {
+        "terminal"
+    };
+    let document = json!({
+        "ok": !matches!(outcome.final_status, GoalControlStatus::Refused | GoalControlStatus::OutcomeUnknown)
+            && report_verification["valid"] == true,
+        "workflow": "autopilot_goal_step",
+        "resumed": resumed,
+        "goal_id": request.goal_id,
+        "goal_status": goal_status,
+        "goal_complete": outcome.final_status == GoalControlStatus::Completed,
+        "dispatch_started": current_dispatches > 0,
+        "dispatches_this_call": current_dispatches,
+        "total_dispatches": outcome.report["total_dispatches"],
+        "report_sha256": report_sha256,
+        "report_verification": report_verification,
+        "report": outcome.report,
+        "checkpoint_generation": checkpoint_generation,
+        "checkpoint": goal_checkpoint,
+        "recovery": {
+            "directory": recovery_dir.display().to_string(),
+            "generation": store.generation(),
+            "state": recovery_state,
+            "private_reports": "separate files containing mission arguments and tool results; protect this directory",
+            "anti_rollback": "not provided by local content digests; protect and fence the recovery directory",
+        },
+        "writes": if report_out.is_some() { "recovery_and_report" } else { "recovery_state" },
+    });
+    let artifact = report_out
+        .map(|path| io::write_artifact(path, &outcome.report, false))
+        .transpose()?;
+    let report_outcome = if let Some(artifact) = artifact {
+        json!({
+            "path": artifact.path.display().to_string(),
+            "bytes": artifact.bytes,
+            "written": artifact.written,
+        })
+    } else {
+        Value::Null
+    };
+    let human = format!(
+        "autopilot goal step: {goal_status}\n  goal: {}\n  total dispatches: {}\n  report sha256: {}\n  recovery: {} (generation {})\n  private recovery reports contain mission arguments and tool results; protect this directory\n",
+        request.goal_id,
+        outcome.report["total_dispatches"].as_u64().unwrap_or(0),
+        report_sha256.as_str().unwrap_or("<missing>"),
+        recovery_state,
+        store.generation(),
+    );
+    let mut output = document;
+    output["artifact"] = report_outcome;
+    Ok(Outcome::ok(output, human).failing_if(matches!(
+        outcome.final_status,
+        GoalControlStatus::Refused | GoalControlStatus::OutcomeUnknown
+    )))
+}
+
+fn autopilot_goal_verify(
+    report_path: Option<&Path>,
+    checkpoint_path: Option<&Path>,
+) -> CliResult<Outcome> {
+    if report_path.is_none() && checkpoint_path.is_none() {
+        return Err(CliError::invalid(
+            "autopilot goal-verify requires a report or checkpoint",
+        ));
+    }
+    let checkpoint = checkpoint_path.map(io::read_json).transpose()?;
+    let report = match report_path.map(io::read_json).transpose()? {
+        Some(report) => report,
+        None => checkpoint
+            .as_ref()
+            .and_then(|checkpoint| checkpoint.get("goal_control_report"))
+            .cloned()
+            .ok_or_else(|| CliError::invalid("goal checkpoint has no embedded goal report"))?,
+    };
+    let report_verification = verify_goal_control_report(&report)
+        .map_err(|error| CliError::invalid(format!("goal report cannot be verified: {error}")))?;
+    let checkpoint_verification = checkpoint
+        .as_ref()
+        .map(|checkpoint| {
+            let normalized = validate_goal_control_checkpoint(checkpoint).map_err(|error| {
+                CliError::invalid(format!("goal checkpoint is invalid: {error}"))
+            })?;
+            if normalized["goal_control_report"] != report {
+                return Err(CliError::invalid(
+                    "goal checkpoint does not bind the supplied report",
+                ));
+            }
+            Ok(json!({
+                "valid": true,
+                "generation": normalized["generation"],
+                "snapshot_digest": normalized["snapshot_digest"],
+            }))
+        })
+        .transpose()?;
+    let valid = report_verification["valid"] == true
+        && checkpoint_verification
+            .as_ref()
+            .is_none_or(|verification| verification["valid"] == true);
+    let document = json!({
+        "ok": valid,
+        "workflow": "autopilot_goal_verify",
+        "report_verification": report_verification,
+        "checkpoint_verification": checkpoint_verification,
+        "dispatch": "not_started",
+        "writes": "none",
+    });
+    let human = if valid {
+        "goal-control report and checkpoint verify; no dispatch or writes\n".to_string()
+    } else {
+        "goal-control verification failed; no dispatch or writes\n".to_string()
+    };
+    Ok(Outcome::ok(document, human).failing_if(!valid))
+}
+
+fn require_report_outside_recovery(
+    report_out: Option<&Path>,
+    recovery_dir: Option<&Path>,
+) -> CliResult<()> {
+    let (Some(report_out), Some(recovery_dir)) = (report_out, recovery_dir) else {
+        return Ok(());
+    };
+    let absolute = |path: &Path| -> CliResult<PathBuf> {
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|error| CliError::internal(error.to_string()))?
+                .join(path)
+        };
+        let mut normalized = PathBuf::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    if !normalized.pop() {
+                        normalized.push(component.as_os_str());
+                    }
+                }
+                _ => normalized.push(component.as_os_str()),
+            }
+        }
+        Ok(normalized)
+    };
+    let report = absolute(report_out)?;
+    let recovery = absolute(recovery_dir)?;
+    let report_text = report.to_string_lossy().to_lowercase();
+    let recovery_text = recovery
+        .to_string_lossy()
+        .trim_end_matches(|character| character == '\\' || character == '/')
+        .to_lowercase();
+    if report_text == recovery_text
+        || report_text.starts_with(&format!("{recovery_text}\\"))
+        || report_text.starts_with(&format!("{recovery_text}/"))
+    {
+        return Err(CliError::invalid(
+            "--report-out must be outside --recovery-dir so recovery generations remain verifiable",
+        ));
+    }
+    Ok(())
+}
+
+fn execute_autopilot(
+    grant: &AutonomyGrant,
+    instantiation: &Value,
+    store: Option<AutopilotRecoveryStore>,
+    resume: Option<(Value, Vec<bioprism_autopilot::AttemptRecord>)>,
+) -> Result<
+    (
+        bioprism_autopilot::DriveOutcome,
+        Option<AutopilotRecoveryStore>,
+    ),
+    AutopilotError,
+> {
+    let server =
+        Server::new(
+            std::env::current_dir().map_err(|error| AutopilotError::Persistence {
+                reason: format!("cannot resolve current directory: {error}"),
+            })?,
+        );
+    let cancellation = AtomicBool::new(false);
+    let shared_store = RefCell::new(store);
+    let dispatch_setup_error = RefCell::new(None);
+    let mut dispatcher = |mission: &Value| -> Result<Value, String> {
+        if let Some(store) = shared_store.borrow_mut().as_mut() {
+            if let Err(error) = store.mark_pending(mission) {
+                *dispatch_setup_error.borrow_mut() = Some(error.clone());
+                return Err(format!("cannot persist pre-dispatch intent: {error}"));
+            }
+        }
+        server.execute_agent_mission_with_cancellation(mission, &cancellation)
+    };
+    let mut checkpoint = |history: &DriveHistory| -> Result<(), AutopilotError> {
+        if let Some(error) = dispatch_setup_error.borrow_mut().take() {
+            return Err(error);
+        }
+        if let Some(store) = shared_store.borrow_mut().as_mut() {
+            store.checkpoint(grant, history)?;
+        }
+        Ok(())
+    };
+    let outcome = match resume {
+        Some((snapshot, attempts)) => resume_instantiation_with_checkpoint(
+            grant,
+            &snapshot,
+            instantiation,
+            attempts,
+            &mut dispatcher,
+            &mut checkpoint,
+        ),
+        None => drive_instantiation_with_checkpoint(
+            grant,
+            instantiation,
+            &mut dispatcher,
+            &mut checkpoint,
+        ),
+    }?;
+    Ok((outcome, shared_store.into_inner()))
+}
+
+fn finish_autopilot(
+    outcome: bioprism_autopilot::DriveOutcome,
+    grant_digest: String,
+    report_out: Option<&Path>,
+    recovery_dir: Option<&Path>,
+    store: Option<AutopilotRecoveryStore>,
+    workflow: &str,
+    resumed: bool,
+) -> CliResult<Outcome> {
     let succeeded = outcome.final_status == FinalStatus::Succeeded;
     let report = outcome.report;
     let artifact = report_out
@@ -2076,10 +2642,15 @@ fn autopilot_run(
         .as_str()
         .unwrap_or("unknown")
         .to_string();
+    let recovery_generation = store
+        .as_ref()
+        .map(AutopilotRecoveryStore::generation)
+        .unwrap_or(0);
     let document = json!({
         "ok": succeeded,
-        "workflow": "autopilot_run",
+        "workflow": workflow,
         "dry_run": false,
+        "resumed": resumed,
         "final_status": final_status,
         "attempts_used": attempts_used,
         "max_attempts": max_attempts,
@@ -2095,6 +2666,13 @@ fn autopilot_run(
                 })
             })
             .unwrap_or(Value::Null),
+        "recovery": recovery_dir
+            .map(|path| json!({
+                "directory": path.display().to_string(),
+                "generation": recovery_generation,
+                "private_rehydration_material": "separate_attempt_files; protect this directory",
+            }))
+            .unwrap_or(Value::Null),
         "report": report,
     });
     let mut human = format!(
@@ -2102,6 +2680,9 @@ fn autopilot_run(
          {grant_digest}\n  attempts used: {attempts_used} of {max_attempts}\n  report sha256: \
          {report_sha256}\n",
     );
+    if let Some(stop_summary) = autopilot_stop_summary(&report) {
+        human.push_str(&format!("  stop: {stop_summary}\n"));
+    }
     if let Some(artifact) = &artifact {
         human.push_str(&format!(
             "  wrote {} ({} bytes)\n",
@@ -2109,19 +2690,58 @@ fn autopilot_run(
             artifact.bytes
         ));
     }
-    match report_out {
-        Some(path) => human.push_str(&format!(
+    if let Some(path) = recovery_dir {
+        human.push_str(&format!(
+            "  recovery directory: {} (generation {})\n  private attempt files contain mission arguments and tool reports; protect this directory\n",
+            path.display(), recovery_generation
+        ));
+    }
+    match (report_out, recovery_dir) {
+        (_, Some(directory)) => human.push_str(&format!(
+            "\nResume or verify the saved recovery state with: bioprism autopilot resume --instantiation <instantiation.json> --grant <grant.json> --recovery-dir {}\n",
+            directory.display()
+        )),
+        (Some(path), None) => human.push_str(&format!(
             "\nNext: bioprism autopilot verify --report {}\n",
             path.display()
         )),
-        None => human.push_str(&format!(
+        (None, None) => human.push_str(&format!(
             "\nNext: bioprism autopilot run --instantiation {} --grant {} --report-out \
              autopilot-report.json\n",
-            instantiation_path.display(),
-            grant_path.display()
+            "<instantiation.json>",
+            "<grant.json>"
         )),
     }
     Ok(Outcome::ok(document, human).failing_if(!succeeded))
+}
+
+/// Keep the human CLI output aligned with the machine report's stop classification. In
+/// particular, `exhausted` is a planner-accounted stop, while `outcome_unknown` marks a dispatched
+/// attempt whose mission-level report is unavailable or invalid.
+fn autopilot_stop_summary(report: &Value) -> Option<String> {
+    let status = report.get("final_status").and_then(Value::as_str)?;
+    let detail = match status {
+        "exhausted" => report.get("accounting")?,
+        "outcome_unknown" => report.get("outcome_unknown")?,
+        "refused" => report
+            .get("repair_refusal")
+            .or_else(|| report.get("first_terminal_refusal"))?,
+        "paused" => report.get("continuation")?,
+        _ => return None,
+    };
+    let reason = detail
+        .get("reason")
+        .or_else(|| detail.get("signal"))
+        .or_else(|| detail.get("status"))
+        .and_then(Value::as_str)?;
+    let explanation = detail
+        .get("detail")
+        .or_else(|| detail.get("error"))
+        .and_then(Value::as_str);
+    Some(match explanation {
+        Some(explanation) => format!("{reason}: {explanation}"),
+        None => reason.to_owned(),
+    })
 }
 
 fn autopilot_verify(report_path: &Path) -> CliResult<Outcome> {
@@ -4387,21 +5007,16 @@ fn verdict_code(report: &AcceptanceReport) -> ExitCode {
 
 /// Re-scans the tree and reports which of a plan's declared criteria held.
 ///
-/// # Not implemented here
-///
-/// **A repaired tree cannot be given a verdict on this surface.** A project world id is derived
-/// from the file listing, so any edit produces a different world and this command reports `stale`
-/// — correctly, and unhelpfully for the case the feature exists for.
-/// `bioprism_repair::verify_successor` exists for it and takes a `Succession`: a named person's
-/// assertion that the new world is the repaired successor of the planned one, recorded verbatim
-/// and never verified. No flag here mints one. That is a gap in this command, not in the crate,
-/// and it is stated rather than worked around by verifying against the new world and calling the
-/// difference immaterial.
+/// A different world is evaluated only when `--succession` supplies a strict declaration naming
+/// the person asserting that it is the repaired successor. That claim is recorded verbatim and
+/// never independently verified; without it, a different world remains stale and evaluates
+/// nothing.
 fn project_verify(
     root: &Path,
     plan_path: &Path,
     issues_path: Option<&Path>,
     decision_time: Option<&str>,
+    succession_path: Option<&Path>,
 ) -> CliResult<Outcome> {
     let plan = RepairPlan::from_json(&io::read_json(plan_path)?)
         .map_err(|error| CliError::from_repair(error).about(plan_path.display().to_string()))?;
@@ -4410,7 +5025,11 @@ fn project_verify(
     let world = bioprism_world::World::from_json(assembled.world.clone())
         .map_err(|error| CliError::internal(error.to_string()))?;
 
-    let report = verify(&plan, &world);
+    let succession = succession_path.map(read_succession).transpose()?;
+    let report = match &succession {
+        Some(succession) => verify_successor(&plan, &world, succession),
+        None => verify(&plan, &world),
+    };
     let code = verdict_code(&report);
 
     let document = json!({
@@ -4482,6 +5101,43 @@ fn project_verify(
     ));
 
     Ok(Outcome::ok(document, human).under(code))
+}
+
+/// Reads the explicit caller assertion needed to verify a changed project world.
+///
+/// The declaration is intentionally a tiny strict object: unknown fields could otherwise make
+/// a misspelled identity or claim look accepted while being ignored.
+fn read_succession(path: &Path) -> CliResult<Succession> {
+    let document = io::read_json(path)?;
+    let object = document.as_object().ok_or_else(|| {
+        CliError::invalid("succession must be a JSON object with declared_by and statement")
+            .about(path.display().to_string())
+    })?;
+    for key in object.keys() {
+        if !["declared_by", "statement"].contains(&key.as_str()) {
+            return Err(CliError::invalid(format!(
+                "undeclared field {key:?} on succession; the declared fields are [\"declared_by\", \"statement\"]"
+            ))
+            .about(path.display().to_string()));
+        }
+    }
+    let declared_by = object
+        .get("declared_by")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CliError::invalid("succession needs a string \"declared_by\"")
+                .about(path.display().to_string())
+        })?;
+    let statement = object
+        .get("statement")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CliError::invalid("succession needs a string \"statement\"")
+                .about(path.display().to_string())
+        })?;
+    Succession::declare(declared_by, statement)
+        .map_err(CliError::from_repair)
+        .map_err(|error| error.about(path.display().to_string()))
 }
 
 fn prism_fork(
@@ -4789,6 +5445,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_identity_only_goal_retry_accepts_only_the_original_budget() {
+        let stored = GoalControlBudget::new(4, 7).expect("stored budget is valid");
+        let matching = AutopilotGoalBudgetRequest {
+            max_cycles: 4,
+            max_total_dispatches: 7,
+        };
+        let different = AutopilotGoalBudgetRequest {
+            max_cycles: 4,
+            max_total_dispatches: 8,
+        };
+
+        assert!(validate_restored_goal_budget(Some(&matching), stored, false).is_ok());
+        assert!(validate_restored_goal_budget(None, stored, false).is_ok());
+        assert!(validate_restored_goal_budget(Some(&different), stored, false).is_err());
+        assert!(validate_restored_goal_budget(Some(&matching), stored, true).is_err());
+    }
+
+    #[test]
     fn the_commented_grant_template_stays_in_lockstep_with_the_typed_template_document() {
         let stripped = GRANT_TEMPLATE_COMMENTED
             .lines()
@@ -4802,6 +5476,22 @@ mod tests {
         assert_eq!(
             parsed, typed,
             "the human-mode commented template and the --json template document have drifted"
+        );
+    }
+
+    #[test]
+    fn a_non_successful_autopilot_summary_explains_why_the_drive_stopped() {
+        let report = json!({
+            "final_status": "outcome_unknown",
+            "outcome_unknown": {
+                "reason": "invalid_mission_report",
+                "detail": "the response may have caused side effects and will not be re-sent",
+            },
+        });
+
+        assert_eq!(
+            autopilot_stop_summary(&report).as_deref(),
+            Some("invalid_mission_report: the response may have caused side effects and will not be re-sent")
         );
     }
 }

@@ -124,6 +124,17 @@ acquire/project callbacks for that exact plan; the callback validates the transi
 projects only receipt digests as evidence metadata. The adapter has no API-key
 argument or synthetic fallback; broader source coverage, evidence-quality checks, claim-integrity
 review, and scientific/clinical interpretation remain separate caller-owned work.
+`ReviewedCBioPortalRetrievalAdapter` adds a distinct reviewed metadata catalogue for the two fixed
+public studies `gbm_tcga` and `lgg_tcga`. Its preflight is network-free; approved execution makes
+exactly two GETs per study: study metadata and one sorted `SUMMARY` molecular-profile page capped at
+128 profiles. It retains only allow-listed descriptors and source-reported aggregate sample counts,
+never sample, patient, clinical, or molecular-value rows. A full page is refused as potentially
+truncated, and missing counts remain unknown. The single-study
+`createReviewedCBioPortalAutonomousEvidenceRegistration()` validates the transient bundle/receipt
+and projects only digests. The [official API overview](https://docs.cbioportal.org/web-api-and-clients/)
+links to its current [OpenAPI reference](https://www.cbioportal.org/api/swagger-ui/index.html?urls.primaryName=internal);
+the API is beta, so identity and response drift fail closed. This catalogue is not exhaustive
+glioma research or an evidence-quality assessment.
 `publicLiteratureMatrix()` provides the lane-complete version of that handoff, preserving one
 source-bound packet per selected specialty and reporting empty/truncated lanes explicitly.
 `publicLiteratureReasoningContext()` renders a packet into bounded, source-addressable context for

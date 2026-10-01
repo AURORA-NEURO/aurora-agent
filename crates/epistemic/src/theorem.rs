@@ -224,7 +224,9 @@ pub fn greedy_cardinality(
 pub fn greedy_knapsack() -> Applicability {
     Applicability::DoesNotApply {
         guarantee: Guarantee::GreedyKnapsackCostBenefit,
-        failed_precondition: Guarantee::GreedyKnapsackCostBenefit.precondition().to_string(),
+        failed_precondition: Guarantee::GreedyKnapsackCostBenefit
+            .precondition()
+            .to_string(),
     }
 }
 

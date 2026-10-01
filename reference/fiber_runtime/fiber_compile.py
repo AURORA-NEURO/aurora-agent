@@ -102,10 +102,21 @@ def validate_world(world: dict[str, Any]) -> None:
             raise ValueError(f"factor {factor['id']} has unknown inputs {missing}")
 
 
-def accessible_variables(world: dict[str, Any], decision_time: str) -> set[str]:
+def temporal_cut(world: dict[str, Any], decision_time: str) -> tuple[set[str], set[str]]:
     cut=parse_time(decision_time)
-    produced_by_event={v for e in world.get("events",[]) if parse_time(e["availability_time"]) <= cut for v in e.get("produces",[])}
-    event_managed={v for e in world.get("events",[]) for v in e.get("produces",[])}
+    released=set()
+    event_managed=set()
+    for event in world.get("events",[]):
+        available=parse_time(event["availability_time"]) <= cut
+        for variable in event.get("produces",[]):
+            event_managed.add(variable)
+            if available:
+                released.add(variable)
+    return released,event_managed
+
+
+def accessible_variables(world: dict[str, Any], decision_time: str) -> set[str]:
+    produced_by_event,event_managed=temporal_cut(world,decision_time)
     all_vars={f["provides"] for f in world["facts"]}
     return (all_vars-event_managed) | produced_by_event
 
@@ -185,6 +196,10 @@ def policy_requirement(fact: dict[str, Any]) -> set[str]:
 
 def resolve_policy(world: dict[str, Any], query: dict[str, Any]) -> tuple[set[str] | None, set[str]]:
     """The admission gate: runs before closure and slice, and needs no evidence."""
+    released,event_managed=temporal_cut(world,query["decision_time"])
+    if DATA_POLICY_VARIABLE in event_managed and DATA_POLICY_VARIABLE not in released:
+        decision_time=parse_time(query["decision_time"]).isoformat().replace("+00:00","Z")
+        raise ValueError(f"the world's governing data policy is not available at decision time {decision_time}")
     governing=governing_policy(world)
     in_force=set(query.get("policy",[]))
     if governing is not None:

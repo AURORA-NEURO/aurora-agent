@@ -333,6 +333,7 @@ pub fn assure(
     let mut negative = BTreeSet::new();
     let mut state = BTreeMap::<String, u8>::new();
     let mut selected = BTreeSet::new();
+    #[allow(clippy::too_many_arguments)]
     fn visit(
         id: &str,
         declarations: &BTreeMap<String, &CapabilityDeclaration>,

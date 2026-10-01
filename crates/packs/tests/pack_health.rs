@@ -311,6 +311,63 @@ fn passes_exceeding_trials_is_a_typed_error_not_a_pass_rate_above_one() {
 }
 
 #[test]
+fn impossible_counts_are_rejected_at_deserialization_and_never_scored_if_constructed_directly() {
+    let encoded = r#"{"system":"forged","trials":10,"passes":11}"#;
+    assert!(serde_json::from_str::<SystemObservation>(encoded).is_err());
+
+    // Public fields are retained for source compatibility, so assessment must defend its own
+    // boundary even when a caller bypasses the checked constructor.
+    let impossible = SystemObservation {
+        system: "forged".into(),
+        trials: 10,
+        passes: 11,
+    };
+    assert_eq!(impossible.pass_rate(), None);
+    let invalid_calibration = DifficultyCalibration::new(vec![impossible]);
+    assert_eq!(invalid_calibration.pooled_pass_rate(), None);
+    assert!(matches!(
+        invalid_calibration.discrimination(&CalibrationPolicy::default()),
+        Discrimination::Undetermined { .. }
+    ));
+
+    let invalid_observations = Observations {
+        calibration: invalid_calibration,
+        ..Observations::default()
+    };
+    assert!(matches!(
+        assess(
+            &healthy_pack(),
+            &invalid_observations,
+            &HealthPolicy::default()
+        ),
+        Err(PackError::ImpossibleObservation { .. })
+    ));
+}
+
+#[test]
+fn invalid_thresholds_cannot_disable_pack_health_checks() {
+    let invalid_calibration = CalibrationPolicy {
+        saturation_ceiling: 0.9,
+        floor: 0.9,
+        min_systems: 3,
+        min_trials_per_system: 20,
+    };
+    assert!(matches!(
+        discriminating().discrimination(&invalid_calibration),
+        Discrimination::Undetermined { reason } if reason.contains("invalid calibration policy")
+    ));
+
+    let invalid_health = HealthPolicy {
+        materialization_floor: 1.1,
+        ..HealthPolicy::default()
+    };
+    assert!(matches!(
+        assess(&healthy_pack(), &Observations::default(), &invalid_health),
+        Err(PackError::InvalidPolicy(_))
+    ));
+}
+
+#[test]
 fn two_systems_whose_wilson_intervals_overlap_do_not_establish_an_ordering() {
     let close = calibration(&[("a", 10, 20), ("b", 11, 20), ("c", 12, 20)]);
     match close.discrimination(&CalibrationPolicy::default()) {

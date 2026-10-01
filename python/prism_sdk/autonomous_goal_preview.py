@@ -15,12 +15,16 @@ import json
 import re
 from typing import Any, Protocol
 
-from .authoring import canonical_json, content_digest
+from .authoring import canonical_json, content_digest, utf8_scalar_byte_length
 from .goals import AutonomousGoalError
+from .goal_time import AutonomousGoalTimeError, normalize_autonomous_goal_timestamp_ns, require_autonomous_goal_timestamp_ns_wire
+from .autonomous_goal_scheduler import validate_goal_schedule
 
 
-AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA = "bioprism-autonomous-goal-preview-admission-record/0.1"
-AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA = "bioprism-autonomous-goal-preview-admission-snapshot/0.1"
+AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA_V01 = "bioprism-autonomous-goal-preview-admission-record/0.1"
+AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA_V01 = "bioprism-autonomous-goal-preview-admission-snapshot/0.1"
+AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA = "bioprism-autonomous-goal-preview-admission-record/0.2"
+AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA = "bioprism-autonomous-goal-preview-admission-snapshot/0.2"
 AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RETENTION = "metadata_only_goal_preview_approval;tasks_prompts_parameters_credentials_and_results_not_retained"
 AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SECRET_MATERIAL = "never_returned"
 AUTONOMOUS_GOAL_PREVIEW_ADMISSION_AUTHORITY = "caller_operator_review_only;does_not_authenticate_or_authorize_provider_source_tool_effect_or_credentials"
@@ -60,7 +64,10 @@ def _clone(value: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _text(value: Any, *, name: str, maximum: int = 256) -> str:
-    if not isinstance(value, str) or not value.strip() or "\x00" in value or len(value.encode("utf-8")) > maximum:
+    if not isinstance(value, str) or not value.strip() or "\x00" in value:
+        _fail(f"{name} is outside its text bound")
+    byte_length = utf8_scalar_byte_length(value)
+    if byte_length is None or byte_length > maximum:
         _fail(f"{name} is outside its text bound")
     return value.strip()
 
@@ -145,16 +152,10 @@ def _preview(value: Any) -> dict[str, Any]:
     _counts(value["status_counts"], name="preview status_counts")
     blocked = [_identifier(item, name="preview dependency_blocked_goal_id") for item in _sequence(value["dependency_blocked_goal_ids"], name="preview dependency_blocked_goal_ids", maximum=MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORDS)]
     learning = _digest(value["learning_state_digest"], name="preview learning_state_digest", allow_none=True)
-    schedule = value["schedule"]
-    if not isinstance(schedule, Mapping):
-        _fail("preview schedule is malformed")
-    _digest(schedule.get("schedule_digest"), name="preview schedule_digest")
-    selected = [_identifier(item, name="preview selected_goal_id") for item in _sequence(schedule.get("selected_goal_ids"), name="preview selected_goal_ids", maximum=128)]
-    coverage = schedule.get("coverage")
-    if not isinstance(coverage, Mapping):
-        _fail("preview schedule coverage is malformed")
-    for field in ("required_domains", "selected_domains", "missing_domains"):
-        [_identifier(item, name=f"preview coverage {field}", maximum=128) for item in _sequence(coverage.get(field), name=f"preview coverage {field}", maximum=128)]
+    try:
+        schedule = validate_goal_schedule(value["schedule"])
+    except AutonomousGoalError as error:
+        _fail(f"preview schedule is invalid: {error}")
     normalized = {
         "schema": value["schema"],
         "schedule": _clone(schedule),
@@ -188,9 +189,14 @@ def _record_body(
     reason_digest: Any,
     previous_record_digest: Any,
 ) -> dict[str, Any]:
-    issued = _integer(issued_at_ns, name="issued_at_ns", minimum=0, maximum=2**63 - 1)
-    expires = _integer(expires_at_ns, name="expires_at_ns", minimum=1, maximum=2**63 - 1)
-    if expires <= issued or expires - issued > MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_TTL_NS:
+    try:
+        issued = normalize_autonomous_goal_timestamp_ns(issued_at_ns, name="issued_at_ns")
+        expires = normalize_autonomous_goal_timestamp_ns(expires_at_ns, name="expires_at_ns")
+    except AutonomousGoalTimeError as error:
+        _fail(str(error))
+    issued_exact = int(issued)
+    expires_exact = int(expires)
+    if expires_exact <= issued_exact or expires_exact - issued_exact > MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_TTL_NS:
         _fail("approval expiry is outside its bounded lifetime")
     requested = _digest(requested_by_digest, name="requested_by_digest", allow_none=True)
     reviewer = _digest(reviewer_digest, name="reviewer_digest", allow_none=True)
@@ -223,6 +229,8 @@ def validate_autonomous_goal_preview_admission_record(value: Mapping[str, Any]) 
     if not isinstance(value, Mapping) or set(value) != _RECORD_KEYS | {"record_digest"}:
         _fail("record contains unsupported or missing fields")
     _safe_metadata(value)
+    if value.get("schema") == AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA_V01:
+        _fail("0.1 approval must be re-reviewed and re-issued with a current 0.2 preview")
     if value["schema"] != AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA or value["authority"] != AUTONOMOUS_GOAL_PREVIEW_ADMISSION_AUTHORITY or value["retention"] != AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RETENTION or value["execution"] != AUTONOMOUS_GOAL_PREVIEW_ADMISSION_EXECUTION or value["secret_material"] != AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SECRET_MATERIAL:
         _fail("record markers are invalid")
     preview = _preview(value["preview"])
@@ -232,6 +240,11 @@ def validate_autonomous_goal_preview_admission_record(value: Mapping[str, Any]) 
     decision = value["decision"]
     if status not in _STATUSES or decision not in _DECISIONS or (status == "pending_review" and decision != "submitted") or (status == "approved" and decision != "approved") or (status == "rejected" and decision != "rejected") or (status == "revoked" and decision != "revoked"):
         _fail("record status or decision is invalid")
+    try:
+        require_autonomous_goal_timestamp_ns_wire(value["issued_at_ns"], name="record issued_at_ns")
+        require_autonomous_goal_timestamp_ns_wire(value["expires_at_ns"], name="record expires_at_ns")
+    except AutonomousGoalTimeError as error:
+        _fail(str(error))
     body = _record_body(
         admission_id=value["admission_id"], revision=value["revision"], status=status, decision=decision,
         preview=preview, requested_by_digest=value["requested_by_digest"], reviewer_digest=value["reviewer_digest"],
@@ -248,8 +261,8 @@ def create_autonomous_goal_preview_admission_record(
     preview: Any,
     *,
     admission_id: str,
-    issued_at_ns: int,
-    expires_at_ns: int,
+    issued_at_ns: int | str,
+    expires_at_ns: int | str,
     requested_by_digest: str | None = None,
     reason: str | None = None,
     previous_record_digest: str | None = None,
@@ -323,15 +336,20 @@ def verify_autonomous_goal_preview_approval(
     record: Mapping[str, Any],
     *,
     current_preview_digest: str,
-    now_ns: int,
+    now_ns: int | str,
     reviewer_digest: str | None = None,
 ) -> dict[str, Any]:
     normalized = validate_autonomous_goal_preview_admission_record(record)
     if normalized["status"] != "approved":
         _fail("preview admission is not approved")
     _digest(current_preview_digest, name="current_preview_digest")
-    _integer(now_ns, name="now_ns", minimum=0, maximum=2**63 - 1)
-    if now_ns >= normalized["expires_at_ns"]:
+    try:
+        now = normalize_autonomous_goal_timestamp_ns(now_ns, name="now_ns")
+    except AutonomousGoalTimeError as error:
+        _fail(str(error))
+    if int(now) < int(normalized["issued_at_ns"]):
+        _fail("preview admission is not yet valid")
+    if int(now) >= int(normalized["expires_at_ns"]):
         _fail("preview admission has expired")
     if normalized["preview_digest"] != current_preview_digest:
         _fail("preview admission does not match the current preview")
@@ -344,6 +362,8 @@ def validate_autonomous_goal_preview_admission_snapshot(value: Mapping[str, Any]
     if not isinstance(value, Mapping) or set(value) != _SNAPSHOT_KEYS | {"snapshot_digest"}:
         _fail("snapshot contains unsupported or missing fields")
     _safe_metadata(value)
+    if value.get("schema") == AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA_V01:
+        _fail("0.1 approval snapshot must be reviewed and re-issued with current 0.2 previews")
     if value["schema"] != AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA or value["retention"] != AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RETENTION or value["secret_material"] != AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SECRET_MATERIAL:
         _fail("snapshot markers are invalid")
     generation = _integer(value["generation"], name="snapshot generation", minimum=0, maximum=2**31 - 1)
@@ -466,7 +486,8 @@ class JsonAutonomousGoalPreviewAdmissionSnapshotPersistence:
         encoded = self.store.read()
         if encoded is None:
             return None
-        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+        encoded_bytes = utf8_scalar_byte_length(encoded) if isinstance(encoded, str) else None
+        if encoded_bytes is None or encoded_bytes > self.max_bytes:
             _fail("stored JSON exceeds its byte bound")
         try:
             raw = json.loads(encoded)

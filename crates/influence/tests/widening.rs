@@ -145,7 +145,8 @@ fn a_chain_that_does_not_converge_under_join_alone_does_converge_under_widening(
 /// way to know in advance which case it is in. A solver that relied on it would be one whose
 /// termination depended on the magnitudes in a factor table.
 #[test]
-fn join_only_termination_on_a_weakly_coupled_region_is_a_rounding_artefact_not_a_lattice_property() {
+fn join_only_termination_on_a_weakly_coupled_region_is_a_rounding_artefact_not_a_lattice_property()
+{
     let weak = weak_cycle_system();
     let weak_product = ProductDomain::new(DisplacementDomain, weak.sites().len());
     let weak_ascent = ascend_by_join_only_from(

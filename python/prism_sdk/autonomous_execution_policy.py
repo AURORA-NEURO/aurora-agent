@@ -62,9 +62,15 @@ def _digest(name: str, value: Any, *, allow_none: bool = False) -> str | None:
 
 
 def _finite(name: str, value: Any, minimum: float, maximum: float) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or not minimum <= float(value) <= maximum:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         _fail(f"{name} is outside its numeric bound")
-    return float(value)
+    try:
+        normalized = float(value)
+    except (OverflowError, ValueError):
+        _fail(f"{name} is outside its numeric bound")
+    if not math.isfinite(normalized) or not minimum <= normalized <= maximum:
+        _fail(f"{name} is outside its numeric bound")
+    return normalized
 
 
 def _integer(name: str, value: Any, minimum: int, maximum: int) -> int:

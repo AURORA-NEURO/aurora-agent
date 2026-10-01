@@ -51,9 +51,11 @@ pub fn with_replaced_table(
             RegionFactor::with_table(factor.id(), factor.scope().to_vec(), table.clone())
         } else {
             match factor.table() {
-                Some(existing) => {
-                    RegionFactor::with_table(factor.id(), factor.scope().to_vec(), existing.to_vec())
-                }
+                Some(existing) => RegionFactor::with_table(
+                    factor.id(),
+                    factor.scope().to_vec(),
+                    existing.to_vec(),
+                ),
                 None => RegionFactor::structural(factor.id(), factor.scope().to_vec()),
             }
         };
@@ -97,7 +99,9 @@ pub fn with_factor_removed(
         region,
         factor_id,
         vec![1.0; entries],
-        &format!("factor {factor_id:?} replaced by the all-ones potential to measure its influence"),
+        &format!(
+            "factor {factor_id:?} replaced by the all-ones potential to measure its influence"
+        ),
     )
 }
 
@@ -114,7 +118,9 @@ pub(crate) fn table_of<'a>(
             region: region.label().to_string(),
             factor: factor_id.to_string(),
         })?;
-    target.table().ok_or_else(|| InfluenceError::UntabledFactor {
-        factor: factor_id.to_string(),
-    })
+    target
+        .table()
+        .ok_or_else(|| InfluenceError::UntabledFactor {
+            factor: factor_id.to_string(),
+        })
 }

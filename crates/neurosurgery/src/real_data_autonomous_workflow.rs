@@ -252,9 +252,10 @@ impl RealDataAutonomousWorkflowReport {
         if self.resolved_queue_item_count > self.packet.review_queue.returned_item_count
             || self.open_queue_item_count != expected_open
             || self.state
-                != if self.packet.review_queue.omitted_item_count > 0 {
-                    RealDataAutonomousWorkflowState::NeedsSnapshotExpansion
-                } else if projection_expansion_required || self.omitted_action_count > 0 {
+                != if self.packet.review_queue.omitted_item_count > 0
+                    || projection_expansion_required
+                    || self.omitted_action_count > 0
+                {
                     RealDataAutonomousWorkflowState::NeedsSnapshotExpansion
                 } else if expected_open > 0 || freshness_review_required {
                     RealDataAutonomousWorkflowState::NeedsMetadataReview
@@ -472,7 +473,7 @@ impl RealGliomaBundle {
                     ),
                     crate::RealDataFreshnessState::FutureDated => (
                         RealDataAutonomousActionKind::VerifySourceMetadata,
-                        format!("Source freshness: future-dated"),
+                        "Source freshness: future-dated".to_string(),
                         format!(
                             "The caller's freshness policy marks source {} as future-dated; inspect its retrieval timestamp and caller clock before relying on this snapshot.",
                             source.source_id

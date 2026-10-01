@@ -7,9 +7,8 @@ skills are installable from any project. Run this after editing any skill:
 
     python tools/sync_plugin_skills.py
 
-The mirror gets a banner naming its origin, and known-stale figures are
-corrected in the mirror only (the source is fixed separately when its owners
-choose to).
+The mirror gets a banner naming its origin; the source stays authoritative for
+all skill content and workspace-specific figures.
 """
 
 from pathlib import Path
@@ -42,13 +41,6 @@ PORTABLE_NOTE = (
 
 SCOPE_PREFIX = "(aurora-agent workspace only) "
 
-CORRECTIONS = {
-    # (skill, stale text, corrected text) — applied to the mirror only.
-    ("verify-crate", "`ls crates | wc -l` is 77", "`ls crates | wc -l` is 79"),
-    ("verify-crate", "77 crates", "79 crates"),
-}
-
-
 def sync() -> int:
     if not SOURCE.is_dir():
         print(f"source skills directory missing: {SOURCE}", file=sys.stderr)
@@ -59,9 +51,6 @@ def sync() -> int:
             print(f"missing source skill: {src}", file=sys.stderr)
             return 2
         text = src.read_text(encoding="utf-8")
-        for skill, stale, fixed in CORRECTIONS:
-            if skill == name and stale in text:
-                text = text.replace(stale, fixed)
         if scoped:
             # Scope the trigger description so the skill does not fire outside this repo.
             marker = "description: "

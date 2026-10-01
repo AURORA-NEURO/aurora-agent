@@ -17,7 +17,9 @@ use bioprism_influence::domains::product::ProductDomain;
 use bioprism_influence::domains::ratio_interval::{RatioInterval, RatioIntervalDomain};
 use bioprism_influence::domains::support::{EntrySign, Support, SupportDomain};
 use bioprism_influence::registry::{AbstractValue, DomainRegistry};
-use bioprism_influence::{AbstractDomain, DomainError, DomainId, EnumerableConcretisation, FactClass};
+use bioprism_influence::{
+    AbstractDomain, DomainError, DomainId, EnumerableConcretisation, FactClass,
+};
 
 fn ratio_elements() -> Vec<RatioInterval> {
     vec![
@@ -46,7 +48,11 @@ fn support_elements(length: usize) -> Vec<Support> {
     let mut elements = vec![Support::Bottom, Support::unknown(length)];
     for pattern in [
         vec![EntrySign::Zero, EntrySign::Positive, EntrySign::Positive],
-        vec![EntrySign::Positive, EntrySign::Positive, EntrySign::Positive],
+        vec![
+            EntrySign::Positive,
+            EntrySign::Positive,
+            EntrySign::Positive,
+        ],
         vec![EntrySign::Zero, EntrySign::Zero, EntrySign::Either],
         vec![EntrySign::Positive, EntrySign::Either, EntrySign::Zero],
     ] {
@@ -362,8 +368,10 @@ fn the_registry_reports_which_domains_abstract_which_class_of_facts() {
         registry.abstracting(FactClass::FactorPotential),
         vec![DomainId::new("factor_support/4")]
     );
-    assert!(registry.abstracting(FactClass::JointReweighting)
-        != registry.abstracting(FactClass::AnswerDisplacement));
+    assert!(
+        registry.abstracting(FactClass::JointReweighting)
+            != registry.abstracting(FactClass::AnswerDisplacement)
+    );
 }
 
 #[test]

@@ -309,7 +309,7 @@ pub fn simulate_protocol_workbench(
     let mut peers = request.peers.clone();
     peers.sort_by(|a, b| a.peer_id.cmp(&b.peer_id));
     let peer_order = peers.iter().map(|x| x.peer_id.clone()).collect::<Vec<_>>();
-    let batch_order = (0..((stage_order.len() + request.batch_size - 1) / request.batch_size))
+    let batch_order = (0..stage_order.len().div_ceil(request.batch_size))
         .map(|n| format!("batch:{n:04}"))
         .collect::<Vec<_>>();
     let mut qualified_stage = BTreeSet::new();

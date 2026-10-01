@@ -117,6 +117,57 @@ pub struct CapabilityEstimate {
 }
 
 impl CapabilityEstimate {
+    fn validate(&self) -> Result<(), EvalError> {
+        let invalid = |detail: &str| EvalError::InvalidCapabilityPosterior {
+            detail: format!("capability `{}`: {detail}", self.capability),
+        };
+
+        self.pass_rate
+            .validate()
+            .map_err(|error| invalid(&error.to_string()))?;
+        self.credit
+            .validate()
+            .map_err(|error| invalid(&error.to_string()))?;
+        self.outcome_rate
+            .validate()
+            .map_err(|error| invalid(&error.to_string()))?;
+        for (name, estimate) in [
+            ("pass rate", &self.pass_rate),
+            ("partial credit", &self.credit),
+            ("outcome rate", &self.outcome_rate),
+        ] {
+            if !(0.0..=1.0).contains(&estimate.mean)
+                || !(0.0..=1.0).contains(&estimate.naive_instance_mean)
+            {
+                return Err(invalid(&format!("{name} means must be in [0, 1]")));
+            }
+        }
+        if self.pass_rate.instances != self.outcome_rate.instances
+            || self.pass_rate.unknown_instances != self.outcome_rate.unknown_instances
+            || self.pass_rate.clusters != self.outcome_rate.clusters
+            || self.pass_rate.largest_cluster != self.outcome_rate.largest_cluster
+        {
+            return Err(invalid(
+                "pass rate and outcome rate must describe the same observations and parents",
+            ));
+        }
+        if self.pass_rate.mean > self.outcome_rate.mean + 1e-12 {
+            return Err(invalid("pass rate cannot exceed outcome rate"));
+        }
+        let observations = self
+            .pass_rate
+            .instances
+            .checked_add(self.pass_rate.unknown_instances)
+            .ok_or_else(|| invalid("observation count overflows"))?;
+        if self.disputed > observations
+            || self.abstained > observations
+            || self.optimistic_weak_evidence > observations
+        {
+            return Err(invalid("result counters exceed the observation count"));
+        }
+        Ok(())
+    }
+
     /// Passes that were right for a reason the evidence did not support.
     pub fn unsupported_pass_gap(&self) -> f64 {
         self.outcome_rate.mean - self.pass_rate.mean
@@ -216,6 +267,55 @@ impl ReleaseGate {
         self.formula = formula.into();
         self
     }
+
+    /// Validate a gate that may have come from a serialized report or direct field mutation.
+    pub fn validate(&self) -> Result<(), EvalError> {
+        if self.rationale.trim().is_empty() {
+            return Err(EvalError::GateWithoutRationale {
+                gate: self.gate.clone(),
+            });
+        }
+        if self.floors.is_empty() {
+            return Err(EvalError::GateWithoutCoverageFloors {
+                gate: self.gate.clone(),
+            });
+        }
+        let invalid = |detail: &str| EvalError::InvalidReleaseGate {
+            gate: self.gate.clone(),
+            detail: detail.to_string(),
+        };
+        if self.gate.trim().is_empty() {
+            return Err(invalid("gate name must not be empty"));
+        }
+        if self.formula.trim().is_empty() {
+            return Err(invalid("formula must not be empty"));
+        }
+        for (capability, floor) in &self.floors {
+            if floor.min_clusters == 0 {
+                return Err(invalid(&format!(
+                    "capability `{capability}` must require at least one parent cluster"
+                )));
+            }
+            if !floor.min_effective_sample.is_finite() || floor.min_effective_sample <= 0.0 {
+                return Err(invalid(&format!(
+                    "capability `{capability}` must require a finite, positive effective sample"
+                )));
+            }
+            if !floor.max_unknown_fraction.is_finite()
+                || !(0.0..=1.0).contains(&floor.max_unknown_fraction)
+            {
+                return Err(invalid(&format!(
+                    "capability `{capability}` unknown fraction tolerance must be in [0, 1]"
+                )));
+            }
+            if !floor.weight.is_finite() || floor.weight <= 0.0 {
+                return Err(invalid(&format!(
+                    "capability `{capability}` weight must be finite and positive"
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A scalar that carries everything 07.05 requires before it may be quoted.
@@ -265,6 +365,27 @@ pub enum Dominance {
 }
 
 impl CapabilityPosterior {
+    /// Validate every capability entry before comparing or publishing the vector.
+    pub fn validate(&self) -> Result<(), EvalError> {
+        if self.schema_version.trim().is_empty() {
+            return Err(EvalError::InvalidCapabilityPosterior {
+                detail: "schema version must not be empty".to_string(),
+            });
+        }
+        for (key, estimate) in &self.capabilities {
+            if key != &estimate.capability {
+                return Err(EvalError::InvalidCapabilityPosterior {
+                    detail: format!(
+                        "map key `{key}` does not match capability name `{}`",
+                        estimate.capability
+                    ),
+                });
+            }
+            estimate.validate()?;
+        }
+        Ok(())
+    }
+
     /// Aggregate scored results into a capability vector.
     ///
     /// Uninformative conclusions — unknown, disputed, unexamined justification — are pushed as
@@ -390,14 +511,10 @@ impl CapabilityPosterior {
     /// unknown share, tier — and the first failure is returned. Only the first, deliberately: a
     /// list of eight problems invites triage, and a gate is not partially passed.
     pub fn overall(&self, gate: &ReleaseGate) -> Result<GateScalar, EvalError> {
-        if gate.rationale.trim().is_empty() {
-            return Err(EvalError::GateWithoutRationale {
-                gate: gate.gate.clone(),
-            });
-        }
-        if gate.floors.is_empty() {
-            return Err(EvalError::GateWithoutCoverageFloors {
-                gate: gate.gate.clone(),
+        gate.validate()?;
+        if self.schema_version.trim().is_empty() {
+            return Err(EvalError::InvalidCapabilityPosterior {
+                detail: "schema version must not be empty".to_string(),
             });
         }
 
@@ -413,6 +530,15 @@ impl CapabilityPosterior {
                 }
             })?;
 
+            if estimate.capability != *capability {
+                return Err(EvalError::InvalidCapabilityPosterior {
+                    detail: format!(
+                        "map key `{capability}` does not match capability name `{}`",
+                        estimate.capability
+                    ),
+                });
+            }
+
             if let Some(veto) = estimate.vetoes.first() {
                 return Err(EvalError::VetoOutstanding {
                     gate: gate.gate.clone(),
@@ -421,6 +547,7 @@ impl CapabilityPosterior {
                     detail: veto.detail.clone(),
                 });
             }
+            estimate.validate()?;
             if estimate.pass_rate.clusters < floor.min_clusters {
                 return Err(EvalError::ClusterFloorUnmet {
                     gate: gate.gate.clone(),
@@ -459,8 +586,9 @@ impl CapabilityPosterior {
             terms.push((capability.clone(), estimate.pass_rate.mean, floor.weight));
         }
 
-        let value = weighted_mean(&terms).ok_or_else(|| EvalError::GateWithoutCoverageFloors {
+        let value = weighted_mean(&terms).ok_or_else(|| EvalError::InvalidReleaseGate {
             gate: gate.gate.clone(),
+            detail: "weighted mean could not be computed from the declared terms".to_string(),
         })?;
 
         let sensitivity = terms
@@ -503,6 +631,24 @@ impl CapabilityPosterior {
             .keys()
             .chain(other.capabilities.keys())
             .collect();
+
+        let incomparable = || Dominance::Incomparable {
+            better: Vec::new(),
+            worse: Vec::new(),
+            uncertain: names.iter().map(|name| (*name).clone()).collect(),
+        };
+        if !tolerance.is_finite()
+            || !(0.0..=1.0).contains(&tolerance)
+            || !min_effective.is_finite()
+            || min_effective <= 0.0
+            || self.validate().is_err()
+            || other.validate().is_err()
+        {
+            return incomparable();
+        }
+        if names.is_empty() {
+            return incomparable();
+        }
 
         let mut better = Vec::new();
         let mut worse = Vec::new();
@@ -551,6 +697,10 @@ impl CapabilityPosterior {
     /// purpose: the gap between them is the unsupported-pass population.
     pub fn to_markdown(&self) -> String {
         use std::fmt::Write as _;
+        if self.validate().is_err() {
+            return "**Invalid capability posterior:** validation failed; metrics are not displayed.\n"
+                .to_string();
+        }
         let mut text = String::new();
         let _ = writeln!(
             text,
@@ -611,17 +761,28 @@ impl CapabilityPosterior {
 }
 
 fn weighted_mean(terms: &[(String, f64, f64)]) -> Option<f64> {
-    let total_weight: f64 = terms.iter().map(|(_, _, weight)| weight).sum();
-    if total_weight <= 0.0 {
+    if terms.is_empty()
+        || terms
+            .iter()
+            .any(|(_, value, weight)| !value.is_finite() || !weight.is_finite() || *weight <= 0.0)
+    {
         return None;
     }
-    Some(
-        terms
-            .iter()
-            .map(|(_, value, weight)| value * weight)
-            .sum::<f64>()
-            / total_weight,
-    )
+    let largest_weight = terms
+        .iter()
+        .map(|(_, _, weight)| *weight)
+        .fold(0.0, f64::max);
+    let normalized: Vec<(f64, f64)> = terms
+        .iter()
+        .map(|(_, value, weight)| (*value, *weight / largest_weight))
+        .collect();
+    let total_weight: f64 = normalized.iter().map(|(_, weight)| weight).sum();
+    let weighted_total: f64 = normalized
+        .iter()
+        .map(|(value, weight)| value * weight)
+        .sum();
+    let mean = weighted_total / total_weight;
+    (total_weight.is_finite() && total_weight > 0.0 && mean.is_finite()).then_some(mean)
 }
 
 #[cfg(test)]
@@ -904,5 +1065,85 @@ mod tests {
         let text = serde_json::to_string(&posterior).expect("serialize");
         let back: CapabilityPosterior = serde_json::from_str(&text).expect("deserialize");
         assert_eq!(posterior, back);
+    }
+
+    #[test]
+    fn a_deserialized_out_of_range_mean_cannot_pass_a_gate_or_claim_dominance() {
+        let valid = posterior(&[
+            ("planning", "p1", Conclusion::Pass),
+            ("planning", "p2", Conclusion::Pass),
+        ]);
+        let mut json = serde_json::to_value(&valid).expect("serialize");
+        json["capabilities"]["planning"]["pass_rate"]["mean"] = serde_json::json!(1.2);
+        let tampered: CapabilityPosterior = serde_json::from_value(json).expect("deserialize");
+
+        assert!(matches!(
+            tampered.overall(&lenient_gate()),
+            Err(EvalError::InvalidCapabilityPosterior { .. })
+        ));
+        assert_eq!(
+            tampered.compare(&valid, 0.01, 1.0),
+            Dominance::Incomparable {
+                better: vec![],
+                worse: vec![],
+                uncertain: vec!["planning".to_string()],
+            }
+        );
+        assert!(tampered.to_markdown().contains("validation failed"));
+    }
+
+    #[test]
+    fn malformed_gate_floors_and_comparison_thresholds_fail_closed() {
+        let measured = posterior(&[
+            ("planning", "p1", Conclusion::Pass),
+            ("planning", "p2", Conclusion::Pass),
+        ]);
+        let gate = lenient_gate().require(
+            "planning",
+            CoverageFloor::requiring(2, 2.0).weighted(f64::NAN),
+        );
+        assert!(matches!(
+            measured.overall(&gate),
+            Err(EvalError::InvalidReleaseGate { .. })
+        ));
+        assert!(matches!(
+            measured.compare(&measured, f64::NAN, 1.0),
+            Dominance::Incomparable { .. }
+        ));
+        assert!(matches!(
+            measured.compare(&measured, 1.01, 1.0),
+            Dominance::Incomparable { .. }
+        ));
+        assert!(matches!(
+            measured.compare(&measured, 0.0, 0.0),
+            Dominance::Incomparable { .. }
+        ));
+    }
+
+    #[test]
+    fn two_empty_posteriors_are_not_mistaken_for_equivalent_agents() {
+        let empty = CapabilityPosterior {
+            schema_version: crate::EVALENGINE_SCHEMA_VERSION.to_string(),
+            capabilities: BTreeMap::new(),
+        };
+        assert_eq!(
+            empty.compare(&empty, 0.0, 1.0),
+            Dominance::Incomparable {
+                better: vec![],
+                worse: vec![],
+                uncertain: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn weighted_mean_rejects_non_finite_terms_and_normalizes_large_weights() {
+        assert_eq!(weighted_mean(&[("x".to_string(), f64::NAN, 1.0)]), None);
+        let mean = weighted_mean(&[
+            ("x".to_string(), 0.0, f64::MAX),
+            ("y".to_string(), 1.0, f64::MAX),
+        ])
+        .expect("finite weighted mean");
+        assert!((mean - 0.5).abs() < 1e-12);
     }
 }

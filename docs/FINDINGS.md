@@ -172,13 +172,14 @@ the two selections can differ at all.
    Sections 01–19 and 23–29 are 0% build-ready, including `03_CORE_SPECIFICATIONS` (the PRISM
    IRs), `05_EXECUTION_RUNTIME`, all 50 files of `23_AGENT_INTERWEAVE_FABRIC` and all 24 of
    `25_BIOLOGICAL_IR_AND_LANGUAGE`.
-3. **The reference runtime hard-codes a radiogenomic goal string** into every Decision Section,
-   regardless of query.
-4. **The reference oracle compares label timestamps lexicographically as strings**, not as parsed
-   instants. It agrees with instant ordering for the zero-offset `...Z` form used in the packs and
-   silently disagrees under mixed offsets or differing sub-second precision.
-
-Items 3 and 4 are reproduced exactly for byte parity and flagged at their call sites.
+3. **The CPython reference runtime hard-codes a radiogenomic goal string** into every Decision
+   Section, regardless of query. The Rust compiler preserves that substitution only for the two
+   legacy query versions to retain their byte-parity contract; later versions report a missing goal.
+4. **The CPython reference oracle compares label times lexicographically as strings**, not as
+   parsed temporal values. Rust compares day-precision dates as civil dates and timezone-qualified
+   timestamps as absolute instants; it refuses mixed date/instant precision rather than guessing a
+   time or timezone. Mixed-offset timestamp cases intentionally diverge, while the canonical
+   fixture remains unchanged.
 
 ## 6. The structural family sweep (measured 2026-08-23)
 
@@ -378,6 +379,24 @@ smaller selection is a tiebreak rather than a proof — which is why `bioprism-f
 shadowed fact `Unknown` and voids the sufficiency claim. Scoring the smaller selection as better
 there would credit the compiler for the gap.
 `a_shadowed_provider_outside_the_closure_separates_them_with_neither_pass_firing` pins it.
+
+## 8. A governing policy must itself be available at the decision cut
+
+The temporal cut used to filter selected evidence ran after policy admission. `PolicyEnvelope`
+therefore read `data_policy` before checking whether an event releasing that variable had occurred
+by `query.decision_time`. A future grant could authorize a policy-scoped fact in an earlier
+decision, even though the policy fact itself would later be removed from the compiled section.
+
+`PolicyEnvelope::resolve` now checks the event cut before reading the governing policy and refuses
+with `DataPolicyUnavailableAtCut` when the release has not happened. The regression case pins both
+sides: a January decision is refused when the policy releases in June, while the same query after
+the release compiles and includes the restricted evidence. It is in
+[`crates/fiber/tests/policy_pass.rs`](../crates/fiber/tests/policy_pass.rs).
+
+This changes no shipped reference digest: those fixtures have no event-gated `data_policy` fact.
+The behavior is covered on both implementations by constructed regression cases: a January
+decision is refused, while a July decision after the June release compiles and includes the
+restricted evidence. The CPython reference keeps the same shipped digest for the frozen fixtures.
 
 ## Reproducing
 

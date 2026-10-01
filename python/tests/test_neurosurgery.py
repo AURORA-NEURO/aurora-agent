@@ -2728,7 +2728,7 @@ class NeurosurgeryFacadeTests(unittest.TestCase):
                 model="llama3.1",
             )
 
-    def test_grounded_real_data_tool_loop_executes_only_snapshot_search_and_closes_citations(self) -> None:
+    def test_grounded_real_data_tool_loop_exposes_pdq_update_date_to_the_model(self) -> None:
         class ToolSearchClient(FakeClient):
             def call_tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> ToolResult:
                 if name == "neurosurgery_real_data_query":
@@ -2741,12 +2741,12 @@ class NeurosurgeryFacadeTests(unittest.TestCase):
                         "returned_matches": 1,
                         "truncated": False,
                         "hits": [{
-                            "record_kind": "clinical_trial",
-                            "record_id": "TOOL-TRIAL",
-                            "title": "Tool-discovered trial",
-                            "source_id": "clinicaltrials_glioma",
-                            "source_uri": "https://clinicaltrials.gov/study/TOOL-TRIAL",
-                            "record_uri": "https://clinicaltrials.gov/study/TOOL-TRIAL",
+                            "record_kind": "guideline_reference",
+                            "record_id": "NCI-PDQ-adult-CNS",
+                            "title": "Central Nervous System Tumors Treatment (PDQ®)–Health Professional Version",
+                            "source_id": "nci_adult_cns_pdq",
+                            "source_uri": "https://www.cancer.gov/types/brain/hp/adult-brain-treatment-pdq",
+                            "guideline_updated_date": "2025-03-28",
                         }],
                     }
                     return ToolResult(tool=name, envelope={"content": [{"type": "text", "text": json.dumps(payload)}]})
@@ -2756,27 +2756,30 @@ class NeurosurgeryFacadeTests(unittest.TestCase):
         agent = LocalNeurosurgicalAgent(client)
         runtime = LLMRuntime()
         turns = 0
+        continuation_request: Any = None
 
         def local_handler(request: Any) -> Mapping[str, Any]:
             nonlocal turns
+            nonlocal continuation_request
             turns += 1
             if turns == 1:
                 return {
                     "tool_calls": [{
                         "id": "search-1",
                         "name": "neurosurgery_real_data_search",
-                        "arguments": {"text": "trial", "limit": 1},
+                        "arguments": {"record_kind": "guideline_reference", "limit": 1},
                     }]
                 }
+            continuation_request = request
             return {
-                "answer": "The tool returned one source-linked trial row.",
+                "answer": "The source reports its PDQ update date.",
                 "unknowns": [],
                 "claims": [{
-                    "claim_id": "tool-trial",
+                    "claim_id": "pdq-update-date",
                     "kind": "source_observation",
                     "scope": "public_record_metadata",
-                    "text": "A bounded query returned a clinical-trial metadata row.",
-                    "citations": [{"record_kind": "clinical_trial", "record_id": "TOOL-TRIAL"}],
+                    "text": "The source metadata reports its PDQ update date.",
+                    "citations": [{"record_kind": "guideline_reference", "record_id": "NCI-PDQ-adult-CNS"}],
                 }],
             }
 
@@ -2784,7 +2787,7 @@ class NeurosurgeryFacadeTests(unittest.TestCase):
             "ollama", local_handler, protocol="openai_chat_completions", structured_output_mode="json_object"
         )
         result = agent.grounded_real_data_research(
-            "Find glioma trial metadata.",
+            "Inspect the NCI PDQ source metadata.",
             {"schema_version": "bioprism-neurosurgery-real/0.1", "synthetic_data": False},
             runtime,
             "ollama",
@@ -2795,8 +2798,11 @@ class NeurosurgeryFacadeTests(unittest.TestCase):
         self.assertEqual(result["tool_loop"], {"status": "completed", "turns": 2, "tool_calls": 1})
         self.assertEqual(result["tool_trace"][0]["tool"], "neurosurgery_real_data_search")
         self.assertNotIn("text", result["tool_trace"][0]["query"])
-        self.assertEqual(result["tool_trace"][0]["query"]["text_bytes"], len("trial".encode("utf-8")))
+        self.assertEqual(result["tool_trace"][0]["query"]["record_kind"], "guideline_reference")
         self.assertEqual(result["audit"]["status"], "grounded_for_human_review")
+        tool_message = next(message for message in continuation_request.messages if message.get("role") == "tool")
+        tool_payload = json.loads(tool_message["content"])
+        self.assertEqual(tool_payload["hits"][0]["guideline_updated_date"], "2025-03-28")
         self.assertEqual(
             [name for name, _ in client.calls],
             [

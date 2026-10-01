@@ -105,9 +105,16 @@ fn separators_are_compact() {
 }
 
 fn fixture(name: &str) -> Value {
-    let path: PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", "..", "fixtures", "fiber-v0.1", name]
-        .iter()
-        .collect();
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "fixtures",
+        "fiber-v0.1",
+        name,
+    ]
+    .iter()
+    .collect();
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("missing fixture {}: {e}", path.display()));
     serde_json::from_str(&text).expect("fixture is valid JSON")

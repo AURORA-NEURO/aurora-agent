@@ -51,6 +51,7 @@ AUTONOMOUS_AGENT_LIFECYCLE_COMPONENT_STATUSES = (
     "not_attempted",
     "failed",
 )
+_MAX_SAFE_INTEGER = 9_007_199_254_740_991
 
 
 class AutonomousAgentPersistenceLifecycleError(ArgumentError):
@@ -86,13 +87,30 @@ def _error_class(value: BaseException) -> str:
     ) else "UnknownError"
 
 
+def _lifecycle_value(value: Any) -> Any:
+    """Resolve one component's metadata view once so status and digest see the same result."""
+
+    to_dict = getattr(value, "to_dict", None)
+    return to_dict() if callable(to_dict) else value
+
+
+def _component_status(operation: str, value: Any) -> str:
+    if value is None:
+        return "empty"
+    if operation == "restore" and isinstance(value, Mapping) and "restored" in value:
+        restored = value["restored"]
+        if not isinstance(restored, bool):
+            raise ArgumentError("lifecycle restored receipt flag must be boolean")
+        if not restored:
+            return "empty"
+    return "restored" if operation == "restore" else "flushed"
+
+
 def _snapshot_projection(value: Any) -> tuple[str | None, str | None, str | None, int | None]:
     """Extract only safe scalar metadata from one coordinator result."""
 
     if value is None:
         return None, None, None, None
-    if hasattr(value, "to_dict") and callable(value.to_dict):
-        value = value.to_dict()
     if not isinstance(value, Mapping):
         return None, None, None, None
     schema = value.get("schema") if isinstance(value.get("schema"), str) else None
@@ -106,8 +124,16 @@ def _snapshot_projection(value: Any) -> tuple[str | None, str | None, str | None
             snapshot_digest = _bounded_digest(f"lifecycle {key}", candidate)
             break
     state_digest = _bounded_digest("lifecycle state_digest", value.get("state_digest"))
-    generation = value.get("generation", value.get("snapshot_generation"))
-    if generation is not None and (isinstance(generation, bool) or not isinstance(generation, int) or generation < 0):
+    generation = value.get("generation")
+    if generation is None:
+        generation = value.get("snapshot_generation")
+    if isinstance(generation, bool):
+        generation = None
+    elif isinstance(generation, float) and generation.is_integer():
+        generation = int(generation)
+    elif generation is not None and not isinstance(generation, int):
+        generation = None
+    if generation is not None and not 0 <= generation <= _MAX_SAFE_INTEGER:
         generation = None
     return schema, snapshot_digest, state_digest, generation
 
@@ -256,6 +282,18 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
             raise ArgumentError("agent persistence lifecycle requires model inventory lifecycle methods")
         if not isinstance(require_all, bool) or not isinstance(continue_on_error, bool):
             raise ArgumentError("agent persistence lifecycle options must be boolean")
+        for option_name, attribute_name, persistence in (
+            ("capability_journal_persistence", "capability_journal_persistence", capability_journal_persistence),
+            ("decision_cycle_persistence", "decision_cycle_persistence", decision_cycle_persistence),
+            ("execution_persistence", "execution_persistence", execution_persistence),
+        ):
+            if persistence is None:
+                continue
+            if not callable(getattr(persistence, "restore", None)) or not callable(getattr(persistence, "flush", None)):
+                raise ArgumentError(f"agent lifecycle {option_name} is malformed")
+            if getattr(agent, attribute_name, None) is not persistence:
+                label = option_name.replace("_", "-")
+                raise ArgumentError(f"agent lifecycle {label} must be bound to the agent")
         self.agent = agent
         self.model_inventory_store = model_inventory_store
         self.activation_store = activation_store
@@ -394,12 +432,12 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
                     break
                 continue
             try:
-                value = self._invoke(component_id, operation)
+                value = _lifecycle_value(self._invoke(component_id, operation))
                 schema, snapshot_digest, state_digest, generation = _snapshot_projection(value)
                 result = AutonomousAgentPersistenceComponentResult(
                     component_id,
                     operation,
-                    "restored" if operation == "restore" and value is not None else "flushed" if operation == "flush" and value is not None else "empty",
+                    _component_status(operation, value),
                     snapshot_schema=schema,
                     snapshot_digest=snapshot_digest,
                     state_digest=state_digest,

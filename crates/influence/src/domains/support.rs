@@ -221,10 +221,7 @@ impl AbstractDomain for SupportDomain {
         match (left.signs(), right.signs()) {
             (None, _) => true,
             (Some(_), None) => false,
-            (Some(lower), Some(upper)) => lower
-                .iter()
-                .zip(upper)
-                .all(|(low, high)| low.leq(*high)),
+            (Some(lower), Some(upper)) => lower.iter().zip(upper).all(|(low, high)| low.leq(*high)),
         }
     }
 

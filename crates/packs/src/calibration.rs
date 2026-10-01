@@ -18,7 +18,7 @@
 //! any strength beyond that of the sample.
 
 use crate::error::PackError;
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 
 /// z for a two-sided 95% normal interval.
 const Z_95: f64 = 1.959_963_984_540_054;
@@ -27,11 +27,38 @@ const Z_95: f64 = 1.959_963_984_540_054;
 ///
 /// Counts, not rates: a rate discards the denominator, and the denominator is what decides
 /// whether the rate means anything.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SystemObservation {
     pub system: String,
     pub trials: u32,
     pub passes: u32,
+}
+
+#[derive(Deserialize)]
+struct SystemObservationWire {
+    system: String,
+    trials: u32,
+    passes: u32,
+}
+
+impl<'de> Deserialize<'de> for SystemObservation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = SystemObservationWire::deserialize(deserializer)?;
+        if wire.passes > wire.trials {
+            return Err(D::Error::custom(format!(
+                "system `{}` records {} passes in {} trials",
+                wire.system, wire.passes, wire.trials
+            )));
+        }
+        Ok(SystemObservation {
+            system: wire.system,
+            trials: wire.trials,
+            passes: wire.passes,
+        })
+    }
 }
 
 impl SystemObservation {
@@ -51,9 +78,22 @@ impl SystemObservation {
         })
     }
 
-    /// `None` when no trials were run. An absent measurement is not a zero.
+    /// Recheck the count invariant at trust boundaries and before calculations. The fields remain
+    /// public for source compatibility, so callers can still construct an invalid value directly.
+    pub fn validate(&self) -> Result<(), PackError> {
+        if self.passes > self.trials {
+            return Err(PackError::ImpossibleObservation {
+                system: self.system.clone(),
+                passes: self.passes,
+                trials: self.trials,
+            });
+        }
+        Ok(())
+    }
+
+    /// `None` when no trials were run or the counts are impossible. Neither is a zero rate.
     pub fn pass_rate(&self) -> Option<f64> {
-        if self.trials == 0 {
+        if self.trials == 0 || self.passes > self.trials {
             None
         } else {
             Some(self.passes as f64 / self.trials as f64)
@@ -98,6 +138,25 @@ impl Default for CalibrationPolicy {
             min_systems: 3,
             min_trials_per_system: 20,
         }
+    }
+}
+
+impl CalibrationPolicy {
+    /// Ensure thresholds describe a meaningful probability range and an actual evidence floor.
+    pub fn validate(&self) -> Result<(), PackError> {
+        if !self.saturation_ceiling.is_finite()
+            || !(0.0..=1.0).contains(&self.saturation_ceiling)
+            || !self.floor.is_finite()
+            || !(0.0..=1.0).contains(&self.floor)
+            || self.floor >= self.saturation_ceiling
+            || self.min_systems == 0
+            || self.min_trials_per_system == 0
+        {
+            return Err(PackError::InvalidPolicy(
+                "calibration requires 0 <= floor < saturation ceiling <= 1 and positive system and trial minima".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -148,21 +207,34 @@ impl DifficultyCalibration {
         self.observations.iter().map(|o| o.trials).sum()
     }
 
+    /// Reject impossible counts before treating the calibration as evidence.
+    pub fn validate(&self) -> Result<(), PackError> {
+        self.observations
+            .iter()
+            .try_for_each(SystemObservation::validate)
+    }
+
     /// Passes over trials across every system. `None` when no trials were run.
     ///
     /// Pooling weights systems by how often they were run, which is rarely what a reader assumes.
     /// It is used here only for the saturation and floor checks, where the question is whether
     /// *any* headroom remains rather than how systems rank.
     pub fn pooled_pass_rate(&self) -> Option<f64> {
-        let trials = self.total_trials();
+        if self.validate().is_err() {
+            return None;
+        }
+        let trials: u64 = self.observations.iter().map(|o| u64::from(o.trials)).sum();
         if trials == 0 {
             return None;
         }
-        let passes: u32 = self.observations.iter().map(|o| o.passes).sum();
+        let passes: u64 = self.observations.iter().map(|o| u64::from(o.passes)).sum();
         Some(passes as f64 / trials as f64)
     }
 
     pub fn best(&self) -> Option<&SystemObservation> {
+        if self.validate().is_err() {
+            return None;
+        }
         self.observations
             .iter()
             .filter(|o| o.trials > 0)
@@ -170,6 +242,9 @@ impl DifficultyCalibration {
     }
 
     pub fn worst(&self) -> Option<&SystemObservation> {
+        if self.validate().is_err() {
+            return None;
+        }
         self.observations
             .iter()
             .filter(|o| o.trials > 0)
@@ -181,6 +256,16 @@ impl DifficultyCalibration {
     /// A pack where everything passes or everything fails discriminates nothing, and that is
     /// reported as its own verdict rather than as a range of width zero.
     pub fn discrimination(&self, policy: &CalibrationPolicy) -> Discrimination {
+        if let Err(error) = policy.validate() {
+            return Discrimination::Undetermined {
+                reason: format!("invalid calibration policy: {error}"),
+            };
+        }
+        if let Err(error) = self.validate() {
+            return Discrimination::Undetermined {
+                reason: format!("invalid calibration observation: {error}"),
+            };
+        }
         let measured: Vec<&SystemObservation> = self
             .observations
             .iter()

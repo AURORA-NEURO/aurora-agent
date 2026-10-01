@@ -17,9 +17,16 @@ import {
   type AutonomousInformationAcquisitionPolicyInput,
   planAutonomousInformationAcquisition,
 } from "./autonomous-information-acquisition.js";
-import { digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestCanonicalJsonTextSync, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
-import type { AutonomousEvidenceAcquisitionRequest } from "./autonomous-evidence-runtime.js";
+import {
+  AUTONOMOUS_EVIDENCE_RUNTIME_SCHEMA,
+  type AutonomousEvidenceAssessmentJSON,
+  type AutonomousEvidenceAcquisitionRequest,
+  type AutonomousEvidenceReceiptJSON,
+} from "./autonomous-evidence-runtime.js";
+import { AutonomousEvidenceExecutionResult } from "./autonomous-evidence-execution.js";
+import type { AutonomousEvidenceExecutionResumableRun } from "./autonomous-evidence-execution-resumable.js";
 
 export const AUTONOMOUS_CLAIM_INTEGRITY_SCHEMA = "bioprism-typescript-autonomous-claim-integrity/0.1" as const;
 export const AUTONOMOUS_CLAIM_INTEGRITY_POLICY_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-policy/0.1" as const;
@@ -29,12 +36,14 @@ export const AUTONOMOUS_CLAIM_INTEGRITY_ASSESSMENT_SCHEMA = "bioprism-typescript
 export const AUTONOMOUS_CLAIM_INTEGRITY_ACTION_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-action/0.1" as const;
 export const AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-acquisition-bridge/0.1" as const;
 export const AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BINDING_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-acquisition-binding/0.1" as const;
+export const AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_AUTHORITY_REVIEW_SCHEMA = "bioprism-autonomous-claim-integrity-evidence-authority-review/0.2" as const;
 
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_CLAIMS = 128;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_EVIDENCE = 512;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACTIONS = 128;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_CLAIM_LINKS = 32;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_MODALITIES = 16;
+export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES = 16_384;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_AGE_SECONDS = 31_536_000;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS = 64;
 
@@ -77,16 +86,26 @@ function integer(name: string, value: unknown, minimum: number, maximum: number)
   return value as number;
 }
 function rounded(value: number): number { return Math.round(value * 100_000_000) / 100_000_000; }
+function reviewUnits(value: number): number { return Math.floor(value * 100_000_000 + 0.5); }
 function timestamp(name: string, value: unknown): string {
   const candidate = text(name, value, 64);
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/.test(candidate) || Number.isNaN(Date.parse(candidate))) fail(`${name} must be an RFC3339 timestamp`);
   return candidate;
 }
 function epoch(value: string): number { return Date.parse(value) / 1000; }
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  if (!isObject(value)) return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
 function safeMetadata(value: unknown, name = "metadata", depth = 0): void {
   if (depth > 8) fail(`${name} is too deeply nested`);
   if (Array.isArray(value)) { if (value.length > 128) fail(`${name} contains too many entries`); value.forEach((child, index) => safeMetadata(child, `${name}[${index}]`, depth + 1)); return; }
-  if (isObject(value)) {
+  if (isPlainJsonObject(value)) {
     if (Object.keys(value).length > 64) fail(`${name} contains too many fields`);
     for (const [key, child] of Object.entries(value)) {
       if (!key.trim() || key.includes("\u0000")) fail(`${name} contains an invalid key`);
@@ -99,7 +118,94 @@ function safeMetadata(value: unknown, name = "metadata", depth = 0): void {
   if (value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number" && Number.isFinite(value)) return;
   fail(`${name} contains unsupported metadata`);
 }
-function metadataDigest(value: Readonly<Record<string, unknown>>): string { safeMetadata(value); return digestJsonSync(value); }
+function freezeJson<T>(value: T): T {
+  if (Array.isArray(value)) return Object.freeze(value.map((item) => freezeJson(item))) as T;
+  if (isObject(value)) return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, freezeJson(item)]))) as T;
+  return value;
+}
+function metadataDigest(value: Readonly<Record<string, unknown>>): string {
+  return digestCanonicalJsonTextSync(canonicalMetadata(value));
+}
+function reviewMetadataDigest(value: Readonly<Record<string, unknown>>): string {
+  canonicalMetadata(value);
+  return digestJsonSync(reviewMetadataNode(value));
+}
+function canonicalMetadata(value: Readonly<Record<string, unknown>>): string {
+  safeMetadata(value);
+  metadataFootprint(value);
+  const serialized = canonicalJson(value);
+  if (bytes(serialized) > AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES) fail("metadata exceeds its canonical byte bound");
+  return serialized;
+}
+function metadataFootprint(value: unknown): void {
+  let total = 0;
+  const add = (size: number): void => {
+    total += size;
+    if (total > AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES) fail("metadata exceeds its bounded footprint");
+  };
+  const visit = (item: unknown): void => {
+    if (item === null) { add(4); return; }
+    if (typeof item === "boolean") { add(item ? 4 : 5); return; }
+    if (typeof item === "string") { add(metadataStringBytes(item) + 2); return; }
+    if (typeof item === "number") {
+      if (Number.isInteger(item) && !Number.isSafeInteger(item)) fail("metadata contains an unsafe integer");
+      add(1);
+      return;
+    }
+    if (Array.isArray(item)) {
+      add(2);
+      item.forEach((child, index) => { if (index > 0) add(1); visit(child); });
+      return;
+    }
+    if (isPlainJsonObject(item)) {
+      add(2);
+      Object.keys(item).sort().forEach((key, index) => {
+        if (index > 0) add(1);
+        add(metadataStringBytes(key) + 3);
+        visit(item[key]);
+      });
+      return;
+    }
+    fail("metadata contains unsupported JSON");
+  };
+  visit(value);
+}
+function metadataStringBytes(value: string): number {
+  if (value.length > AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES) fail("metadata string exceeds its bound");
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) fail("metadata contains an unpaired surrogate");
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) fail("metadata contains an unpaired surrogate");
+  }
+  return bytes(value);
+}
+function reviewMetadataNode(value: unknown): unknown {
+  if (value === null) return ["null"];
+  if (typeof value === "boolean") return ["boolean", value];
+  if (typeof value === "string") return ["string", utf16Hex(value)];
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || Number.isInteger(value) && !Number.isSafeInteger(value)) fail("authority review metadata contains an unsafe number");
+    const normalized = value === 0 ? 0 : value;
+    const buffer = new ArrayBuffer(8);
+    new DataView(buffer).setFloat64(0, normalized, false);
+    const numberHex = [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    return ["number", numberHex];
+  }
+  if (Array.isArray(value)) return ["array", value.map(reviewMetadataNode)];
+  if (isPlainJsonObject(value)) {
+    const keys = Object.keys(value).sort();
+    return ["object", keys.map((key) => [utf16Hex(key), reviewMetadataNode(value[key])])];
+  }
+  fail("authority review metadata contains unsupported JSON");
+}
+function utf16Hex(value: string): string {
+  let encoded = "";
+  for (let index = 0; index < value.length; index += 1) encoded += value.charCodeAt(index).toString(16).padStart(4, "0");
+  return encoded;
+}
 function identifiers(name: string, value: readonly unknown[], maximum: number): string[] {
   if (!Array.isArray(value) || value.length > maximum) fail(`${name} is outside its bounds`);
   const normalized = value.map((item, index) => identifier(`${name}[${index}]`, item));
@@ -400,6 +506,343 @@ export function validateAutonomousClaimIntegrityAcquisitionBinding(value: Autono
   const requestDigests = value.requests.map((request) => digestJsonSync(request));
   if (JSON.stringify(requestDigests) !== JSON.stringify(value.requestDigests)) fail("binding request digest does not match its request");
   return value;
+}
+
+export interface AutonomousClaimIntegrityAcquiredEvidenceLink {
+  receiptDigest: string;
+  assessmentDigest: string;
+  evidence: AutonomousClaimIntegrityEvidence | AutonomousClaimIntegrityEvidenceInput | Record<string, unknown>;
+}
+
+type ReadonlyJsonValue = string | number | boolean | null | ReadonlyJsonObject | readonly ReadonlyJsonValue[];
+interface ReadonlyJsonObject { readonly [key: string]: ReadonlyJsonValue; }
+
+export interface AutonomousClaimIntegrityEvidenceAuthorityReview extends ReadonlyJsonObject {
+  readonly schema: typeof AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_AUTHORITY_REVIEW_SCHEMA;
+  readonly authority_id: string;
+  readonly authority_version: string;
+  readonly context_digest: string;
+  readonly assessment_digest: string;
+  readonly bridge_digest: string;
+  readonly binding_digest: string;
+  readonly candidate_id: string;
+  readonly request_digest: string;
+  readonly receipt: ReadonlyJsonObject;
+  readonly source_quality_assessment: ReadonlyJsonObject;
+  readonly claim_contracts: readonly ReadonlyJsonObject[];
+  readonly evidence: ReadonlyJsonObject;
+  readonly review_digest: string;
+}
+
+/** Deployment-owned, synchronous verifier for an existing claim-quality receipt. Verification must be read-only. */
+export interface AutonomousClaimIntegrityEvidenceAuthority {
+  readonly authority_id: string;
+  readonly authority_version: string;
+  verify(review: AutonomousClaimIntegrityEvidenceAuthorityReview): string;
+}
+
+export interface SettleAutonomousClaimIntegrityAcquisitionOptions {
+  previous: AutonomousClaimIntegrityAssessment;
+  bridge: AutonomousClaimIntegrityAcquisitionBridge;
+  binding: AutonomousClaimIntegrityAcquisitionBinding;
+  execution: AutonomousEvidenceExecutionResult | AutonomousEvidenceExecutionResumableRun;
+  claims: readonly (AutonomousClaimIntegrityClaim | AutonomousClaimIntegrityClaimInput | Record<string, unknown>)[];
+  existingEvidence: readonly (AutonomousClaimIntegrityEvidence | AutonomousClaimIntegrityEvidenceInput | Record<string, unknown>)[];
+  acquiredEvidence: readonly AutonomousClaimIntegrityAcquiredEvidenceLink[];
+  referenceTime: string;
+  evidenceAuthority: AutonomousClaimIntegrityEvidenceAuthority;
+  policy?: AutonomousClaimIntegrityPolicy | AutonomousClaimIntegrityPolicyInput;
+}
+
+/**
+ * Reassess claims with caller-owned claim judgments bound to the exact reviewed acquisition and
+ * accepted source-quality assessment. Stance, support, reliability, modality, and reproducibility
+ * remain explicit caller judgments; receipt success and evaluator score never become factual truth.
+ */
+export function settleAutonomousClaimIntegrityAcquisition(options: SettleAutonomousClaimIntegrityAcquisitionOptions): AutonomousClaimIntegrityAssessment {
+  validateAutonomousClaimIntegrity(options.previous);
+  validateAutonomousClaimIntegrityAcquisitionBridge(options.bridge);
+  validateAutonomousClaimIntegrityAcquisitionBinding(options.binding);
+  if (!options.evidenceAuthority || typeof options.evidenceAuthority.verify !== "function") fail("settlement requires a deployment-owned independent evidence authority");
+  const evidenceAuthorityId = identifier("evidence authority id", options.evidenceAuthority.authority_id);
+  const evidenceAuthorityVersion = identifier("evidence authority version", options.evidenceAuthority.authority_version);
+  const { previous, bridge, binding } = options;
+  if (bridge.assessmentDigest !== previous.assessmentDigest || bridge.generation !== previous.generation) fail("acquisition bridge is stale for the previous assessment");
+  if (binding.assessmentDigest !== previous.assessmentDigest || binding.bridgeDigest !== bridge.bridgeDigest) fail("acquisition binding is stale for the selected bridge");
+  if (bridge.status !== "planned" || bridge.acquisitionPlan === null) fail("settlement requires a planned acquisition bridge");
+  if (binding.acquisitionPlanDigest !== bridge.acquisitionPlan.planDigest) fail("binding plan does not match its bridge");
+
+  const result = options.execution instanceof AutonomousEvidenceExecutionResult
+    ? options.execution
+    : options.execution && "result" in options.execution ? options.execution.result : null;
+  if (!(result instanceof AutonomousEvidenceExecutionResult)) fail("settlement requires a completed reviewed execution result");
+  const executionPlanJSON = result.plan.toJSON();
+  const { plan_digest: executionPlanDigest, ...executionPlanPayload } = executionPlanJSON;
+  if (digestJsonSync(executionPlanPayload) !== executionPlanDigest) fail("execution plan digest is invalid");
+  const readinessJSON = result.readiness.toJSON();
+  const { report_digest: readinessDigest, ...readinessPayload } = readinessJSON;
+  if (digestJsonSync(readinessPayload) !== readinessDigest) fail("execution readiness digest is invalid");
+  if (JSON.stringify(result.plan.domains) !== JSON.stringify(bridge.acquisitionPlan.selectedDomains)) fail("execution domains do not match the reviewed acquisition plan");
+  const runtimeJSON = result.runtime.toJSON();
+  const expectedRuntimeDigest = digestJsonSync({
+    schema: AUTONOMOUS_EVIDENCE_RUNTIME_SCHEMA,
+    status: runtimeJSON.status,
+    plan_digest: runtimeJSON.plan.plan_digest,
+    receipt_digests: runtimeJSON.receipts.map((receipt) => receipt.receipt_digest),
+    assessment_digests: runtimeJSON.assessments.map((assessment) => assessment.assessment_digest),
+    completed_requirement_ids: [...runtimeJSON.completed_requirement_ids].sort(),
+    pending_evaluation_requirement_ids: [...runtimeJSON.pending_evaluation_requirement_ids].sort(),
+    missing_requirement_ids: [...runtimeJSON.missing_requirement_ids].sort(),
+    next_stage_ids: [...runtimeJSON.next_stage_ids].sort(),
+    omitted_request_digests: [...runtimeJSON.omitted_request_digests].sort(),
+    retention: "metadata_only;raw_values_caller_owned",
+    secret_material: "never_returned",
+  });
+  if (expectedRuntimeDigest !== runtimeJSON.result_digest) fail("execution runtime result digest is invalid");
+
+  const selections = [...bridge.acquisitionPlan.selected];
+  if (JSON.stringify(selections.map((item) => item.candidate_id)) !== JSON.stringify(binding.candidateIds)) fail("binding candidate order differs from the reviewed plan");
+  if (JSON.stringify(selections.map((item) => item.domain)) !== JSON.stringify(binding.domains)) fail("binding domains differ from the reviewed plan");
+  const actionById = new Map(previous.actions.map((action) => [action.actionId, action]));
+  const normalizedClaims = options.claims.map(normalizeClaim);
+  const previousClaims = new Map(previous.claims.map((item) => [item.claim_id, item.domain]));
+  if (normalizedClaims.length !== previousClaims.size || normalizedClaims.some((claim) => previousClaims.get(claim.claimId) !== claim.domain)) fail("settlement claim identities do not match the previous assessment");
+  const claimContracts = new Map(normalizedClaims.map((claim) => [claim.claimId, {
+    claim_id: claim.claimId,
+    domain: claim.domain,
+    claim_digest: claim.claimDigest,
+    required_support_units_1e8: reviewUnits(claim.requiredSupport),
+    required_independent_sources: claim.requiredIndependentSources,
+    required_reproducibility: claim.requiredReproducibility,
+    required_modalities: [...claim.requiredModalities],
+    priority_units_1e8: reviewUnits(claim.priority),
+    metadata_digest: reviewMetadataDigest(claim.metadata),
+  }]));
+  const authorizedClaimsByCandidate = new Map<string, Set<string>>();
+  for (const match of bridge.candidateActionMatches) {
+    const candidateId = match.candidate_id;
+    const actionIds = match.action_ids;
+    if (typeof candidateId !== "string" || !Array.isArray(actionIds)) fail("bridge action match is malformed");
+    const claimIds = new Set<string>();
+    for (const actionId of actionIds) {
+      if (typeof actionId !== "string") fail("bridge action match contains a malformed action id");
+      const action = actionById.get(actionId);
+      if (!action) fail("bridge action match references a foreign claim action");
+      action.claimIds.forEach((claimId) => claimIds.add(claimId));
+    }
+    authorizedClaimsByCandidate.set(candidateId, claimIds);
+  }
+
+  const requests = binding.requests;
+  const expectedRequests = new Map<string, { candidateId: string; domain: string; request: AutonomousEvidenceAcquisitionRequest }>();
+  for (const [index, selection] of selections.entries()) {
+    const request = requests[index];
+    if (!request) fail("binding request batch is incomplete");
+    const metadata = request.metadata ?? {};
+    if (metadata.claim_integrity_assessment_digest !== previous.assessmentDigest
+      || metadata.claim_integrity_bridge_digest !== bridge.bridgeDigest
+      || metadata.claim_integrity_acquisition_plan_digest !== bridge.acquisitionPlan.planDigest
+      || metadata.claim_integrity_candidate_id !== selection.candidate_id
+      || metadata.claim_integrity_candidate_digest !== selection.candidate_digest) fail("bound request metadata was changed");
+    const requestDigest = digestJsonSync({
+      schema: AUTONOMOUS_EVIDENCE_RUNTIME_SCHEMA,
+      plan_digest: result.plan.evidence_plan_digest,
+      requirement_id: request.requirement_id,
+      source_id: request.source_id,
+      source_digest: request.source_digest ?? null,
+      request_id: request.request_id ?? null,
+      metadata,
+    });
+    if (expectedRequests.has(requestDigest)) fail("requests map to a duplicate runtime request");
+    expectedRequests.set(requestDigest, { candidateId: selection.candidate_id, domain: selection.domain, request });
+  }
+
+  const receiptsByDigest = new Map<string, AutonomousEvidenceReceiptJSON>();
+  const receiptToCandidate = new Map<string, string>();
+  for (const receipt of runtimeJSON.receipts) {
+    const { receipt_digest: receiptDigest, ...receiptPayload } = receipt;
+    if (digestJsonSync(receiptPayload) !== receiptDigest) fail("execution contains an invalid receipt digest");
+    const expected = expectedRequests.get(receipt.request_digest);
+    if (!expected) fail("execution contains a receipt outside its request binding");
+    if (receiptsByDigest.has(receipt.receipt_digest) || [...receiptsByDigest.values()].some((item) => item.request_digest === receipt.request_digest)) fail("execution contains duplicate request receipts");
+    if (receipt.plan_digest !== result.plan.evidence_plan_digest
+      || receipt.requirement_id !== expected.request.requirement_id
+      || receipt.domain !== expected.domain
+      || receipt.source_id !== expected.request.source_id
+      || receipt.source_digest !== (expected.request.source_digest ?? null)) fail("receipt does not match its bound source request");
+    receiptsByDigest.set(receipt.receipt_digest, receipt);
+    receiptToCandidate.set(receipt.receipt_digest, expected.candidateId);
+  }
+  const settledRequestDigests = new Set([...receiptsByDigest.values()].map((receipt) => receipt.request_digest));
+  const omittedRequestDigests = new Set(runtimeJSON.omitted_request_digests);
+  if ([...settledRequestDigests].some((requestDigest) => omittedRequestDigests.has(requestDigest))
+    || new Set([...settledRequestDigests, ...omittedRequestDigests]).size !== expectedRequests.size
+    || [...expectedRequests.keys()].some((requestDigest) => !settledRequestDigests.has(requestDigest) && !omittedRequestDigests.has(requestDigest))) fail("execution does not account for the exact bound request batch");
+
+  const assessmentsByReceipt = new Map<string, AutonomousEvidenceAssessmentJSON>();
+  for (const assessment of runtimeJSON.assessments) {
+    const { assessment_digest: assessmentDigest, ...assessmentPayload } = assessment;
+    if (digestJsonSync(assessmentPayload) !== assessmentDigest) fail("execution contains an invalid evaluator assessment digest");
+    if (!receiptsByDigest.has(assessment.receipt_digest)) fail("assessment references a receipt outside the execution");
+    const receipt = receiptsByDigest.get(assessment.receipt_digest)!;
+    if (receipt.requirement_id !== assessment.requirement_id) fail("assessment requirement does not match its receipt");
+    if (assessmentsByReceipt.has(assessment.receipt_digest)) fail("execution contains duplicate evaluator assessments");
+    assessmentsByReceipt.set(assessment.receipt_digest, assessment);
+  }
+
+  if (!Array.isArray(options.acquiredEvidence) || options.acquiredEvidence.length > AUTONOMOUS_CLAIM_INTEGRITY_MAX_EVIDENCE) fail("acquired evidence links are outside their bound");
+  const pendingEvidenceReviews: Array<{
+    evidence: AutonomousClaimIntegrityEvidence;
+    receipt: AutonomousEvidenceReceiptJSON;
+    assessment: AutonomousEvidenceAssessmentJSON;
+    candidateId: string;
+    reviewDigest: string;
+    review: AutonomousClaimIntegrityEvidenceAuthorityReview;
+  }> = [];
+  const evidenceIds = new Set<string>();
+  const reservedMetadata = new Set([
+    "claim_integrity_acquisition_receipt_digest",
+    "claim_integrity_source_quality_assessment_digest",
+    "claim_integrity_source_quality_evaluator_id",
+    "claim_integrity_source_quality_evaluator_version",
+    "claim_integrity_evidence_authority_id",
+    "claim_integrity_evidence_authority_version",
+    "claim_integrity_evidence_authority_review_digest",
+    "claim_integrity_evidence_authority_receipt_digest",
+    "claim_integrity_acquisition_candidate_id",
+    "claim_integrity_acquisition_binding_digest",
+    "claim_integrity_acquisition_bridge_digest",
+  ]);
+  for (const [index, link] of options.acquiredEvidence.entries()) {
+    if (!isObject(link) || Object.keys(link).length !== 3 || !["receiptDigest", "assessmentDigest", "evidence"].every((key) => Object.prototype.hasOwnProperty.call(link, key))) fail(`acquired evidence link ${index} is malformed`);
+    const receiptDigest = digest(`acquired evidence link ${index} receiptDigest`, link.receiptDigest)!;
+    const assessmentDigest = digest(`acquired evidence link ${index} assessmentDigest`, link.assessmentDigest)!;
+    const receipt = receiptsByDigest.get(receiptDigest);
+    const assessment = receipt ? assessmentsByReceipt.get(receipt.receipt_digest) : undefined;
+    if (!receipt || !assessment || receipt.assessment_digest !== assessment.assessment_digest) fail("acquired evidence link is not attached to an assessed receipt");
+    if (assessment.assessment_digest !== assessmentDigest || assessment.verdict !== "accepted" || assessment.evidence_digest === null) fail("acquired evidence requires the exact accepted source-quality assessment");
+    if (receipt.status !== "observed" || receipt.evidence_status !== "declared_for_evaluator" || receipt.evaluator_status !== "accepted") fail("acquired evidence requires a complete accepted acquisition receipt");
+    const rawEvidence = link.evidence;
+    if (!(rawEvidence instanceof AutonomousClaimIntegrityEvidence) && !isObject(rawEvidence)) fail(`acquired evidence link ${index} has malformed evidence`);
+    if (isObject(rawEvidence)) {
+      const allowedEvidenceFields = new Set(["evidence_id", "evidenceId", "domain", "claim_ids", "claimIds", "source_id", "sourceId", "evidence_digest", "evidenceDigest", "source_digest", "sourceDigest", "observed_at", "observedAt", "valid_from", "validFrom", "valid_until", "validUntil", "reliability", "support", "status", "stance", "modality", "reproducibility", "metadata"]);
+      if (Object.keys(rawEvidence).some((key) => !allowedEvidenceFields.has(key))) fail(`acquired evidence link ${index} contains unsupported evidence fields`);
+    }
+    const evidenceItem = normalizeEvidence(rawEvidence as AutonomousClaimIntegrityEvidence | AutonomousClaimIntegrityEvidenceInput | Record<string, unknown>);
+    const candidateId = receiptToCandidate.get(receipt.receipt_digest)!;
+    if (evidenceItem.domain !== receipt.domain || evidenceItem.sourceId !== receipt.source_id || evidenceItem.sourceDigest !== receipt.source_digest || evidenceItem.evidenceDigest !== assessment.evidence_digest) fail("acquired evidence does not match its assessed source receipt");
+    const allowedClaims = authorizedClaimsByCandidate.get(candidateId);
+    if (!allowedClaims?.size || evidenceItem.claimIds.some((claimId) => !allowedClaims.has(claimId))) fail("acquired evidence targets claims outside the candidate's reviewed actions");
+    if ([...reservedMetadata].some((key) => Object.prototype.hasOwnProperty.call(evidenceItem.metadata, key))) fail("acquired evidence attempts to override settlement provenance");
+    if (evidenceIds.has(evidenceItem.evidenceId)) fail("acquired evidence contains duplicate identifiers");
+    const sourceQualityReviewBody = {
+      schema: AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_AUTHORITY_REVIEW_SCHEMA,
+      authority_id: evidenceAuthorityId,
+      authority_version: evidenceAuthorityVersion,
+      context_digest: previous.contextDigest,
+      assessment_digest: previous.assessmentDigest,
+      bridge_digest: bridge.bridgeDigest,
+      binding_digest: binding.bindingDigest,
+      candidate_id: candidateId,
+      request_digest: receipt.request_digest,
+      receipt: {
+        receipt_digest: receipt.receipt_digest,
+        request_digest: receipt.request_digest,
+        requirement_id: receipt.requirement_id,
+        domain: receipt.domain,
+        source_id: receipt.source_id,
+        source_digest: receipt.source_digest,
+        status: receipt.status,
+        evidence_status: receipt.evidence_status,
+        evaluator_status: receipt.evaluator_status,
+      },
+      source_quality_assessment: {
+        assessment_digest: assessment.assessment_digest,
+        receipt_digest: assessment.receipt_digest,
+        requirement_id: assessment.requirement_id,
+        evaluator_id: assessment.evaluator_id,
+        evaluator_version: assessment.evaluator_version,
+        verdict: assessment.verdict,
+        score_units_1e8: reviewUnits(assessment.score),
+        evidence_digest: assessment.evidence_digest,
+      },
+      claim_contracts: evidenceItem.claimIds.map((claimId) => {
+        const claimContract = claimContracts.get(claimId);
+        if (!claimContract) fail("acquired evidence references a claim without a reviewed contract");
+        return claimContract;
+      }),
+      evidence: {
+        evidence_id: evidenceItem.evidenceId,
+        domain: evidenceItem.domain,
+        claim_ids: [...evidenceItem.claimIds],
+        source_id: evidenceItem.sourceId,
+        source_digest: evidenceItem.sourceDigest,
+        evidence_digest: evidenceItem.evidenceDigest,
+        observed_at: evidenceItem.observedAt,
+        valid_from: evidenceItem.validFrom,
+        valid_until: evidenceItem.validUntil,
+        reliability_units_1e8: reviewUnits(evidenceItem.reliability),
+        support_units_1e8: reviewUnits(evidenceItem.support),
+        status: evidenceItem.status,
+        stance: evidenceItem.stance,
+        modality: evidenceItem.modality,
+        reproducibility: evidenceItem.reproducibility,
+        metadata_digest: reviewMetadataDigest(evidenceItem.metadata),
+      },
+    } satisfies JsonObject;
+    const sourceQualityReviewDigest = digestJsonSync(sourceQualityReviewBody);
+    const authorityReview = freezeJson({ ...sourceQualityReviewBody, review_digest: sourceQualityReviewDigest }) as AutonomousClaimIntegrityEvidenceAuthorityReview;
+    evidenceIds.add(evidenceItem.evidenceId);
+    pendingEvidenceReviews.push({ evidence: evidenceItem, receipt, assessment, candidateId, reviewDigest: sourceQualityReviewDigest, review: authorityReview });
+  }
+
+  const priorEvidence = options.existingEvidence.map(normalizeEvidence);
+  const unverifiedEvidence = pendingEvidenceReviews.map((item) => item.evidence);
+  const allEvidenceIds = [...priorEvidence, ...unverifiedEvidence].map((item) => item.evidenceId);
+  if (new Set(allEvidenceIds).size !== allEvidenceIds.length) fail("settlement evidence identifiers must be unique");
+  reassessAutonomousClaimIntegrity({ previous, claims: normalizedClaims, evidence: [...priorEvidence, ...unverifiedEvidence], referenceTime: options.referenceTime, policy: options.policy });
+  const linkedEvidence = pendingEvidenceReviews.map(({ evidence: evidenceItem, receipt, assessment, candidateId, reviewDigest, review }) => {
+    let rawAuthorityReceiptDigest: unknown;
+    try {
+      rawAuthorityReceiptDigest = options.evidenceAuthority.verify(review);
+    } catch {
+      fail("deployment evidence authority failed to verify acquired claim evidence");
+    }
+    const authorityReceiptDigest = digest("evidence authority receipt digest", rawAuthorityReceiptDigest)!;
+    return new AutonomousClaimIntegrityEvidence({
+      evidenceId: evidenceItem.evidenceId,
+      domain: evidenceItem.domain,
+      claimIds: evidenceItem.claimIds,
+      sourceId: evidenceItem.sourceId,
+      sourceDigest: evidenceItem.sourceDigest,
+      evidenceDigest: evidenceItem.evidenceDigest,
+      observedAt: evidenceItem.observedAt,
+      validFrom: evidenceItem.validFrom,
+      validUntil: evidenceItem.validUntil,
+      reliability: evidenceItem.reliability,
+      support: evidenceItem.support,
+      status: evidenceItem.status,
+      stance: evidenceItem.stance,
+      modality: evidenceItem.modality,
+      reproducibility: evidenceItem.reproducibility,
+      metadata: {
+        ...evidenceItem.metadata,
+        claim_integrity_acquisition_receipt_digest: receipt.receipt_digest,
+        claim_integrity_source_quality_assessment_digest: assessment.assessment_digest,
+        claim_integrity_source_quality_evaluator_id: assessment.evaluator_id,
+        claim_integrity_source_quality_evaluator_version: assessment.evaluator_version,
+        claim_integrity_evidence_authority_id: evidenceAuthorityId,
+        claim_integrity_evidence_authority_version: evidenceAuthorityVersion,
+        claim_integrity_evidence_authority_review_digest: reviewDigest,
+        claim_integrity_evidence_authority_receipt_digest: authorityReceiptDigest,
+        claim_integrity_acquisition_candidate_id: candidateId,
+        claim_integrity_acquisition_binding_digest: binding.bindingDigest,
+        claim_integrity_acquisition_bridge_digest: bridge.bridgeDigest,
+      },
+    });
+  });
+  const allEvidence = [...priorEvidence, ...linkedEvidence];
+  return reassessAutonomousClaimIntegrity({ previous, claims: normalizedClaims, evidence: allEvidence, referenceTime: options.referenceTime, policy: options.policy });
 }
 
 function normalizePolicy(value: AutonomousClaimIntegrityPolicy | AutonomousClaimIntegrityPolicyInput | undefined): AutonomousClaimIntegrityPolicy { return value instanceof AutonomousClaimIntegrityPolicy ? value : new AutonomousClaimIntegrityPolicy(value); }

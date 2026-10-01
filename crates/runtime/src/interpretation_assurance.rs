@@ -9,8 +9,8 @@
 
 use bioprism_foundation::{
     AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference, EvidenceState,
-    LossSeverity, ProvenanceLink, ResearchContractError, ResearchSurface, SemanticLoss,
-    TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    LossSeverity, ProvenanceLink, ResearchContractError, ResearchSurface, SemanticLoss, TypedPort,
+    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -90,7 +90,9 @@ pub struct EvidenceBackedResult4 {
     pub boundary: String,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InterpretationArtifact7 {
@@ -140,14 +142,17 @@ impl InteractiveInterpretation7 {
             || self.replay_identity.trim().is_empty()
             || self.effect_receipts != vec!["block:unsafe-release".to_string()]
             || self.boundary != PRECLINICAL_BOUNDARY
-            || self.locality != "raw-data-local; aggregate-only federation" 
+            || self.locality != "raw-data-local; aggregate-only federation"
             || self.candidate_order.is_empty()
         {
             return Err(InterpretationAssuranceError::InvalidOutput(
-                "interpretation identity, release effect, locality, or boundary is incomplete".into(),
+                "interpretation identity, release effect, locality, or boundary is incomplete"
+                    .into(),
             ));
         }
-        self.artifact.validate_metadata().map_err(InterpretationAssuranceError::Contract)
+        self.artifact
+            .validate_metadata()
+            .map_err(InterpretationAssuranceError::Contract)
     }
 }
 
@@ -208,7 +213,8 @@ fn validate_request(request: &EvidenceBackedResult4) -> Result<(), Interpretatio
             || candidate.provenance_digest == ContentHash::of_bytes(b"")
         {
             return Err(InterpretationAssuranceError::InvalidRequest(
-                "candidate identity, typed profile, replay, provenance, or digest is incomplete".into(),
+                "candidate identity, typed profile, replay, provenance, or digest is incomplete"
+                    .into(),
             ));
         }
     }
@@ -235,12 +241,17 @@ pub fn assure_interpretation(
         || !request.adversarial_event_order.is_empty();
     let mut candidates = request.candidates.clone();
     candidates.sort_by(|left, right| {
-        right.interpretation_score_milli.cmp(&left.interpretation_score_milli)
+        right
+            .interpretation_score_milli
+            .cmp(&left.interpretation_score_milli)
             .then_with(|| left.study_order.cmp(&right.study_order))
             .then_with(|| left.modality_order.cmp(&right.modality_order))
             .then_with(|| left.candidate_id.cmp(&right.candidate_id))
     });
-    let candidate_order = candidates.iter().map(|candidate| candidate.candidate_id.clone()).collect::<Vec<_>>();
+    let candidate_order = candidates
+        .iter()
+        .map(|candidate| candidate.candidate_id.clone())
+        .collect::<Vec<_>>();
     let mut qualified = Vec::new();
     let mut unresolved = Vec::new();
     let mut blocked = Vec::new();
@@ -253,7 +264,12 @@ pub fn assure_interpretation(
     for candidate in &candidates {
         omissions.extend(candidate.omission_order.clone());
         uncertainty.extend(candidate.uncertainty_order.clone());
-        if candidate.negative_result || matches!(candidate.evidence_state, InterpretationEvidenceState::Negative) {
+        if candidate.negative_result
+            || matches!(
+                candidate.evidence_state,
+                InterpretationEvidenceState::Negative
+            )
+        {
             negative_results.push(candidate.candidate_id.clone());
         }
         if candidate.study_order != request.required_study_order {
@@ -264,15 +280,27 @@ pub fn assure_interpretation(
         }
         let comparable = candidate.semantic_profile == request.semantic_profile
             && candidate.comparability_digest == request.comparability_digest;
-        if global_block || !candidate.policy_allowed || !candidate.local || !candidate.aggregate_only {
+        if global_block
+            || !candidate.policy_allowed
+            || !candidate.local
+            || !candidate.aggregate_only
+        {
             blocked.push(candidate.candidate_id.clone());
         } else if !comparable {
             incomparable.push(candidate.candidate_id.clone());
         } else {
             match candidate.evidence_state {
-                InterpretationEvidenceState::Proven | InterpretationEvidenceState::Supported => qualified.push(candidate.candidate_id.clone()),
-                InterpretationEvidenceState::Contradicted => unresolved.push(candidate.candidate_id.clone()),
-                InterpretationEvidenceState::Unknown | InterpretationEvidenceState::Unmeasured | InterpretationEvidenceState::Negative => unresolved.push(candidate.candidate_id.clone()),
+                InterpretationEvidenceState::Proven | InterpretationEvidenceState::Supported => {
+                    qualified.push(candidate.candidate_id.clone())
+                }
+                InterpretationEvidenceState::Contradicted => {
+                    unresolved.push(candidate.candidate_id.clone())
+                }
+                InterpretationEvidenceState::Unknown
+                | InterpretationEvidenceState::Unmeasured
+                | InterpretationEvidenceState::Negative => {
+                    unresolved.push(candidate.candidate_id.clone())
+                }
             }
         }
     }
@@ -280,14 +308,21 @@ pub fn assure_interpretation(
     omissions.dedup();
     uncertainty.sort();
     uncertainty.dedup();
-    let mut negative_results = negative_results;
     negative_results.sort();
     let interpretation = InterpretationArtifact7 {
-        request_id: request.request_id.clone(), candidate_order: candidate_order.clone(),
-        qualified: qualified.clone(), unresolved: unresolved.clone(), blocked: blocked.clone(), incomparable: incomparable.clone(),
-        missing_study_order: missing_study.iter().copied().collect(), missing_modality_order: missing_modality.iter().copied().collect(),
-        omissions: omissions.clone(), uncertainty: uncertainty.clone(), negative_results: negative_results.clone(),
-        replay_identity: request.replay_identity.clone(), interpretation_digest: ContentHash::of_bytes(b"") ,
+        request_id: request.request_id.clone(),
+        candidate_order: candidate_order.clone(),
+        qualified: qualified.clone(),
+        unresolved: unresolved.clone(),
+        blocked: blocked.clone(),
+        incomparable: incomparable.clone(),
+        missing_study_order: missing_study.iter().copied().collect(),
+        missing_modality_order: missing_modality.iter().copied().collect(),
+        omissions: omissions.clone(),
+        uncertainty: uncertainty.clone(),
+        negative_results: negative_results.clone(),
+        replay_identity: request.replay_identity.clone(),
+        interpretation_digest: ContentHash::of_bytes(b""),
     };
     let interpretation_digest = digest(&json!({
         "request_id": request.request_id, "candidate_order": candidate_order, "qualified": qualified,
@@ -296,7 +331,8 @@ pub fn assure_interpretation(
         "omissions": omissions, "uncertainty": uncertainty, "negative_results": negative_results,
         "replay_identity": request.replay_identity,
     }))?;
-    let artifact_payload = json!({ "interpretation": interpretation, "interpretation_digest": interpretation_digest });
+    let artifact_payload =
+        json!({ "interpretation": interpretation, "interpretation_digest": interpretation_digest });
     let artifact_digest = ContentHash::of_value(&artifact_payload)
         .map_err(|error| InterpretationAssuranceError::Serialization(error.to_string()))?;
     let artifact = TypedResearchArtifact {
@@ -309,11 +345,25 @@ pub fn assure_interpretation(
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     let output = InteractiveInterpretation7 {
-        schema_version: OUTPUT_SCHEMA.into(), feature_id: FEATURE_ID.into(), request_id: request.request_id.clone(),
-        candidate_order, qualified, unresolved, blocked, incomparable,
-        missing_study_order: interpretation.missing_study_order, missing_modality_order: interpretation.missing_modality_order,
-        omissions, uncertainty, negative_results, replay_identity: request.replay_identity.clone(), interpretation_digest,
-        artifact, effect_receipts: vec!["block:unsafe-release".into()], locality: "raw-data-local; aggregate-only federation".into(), boundary: PRECLINICAL_BOUNDARY.into(),
+        schema_version: OUTPUT_SCHEMA.into(),
+        feature_id: FEATURE_ID.into(),
+        request_id: request.request_id.clone(),
+        candidate_order,
+        qualified,
+        unresolved,
+        blocked,
+        incomparable,
+        missing_study_order: interpretation.missing_study_order,
+        missing_modality_order: interpretation.missing_modality_order,
+        omissions,
+        uncertainty,
+        negative_results,
+        replay_identity: request.replay_identity.clone(),
+        interpretation_digest,
+        artifact,
+        effect_receipts: vec!["block:unsafe-release".into()],
+        locality: "raw-data-local; aggregate-only federation".into(),
+        boundary: PRECLINICAL_BOUNDARY.into(),
     };
     output.validate()?;
     Ok(output)
@@ -323,13 +373,47 @@ pub fn assure_interpretation(
 mod tests {
     use super::*;
 
-    fn hash(text: &str) -> ContentHash { ContentHash::of_bytes(text.as_bytes()) }
+    fn hash(text: &str) -> ContentHash {
+        ContentHash::of_bytes(text.as_bytes())
+    }
 
     fn fixture() -> EvidenceBackedResult4 {
         EvidenceBackedResult4 {
-            schema_version: INPUT_SCHEMA.into(), request_id: "req-interpret-1".into(), researcher: "researcher".into(), purpose: "compare preclinical modalities".into(), semantic_profile: "mouse-cortex-v1".into(), required_study_order: 1, required_modality_order: 1, comparability_digest: hash("cmp"), replay_identity: "replay-1".into(),
-            candidates: vec![InterpretationCandidate4 { candidate_id: "cand-1".into(), study_order: 1, modality_order: 1, semantic_profile: "mouse-cortex-v1".into(), interpretation_score_milli: 900, evidence_state: InterpretationEvidenceState::Supported, comparability_digest: hash("cmp"), result_digest: hash("result"), provenance_digest: hash("prov"), replay_identity: "replay-cand".into(), local: true, aggregate_only: true, policy_allowed: true, omission_order: vec![], uncertainty_order: vec!["sample-size".into()], negative_result: false }],
-            policy_allowed: true, protected_closure: true, signed_approval: true, federation_allowed: true, raw_data_local: true, aggregate_only: true, adversarial_event_order: vec![], boundary: PRECLINICAL_BOUNDARY.into(),
+            schema_version: INPUT_SCHEMA.into(),
+            request_id: "req-interpret-1".into(),
+            researcher: "researcher".into(),
+            purpose: "compare preclinical modalities".into(),
+            semantic_profile: "mouse-cortex-v1".into(),
+            required_study_order: 1,
+            required_modality_order: 1,
+            comparability_digest: hash("cmp"),
+            replay_identity: "replay-1".into(),
+            candidates: vec![InterpretationCandidate4 {
+                candidate_id: "cand-1".into(),
+                study_order: 1,
+                modality_order: 1,
+                semantic_profile: "mouse-cortex-v1".into(),
+                interpretation_score_milli: 900,
+                evidence_state: InterpretationEvidenceState::Supported,
+                comparability_digest: hash("cmp"),
+                result_digest: hash("result"),
+                provenance_digest: hash("prov"),
+                replay_identity: "replay-cand".into(),
+                local: true,
+                aggregate_only: true,
+                policy_allowed: true,
+                omission_order: vec![],
+                uncertainty_order: vec!["sample-size".into()],
+                negative_result: false,
+            }],
+            policy_allowed: true,
+            protected_closure: true,
+            signed_approval: true,
+            federation_allowed: true,
+            raw_data_local: true,
+            aggregate_only: true,
+            adversarial_event_order: vec![],
+            boundary: PRECLINICAL_BOUNDARY.into(),
         }
     }
 

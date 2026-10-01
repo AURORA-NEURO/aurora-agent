@@ -127,6 +127,70 @@ test("strict lifecycle failure preserves a redacted report and stops after the f
   assert.deepEqual(calls, ["restore:model_inventory", "restore:runtime_health", "restore:health"]);
 });
 
+test("lifecycle rejects malformed and unbound persistence coordinators", () => {
+  const agent = fakeAgent([]);
+  const validCoordinator = { restore: async () => null, flush: async () => null };
+  assert.throws(
+    () => new AutonomousAgentPersistenceLifecycleCoordinator(agent, { capabilityJournalPersistence: validCoordinator }),
+    /must be bound to the agent/,
+  );
+
+  agent.capabilityJournalPersistence = validCoordinator;
+  assert.throws(
+    () => new AutonomousAgentPersistenceLifecycleCoordinator(agent, { capabilityJournalPersistence: {} }),
+    /is malformed/,
+  );
+});
+
+test("lifecycle reports explicit missing snapshots as empty instead of restored", async () => {
+  const calls = [];
+  const agent = fakeAgent(calls);
+  agent.restoreActivation = async () => { calls.push("restore:activation"); return { restored: false, snapshot_digest: null }; };
+  const coordinator = new AutonomousAgentPersistenceLifecycleCoordinator(agent, {
+    modelInventoryPersistence: { read: () => null, write: () => {} },
+    activationStore: { load: () => null, save: () => {} },
+    selectionPromotionStore: { load: () => null, save: () => {} },
+    requireAll: true,
+  });
+
+  const report = await coordinator.restore();
+  const activation = report.components.find((component) => component.component_id === "activation");
+  assert.equal(activation?.status, "empty");
+  assert.equal(report.status, "completed");
+  assert.ok(report.completed_component_ids.includes("activation"));
+});
+
+test("lifecycle rejects malformed restore receipt flags", async () => {
+  const calls = [];
+  const agent = fakeAgent(calls);
+  agent.restoreModelInventory = async () => { calls.push("restore:model_inventory"); return { restored: "false" }; };
+  const coordinator = new AutonomousAgentPersistenceLifecycleCoordinator(agent, {
+    modelInventoryPersistence: { read: () => null, write: () => {} },
+    activationStore: { load: () => null, save: () => {} },
+    selectionPromotionStore: { load: () => null, save: () => {} },
+    requireAll: true,
+  });
+
+  const report = await coordinator.restore({ strict: false });
+  assert.equal(report.status, "failed");
+  assert.equal(report.components[0].status, "failed");
+  assert.equal(report.components[0].error_class, "ArgumentError");
+  assert.equal(report.components[1].status, "not_attempted");
+});
+
+test("lifecycle generation projection follows nullish fallback and safe integer rules", async () => {
+  const agent = fakeAgent([]);
+  agent.restoreRuntimeHealth = async () => ({ generation: null, snapshot_generation: 7 });
+  agent.restoreHealth = async () => ({ generation: Number.MAX_SAFE_INTEGER + 1 });
+  const coordinator = new AutonomousAgentPersistenceLifecycleCoordinator(agent);
+
+  const report = await coordinator.restore({ strict: false });
+  const generations = new Map(report.components.map((component) => [component.component_id, component.generation]));
+
+  assert.equal(generations.get("runtime_health"), 7);
+  assert.equal(generations.get("health"), null);
+});
+
 test("high-level agent lifecycle composes model inventory restart and flush without rediscovery", async () => {
   const llm = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
   llm.registerInMemoryProvider("offline", () => "unused", {

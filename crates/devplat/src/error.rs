@@ -15,11 +15,14 @@ pub enum SurfaceError {
     UnnamedArtifact { kind: &'static str },
     #[error("surface of kind `{kind}` has invalid artifact metadata")]
     InvalidArtifact { kind: &'static str },
-    /// The in-repository surface is a Rust crate, and this workspace's crates are `bioprism-*`.
+    /// A Rust surface must name a package of this workspace.
     #[error(
         "`{artifact}` is not a crate of this workspace: an in-repository surface must name one"
     )]
     NotAWorkspaceCrate { artifact: String },
+    /// Local non-Rust surfaces must be addressed by normalized repository-relative paths.
+    #[error("`{artifact}` is not a safe repository-relative artifact path")]
+    InvalidRepositoryPath { artifact: String },
 }
 
 /// A claim about a named API could not be sealed.
@@ -41,7 +44,7 @@ pub enum ClaimError {
     },
     /// The evidence says "I could not check it here" about something that is in the tree.
     #[error(
-        "`{api}` lives in this repository (crate `{artifact}`), so `outside the tree` is not a \
+        "`{api}` lives in this repository (artifact `{artifact}`), so `outside the tree` is not a \
          reason: resolve it or record it as absent"
     )]
     InTreeSurfaceClaimsForeignEvidence { api: String, artifact: String },

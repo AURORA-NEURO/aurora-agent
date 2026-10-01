@@ -50,7 +50,7 @@ from .autonomy import (
     AutonomousTaskOrchestrator,
 )
 from . import brain as _brain_module
-from .brain import AutonomousBrain, BrainRunError
+from .brain import AutonomousBrain, BrainRunError, MAX_MODEL_CONTINUATION_STEPS
 from . import llm_runtime as _llm_runtime_module
 from .llm_runtime import (
     CompositeProviderInvocationObserver,
@@ -3892,10 +3892,11 @@ def run_autonomous_evidence_backed_resumable(
     if (
         not isinstance(model_candidates, Sequence)
         or isinstance(model_candidates, (str, bytes, bytearray))
-        or len(model_candidates) != 1
+        or not 1 <= len(model_candidates) <= MAX_MODEL_CONTINUATION_STEPS
     ):
         raise ArgumentError(
-            "resumable evidence-backed provider fencing requires exactly one explicit model candidate"
+            "resumable evidence-backed provider fencing requires 1.."
+            f"{MAX_MODEL_CONTINUATION_STEPS} explicit model candidates"
         )
     if (
         restored is not None

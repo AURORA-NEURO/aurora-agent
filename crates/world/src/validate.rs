@@ -36,7 +36,9 @@ impl ValidationReport {
     }
 
     pub fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(|d| d.severity == Severity::Error)
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error)
     }
 
     pub fn with_code<'a>(&'a self, code: &'a str) -> impl Iterator<Item = &'a Diagnostic> + 'a {
@@ -44,7 +46,12 @@ impl ValidationReport {
     }
 
     fn push(&mut self, severity: Severity, code: &'static str, subject: String, message: String) {
-        self.diagnostics.push(Diagnostic { severity, code, subject, message });
+        self.diagnostics.push(Diagnostic {
+            severity,
+            code,
+            subject,
+            message,
+        });
     }
 }
 
@@ -227,7 +234,13 @@ fn find_factor_cycles(world: &World) -> Vec<Vec<String>> {
     for node in 0..variables.len() {
         if marks[node] == Mark::Unvisited {
             visit(
-                node, world, &variables, &mut marks, &mut stack, &mut cycles, &position,
+                node,
+                world,
+                &variables,
+                &mut marks,
+                &mut stack,
+                &mut cycles,
+                &position,
             );
         }
     }

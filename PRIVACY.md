@@ -1,33 +1,46 @@
 # Privacy Policy — AURORA Agent (bioprism)
 
-Effective: 2026-08-24. Applies to the `bioprism` binaries (`bioprism`,
+Effective: 2026-09-28. Applies to the `bioprism` binaries (`bioprism`,
 `bioprism-mcp`, `bioprism-api`) and the packaged Claude Desktop extension
 (`aurora-agent.mcpb`).
 
 ## Summary
 
-The AURORA Agent MCP server is a **local program**. It makes **no network
-requests**, calls **no external services**, and **collects, stores, and
-transmits no personal data**. There is no telemetry, no analytics, no
-crash reporting, and no account.
+AURORA Agent is local-first software. It has no telemetry, analytics, crash
+reporting, account, or background network activity. Local workflows can run
+offline. The source retrieval connector can make a network request only when an
+operator explicitly allows an exact HTTP origin at startup and a caller submits
+a retained plan that separately opts into networking and allows that host.
+Outbound source retrieval is denied by default. The connector supports plain
+HTTP only; it refuses HTTPS and redirects.
 
 ## Details
 
-- **Data processed**: the server reads only files inside the data root you
-  configure (`--root`, or the extension's "AURORA data root" setting) and
-  writes only the artifacts you explicitly request (e.g. certificate or index
-  files at paths you supply). Absolute paths, `..` traversal, and symlink
-  escapes are refused.
-- **Network**: the MCP server and CLI open no network connections. The
-  workspace builds offline against pinned dependencies. (The optional
-  `bioprism-api` gateway binds to an address you choose — loopback by
-  default — and serves only callers presenting your bearer token; it likewise
-  calls no external services.)
-- **Conversation data**: the server sees only the tool arguments the MCP
-  client sends it and returns results to that client. It does not read,
-  store, or transmit conversation history.
-- **Third parties**: none. No data is shared with anyone, including the
-  authors.
+- **Data processed**: the server processes the tool arguments sent by its MCP
+  client and returns results to that client. Local file reads and writes are
+  confined to the configured data root (`--root`); absolute paths, `..`
+  traversal, and symlink escapes are refused. The API gateway can persist
+  registries only when an operator configures the corresponding state paths.
+- **Network**: no background requests, telemetry, or conversation-history
+  transfer occurs. `domain_evidence_source_execute` can send an HTTP GET only
+  after both gates pass: the operator starts `bioprism-mcp` or `bioprism-api`
+  with one or more `--allow-http-origin <host[:port]>` options, and the retained
+  plan sets `retrieval_policy.network` to `enabled` and includes the requested
+  host in `retrieval_policy.allowed_hosts`. The default operator allow-list is
+  empty. The request contains the locator's path and query; the remote host and
+  network intermediaries can observe the request, the server's network address,
+  and ordinary connection metadata. Do not place secrets or personal data in a
+  locator. Requests are unencrypted because this connector supports HTTP only.
+  Credentials are not accepted by this connector. Returned content is bounded
+  by the plan and is passed back to the caller; it may also be retained by the
+  server's evidence registries, and the API gateway may persist it if configured.
+- **Conversation data**: the server sees only the tool arguments the MCP client
+  sends it. It does not read, store, or transmit conversation history unless a
+  caller explicitly places data in a tool argument or source locator.
+- **Third parties**: the project does not send data to service operators. When
+  an operator enables and a caller uses remote HTTP retrieval, the selected
+  source host receives the request described above and applies its own privacy
+  policy.
 
 ## Boundary
 

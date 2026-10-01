@@ -110,6 +110,7 @@ pub struct ContextAssuranceReceipt {
     pub boundary: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn context_payload(
     context_id: &str,
     disposition: ContextDisposition,
@@ -256,9 +257,7 @@ impl ContextAssuranceReceipt {
 
     pub fn digest(&self) -> Result<ContentHash, ContextAssuranceError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| ContextAssuranceError::Serialization(error.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|error| ContextAssuranceError::Serialization(error.to_string()))
     }
 }

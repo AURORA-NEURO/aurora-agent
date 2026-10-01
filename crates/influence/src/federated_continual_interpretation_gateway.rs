@@ -158,6 +158,16 @@ pub enum GatewayDisposition {
     Unknown,
 }
 
+struct PeerNegotiation {
+    peer_order: Vec<String>,
+    accepted_peer_order: Vec<String>,
+    capability_order: Vec<String>,
+    disposition: GatewayDisposition,
+    semantic_loss: Vec<SemanticLoss>,
+    omissions: Vec<String>,
+    uncertainty: Vec<String>,
+}
+
 /// Versioned output consumed by a researcher workbench, HTTP/event gateway, SDK, or MCP tool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InteractiveInterpretation {
@@ -604,17 +614,7 @@ fn selected_perturbation(
     }
 }
 
-fn peer_negotiation(
-    request: &EvidenceBackedResult4,
-) -> (
-    Vec<String>,
-    Vec<String>,
-    Vec<String>,
-    GatewayDisposition,
-    Vec<SemanticLoss>,
-    Vec<String>,
-    Vec<String>,
-) {
+fn peer_negotiation(request: &EvidenceBackedResult4) -> PeerNegotiation {
     let mut peers = request.peer_capabilities.clone();
     peers.sort_by(|left, right| left.endpoint_id.cmp(&right.endpoint_id));
     let peer_order = peers
@@ -688,15 +688,15 @@ fn peer_negotiation(
         uncertainty.push("protected closure or signed A2 approval is incomplete".into());
         disposition = GatewayDisposition::ApprovalRequired;
     }
-    (
+    PeerNegotiation {
         peer_order,
-        accepted,
-        capabilities.into_iter().collect(),
+        accepted_peer_order: accepted,
+        capability_order: capabilities.into_iter().collect(),
         disposition,
-        losses,
+        semantic_loss: losses,
         omissions,
         uncertainty,
-    )
+    }
 }
 
 pub fn run_federated_continual_interpretation(
@@ -705,7 +705,7 @@ pub fn run_federated_continual_interpretation(
     validate_request(request)?;
     let perturbation = selected_perturbation(request)?;
     let region = build_region(request)?;
-    let (
+    let PeerNegotiation {
         peer_order,
         accepted_peer_order,
         capability_order,
@@ -713,7 +713,7 @@ pub fn run_federated_continual_interpretation(
         mut semantic_loss,
         mut omissions,
         mut uncertainty,
-    ) = peer_negotiation(request);
+    } = peer_negotiation(request);
     let mut factors = request.factors.clone();
     factors.sort_by(|left, right| left.factor_id.cmp(&right.factor_id));
     let analyzer = InfluenceAnalyzer::default();
@@ -835,10 +835,10 @@ pub fn run_federated_continual_interpretation(
         counterexamples
             .push("one or more required influence or evidence gates are unresolved".into());
     }
-    if disposition == GatewayDisposition::Accepted || disposition == GatewayDisposition::Migrated {
-        if !all_bounded || !omitted_modalities.is_empty() {
-            disposition = GatewayDisposition::Unknown;
-        }
+    if (disposition == GatewayDisposition::Accepted || disposition == GatewayDisposition::Migrated)
+        && (!all_bounded || !omitted_modalities.is_empty())
+    {
+        disposition = GatewayDisposition::Unknown;
     }
     omissions.sort();
     omissions.dedup();

@@ -97,14 +97,8 @@ fn a_generated_region_under_uniform_potentials_still_agrees_with_enumeration() {
     let enumerated = DirectMaterialization::new().execute(&region).unwrap();
 
     assert!(eliminated.agrees_exactly_with(&enumerated));
-    assert_eq!(
-        eliminated.receipt().backend,
-        Backend::FaqInsideOut
-    );
-    assert_eq!(
-        enumerated.receipt().backend,
-        Backend::DirectMaterialization
-    );
+    assert_eq!(eliminated.receipt().backend, Backend::FaqInsideOut);
+    assert_eq!(enumerated.receipt().backend, Backend::DirectMaterialization);
     assert!(
         eliminated.receipt().observed_ops() < enumerated.receipt().observed_ops(),
         "elimination executed {} operations against enumeration's {}",

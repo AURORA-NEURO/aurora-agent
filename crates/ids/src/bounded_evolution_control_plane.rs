@@ -198,9 +198,7 @@ impl IdsEvolutionReceipt10 {
     }
     pub fn digest(&self) -> Result<ContentHash, BoundedEvolutionError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| BoundedEvolutionError::Report(error.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|error| BoundedEvolutionError::Report(error.to_string()))
     }
 }
@@ -266,10 +264,8 @@ pub fn preview_bounded_evolution(
         provenance.insert(proposal.benchmark_digest.clone());
         if proposal.capability_id != request.capability_id
             || proposal.from_version != request.current_version
+            || !proposal.compatible
         {
-            unresolved.insert(proposal.proposal_id.clone());
-            incompatible.insert(proposal.proposal_id.clone());
-        } else if !proposal.compatible {
             unresolved.insert(proposal.proposal_id.clone());
             incompatible.insert(proposal.proposal_id.clone());
         } else if !proposal.benchmark_pass {

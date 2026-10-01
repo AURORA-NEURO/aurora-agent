@@ -8,8 +8,6 @@
 //! *which* of these objects a query needs belongs to the compiler, so that the world can be
 //! shared unchanged across queries, roles and policies.
 
-#![allow(clippy::all)]
-
 pub mod causal_integrity_support;
 pub mod error;
 pub mod event;
@@ -42,7 +40,7 @@ pub use causal_integrity_support::{
     CausalIntegrityArtifact4, CausalIntegrityCard7, CausalIntegrityError, CausalIntegrityRequest4,
     BOUNDARY as CAUSAL_INTEGRITY_BOUNDARY, CONTENT_TYPE as CAUSAL_INTEGRITY_CONTENT_TYPE,
 };
-pub use error::WorldError;
+pub use error::{WorldError, WorldSourceError};
 pub use event::CausalEvent;
 pub use fact::Fact;
 pub use factor::Factor;

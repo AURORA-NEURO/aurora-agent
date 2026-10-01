@@ -258,11 +258,7 @@ fn verifying_an_unrepaired_tree_reports_not_met_and_never_that_the_issue_is_reso
     let out = directory.join("plan.json");
     plan_issue_one(&out, &[]);
 
-    let (status, parsed) = verify_json(
-        &fixture("demo-app"),
-        &out,
-        &["--issues", &demo_issues()],
-    );
+    let (status, parsed) = verify_json(&fixture("demo-app"), &out, &["--issues", &demo_issues()]);
     let report = &parsed["report"];
 
     assert_eq!(
@@ -316,10 +312,10 @@ fn verifying_an_unrepaired_tree_reports_not_met_and_never_that_the_issue_is_reso
 
     let limitations = report["limitations"].as_array().expect("limitations");
     assert!(
-        limitations
-            .iter()
-            .any(|line| line.as_str().unwrap_or_default()
-                .contains("does not state that the issue is resolved")),
+        limitations.iter().any(|line| line
+            .as_str()
+            .unwrap_or_default()
+            .contains("does not state that the issue is resolved")),
         "the report must refuse the claim the whole command could be mistaken for: {limitations:?}"
     );
 
@@ -370,6 +366,99 @@ fn a_plan_verified_against_a_different_root_exits_stale_and_evaluates_nothing() 
 }
 
 #[test]
+fn a_named_succession_allows_explicit_evaluation_of_a_changed_tree_and_is_recorded() {
+    let directory = scratch("successor-world");
+    let plan = directory.join("plan.json");
+    let succession = directory.join("succession.json");
+    plan_issue_one(&plan, &[]);
+    std::fs::write(
+        &succession,
+        serde_json::to_vec_pretty(&json!({
+            "declared_by": "release engineer",
+            "statement": "The checked tree is the successor produced by this repair."
+        }))
+        .unwrap(),
+    )
+    .expect("succession declaration written");
+
+    let succession_path = succession.display().to_string();
+    let (status, parsed) = verify_json(
+        &fixture("bare-script"),
+        &plan,
+        &["--succession", &succession_path],
+    );
+    let report = &parsed["report"];
+    assert_ne!(
+        status, 9,
+        "the explicit declaration lets evaluation run: {report}"
+    );
+    assert_eq!(report["verdict"], Value::from("evaluated"));
+    assert_eq!(report["binding_matches"], Value::from(false));
+    assert_eq!(
+        report["succession"],
+        json!({
+            "declared_by": "release engineer",
+            "statement": "The checked tree is the successor produced by this repair."
+        }),
+        "the report must preserve exactly who asserted succession and what they asserted"
+    );
+    assert!(
+        report["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line
+                .as_str()
+                .unwrap_or_default()
+                .contains("asserted by the caller and is never verified")),
+        "the report must explain that the named succession remains an assertion: {report}"
+    );
+
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn a_succession_declaration_with_an_undeclared_field_is_rejected() {
+    let directory = scratch("invalid-succession");
+    let plan = directory.join("plan.json");
+    let succession = directory.join("succession.json");
+    plan_issue_one(&plan, &[]);
+    std::fs::write(
+        &succession,
+        serde_json::to_vec_pretty(&json!({
+            "declared_by": "release engineer",
+            "statement": "The checked tree is the successor produced by this repair.",
+            "verified": true
+        }))
+        .unwrap(),
+    )
+    .expect("invalid succession declaration written");
+
+    let output = run(&[
+        "--json",
+        "project",
+        "verify",
+        "--root",
+        &fixture("bare-script"),
+        "--plan",
+        &plan.display().to_string(),
+        "--succession",
+        &succession.display().to_string(),
+    ]);
+    assert_eq!(code(&output), 3, "invalid declaration is input error");
+    let error: Value = serde_json::from_slice(&output.stdout).expect("JSON error envelope");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("undeclared field \"verified\""),
+        "unknown fields must be named instead of silently ignored: {error}"
+    );
+
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
 fn verifying_the_planned_tree_without_the_issues_it_was_planned_from_is_stale_not_a_verdict() {
     let directory = scratch("stale-issues");
     let out = directory.join("plan.json");
@@ -407,15 +496,8 @@ fn a_declared_criterion_that_cannot_be_evaluated_exits_eight_rather_than_joining
     )
     .expect("declarations written");
 
-    plan_issue_one(
-        &out,
-        &["--criteria", &declarations.display().to_string()],
-    );
-    let (status, parsed) = verify_json(
-        &fixture("demo-app"),
-        &out,
-        &["--issues", &demo_issues()],
-    );
+    plan_issue_one(&out, &["--criteria", &declarations.display().to_string()]);
+    let (status, parsed) = verify_json(&fixture("demo-app"), &out, &["--issues", &demo_issues()]);
     let report = &parsed["report"];
 
     let items = report["items"].as_array().expect("item list");
@@ -430,9 +512,7 @@ fn a_declared_criterion_that_cannot_be_evaluated_exits_eight_rather_than_joining
         "the third status exists to name what stopped the check: {blocked}"
     );
     assert!(
-        items
-            .iter()
-            .any(|item| item["status"] == *"unmet"),
+        items.iter().any(|item| item["status"] == *"unmet"),
         "a determinate failure must also be present, or this test does not discriminate the two \
          exit codes: {items:?}"
     );
@@ -477,10 +557,7 @@ fn a_declared_criterion_is_never_recorded_as_the_generators_own_inference() {
     )
     .expect("declarations written");
 
-    plan_issue_one(
-        &out,
-        &["--criteria", &declarations.display().to_string()],
-    );
+    plan_issue_one(&out, &["--criteria", &declarations.display().to_string()]);
     let plan = RepairPlan::from_json(
         &serde_json::from_slice(&std::fs::read(&out).expect("plan on disk")).expect("JSON"),
     )
@@ -517,11 +594,7 @@ fn a_declared_criterion_is_never_recorded_as_the_generators_own_inference() {
         plan.limitations()
     );
 
-    let (_status, parsed) = verify_json(
-        &fixture("demo-app"),
-        &out,
-        &["--issues", &demo_issues()],
-    );
+    let (_status, parsed) = verify_json(&fixture("demo-app"), &out, &["--issues", &demo_issues()]);
     assert_eq!(
         parsed["report"]["admissibility"],
         Value::from("held"),
@@ -633,10 +706,7 @@ fn the_human_verify_report_prints_every_item_with_its_status_and_the_obstruction
         .unwrap(),
     )
     .expect("declarations written");
-    plan_issue_one(
-        &out,
-        &["--criteria", &declarations.display().to_string()],
-    );
+    plan_issue_one(&out, &["--criteria", &declarations.display().to_string()]);
 
     let output = run(&[
         "project",

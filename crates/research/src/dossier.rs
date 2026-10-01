@@ -22,8 +22,8 @@ use crate::error::ResearchError;
 use crate::findings::Finding;
 use crate::protocol::ResearchProtocol;
 use crate::request::ResearchRequest;
-use bioprism_ids::{to_canonical_string, ContentHash};
-use serde_json::{json, Map, Value};
+use bioprism_ids::{ContentHash, to_canonical_string};
+use serde_json::{Map, Value, json};
 
 pub const DOSSIER_SCHEMA: &str = "bioprism-research/dossier/0.1";
 

@@ -1,5 +1,3 @@
-#![allow(clippy::all)]
-
 //! BioPRISM execution runtime: the layer that runs a trial and can prove what it did.
 //!
 //! Implements blueprint §05 (execution runtime): the run orchestrator (05.02), the executor
@@ -30,10 +28,11 @@
 //! replayable by neither.
 //!
 //! What this crate deliberately does **not** do: it does not score, it does not schedule against a
-//! real queue, it does not open a socket or a real file, and it does not run containers. The last
-//! two are the same refusal — the subprocess and container providers of 05.03 are declared and
-//! return `ProviderUnavailable`, because a plan that asked for container isolation and silently got
-//! a thread produces results that are wrong in a way no downstream analysis can detect.
+//! real queue, and the `ExecutorProvider` interface does not yet run subprocess or container trial
+//! plans. Those providers remain unavailable rather than degrading a request for isolation to an
+//! in-process thread. [`DockerSandbox`] is a separate opt-in command boundary for callers that have
+//! a reachable Docker Engine; it does not create a WorldTape provider or make SDK manifest requests
+//! enforced automatically.
 //!
 //! ```
 //! use bioprism_ids::RunId;
@@ -61,6 +60,7 @@
 //! ```
 
 pub mod budget;
+pub mod container_effect;
 pub mod context_compilation_contract;
 pub mod effect;
 pub mod error;
@@ -68,6 +68,7 @@ pub mod federated_knowledge_representation_assurance;
 pub mod fork;
 pub mod host;
 pub mod interpretation_assurance;
+pub mod oci_sandbox;
 pub mod orchestrator;
 pub mod provider;
 pub mod replay_audit;
@@ -81,6 +82,9 @@ pub mod workflow_execution;
 
 pub use budget::{
     Accounting, BudgetController, BudgetPlan, BudgetWarning, ChargeStatus, Limit, RuntimeResource,
+};
+pub use container_effect::{
+    DockerProcessConfig, DockerProcessSource, QuarantinedProcessOutput, SandboxCommandRunner,
 };
 pub use context_compilation_contract::{
     capability_manifest as context_compilation_capability_manifest,
@@ -118,6 +122,10 @@ pub use interpretation_assurance::{
     InterpretationCandidate4, InterpretationEvidenceState,
     CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
+};
+pub use oci_sandbox::{
+    DockerArtifact, DockerSandbox, LinuxPlatform, OciSandboxError, SandboxLimits, SandboxRequest,
+    SandboxRunResult,
 };
 pub use orchestrator::{
     AggregationPolicy, AttemptId, AttemptRecord, LifecycleEvent, RetryClass, RunState, Termination,

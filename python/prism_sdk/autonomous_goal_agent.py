@@ -10,8 +10,11 @@ effects, and online learning; this module only composes it with the bounded goal
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+import asyncio
+import inspect
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
+from threading import Lock
 from typing import Any
 
 from .authoring import content_digest
@@ -27,8 +30,14 @@ from .autonomous_goal_control_loop import (
     GoalLoopOptionsFactory,
 )
 from .autonomous_goal_recovery import AutonomousGoalRecoveryCoordinator
+from .autonomous_goal_worker_journal import AutonomousGoalDispatchResolutionVerifier
+from ._async_callback_bridge import (
+    bridge_callback_to_loop,
+    is_async_callable,
+    run_in_thread_and_drain,
+)
 from .autonomous_goal_scheduler import AutonomousGoalScheduleRow
-from .autonomous_goal_worker import AutonomousGoalExecutionRequest, AutonomousGoalWorker
+from .autonomous_goal_worker import AutonomousGoalExecutionRequest, AutonomousGoalWorker, GoalDispatchIntentPersister
 from .autonomous_goal_worker_journal import AutonomousGoalWorkerJournal
 from .autonomous_goal_preview import InMemoryAutonomousGoalPreviewAdmissionLedger
 from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
@@ -43,7 +52,7 @@ from .autonomous_run_trace_registry import (
     AutonomousRunTraceRegistryPublication,
     publish_autonomous_run_trace_registry_snapshot,
 )
-from .goals import AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord
+from .goals import MAX_GOALS, AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord
 from .llm_runtime import CompositeProviderInvocationObserver
 
 
@@ -53,10 +62,18 @@ GOAL_AGENT_TRACE_SCHEMA = "bioprism-autonomous-goal-agent-trace/0.1"
 GOAL_AGENT_TRACE_RETENTION = "metadata_only_goal_control_trace;goal_task_prompts_parameters_credentials_and_results_not_retained"
 _FORBIDDEN_RUN_OPTION_KEYS = frozenset({"task", "domain"})
 
-GoalAgentTaskResolver = Callable[[AutonomousGoalRecord, AutonomousGoalScheduleRow], str]
-GoalAgentRunOptionsFactory = Callable[[AutonomousGoalRecord, AutonomousGoalScheduleRow], Mapping[str, Any]]
+GoalAgentTaskResolver = Callable[
+    [AutonomousGoalRecord, AutonomousGoalScheduleRow], str | Awaitable[str]
+]
+GoalAgentRunOptionsFactory = Callable[
+    [AutonomousGoalRecord, AutonomousGoalScheduleRow],
+    Mapping[str, Any] | Awaitable[Mapping[str, Any]],
+]
 GoalAgentActionHandoffRequest = Mapping[str, Any]
-GoalAgentActionHandoffResolver = Callable[[AutonomousGoalRecord, AutonomousGoalScheduleRow, str], Mapping[str, Any] | None]
+GoalAgentActionHandoffResolver = Callable[
+    [AutonomousGoalRecord, AutonomousGoalScheduleRow, str],
+    Mapping[str, Any] | None | Awaitable[Mapping[str, Any] | None],
+]
 _ACTION_HANDOFF_REQUEST_KEYS = frozenset({"domain", "capability", "hints", "allow_cross_domain", "context", "connector"})
 
 
@@ -88,6 +105,21 @@ def _fail(message: str) -> None:
     raise AutonomousGoalError(f"autonomous goal agent runtime {message}")
 
 
+def _sync_callback_result(value: Any, *, name: str) -> Any:
+    if inspect.isawaitable(value):
+        if inspect.iscoroutine(value):
+            value.close()
+        _fail(f"{name} returned an awaitable; use run_async()")
+    return value
+
+
+def _utf8_byte_length(value: str, *, name: str) -> int:
+    try:
+        return len(value.encode("utf-8"))
+    except UnicodeEncodeError:
+        _fail(f"{name} contains invalid Unicode")
+
+
 def _options(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
@@ -96,8 +128,10 @@ def _options(value: Any) -> dict[str, Any]:
     unknown = sorted(set(value).intersection(_FORBIDDEN_RUN_OPTION_KEYS))
     if unknown:
         _fail("run options cannot override goal " + ", ".join(unknown))
-    if any(not isinstance(key, str) or not key.strip() or "\x00" in key for key in value):
-        _fail("run options contain an invalid key")
+    for key in value:
+        if not isinstance(key, str) or not key.strip() or "\x00" in key:
+            _fail("run options contain an invalid key")
+        _utf8_byte_length(key, name="run option key")
     if len(value) > 128:
         _fail("run options contain too many fields")
     # Do not JSON-clone this mapping: credential handles, abort callbacks, effect boundaries, and
@@ -249,6 +283,7 @@ class AutonomousGoalAgentRuntime:
         evaluator: GoalLoopEvaluator | None = None,
         learner: GoalLoopLearner | AutonomousGoalBanditLearner | None = None,
         journal: AutonomousGoalWorkerJournal | None = None,
+        persist_dispatch_intent: GoalDispatchIntentPersister | None = None,
         recovery: AutonomousGoalRecoveryCoordinator | None = None,
         preview_admission_ledger: InMemoryAutonomousGoalPreviewAdmissionLedger | None = None,
         batch_id_prefix: str = "autonomous-goal-agent",
@@ -276,6 +311,8 @@ class AutonomousGoalAgentRuntime:
             _fail("agent must expose execute_action_handoff when action_handoff_resolver is configured")
         if journal is not None and not isinstance(journal, AutonomousGoalWorkerJournal):
             _fail("journal must be an AutonomousGoalWorkerJournal or None")
+        if persist_dispatch_intent is not None and not callable(persist_dispatch_intent):
+            _fail("persist_dispatch_intent must be callable or None")
         if recovery is not None and not isinstance(recovery, AutonomousGoalRecoveryCoordinator):
             _fail("recovery must be an AutonomousGoalRecoveryCoordinator or None")
         if recovery is not None and recovery.ledger is not ledger:
@@ -284,7 +321,7 @@ class AutonomousGoalAgentRuntime:
             _fail("recovery coordinator must own the supplied worker journal")
         if preview_admission_ledger is not None and not isinstance(preview_admission_ledger, InMemoryAutonomousGoalPreviewAdmissionLedger):
             _fail("preview_admission_ledger must be an InMemoryAutonomousGoalPreviewAdmissionLedger or None")
-        if not isinstance(batch_id_prefix, str) or not batch_id_prefix.strip() or "\x00" in batch_id_prefix or len(batch_id_prefix.encode("utf-8")) > 128:
+        if not isinstance(batch_id_prefix, str) or not batch_id_prefix.strip() or "\x00" in batch_id_prefix or _utf8_byte_length(batch_id_prefix, name="batch_id_prefix") > 128:
             _fail("batch_id_prefix is outside its bounded contract")
         self.orchestrator = orchestrator
         self.agent = agent
@@ -297,11 +334,13 @@ class AutonomousGoalAgentRuntime:
         self.preview_admission_ledger = preview_admission_ledger
         self.batch_id_prefix = batch_id_prefix.strip()
         self._trace_context: dict[str, Any] | None = None
+        self._execution_lock = Lock()
         self.worker = AutonomousGoalWorker(
             ledger,
             resolver=self._resolve,
             executor=self._execute,
             journal=journal,
+            persist_dispatch_intent=persist_dispatch_intent,
         )
         self.loop = AutonomousGoalControlLoop(
             self.worker,
@@ -315,7 +354,9 @@ class AutonomousGoalAgentRuntime:
         if goal.domain not in AUTONOMOUS_DOMAINS:
             _fail(f"goal {goal.goal_id} has an unsupported autonomous domain")
         if self.task_resolver is not None:
-            task = self.task_resolver(goal, row)
+            task = _sync_callback_result(
+                self.task_resolver(goal, row), name="task_resolver"
+            )
         elif self.protected_rehydration is not None:
             receipt = {
                 "goal_id": goal.goal_id,
@@ -336,9 +377,16 @@ class AutonomousGoalAgentRuntime:
             )
         else:
             _fail("task rehydration is not configured")
-        if not isinstance(task, str) or not task.strip() or "\x00" in task or len(task.encode("utf-8")) > 32_000:
+        if not isinstance(task, str) or not task.strip() or "\x00" in task or _utf8_byte_length(task, name="resolved task") > 32_000:
             _fail(f"resolved task is invalid for goal {goal.goal_id}")
-        resolved_handoff = None if self.action_handoff_resolver is None else self.action_handoff_resolver(goal, row, task)
+        resolved_handoff = (
+            None
+            if self.action_handoff_resolver is None
+            else _sync_callback_result(
+                self.action_handoff_resolver(goal, row, task),
+                name="action_handoff_resolver",
+            )
+        )
         binding = _action_handoff(resolved_handoff, goal)
         # Options are intentionally fetched at execution time, not placed in the worker request.
         # This keeps TypeScript/Python behavior aligned for non-cloneable credential/callback
@@ -346,7 +394,13 @@ class AutonomousGoalAgentRuntime:
         return {"task": task, "parameters": {} if binding is None else {"action_handoff": binding}}
 
     def _run_options(self, goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow) -> dict[str, Any]:
-        supplied = {} if self.run_options_factory is None else self.run_options_factory(goal, row)
+        supplied = (
+            {}
+            if self.run_options_factory is None
+            else _sync_callback_result(
+                self.run_options_factory(goal, row), name="run_options_factory"
+            )
+        )
         options = _options(supplied)
         # Goal context is durable metadata and must reach the transient model/planner boundary.
         # A factory may repeat the values for explicitness, but it cannot silently execute a goal
@@ -459,6 +513,28 @@ class AutonomousGoalAgentRuntime:
             "secret_material": "never_returned",
         }
 
+    def _assert_sync_callbacks(
+        self,
+        *,
+        options_factory: GoalLoopOptionsFactory | None,
+        checkpoint: GoalLoopCheckpoint | None,
+    ) -> None:
+        callbacks = [
+            ("task_resolver", self.task_resolver),
+            ("run_options_factory", self.run_options_factory),
+            ("action_handoff_resolver", self.action_handoff_resolver),
+            ("evaluator", self.loop.evaluator),
+            ("options_factory", options_factory),
+            ("checkpoint", checkpoint),
+        ]
+        if self.loop.learner is not None and not isinstance(
+            self.loop.learner, AutonomousGoalBanditLearner
+        ):
+            callbacks.append(("learner", self.loop.learner))
+        for name, callback in callbacks:
+            if callback is not None and is_async_callable(callback):
+                _fail(f"async {name} requires run_async()")
+
     def run(
         self,
         *,
@@ -472,6 +548,119 @@ class AutonomousGoalAgentRuntime:
         expected_preview_digest: str | None = None,
         preview_approval: Mapping[str, Any] | None = None,
     ) -> AutonomousGoalControlLoopResult:
+        """Run one loop because this runtime owns shared scheduler, journal, and learner state."""
+
+        self._assert_sync_callbacks(options_factory=options_factory, checkpoint=checkpoint)
+        self._begin_execution_boundary()
+        try:
+            return self._run_unlocked(
+                schedule_options=schedule_options,
+                options_factory=options_factory,
+                max_cycles=max_cycles,
+                max_total_runs=max_total_runs,
+                run_id=run_id,
+                resume_snapshot=resume_snapshot,
+                checkpoint=checkpoint,
+                expected_preview_digest=expected_preview_digest,
+                preview_approval=preview_approval,
+            )
+        finally:
+            self._execution_lock.release()
+
+    def _with_async_callbacks(
+        self,
+        loop: asyncio.AbstractEventLoop,
+    ) -> "AutonomousGoalAgentRuntime":
+        def bridge(callback: Callable[..., Any] | None) -> Callable[..., Any] | None:
+            return None if callback is None else bridge_callback_to_loop(callback, loop)
+
+        learner = self.loop.learner
+        if learner is not None and not isinstance(learner, AutonomousGoalBanditLearner):
+            learner = bridge(learner)
+        return AutonomousGoalAgentRuntime(
+            self.orchestrator,
+            self.ledger,
+            agent=self.agent,
+            task_resolver=bridge(self.task_resolver),
+            protected_rehydration=self.protected_rehydration,
+            run_options_factory=bridge(self.run_options_factory),
+            action_handoff_resolver=bridge(self.action_handoff_resolver),
+            evaluator=bridge(self.loop.evaluator),
+            learner=learner,
+            journal=self.worker.journal,
+            persist_dispatch_intent=bridge(self.worker.persist_dispatch_intent),
+            recovery=self.recovery,
+            preview_admission_ledger=self.preview_admission_ledger,
+            batch_id_prefix=self.batch_id_prefix,
+        )
+
+    async def run_async(
+        self,
+        *,
+        schedule_options: Mapping[str, Any] | None = None,
+        options_factory: GoalLoopOptionsFactory | None = None,
+        max_cycles: int = 128,
+        max_total_runs: int = 8_192,
+        run_id: str | None = None,
+        resume_snapshot: Mapping[str, Any] | None = None,
+        checkpoint: GoalLoopCheckpoint | None = None,
+        expected_preview_digest: str | None = None,
+        preview_approval: Mapping[str, Any] | None = None,
+    ) -> AutonomousGoalControlLoopResult:
+        """Run the complete goal-agent facade from an async host.
+
+        All async task, option, action-handoff, dispatch-persistence, evaluation, learning, and
+        checkpoint callbacks return to the caller's loop. Orchestration and the existing
+        journal/recovery path run in a worker thread; cancellation drains the goal lifecycle
+        before it is re-raised.
+        """
+
+        loop = asyncio.get_running_loop()
+        self._begin_execution_boundary()
+        try:
+            runtime = self._with_async_callbacks(loop)
+            return await run_in_thread_and_drain(
+                runtime.run,
+                schedule_options=schedule_options,
+                options_factory=(
+                    None
+                    if options_factory is None
+                    else bridge_callback_to_loop(options_factory, loop)
+                ),
+                max_cycles=max_cycles,
+                max_total_runs=max_total_runs,
+                run_id=run_id,
+                resume_snapshot=resume_snapshot,
+                checkpoint=(
+                    None
+                    if checkpoint is None
+                    else bridge_callback_to_loop(checkpoint, loop)
+                ),
+                expected_preview_digest=expected_preview_digest,
+                preview_approval=preview_approval,
+            )
+        finally:
+            self._execution_lock.release()
+
+    def _begin_execution_boundary(self) -> None:
+        if not self._execution_lock.acquire(blocking=False):
+            _fail("another goal runtime operation is already active")
+
+    def _run_unlocked(
+        self,
+        *,
+        schedule_options: Mapping[str, Any] | None = None,
+        options_factory: GoalLoopOptionsFactory | None = None,
+        max_cycles: int = 128,
+        max_total_runs: int = 8_192,
+        run_id: str | None = None,
+        resume_snapshot: Mapping[str, Any] | None = None,
+        checkpoint: GoalLoopCheckpoint | None = None,
+        expected_preview_digest: str | None = None,
+        preview_approval: Mapping[str, Any] | None = None,
+    ) -> AutonomousGoalControlLoopResult:
+        if self.task_resolver is None and self.protected_rehydration is None:
+            _fail("task rehydration is not configured; runtime is preview-only")
         if self.recovery is not None:
             if expected_preview_digest is not None or preview_approval is not None:
                 _fail("preview admission cannot be combined with recovery-owned resume")
@@ -528,9 +717,10 @@ class AutonomousGoalAgentRuntime:
             _fail("run_with_trace requires a trace store")
         if trace_registry is not None and not isinstance(trace_registry, AutonomousRunTraceRegistry):
             _fail("run_with_trace trace_registry must be an AutonomousRunTraceRegistry")
+        self._assert_sync_callbacks(options_factory=options_factory, checkpoint=checkpoint)
         if self._trace_context is not None:
             _fail("run_with_trace cannot be re-entered while another trace is active")
-        goals = self.ledger.list(limit=512)
+        goals = self.ledger.list(limit=MAX_GOALS)
         unsupported = [goal.domain for goal in goals if goal.domain not in AUTONOMOUS_DOMAINS]
         if unsupported:
             _fail("run_with_trace found unsupported goal domains: " + ", ".join(unsupported))
@@ -552,20 +742,22 @@ class AutonomousGoalAgentRuntime:
         task_digest = content_digest({"schema": GOAL_AGENT_TRACE_SCHEMA, "run_id": run_id, "goals": goal_metadata})
         plan_digest = content_digest({"schema": GOAL_AGENT_TRACE_SCHEMA, "batch_id_prefix": self.batch_id_prefix, "goals": goal_metadata})
         session = AutonomousRunTraceSession(trace_store, run_id=run_id, task_digest=task_digest, domains=domains)
-        session.started(detail_digest=content_digest({"goal_count": len(goal_metadata), "domain_count": len(domains)}))
-        session.record(
-            phase="plan_compiled",
-            status="running",
-            domains=domains,
-            plan_digest=plan_digest,
-            detail_digest=content_digest({"goal_count": len(goal_metadata), "domain_count": len(domains)}),
-        )
-        self._trace_context = {
+        trace_context = {
             "session": session,
             "observer": session.provider_observer(),
         }
+        self._begin_execution_boundary()
+        self._trace_context = trace_context
         try:
-            result = self.run(
+            session.started(detail_digest=content_digest({"goal_count": len(goal_metadata), "domain_count": len(domains)}))
+            session.record(
+                phase="plan_compiled",
+                status="running",
+                domains=domains,
+                plan_digest=plan_digest,
+                detail_digest=content_digest({"goal_count": len(goal_metadata), "domain_count": len(domains)}),
+            )
+            result = self._run_unlocked(
                 schedule_options=schedule_options,
                 options_factory=options_factory,
                 max_cycles=max_cycles,
@@ -602,24 +794,94 @@ class AutonomousGoalAgentRuntime:
             publication = None if trace_registry is None else publish_autonomous_run_trace_registry_snapshot(trace_registry, trace_store, run_id)
             return AutonomousGoalAgentTracedRunResult(result=result, trace=session.summary(), trace_registry=publication)
         except Exception as error:
+            trace_cleanup_failures: list[str] = []
             try:
                 session.fail(
                     failure_class=type(error).__name__,
                     failure_code="goal_control_loop_error",
                     detail_digest=content_digest({"failure_class": type(error).__name__}),
                 )
-            except Exception:
-                pass
+            except Exception as cleanup_error:
+                trace_cleanup_failures.append(f"session_fail:{type(cleanup_error).__name__}")
             if trace_registry is not None:
-                publish_autonomous_run_trace_registry_snapshot(trace_registry, trace_store, run_id)
+                try:
+                    publish_autonomous_run_trace_registry_snapshot(trace_registry, trace_store, run_id)
+                except Exception as publication_error:
+                    trace_cleanup_failures.append(f"trace_registry_publish:{type(publication_error).__name__}")
+            for failure in trace_cleanup_failures:
+                error.add_note(f"goal trace cleanup was incomplete ({failure})")
             raise
         finally:
             self._trace_context = None
+            self._execution_lock.release()
 
-    def restore(self, *, now_ns: int | None = None) -> dict[str, Any]:
+    async def run_with_trace_async(
+        self,
+        *,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str,
+        trace_registry: AutonomousRunTraceRegistry | None = None,
+        schedule_options: Mapping[str, Any] | None = None,
+        options_factory: GoalLoopOptionsFactory | None = None,
+        max_cycles: int = 128,
+        max_total_runs: int = 8_192,
+        resume_snapshot: Mapping[str, Any] | None = None,
+        checkpoint: GoalLoopCheckpoint | None = None,
+        expected_preview_digest: str | None = None,
+        preview_approval: Mapping[str, Any] | None = None,
+    ) -> AutonomousGoalAgentTracedRunResult:
+        """Async counterpart to :meth:`run_with_trace` with the same retention boundary."""
+
+        loop = asyncio.get_running_loop()
+        self._begin_execution_boundary()
+        try:
+            runtime = self._with_async_callbacks(loop)
+            return await run_in_thread_and_drain(
+                runtime.run_with_trace,
+                trace_store=trace_store,
+                run_id=run_id,
+                trace_registry=trace_registry,
+                schedule_options=schedule_options,
+                options_factory=(
+                    None
+                    if options_factory is None
+                    else bridge_callback_to_loop(options_factory, loop)
+                ),
+                max_cycles=max_cycles,
+                max_total_runs=max_total_runs,
+                resume_snapshot=resume_snapshot,
+                checkpoint=(
+                    None
+                    if checkpoint is None
+                    else bridge_callback_to_loop(checkpoint, loop)
+                ),
+                expected_preview_digest=expected_preview_digest,
+                preview_approval=preview_approval,
+            )
+        finally:
+            self._execution_lock.release()
+
+    def restore(self, *, now_ns: int | str | None = None) -> dict[str, Any]:
         if self.recovery is None:
             _fail("restore requires a recovery coordinator")
-        return self.recovery.restore(now_ns=now_ns)
+        self._begin_execution_boundary()
+        try:
+            return self.recovery.restore(now_ns=now_ns)
+        finally:
+            self._execution_lock.release()
+
+    def reconcile_external_outcome(
+        self,
+        resolution: Mapping[str, Any],
+        verifier: AutonomousGoalDispatchResolutionVerifier | None,
+    ) -> dict[str, Any]:
+        if self.recovery is None:
+            _fail("external outcome reconciliation requires a recovery coordinator")
+        self._begin_execution_boundary()
+        try:
+            return self.recovery.reconcile_external_outcome(resolution, verifier)
+        finally:
+            self._execution_lock.release()
 
 
 __all__ = [

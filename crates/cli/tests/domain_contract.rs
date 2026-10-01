@@ -63,7 +63,14 @@ fn pack() -> String {
 #[test]
 fn a_domain_pack_routes_the_compile_to_its_rule_oracle_and_names_itself_in_the_output() {
     let output = run(&[
-        "--json", "context", "compile", "--world", &world(), "--query", &query(), "--domain",
+        "--json",
+        "context",
+        "compile",
+        "--world",
+        &world(),
+        "--query",
+        &query(),
+        "--domain",
         &pack(),
     ]);
     assert_eq!(
@@ -105,7 +112,13 @@ fn a_domain_pack_routes_the_compile_to_its_rule_oracle_and_names_itself_in_the_o
 #[test]
 fn without_the_pack_the_same_world_reads_clean_which_is_exactly_the_gap_packs_exist_to_close() {
     let output = run(&[
-        "--json", "context", "compile", "--world", &world(), "--query", &query(),
+        "--json",
+        "context",
+        "compile",
+        "--world",
+        &world(),
+        "--query",
+        &query(),
     ]);
     assert_eq!(code(&output), 0);
     let parsed: Value = serde_json::from_str(&stdout(&output)).expect("compile JSON");
@@ -140,7 +153,10 @@ fn a_malformed_domain_pack_exits_three_rather_than_compiling_without_it() {
     assert_eq!(code(&output), 3, "a malformed pack is invalid_input");
     let parsed: Value = serde_json::from_str(&stdout(&output)).expect("error envelope");
     assert_eq!(parsed["ok"], Value::Bool(false));
-    assert_eq!(parsed["error"]["kind"], Value::String("invalid_input".into()));
+    assert_eq!(
+        parsed["error"]["kind"],
+        Value::String("invalid_input".into())
+    );
     assert_eq!(
         parsed["error"]["retryability"],
         Value::String("terminal".into())
@@ -155,9 +171,16 @@ fn the_advisories_name_the_unprotected_pack_tag_and_point_a_goalless_query_at_th
             .unwrap();
     let map = query_document.as_object_mut().unwrap();
     map.remove("goal");
-    map.insert("protected_tags".into(), serde_json::json!(["time", "protected"]));
+    map.insert(
+        "protected_tags".into(),
+        serde_json::json!(["time", "protected"]),
+    );
     let stripped = directory.join("query.json");
-    std::fs::write(&stripped, serde_json::to_string_pretty(&query_document).unwrap()).unwrap();
+    std::fs::write(
+        &stripped,
+        serde_json::to_string_pretty(&query_document).unwrap(),
+    )
+    .unwrap();
 
     let output = run(&[
         "--json",
@@ -201,9 +224,20 @@ fn the_advisories_name_the_unprotected_pack_tag_and_point_a_goalless_query_at_th
 #[test]
 fn context_compare_refuses_a_domain_pack_rather_than_half_applying_it() {
     let output = run(&[
-        "context", "compare", "--world", &world(), "--query", &query(), "--domain", &pack(),
+        "context",
+        "compare",
+        "--world",
+        &world(),
+        "--query",
+        &query(),
+        "--domain",
+        &pack(),
     ]);
-    assert_eq!(code(&output), 2, "unsupported flag combination is a usage error");
+    assert_eq!(
+        code(&output),
+        2,
+        "unsupported flag combination is a usage error"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("not supported on context compare"),
@@ -269,7 +303,11 @@ fn a_dimension_document_clears_the_unclassified_warnings_the_default_registry_re
 fn a_malformed_dimension_document_exits_three() {
     let directory = scratch("bad-dimensions");
     let bad = directory.join("dimensions.json");
-    std::fs::write(&bad, r#"{"schema_version":"bioprism-scope-dimensions/0.9"}"#).unwrap();
+    std::fs::write(
+        &bad,
+        r#"{"schema_version":"bioprism-scope-dimensions/0.9"}"#,
+    )
+    .unwrap();
     let output = run(&[
         "--json",
         "world",
@@ -281,5 +319,8 @@ fn a_malformed_dimension_document_exits_three() {
     ]);
     assert_eq!(code(&output), 3);
     let parsed: Value = serde_json::from_str(&stdout(&output)).expect("error envelope");
-    assert_eq!(parsed["error"]["kind"], Value::String("invalid_input".into()));
+    assert_eq!(
+        parsed["error"]["kind"],
+        Value::String("invalid_input".into())
+    );
 }

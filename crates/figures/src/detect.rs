@@ -54,7 +54,15 @@ use serde_json::{Map, Value};
 /// one: a document carrying it must still hold the `steps` array the walk reads.
 const DOSSIER_SCHEMA: &str = "bioprism-research/dossier/0.1";
 /// The report schema `bioprism-autopilot` stamps.
-const AUTOPILOT_REPORT_SCHEMA: &str = "bioprism-autopilot/report/0.1";
+const AUTOPILOT_REPORT_SCHEMAS: [&str; 7] = [
+    "bioprism-autopilot/report/0.7",
+    "bioprism-autopilot/report/0.6",
+    "bioprism-autopilot/report/0.5",
+    "bioprism-autopilot/report/0.4",
+    "bioprism-autopilot/report/0.3",
+    "bioprism-autopilot/report/0.2",
+    "bioprism-autopilot/report/0.1",
+];
 /// Both certificate profiles share this prefix; the extended profile adds keys rather than
 /// replacing them, so one required-key set recognises both.
 const CERTIFICATE_SCHEMA_PREFIX: &str = "fiber-context-certificate/";
@@ -360,7 +368,7 @@ pub fn classify(value: &Value) -> Result<Option<ArtifactKind>, FigureError> {
             }
             return Ok(Some(ArtifactKind::ResearchDossier));
         }
-        if declared == AUTOPILOT_REPORT_SCHEMA {
+        if AUTOPILOT_REPORT_SCHEMAS.contains(&declared) {
             if let Some(error) =
                 schema_without_shape(declared, "autopilot report", matches_autopilot_report(map))
             {

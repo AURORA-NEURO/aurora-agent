@@ -11,6 +11,7 @@ description = "Autonomous research protocol runner: a validated request, a pure 
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+ed25519-dalek = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-world = { workspace = true }
@@ -20,3 +21,5 @@ bioprism-worldgen = { workspace = true }
 bioprism-mutation = { workspace = true }
 bioprism-prism = { workspace = true }
 bioprism-figures = { workspace = true }
+bioprism-foundation = { workspace = true }
+bioprism-onco = { workspace = true }

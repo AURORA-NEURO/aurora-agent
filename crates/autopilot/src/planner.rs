@@ -98,8 +98,8 @@ pub enum NextAction {
         authorization: DispatchAuthorization,
         included_step_ids: Vec<String>,
         rematerialized_bindings: usize,
-        /// Claim ids the base mission carried and this repair does not: claim lineage exists
-        /// only for attempt 1, and the stripping is disclosed here rather than left silent.
+        /// Claim ids omitted because their evidence basis includes a step outside this repair
+        /// subset. Claims that fit wholly within the subset remain attempt-scoped.
         dropped_claim_ids: Vec<String>,
     },
     /// Every requirement of the success rule holds; `evidence` names the records.
@@ -107,9 +107,15 @@ pub enum NextAction {
     /// No further dispatch is authorised or none could change the outcome; `accounting` says
     /// which, per step.
     StopExhausted { accounting: Value },
+    /// A dispatch was issued but its mission-level outcome cannot be established. The only
+    /// permitted next step is external reconciliation; the planner never authorizes replay.
+    StopOutcomeUnknown { outcome_unknown: Value },
     /// A step failed terminally; re-dispatching it unchanged would be dishonest, so the drive
     /// stops and reports the first such refusal in plan order.
     StopRefused { first_terminal_refusal: Value },
+    /// The planner could not construct a valid repair after an earlier dispatch. The stop retains
+    /// the refusal details and the earlier attempt receipts; it never authorizes the repair.
+    StopRepairRefused { refusal: Value },
 }
 
 struct Disposition<'h> {
@@ -222,7 +228,7 @@ fn success_evidence(
         .collect::<Vec<_>>();
     let reconciliation = if grant.require_reconciliation_complete() {
         let latest = &history.attempts()[latest_index - 1];
-        let (status, integrity_valid, digest) = latest
+        let (status, integrity_valid, digest, digest_verified) = latest
             .reconciliation_summary()
             .expect("success under a reconciliation-requiring grant was checked before this");
         json!({
@@ -231,6 +237,7 @@ fn success_evidence(
             "status": status,
             "integrity_valid": integrity_valid,
             "digest": digest,
+            "digest_verified": digest_verified,
             "scope": latest.kind().reconciliation_scope(),
         })
     } else {
@@ -260,6 +267,51 @@ fn exhausted(
             "attempts_used": history.dispatches_used(),
             "max_attempts": grant.max_attempts(),
             "unresolved_steps": unresolved,
+        }),
+    }
+}
+
+fn outcome_unknown(
+    grant: &AutonomyGrant,
+    history: &DriveHistory,
+    reason: &str,
+    detail: String,
+    unresolved: Vec<Value>,
+) -> NextAction {
+    NextAction::StopOutcomeUnknown {
+        outcome_unknown: json!({
+            "reason": reason,
+            "detail": detail,
+            "attempts_used": history.dispatches_used(),
+            "max_attempts": grant.max_attempts(),
+            "unresolved_steps": unresolved,
+        }),
+    }
+}
+
+/// Preserve prior attempt receipts when a newly built repair fails the mission contract. This is
+/// a stop, not a dispatch authorization: 40.36 retry authority never waives the executor's
+/// reservation and validation rules.
+fn repair_plan_refused(
+    grant: &AutonomyGrant,
+    history: &DriveHistory,
+    ordered_steps: &[String],
+    merged: &BTreeMap<String, Disposition<'_>>,
+    error: &AutopilotError,
+) -> NextAction {
+    let error_class = match error {
+        AutopilotError::GrantDoesNotAuthorise { .. } => "grant_does_not_authorise",
+        AutopilotError::InvalidMission { .. } => "mission_contract",
+        _ => "repair_planning",
+    };
+    NextAction::StopRepairRefused {
+        refusal: json!({
+            "reason": "repair_plan_refused",
+            "error_class": error_class,
+            "detail": error.to_string(),
+            "attempts_used": history.dispatches_used(),
+            "max_attempts": grant.max_attempts(),
+            "unresolved_steps": unresolved_rows(ordered_steps, merged, &BTreeMap::new()),
         }),
     }
 }
@@ -447,7 +499,7 @@ pub fn plan_next_action(
     let latest = history.latest().expect("attempts checked non-empty");
     let merged = merged_dispositions(history);
     if let Some(error) = latest.dispatch_error() {
-        return Ok(exhausted(
+        return Ok(outcome_unknown(
             grant,
             history,
             "dispatch_transport_error",
@@ -455,6 +507,19 @@ pub fn plan_next_action(
                 "the dispatch returned no mission report ({error}); the mission outcome is \
                  unknown at mission level and side effects may have run, so the drive stops \
                  rather than re-sending blind"
+            ),
+            unresolved_rows(&plan.ordered_steps, &merged, &BTreeMap::new()),
+        ));
+    }
+    if let Some(error) = latest.report_validation_error() {
+        return Ok(outcome_unknown(
+            grant,
+            history,
+            "invalid_mission_report",
+            format!(
+                "the dispatcher returned a value, but it did not satisfy the mission-report \
+                 contract ({error}); the dispatch may already have caused side effects, so the \
+                 retained response is not re-sent"
             ),
             unresolved_rows(&plan.ordered_steps, &merged, &BTreeMap::new()),
         ));
@@ -502,7 +567,7 @@ pub fn plan_next_action(
         let reconciliation_ok = if grant.require_reconciliation_complete() {
             matches!(
                 latest.reconciliation_summary(),
-                Some((status, true, _)) if status == "complete"
+                Some((status, true, Some(_), true)) if status == "complete"
             )
         } else {
             true
@@ -519,11 +584,14 @@ pub fn plan_next_action(
             });
         }
         let detail = match latest.reconciliation_summary() {
-            Some((status, integrity_valid, _)) => format!(
+            Some((status, integrity_valid, digest, digest_verified)) => format!(
                 "every step succeeded but the latest reconciliation records completion \
-                 `{status}` with integrity_valid={integrity_valid}; the grant requires \
-                 `complete` with valid integrity, and re-dispatching succeeded steps to \
+                 `{status}` with integrity_valid={integrity_valid}, digest_present={}, \
+                 digest_verified={digest_verified}; the grant requires \
+                 `complete` with valid integrity and a verified digest, and re-dispatching succeeded steps to \
                  manufacture one would re-run side effects"
+                ,
+                digest.is_some()
             ),
             None => format!(
                 "every step succeeded but no reconciliation record accompanies the latest \
@@ -757,7 +825,16 @@ pub fn plan_next_action(
                 .and_then(|result| result.wire.as_ref())
                 .expect("materializability was proven during inclusion");
             let payload = binding_payload(wire);
-            apply_binding(&mut new_step.arguments, binding, &payload).map_err(map_mission_error)?;
+            if let Err(error) = apply_binding(&mut new_step.arguments, binding, &payload) {
+                let error = map_mission_error(error);
+                return Ok(repair_plan_refused(
+                    grant,
+                    history,
+                    &plan.ordered_steps,
+                    &merged,
+                    &error,
+                ));
+            }
             rematerialized += 1;
         }
         new_step.bindings = kept_bindings;
@@ -779,18 +856,30 @@ pub fn plan_next_action(
         repair_steps.len()
     );
     repair.steps = repair_steps;
-    let dropped_claim_ids = repair
+    let mut dropped_claim_ids = Vec::new();
+    repair.claim_requests = history
+        .parsed_base()
         .claim_requests
         .iter()
-        .map(|request| request.id.clone())
-        .collect::<Vec<_>>();
-    repair.claim_requests = Vec::new();
+        .filter_map(|claim| {
+            if claim
+                .requires_steps
+                .iter()
+                .all(|step_id| included.contains(step_id))
+            {
+                Some(claim.clone())
+            } else {
+                dropped_claim_ids.push(claim.id.clone());
+                None
+            }
+        })
+        .collect();
     repair.evaluator_review = None;
     repair.route_review = None;
     repair.workflow_binding = match &history.parsed_base().workflow_binding {
-        Some(binding) => match repair_binding(binding, &included)? {
-            Some(filtered) => Some(filtered),
-            None => {
+        Some(binding) => match repair_binding(binding, &included) {
+            Ok(Some(filtered)) => Some(filtered),
+            Ok(None) => {
                 let rows = unresolved_rows(&plan.ordered_steps, &merged, &exclusions);
                 return Ok(exhausted(
                     grant,
@@ -802,14 +891,44 @@ pub fn plan_next_action(
                     rows,
                 ));
             }
+            Err(error) => {
+                return Ok(repair_plan_refused(
+                    grant,
+                    history,
+                    &plan.ordered_steps,
+                    &merged,
+                    &error,
+                ));
+            }
         },
         None => None,
     };
-    plan_mission(&repair).map_err(map_mission_error)?;
+    if let Err(error) = plan_mission(&repair) {
+        let error = map_mission_error(error);
+        return Ok(repair_plan_refused(
+            grant,
+            history,
+            &plan.ordered_steps,
+            &merged,
+            &error,
+        ));
+    }
     let authorization =
         authorize(grant, history).expect("the attempt budget was checked before construction");
+    let mission = match encode_request(&repair) {
+        Ok(mission) => mission,
+        Err(error) => {
+            return Ok(repair_plan_refused(
+                grant,
+                history,
+                &plan.ordered_steps,
+                &merged,
+                &error,
+            ));
+        }
+    };
     Ok(NextAction::DispatchRepair {
-        mission: encode_request(&repair)?,
+        mission,
         authorization,
         included_step_ids: included.iter().cloned().collect(),
         rematerialized_bindings: rematerialized,

@@ -26,6 +26,7 @@ bioprism-atlas = { workspace = true }
 bioprism-baseline = { workspace = true }
 bioprism-atlasx = { workspace = true }
 bioprism-atlashub = { workspace = true }
+bioprism-autopilot = { workspace = true }
 bioprism-bioworlds = { workspace = true }
 bioprism-cookbook = { workspace = true }
 bioprism-conformance = { workspace = true }
@@ -66,9 +67,9 @@ bioprism-oraclex = { workspace = true }
 bioprism-policy = { workspace = true }
 bioprism-packs = { workspace = true }
 bioprism-prism = { workspace = true }
+bioprism-research = { workspace = true }
 bioprism-project = { workspace = true }
 bioprism-registry = { workspace = true }
-bioprism-research = { workspace = true }
 bioprism-research-campaign = { workspace = true }
 bioprism-repair = { workspace = true }
 bioprism-routing = { workspace = true }

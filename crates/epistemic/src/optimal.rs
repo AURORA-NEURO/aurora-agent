@@ -247,7 +247,9 @@ pub fn regret_family(
     let mut rng = SplitMix64::new(seed);
     let mut out = Vec::with_capacity(count);
     for _ in 0..count {
-        let loss: Vec<f64> = (0..actions * models).map(|_| rng.between(0.0, 1.0)).collect();
+        let loss: Vec<f64> = (0..actions * models)
+            .map(|_| rng.between(0.0, 1.0))
+            .collect();
         let problem = DecisionProblem::new(
             (0..actions).map(|a| format!("a{a}")).collect(),
             (0..models).map(|m| format!("m{m}")).collect(),
@@ -256,8 +258,7 @@ pub fn regret_family(
         let prior = Belief::new((0..models).map(|_| rng.between(0.2, 1.0)).collect())?;
         let items: Vec<EvidenceItem> = (0..ground)
             .map(|index| {
-                let likelihood: Vec<f64> =
-                    (0..models).map(|_| rng.between(0.05, 1.0)).collect();
+                let likelihood: Vec<f64> = (0..models).map(|_| rng.between(0.05, 1.0)).collect();
                 EvidenceItem::new(format!("e{index}"), 1.0, likelihood)
             })
             .collect::<Result<_, _>>()?;

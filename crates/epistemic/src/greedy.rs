@@ -263,7 +263,15 @@ pub fn greedy<F: SetFunction + ?Sized>(
         });
     }
 
-    finish(function, constraint, protected, chosen, steps, evaluations, report)
+    finish(
+        function,
+        constraint,
+        protected,
+        chosen,
+        steps,
+        evaluations,
+        report,
+    )
 }
 
 /// Lazy greedy: keep stale marginals as upper bounds and re-evaluate only the current front-runner.
@@ -341,7 +349,15 @@ pub fn lazy_greedy<F: SetFunction + ?Sized>(
         });
     }
 
-    finish(function, constraint, protected, chosen, steps, evaluations, report)
+    finish(
+        function,
+        constraint,
+        protected,
+        chosen,
+        steps,
+        evaluations,
+        report,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

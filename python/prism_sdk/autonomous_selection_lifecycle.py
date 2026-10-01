@@ -249,7 +249,9 @@ class AutonomousSelectionPromotionLifecycle:
             return self._state
 
     def rollback(self, *, reason: str = "selection_promotion_rollback") -> AutonomousSelectionLifecycleState:
-        _reason(reason)
+        validated_reason = _reason(reason)
+        if validated_reason is None:
+            _fail("last_reason is invalid")
         with self._lock:
             if not self.is_admitted():
                 return self._state
@@ -258,7 +260,7 @@ class AutonomousSelectionPromotionLifecycle:
                 rollback_count=self._state.rollback_count + 1,
                 last_decision="rollback",
                 active_promotion_digest=None,
-                last_reason=reason,
+                last_reason=validated_reason,
             )
             return self._state
 
@@ -317,7 +319,11 @@ class AutonomousSelectionPromotionLifecycleStore:
         return {**body, "snapshot_digest": content_digest(body)}
 
     def restore(self, snapshot: Mapping[str, Any]) -> None:
-        if not isinstance(snapshot, Mapping) or snapshot.get("schema") != AUTONOMOUS_SELECTION_LIFECYCLE_STORE_SCHEMA or snapshot.get("retention") != _STORE_RETENTION or snapshot.get("secret_material") != _SECRET_MATERIAL:
+        if not isinstance(snapshot, Mapping):
+            _fail("snapshot retention markers are invalid")
+        if set(snapshot).difference({"schema", "state", "state_digest", "snapshot_digest", "retention", "secret_material"}):
+            _fail("snapshot contains unsupported fields")
+        if snapshot.get("schema") != AUTONOMOUS_SELECTION_LIFECYCLE_STORE_SCHEMA or snapshot.get("retention") != _STORE_RETENTION or snapshot.get("secret_material") != _SECRET_MATERIAL:
             _fail("snapshot retention markers are invalid")
         state = AutonomousSelectionLifecycleState.from_mapping(snapshot.get("state"))
         if snapshot.get("state_digest") != state.state_digest:

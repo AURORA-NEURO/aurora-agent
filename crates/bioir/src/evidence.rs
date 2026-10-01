@@ -509,7 +509,9 @@ impl EvidenceLedger {
 /// A diagnostic about an evidence set as a whole.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum EvidenceIssue {
-    #[error("evidence {evidence} is contradicted by {contradicted_by} and no adjudication is recorded")]
+    #[error(
+        "evidence {evidence} is contradicted by {contradicted_by} and no adjudication is recorded"
+    )]
     UnadjudicatedContradiction {
         evidence: EvidenceId,
         contradicted_by: EvidenceId,

@@ -482,15 +482,23 @@ fn compare_digest(
     if supplied.and_then(Value::as_str).is_none_or(valid_digest) {
         compare_value(findings, code, subject, supplied, expected)
     } else {
+        let malformed_code = code
+            .strip_suffix("_mismatch")
+            .map(|base| format!("{base}_malformed"))
+            .unwrap_or_else(|| format!("{code}_malformed"));
+        let noncanonical_code = code
+            .strip_suffix("_mismatch")
+            .map(|base| format!("{base}_noncanonical"))
+            .unwrap_or_else(|| format!("{code}_noncanonical"));
         finding(
             findings,
-            &format!("{code}_noncanonical"),
+            &noncanonical_code,
             subject,
             "stored receipt digest must be a lowercase canonical SHA-256 digest",
         );
         finding(
             findings,
-            &format!("{code}_malformed"),
+            &malformed_code,
             subject,
             "the stored receipt digest has the wrong shape; this is a defect in the claimed digest, not evidence that the projection moved",
         );
@@ -913,6 +921,6 @@ mod tests {
         assert!(rejected
             .findings
             .iter()
-            .any(|finding| finding.code == "receipt_digest_mismatch_noncanonical"));
+            .any(|finding| finding.code == "receipt_digest_noncanonical"));
     }
 }
