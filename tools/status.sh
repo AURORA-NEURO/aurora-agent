@@ -55,14 +55,16 @@ if [[ "$want_tests" == 1 ]]; then
     cargo_status=$?
   fi
   cat "$test_log"
-  blocked=$(grep -c 'never executed' "$test_log" || true)
+  # Cargo test binaries say "never executed"; rustdoc doctests report the policy denial inline.
+  # Count both once per blocked process so the successful-test sum is never mistaken for complete.
+  blocked=$(grep -Eic 'never executed|couldn.t run the test:.*application control policy.*os error 4551' "$test_log" || true)
   total=$(awk '/^test result: ok/ {s+=$4} END {print s+0}' "$test_log")
   echo "tests:  $total"
   echo "blocked binaries: $blocked"
   echo "cargo exit code: $cargo_status"
   if [[ "$blocked" != 0 ]]; then
     echo "WARNING: this test count is incomplete because one or more binaries never executed"
-    grep -B2 -A2 'never executed' "$test_log" || true
+    grep -i -B2 -A2 -E 'never executed|couldn.t run the test:.*application control policy.*os error 4551' "$test_log" || true
   fi
   exit "$cargo_status"
 fi

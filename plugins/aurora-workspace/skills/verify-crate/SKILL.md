@@ -38,6 +38,10 @@ Caused by:
   An Application Control policy has blocked this file. (os error 4551)
 ```
 
+Rustdoc doctests can report the same block inline as `Couldn't run the test: An Application
+Control policy has blocked this file. (os error 4551)` without Cargo's `never executed` wording.
+Count both forms; `tools/status.sh --tests` includes both in its blocked-process count.
+
 **A suite that never ran looks exactly like a suite that failed.** Worse, `cargo test` continues to
 the next binary, so a naive sum silently under-reports — this has already produced a wrong count
 once (27 reported where the true figure was 75).
@@ -49,8 +53,8 @@ touch crates/<crate>/tests/*.rs
 cargo test -p bioprism-<crate> --offline
 ```
 
-If a per-crate count looks lower than expected, check for `never executed` before concluding
-anything about the code.
+If a per-crate count looks lower than expected, check for `never executed` and rustdoc's inline
+Application Control diagnostic before concluding anything about the code.
 
 ### It bites the workspace sum harder than any single crate
 
