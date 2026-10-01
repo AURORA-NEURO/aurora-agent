@@ -134,6 +134,40 @@ class PolicyPassTests(unittest.TestCase):
             compile_fiber(self.world,self._with_clauses('research-only','commercial-use'))
         self.assertIn('policy conflict',str(raised.exception))
 
+    def test_future_governing_policy_is_unavailable_until_its_release_event(self):
+        world={
+            'schema_version':'fiber-world/0.1',
+            'world_id':'future-policy-release-v1',
+            'events':[{
+                'id':'event.policy-release',
+                'event_time':'2025-06-01T00:00:00Z',
+                'availability_time':'2025-06-01T00:00:00Z',
+                'produces':['data_policy'],
+                'causal_parents':[],
+            }],
+            'factors':[{
+                'id':'factor.check',
+                'inputs':['restricted_reading','cohort_id'],
+                'outputs':['split_integrity_status'],
+                'kind':'rule',
+                'scope':{},
+            }],
+            'facts':[
+                {'id':'fact.cohort','provides':'cohort_id','value':'FP-001','scope':{},'tags':['protected']},
+                {'id':'fact.policy','provides':'data_policy','value':['research-only'],'scope':{},'tags':['protected']},
+                {'id':'fact.restricted','provides':'restricted_reading','value':1.0,'scope':{'policy':'research-only'},'tags':[]},
+            ],
+        }
+        early_query=self._with_clauses('research-only')
+        with self.assertRaises(ValueError) as raised:
+            compile_fiber(world,early_query)
+        self.assertIn('governing data policy is not available at decision time',str(raised.exception))
+
+        later_query=dict(early_query)
+        later_query['decision_time']='2025-07-01T00:00:00Z'
+        result=compile_fiber(world,later_query)
+        self.assertIn('fact.restricted',result.certificate['selected_facts'])
+
     def test_the_structure_survives_the_evidence_being_withheld(self):
         cert=compile_fiber(self.world,self.query).certificate
         self.assertEqual(cert['selected_factors'],['factor.claim_support','factor.identity_check'])

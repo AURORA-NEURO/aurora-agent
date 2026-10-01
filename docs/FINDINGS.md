@@ -394,8 +394,9 @@ the release compiles and includes the restricted evidence. It is in
 [`crates/fiber/tests/policy_pass.rs`](../crates/fiber/tests/policy_pass.rs).
 
 This changes no shipped reference digest: those fixtures have no event-gated `data_policy` fact.
-The new behavior is covered by a constructed Rust regression case; the CPython reference has not
-been extended for this policy-release scenario.
+The behavior is covered on both implementations by constructed regression cases: a January
+decision is refused, while a July decision after the June release compiles and includes the
+restricted evidence. The CPython reference keeps the same shipped digest for the frozen fixtures.
 
 ## Reproducing
 
