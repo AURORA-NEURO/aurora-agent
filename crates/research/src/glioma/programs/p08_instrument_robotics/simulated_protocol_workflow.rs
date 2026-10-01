@@ -232,12 +232,15 @@ impl SimulationGatedInstrumentWorkflowRun {
     }
 }
 
-fn seal_run(
+struct WorkflowRunBasis {
     simulation: ProtocolSimulation,
     instrument_task_order: Vec<String>,
     deferred_task_order: Vec<String>,
     completed_prerequisite_order: Vec<String>,
     missing_prerequisite_order: Vec<String>,
+}
+
+struct WorkflowRunSeal {
     preflight: Option<InstrumentPreflightPlan>,
     protocol_binding: Option<InstrumentProtocolBindingPlan>,
     execution: Option<InstrumentExecutionRun>,
@@ -245,22 +248,27 @@ fn seal_run(
     stop_reason: SimulationGatedInstrumentWorkflowStopReason,
     stop_detail: Option<String>,
     uncertainty: Vec<String>,
+}
+
+fn seal_run(
+    basis: WorkflowRunBasis,
+    seal: WorkflowRunSeal,
 ) -> Result<SimulationGatedInstrumentWorkflowRun, SimulationGatedInstrumentWorkflowError> {
     let mut run = SimulationGatedInstrumentWorkflowRun {
         feature_id: FEATURE_ID.into(),
         output_schema: OUTPUT_SCHEMA.into(),
-        simulation,
-        instrument_task_order,
-        deferred_task_order,
-        completed_prerequisite_order,
-        missing_prerequisite_order,
-        preflight,
-        protocol_binding,
-        execution,
-        disposition,
-        stop_reason,
-        stop_detail,
-        uncertainty,
+        simulation: basis.simulation,
+        instrument_task_order: basis.instrument_task_order,
+        deferred_task_order: basis.deferred_task_order,
+        completed_prerequisite_order: basis.completed_prerequisite_order,
+        missing_prerequisite_order: basis.missing_prerequisite_order,
+        preflight: seal.preflight,
+        protocol_binding: seal.protocol_binding,
+        execution: seal.execution,
+        disposition: seal.disposition,
+        stop_reason: seal.stop_reason,
+        stop_detail: seal.stop_detail,
+        uncertainty: seal.uncertainty,
         digest: ContentHash::of_bytes(b"unsealed-simulation-gated-instrument-workflow"),
     };
     run.digest = ContentHash::of_value(&digest_input(&run))
@@ -516,29 +524,23 @@ fn preflight_still_matches_schedule(
 }
 
 fn blocked_run(
-    simulation: ProtocolSimulation,
-    instrument_task_order: Vec<String>,
-    deferred_task_order: Vec<String>,
-    completed_prerequisite_order: Vec<String>,
-    missing_prerequisite_order: Vec<String>,
+    basis: WorkflowRunBasis,
     preflight: Option<InstrumentPreflightPlan>,
     stop_reason: SimulationGatedInstrumentWorkflowStopReason,
     detail: impl Into<String>,
     uncertainty: Vec<String>,
 ) -> Result<SimulationGatedInstrumentWorkflowRun, SimulationGatedInstrumentWorkflowError> {
     seal_run(
-        simulation,
-        instrument_task_order,
-        deferred_task_order,
-        completed_prerequisite_order,
-        missing_prerequisite_order,
-        preflight,
-        None,
-        None,
-        SimulationGatedInstrumentWorkflowDisposition::Blocked,
-        stop_reason,
-        Some(detail.into()),
-        uncertainty,
+        basis,
+        WorkflowRunSeal {
+            preflight,
+            protocol_binding: None,
+            execution: None,
+            disposition: SimulationGatedInstrumentWorkflowDisposition::Blocked,
+            stop_reason,
+            stop_detail: Some(detail.into()),
+            uncertainty,
+        },
     )
 }
 
@@ -585,29 +587,28 @@ pub fn execute_glioma_simulation_gated_instrument_workflow<G: InstrumentProtocol
         &completed_prerequisite_order,
         &missing_prerequisite_order,
     );
+    let basis = WorkflowRunBasis {
+        simulation,
+        instrument_task_order,
+        deferred_task_order,
+        completed_prerequisite_order,
+        missing_prerequisite_order,
+    };
 
-    if simulation.disposition != ProtocolDisposition::Feasible {
+    if basis.simulation.disposition != ProtocolDisposition::Feasible {
         return blocked_run(
-            simulation,
-            instrument_task_order,
-            deferred_task_order,
-            completed_prerequisite_order,
-            missing_prerequisite_order,
+            basis,
             None,
             SimulationGatedInstrumentWorkflowStopReason::ProtocolNotFeasible,
             "P07 did not admit the declared protocol; no instrument preflight or gateway call was made",
             vec!["the instrument task plan remains unexecuted".into()],
         );
     }
-    validate_task_action_mapping(request, &simulation, &instrument_task_order)?;
-    if !missing_prerequisite_order.is_empty() {
-        let missing = missing_prerequisite_order.join(", ");
+    validate_task_action_mapping(request, &basis.simulation, &basis.instrument_task_order)?;
+    if !basis.missing_prerequisite_order.is_empty() {
+        let missing = basis.missing_prerequisite_order.join(", ");
         return blocked_run(
-            simulation,
-            instrument_task_order,
-            deferred_task_order,
-            completed_prerequisite_order,
-            missing_prerequisite_order,
+            basis,
             None,
             SimulationGatedInstrumentWorkflowStopReason::PrerequisitesMissing,
             format!(
@@ -628,11 +629,7 @@ pub fn execute_glioma_simulation_gated_instrument_workflow<G: InstrumentProtocol
             );
     if !approval_matches {
         return blocked_run(
-            simulation,
-            instrument_task_order,
-            deferred_task_order,
-            completed_prerequisite_order,
-            missing_prerequisite_order,
+            basis,
             None,
             SimulationGatedInstrumentWorkflowStopReason::ApprovalMismatch,
             "P07 approval reference and P08 instrument authorization must be the same explicit grant; no gateway call was made",
@@ -650,24 +647,21 @@ pub fn execute_glioma_simulation_gated_instrument_workflow<G: InstrumentProtocol
             preflight.disposition
         );
         return blocked_run(
-            simulation,
-            instrument_task_order,
-            deferred_task_order,
-            completed_prerequisite_order,
-            missing_prerequisite_order,
+            basis,
             Some(preflight),
             SimulationGatedInstrumentWorkflowStopReason::PreflightBlocked,
             detail,
             vec!["instrument calibration, authorization, or interlock conditions are unresolved or blocked".into()],
         );
     }
-    if !preflight_still_matches_schedule(&preflight, request, &simulation, &instrument_task_order) {
+    if !preflight_still_matches_schedule(
+        &preflight,
+        request,
+        &basis.simulation,
+        &basis.instrument_task_order,
+    ) {
         return blocked_run(
-            simulation,
-            instrument_task_order,
-            deferred_task_order,
-            completed_prerequisite_order,
-            missing_prerequisite_order,
+            basis,
             Some(preflight),
             SimulationGatedInstrumentWorkflowStopReason::ScheduleChanged,
             "P08 preflight changed the P07 scheduled order or timing; re-simulate before dispatch",
@@ -683,11 +677,7 @@ pub fn execute_glioma_simulation_gated_instrument_workflow<G: InstrumentProtocol
         Ok(binding) => binding,
         Err(error) => {
             return blocked_run(
-                simulation,
-                instrument_task_order,
-                deferred_task_order,
-                completed_prerequisite_order,
-                missing_prerequisite_order,
+                basis,
                 Some(preflight),
                 SimulationGatedInstrumentWorkflowStopReason::ProtocolBindingBlocked,
                 format!("no unambiguous live protocol command binding exists: {error}"),
@@ -704,11 +694,7 @@ pub fn execute_glioma_simulation_gated_instrument_workflow<G: InstrumentProtocol
         Ok(executor) => executor,
         Err(error) => {
             return blocked_run(
-                simulation,
-                instrument_task_order,
-                deferred_task_order,
-                completed_prerequisite_order,
-                missing_prerequisite_order,
+                basis,
                 Some(preflight),
                 SimulationGatedInstrumentWorkflowStopReason::ProtocolBindingBlocked,
                 format!("live instrument manifest recheck failed before dispatch: {error}"),
@@ -738,7 +724,7 @@ pub fn execute_glioma_simulation_gated_instrument_workflow<G: InstrumentProtocol
         }
     };
     let (disposition, stop_reason, stop_detail) = match execution.disposition {
-        InstrumentExecutionDisposition::Completed if deferred_task_order.is_empty() => (
+        InstrumentExecutionDisposition::Completed if basis.deferred_task_order.is_empty() => (
             SimulationGatedInstrumentWorkflowDisposition::Completed,
             SimulationGatedInstrumentWorkflowStopReason::Completed,
             None,
@@ -748,7 +734,7 @@ pub fn execute_glioma_simulation_gated_instrument_workflow<G: InstrumentProtocol
             SimulationGatedInstrumentWorkflowStopReason::PartialExecution,
             Some("the instrument slice completed, but P07 non-instrument tasks remain for a local task executor".into()),
         ),
-        InstrumentExecutionDisposition::Negative if deferred_task_order.is_empty() => (
+        InstrumentExecutionDisposition::Negative if basis.deferred_task_order.is_empty() => (
             SimulationGatedInstrumentWorkflowDisposition::Negative,
             SimulationGatedInstrumentWorkflowStopReason::NegativeEvidence,
             None,
@@ -784,18 +770,16 @@ pub fn execute_glioma_simulation_gated_instrument_workflow<G: InstrumentProtocol
     uncertainty.sort();
     uncertainty.dedup();
     seal_run(
-        simulation,
-        instrument_task_order,
-        deferred_task_order,
-        completed_prerequisite_order,
-        missing_prerequisite_order,
-        Some(preflight),
-        Some(binding),
-        Some(execution),
-        disposition,
-        stop_reason,
-        stop_detail,
-        uncertainty,
+        basis,
+        WorkflowRunSeal {
+            preflight: Some(preflight),
+            protocol_binding: Some(binding),
+            execution: Some(execution),
+            disposition,
+            stop_reason,
+            stop_detail,
+            uncertainty,
+        },
     )
 }
 
