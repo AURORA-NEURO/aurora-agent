@@ -210,7 +210,7 @@ pub(super) fn validate_mission_tool_arguments(
     arguments: &Value,
 ) -> Result<Option<MissionSchemaReport>, String> {
     // Borrow the cached schema directly. A mission step should pay for its one authoritative
-    // schema lookup, not rebuild and clone all 893 tool definitions before every validation.
+    // schema lookup, not rebuild and clone the full tool definition set before every validation.
     let Some(definition) = find_tool_definition(tool) else {
         return Ok(None);
     };

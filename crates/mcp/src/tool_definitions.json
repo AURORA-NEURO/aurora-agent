@@ -21406,28 +21406,32 @@
         },
         "outcome_traces": {
           "type": "object",
-          "description": "At most 32 named synthetic traces, mapping action IDs to typed outcomes.",
+          "description": "At most 32 named scenarios, each mapping action IDs or stage IDs to typed outcomes.",
           "maxProperties": 32,
           "additionalProperties": {
             "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "disposition": {
-                "type": "string",
-                "enum": [
-                  "completed",
-                  "negative",
-                  "partial",
-                  "failed"
-                ]
+            "description": "One scenario trace, mapping action IDs or stage IDs to outcomes.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "disposition": {
+                  "type": "string",
+                  "enum": [
+                    "completed",
+                    "negative",
+                    "partial",
+                    "failed"
+                  ]
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
               },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "disposition"
-            ]
+              "required": [
+                "disposition"
+              ]
+            }
           }
         }
       },
