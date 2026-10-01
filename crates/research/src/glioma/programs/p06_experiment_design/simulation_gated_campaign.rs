@@ -43,6 +43,15 @@ pub struct SimulationGatedAssayRoute {
     pub workflow: SimulationGatedInstrumentWorkflowRequest,
 }
 
+/// Local candidate, prior-observation, stratum, and route inputs for one P06/P07/P08 campaign.
+#[derive(Debug, Clone, Copy)]
+pub struct SimulationGatedAssayCampaignInputs<'a> {
+    pub strata: &'a [GliomaResearchStratum],
+    pub candidates: &'a [StratifiedAssayCandidate],
+    pub initial_observations: &'a [StratifiedAssayObservation],
+    pub routes: &'a [SimulationGatedAssayRoute],
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssayRouteDisposition {
@@ -421,10 +430,7 @@ where
 /// repeated campaign call cannot silently reuse an instrument action identity.
 pub fn execute_glioma_simulation_gated_assay_campaign<G, I>(
     request: &StateStratifiedCampaignRequest,
-    strata: &[GliomaResearchStratum],
-    candidates: &[StratifiedAssayCandidate],
-    initial_observations: &[StratifiedAssayObservation],
-    routes: &[SimulationGatedAssayRoute],
+    inputs: SimulationGatedAssayCampaignInputs<'_>,
     gateway: &mut G,
     interpreter: &mut I,
 ) -> Result<SimulationGatedAssayCampaignRun, SimulationGatedAssayCampaignError>
@@ -434,10 +440,7 @@ where
 {
     execute_glioma_simulation_gated_assay_campaign_inner(
         request,
-        strata,
-        candidates,
-        initial_observations,
-        routes,
+        inputs,
         None,
         gateway,
         interpreter,
@@ -449,10 +452,7 @@ where
 /// plausible outcomes would leave too little effective bootstrap support are withheld.
 pub fn execute_glioma_simulation_gated_assay_campaign_with_lineage_acquisition<G, I>(
     request: &StateStratifiedCampaignRequest,
-    strata: &[GliomaResearchStratum],
-    candidates: &[StratifiedAssayCandidate],
-    initial_observations: &[StratifiedAssayObservation],
-    routes: &[SimulationGatedAssayRoute],
+    inputs: SimulationGatedAssayCampaignInputs<'_>,
     acquisition_policy: LineagePropagationAcquisitionPolicy,
     gateway: &mut G,
     interpreter: &mut I,
@@ -463,10 +463,7 @@ where
 {
     execute_glioma_simulation_gated_assay_campaign_inner(
         request,
-        strata,
-        candidates,
-        initial_observations,
-        routes,
+        inputs,
         Some(acquisition_policy),
         gateway,
         interpreter,
@@ -475,10 +472,7 @@ where
 
 fn execute_glioma_simulation_gated_assay_campaign_inner<G, I>(
     request: &StateStratifiedCampaignRequest,
-    strata: &[GliomaResearchStratum],
-    candidates: &[StratifiedAssayCandidate],
-    initial_observations: &[StratifiedAssayObservation],
-    routes: &[SimulationGatedAssayRoute],
+    inputs: SimulationGatedAssayCampaignInputs<'_>,
     acquisition_policy: Option<LineagePropagationAcquisitionPolicy>,
     gateway: &mut G,
     interpreter: &mut I,
@@ -487,6 +481,12 @@ where
     G: InstrumentProtocolGateway,
     I: GliomaInstrumentOutcomeInterpreter,
 {
+    let SimulationGatedAssayCampaignInputs {
+        strata,
+        candidates,
+        initial_observations,
+        routes,
+    } = inputs;
     if candidates.is_empty() || routes.len() != candidates.len() {
         return Err(SimulationGatedAssayCampaignError::InvalidRequest(
             "every candidate must have exactly one declared P07/P08 route".into(),
@@ -698,7 +698,7 @@ mod tests {
     };
     use crate::glioma::programs::p06_experiment_design::lineage_acquisition_design::{
         LineagePropagationAcquisitionPolicy, LineagePropagationAcquisitionTarget,
-        LineagePropagationResponseDependence,
+        LineagePropagationJointAcquisitionRequest, LineagePropagationResponseDependence,
     };
     use crate::glioma::programs::p06_experiment_design::lineage_response_calibration::{
         calibrate_glioma_lineage_assay_response_model,
@@ -974,24 +974,26 @@ mod tests {
         let mut interpreter = UnusedInterpreter;
         let result = execute_glioma_simulation_gated_assay_campaign(
             &campaign_request(),
-            &[GliomaResearchStratum {
-                stratum_id: "mesenchymal".into(),
-                label: "mesenchymal-like glioma organoids".into(),
-                priority_weight_milli: 1_000,
-                mechanism_priors: vec![
-                    DesignMechanism {
-                        mechanism_id: "m1".into(),
-                        prior_milli: 500,
-                    },
-                    DesignMechanism {
-                        mechanism_id: "m2".into(),
-                        prior_milli: 500,
-                    },
-                ],
-            }],
-            &[candidate()],
-            &[],
-            &[blocked_route()],
+            SimulationGatedAssayCampaignInputs {
+                strata: &[GliomaResearchStratum {
+                    stratum_id: "mesenchymal".into(),
+                    label: "mesenchymal-like glioma organoids".into(),
+                    priority_weight_milli: 1_000,
+                    mechanism_priors: vec![
+                        DesignMechanism {
+                            mechanism_id: "m1".into(),
+                            prior_milli: 500,
+                        },
+                        DesignMechanism {
+                            mechanism_id: "m2".into(),
+                            prior_milli: 500,
+                        },
+                    ],
+                }],
+                candidates: &[candidate()],
+                initial_observations: &[],
+                routes: &[blocked_route()],
+            },
             &mut gateway,
             &mut interpreter,
         )
@@ -1287,24 +1289,26 @@ mod tests {
         let mut interpreter = SignalInterpreter;
         let result = execute_glioma_simulation_gated_assay_campaign(
             &campaign_request(),
-            &[GliomaResearchStratum {
-                stratum_id: "mesenchymal".into(),
-                label: "mesenchymal-like glioma organoids".into(),
-                priority_weight_milli: 1_000,
-                mechanism_priors: vec![
-                    DesignMechanism {
-                        mechanism_id: "m1".into(),
-                        prior_milli: 500,
-                    },
-                    DesignMechanism {
-                        mechanism_id: "m2".into(),
-                        prior_milli: 500,
-                    },
-                ],
-            }],
-            &[candidate()],
-            &[],
-            &[route],
+            SimulationGatedAssayCampaignInputs {
+                strata: &[GliomaResearchStratum {
+                    stratum_id: "mesenchymal".into(),
+                    label: "mesenchymal-like glioma organoids".into(),
+                    priority_weight_milli: 1_000,
+                    mechanism_priors: vec![
+                        DesignMechanism {
+                            mechanism_id: "m1".into(),
+                            prior_milli: 500,
+                        },
+                        DesignMechanism {
+                            mechanism_id: "m2".into(),
+                            prior_milli: 500,
+                        },
+                    ],
+                }],
+                candidates: &[candidate()],
+                initial_observations: &[],
+                routes: &[route],
+            },
             &mut gateway,
             &mut interpreter,
         )
@@ -1624,14 +1628,16 @@ mod tests {
         }
         let policy =
             LineagePropagationAcquisitionPolicy::new_with_target_and_joint_response_models(
-                analysis.clone(),
-                &candidates,
-                &models,
-                &joint_models,
-                target,
-                &[],
-                &[],
-                3,
+                LineagePropagationJointAcquisitionRequest {
+                    analysis: analysis.clone(),
+                    candidates: &candidates,
+                    response_models: &models,
+                    joint_response_models: &joint_models,
+                    target,
+                    initial_history: &[],
+                    posterior_particle_weights_million: &[],
+                    max_rounds: 3,
+                },
             )
             .unwrap();
         let initial_particle_weights = policy.particle_weights_million().to_vec();
@@ -1702,20 +1708,22 @@ mod tests {
         let mut mismatch_interpreter = SignalInterpreter;
         let mismatch = execute_glioma_simulation_gated_assay_campaign_with_lineage_acquisition(
             &request,
-            std::slice::from_ref(&stratum),
-            &candidates,
-            &[StratifiedAssayObservation {
-                stratum_id: "mes_like".into(),
-                action_id: "assay-informative".into(),
-                outcome_id: "signal".into(),
-                replicate_index: 1,
-                artifact: local_artifact("prior-assay", "application/json"),
-            }],
-            &[
-                uninformative_route.clone(),
-                informative_route.clone(),
-                complementary_route.clone(),
-            ],
+            SimulationGatedAssayCampaignInputs {
+                strata: std::slice::from_ref(&stratum),
+                candidates: &candidates,
+                initial_observations: &[StratifiedAssayObservation {
+                    stratum_id: "mes_like".into(),
+                    action_id: "assay-informative".into(),
+                    outcome_id: "signal".into(),
+                    replicate_index: 1,
+                    artifact: local_artifact("prior-assay", "application/json"),
+                }],
+                routes: &[
+                    uninformative_route.clone(),
+                    informative_route.clone(),
+                    complementary_route.clone(),
+                ],
+            },
             policy.clone(),
             &mut mismatch_gateway,
             &mut mismatch_interpreter,
@@ -1728,10 +1736,12 @@ mod tests {
 
         let result = execute_glioma_simulation_gated_assay_campaign_with_lineage_acquisition(
             &request,
-            &[stratum],
-            &candidates,
-            &[],
-            &[uninformative_route, informative_route, complementary_route],
+            SimulationGatedAssayCampaignInputs {
+                strata: &[stratum],
+                candidates: &candidates,
+                initial_observations: &[],
+                routes: &[uninformative_route, informative_route, complementary_route],
+            },
             policy,
             &mut gateway,
             &mut interpreter,
@@ -1966,24 +1976,26 @@ mod tests {
         let mut interpreter = UnboundArtifactInterpreter;
         let result = execute_glioma_simulation_gated_assay_campaign(
             &campaign_request(),
-            &[GliomaResearchStratum {
-                stratum_id: "mesenchymal".into(),
-                label: "mesenchymal-like glioma organoids".into(),
-                priority_weight_milli: 1_000,
-                mechanism_priors: vec![
-                    DesignMechanism {
-                        mechanism_id: "m1".into(),
-                        prior_milli: 500,
-                    },
-                    DesignMechanism {
-                        mechanism_id: "m2".into(),
-                        prior_milli: 500,
-                    },
-                ],
-            }],
-            &[candidate()],
-            &[],
-            &[route],
+            SimulationGatedAssayCampaignInputs {
+                strata: &[GliomaResearchStratum {
+                    stratum_id: "mesenchymal".into(),
+                    label: "mesenchymal-like glioma organoids".into(),
+                    priority_weight_milli: 1_000,
+                    mechanism_priors: vec![
+                        DesignMechanism {
+                            mechanism_id: "m1".into(),
+                            prior_milli: 500,
+                        },
+                        DesignMechanism {
+                            mechanism_id: "m2".into(),
+                            prior_milli: 500,
+                        },
+                    ],
+                }],
+                candidates: &[candidate()],
+                initial_observations: &[],
+                routes: &[route],
+            },
             &mut gateway,
             &mut interpreter,
         );

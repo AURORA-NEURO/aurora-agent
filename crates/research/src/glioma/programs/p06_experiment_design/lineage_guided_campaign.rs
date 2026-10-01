@@ -10,7 +10,8 @@
 use super::adaptive_information_campaign::FEATURE_ID;
 use super::simulation_gated_campaign::{
     execute_glioma_simulation_gated_assay_campaign, GliomaInstrumentOutcomeInterpreter,
-    SimulationGatedAssayCampaignError, SimulationGatedAssayCampaignRun, SimulationGatedAssayRoute,
+    SimulationGatedAssayCampaignError, SimulationGatedAssayCampaignInputs,
+    SimulationGatedAssayCampaignRun,
 };
 use super::state_stratified_campaign::{
     execute_glioma_state_stratified_campaign, GliomaResearchStratum,
@@ -58,6 +59,13 @@ pub struct LineageGuidedAssayWorkflowRequest {
     pub lineage_analysis: LineageDynamicsRequest,
     pub assay_campaign: StateStratifiedCampaignRequest,
     pub guidance_weights: LineageGuidanceWeights,
+}
+
+/// P10 snapshot data and local P06/P07/P08 campaign inputs for a lineage-guided instrument run.
+#[derive(Debug, Clone, Copy)]
+pub struct LineageGuidedInstrumentCampaignInputs<'a> {
+    pub snapshots: &'a [LineageStateSnapshot],
+    pub campaign: SimulationGatedAssayCampaignInputs<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -463,11 +471,7 @@ pub fn execute_glioma_lineage_guided_assay_workflow<E: GliomaStateStratifiedAssa
 /// P08, and update only the measured state's posterior from an artifact-backed local interpretation.
 pub fn execute_glioma_lineage_guided_instrument_campaign<G, I>(
     request: &LineageGuidedAssayWorkflowRequest,
-    snapshots: &[LineageStateSnapshot],
-    strata: &[GliomaResearchStratum],
-    assay_candidates: &[StratifiedAssayCandidate],
-    initial_assay_observations: &[StratifiedAssayObservation],
-    routes: &[SimulationGatedAssayRoute],
+    inputs: LineageGuidedInstrumentCampaignInputs<'_>,
     gateway: &mut G,
     interpreter: &mut I,
 ) -> Result<LineageGuidedInstrumentCampaignRun, LineageGuidedAssayWorkflowError>
@@ -480,18 +484,21 @@ where
             "P10 lineage analysis and instrument-backed P06 campaign must target the same preclinical model system".into(),
         ));
     }
-    let lineage_analysis = analyze_glioma_lineage_dynamics(&request.lineage_analysis, snapshots)
-        .map_err(|error| LineageGuidedAssayWorkflowError::Analysis(error.to_string()))?;
+    let lineage_analysis =
+        analyze_glioma_lineage_dynamics(&request.lineage_analysis, inputs.snapshots)
+            .map_err(|error| LineageGuidedAssayWorkflowError::Analysis(error.to_string()))?;
     let priorities = plan_glioma_lineage_guided_state_priorities(
         &lineage_analysis,
         &request.guidance_weights,
-        strata,
+        inputs.campaign.strata,
     )?;
     let weights = priorities
         .iter()
         .map(|priority| (priority.state_id.clone(), priority.priority_weight_milli))
         .collect::<BTreeMap<_, _>>();
-    let guided_strata = strata
+    let guided_strata = inputs
+        .campaign
+        .strata
         .iter()
         .cloned()
         .map(|mut stratum| {
@@ -501,10 +508,10 @@ where
         .collect::<Vec<_>>();
     let instrument_campaign = execute_glioma_simulation_gated_assay_campaign(
         &request.assay_campaign,
-        &guided_strata,
-        assay_candidates,
-        initial_assay_observations,
-        routes,
+        SimulationGatedAssayCampaignInputs {
+            strata: &guided_strata,
+            ..inputs.campaign
+        },
         gateway,
         interpreter,
     )

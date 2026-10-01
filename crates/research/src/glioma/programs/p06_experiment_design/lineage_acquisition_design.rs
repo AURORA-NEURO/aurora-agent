@@ -130,6 +130,18 @@ pub struct LineagePropagationAcquisitionTarget {
     pub destination_state_weights_milli: Vec<u16>,
 }
 
+/// Complete inputs for restoring a pair-calibrated sequential acquisition policy.
+pub struct LineagePropagationJointAcquisitionRequest<'a> {
+    pub analysis: LineagePropagationAnalysis,
+    pub candidates: &'a [StratifiedAssayCandidate],
+    pub response_models: &'a [LineagePropagationAssayResponseModel],
+    pub joint_response_models: &'a [LineagePropagationJointAssayResponseModel],
+    pub target: LineagePropagationAcquisitionTarget,
+    pub initial_history: &'a [LineagePropagationObservedAssay],
+    pub posterior_particle_weights_million: &'a [u32],
+    pub max_rounds: u16,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineagePropagationAcquisitionPlan {
     pub feature_id: String,
@@ -1112,15 +1124,18 @@ impl LineagePropagationAcquisitionPolicy {
     /// unordered candidate pair. Replays in this mode require the ordered prior assay history;
     /// supplied posterior weights are checked against a deterministic replay of that history.
     pub fn new_with_target_and_joint_response_models(
-        analysis: LineagePropagationAnalysis,
-        candidates: &[StratifiedAssayCandidate],
-        response_models: &[LineagePropagationAssayResponseModel],
-        joint_response_models: &[LineagePropagationJointAssayResponseModel],
-        target: LineagePropagationAcquisitionTarget,
-        initial_history: &[LineagePropagationObservedAssay],
-        posterior_particle_weights_million: &[u32],
-        max_rounds: u16,
+        request: LineagePropagationJointAcquisitionRequest<'_>,
     ) -> Result<Self, LineagePropagationAcquisitionError> {
+        let LineagePropagationJointAcquisitionRequest {
+            analysis,
+            candidates,
+            response_models,
+            joint_response_models,
+            target,
+            initial_history,
+            posterior_particle_weights_million,
+            max_rounds,
+        } = request;
         validate_models(&analysis, candidates, response_models, max_rounds)?;
         validate_acquisition_target(&analysis, &target)?;
         let joint_response_models = validate_joint_response_models(
@@ -2484,14 +2499,16 @@ mod tests {
         };
         let mut policy =
             LineagePropagationAcquisitionPolicy::new_with_target_and_joint_response_models(
-                analysis.clone(),
-                &candidates,
-                &response_models,
-                std::slice::from_ref(&joint_model),
-                target.clone(),
-                &[],
-                &[],
-                3,
+                LineagePropagationJointAcquisitionRequest {
+                    analysis: analysis.clone(),
+                    candidates: &candidates,
+                    response_models: &response_models,
+                    joint_response_models: std::slice::from_ref(&joint_model),
+                    target: target.clone(),
+                    initial_history: &[],
+                    posterior_particle_weights_million: &[],
+                    max_rounds: 3,
+                },
             )
             .unwrap();
         let initial_plan = policy.plan(&candidates).unwrap();
@@ -2516,14 +2533,16 @@ mod tests {
 
         let replay =
             LineagePropagationAcquisitionPolicy::new_with_target_and_joint_response_models(
-                analysis.clone(),
-                &candidates,
-                &response_models,
-                std::slice::from_ref(&joint_model),
-                target.clone(),
-                policy.response_history(),
-                policy.particle_weights_million(),
-                3,
+                LineagePropagationJointAcquisitionRequest {
+                    analysis: analysis.clone(),
+                    candidates: &candidates,
+                    response_models: &response_models,
+                    joint_response_models: std::slice::from_ref(&joint_model),
+                    target: target.clone(),
+                    initial_history: policy.response_history(),
+                    posterior_particle_weights_million: policy.particle_weights_million(),
+                    max_rounds: 3,
+                },
             )
             .unwrap();
         assert_eq!(
@@ -2554,14 +2573,16 @@ mod tests {
         invalid_marginal.outcomes[3].likelihood_milli_by_bootstrap_draw[0] -= 1;
         assert!(
             LineagePropagationAcquisitionPolicy::new_with_target_and_joint_response_models(
-                analysis,
-                &candidates,
-                &response_models,
-                &[invalid_marginal],
-                target,
-                &[],
-                &[],
-                3,
+                LineagePropagationJointAcquisitionRequest {
+                    analysis,
+                    candidates: &candidates,
+                    response_models: &response_models,
+                    joint_response_models: &[invalid_marginal],
+                    target,
+                    initial_history: &[],
+                    posterior_particle_weights_million: &[],
+                    max_rounds: 3,
+                },
             )
             .is_err()
         );
@@ -2593,14 +2614,16 @@ mod tests {
         let paired_model = perfectly_correlated_pair_model(&analysis, &models[0], &models[1]);
         let paired =
             LineagePropagationAcquisitionPolicy::new_with_target_and_joint_response_models(
-                analysis.clone(),
-                &candidates,
-                &models,
-                std::slice::from_ref(&paired_model),
-                target,
-                &[],
-                &[],
-                2,
+                LineagePropagationJointAcquisitionRequest {
+                    analysis: analysis.clone(),
+                    candidates: &candidates,
+                    response_models: &models,
+                    joint_response_models: std::slice::from_ref(&paired_model),
+                    target,
+                    initial_history: &[],
+                    posterior_particle_weights_million: &[],
+                    max_rounds: 2,
+                },
             )
             .unwrap();
 

@@ -13,7 +13,7 @@ use super::simulation_gated_campaign::{
     execute_glioma_simulation_gated_assay_campaign,
     execute_glioma_simulation_gated_assay_campaign_with_lineage_acquisition,
     GliomaInstrumentOutcomeInterpreter, SimulationGatedAssayCampaignError,
-    SimulationGatedAssayCampaignRun, SimulationGatedAssayRoute,
+    SimulationGatedAssayCampaignInputs, SimulationGatedAssayCampaignRun, SimulationGatedAssayRoute,
 };
 use super::state_stratified_campaign::{
     GliomaResearchStratum, StratifiedAssayCandidate, StratifiedAssayObservation,
@@ -61,6 +61,15 @@ pub struct GliomaStatePlasticityInstrumentInputs<'a> {
     pub candidates: &'a [StratifiedAssayCandidate],
     pub initial_observations: &'a [StratifiedAssayObservation],
     pub routes: &'a [SimulationGatedAssayRoute],
+}
+
+/// Lineage-propagation evidence and posterior state used to value follow-up assays.
+#[derive(Debug, Clone, Copy)]
+pub struct LineagePropagationGuidedCampaignInputs<'a> {
+    pub request: &'a LineagePropagationRequest,
+    pub snapshots: &'a [LineagePropagationSnapshot],
+    pub response_models: &'a [LineagePropagationAssayResponseModel],
+    pub posterior_particle_weights_million: &'a [u32],
 }
 
 /// State analysis, explicit sampling rationale, and the complete P06/P07/P08 campaign outcome.
@@ -823,10 +832,7 @@ where
 pub fn execute_glioma_lineage_propagation_guided_state_plasticity_campaign<G, I>(
     request: &GliomaStatePlasticityInstrumentRequest,
     inputs: &GliomaStatePlasticityInstrumentInputs<'_>,
-    propagation_request: &LineagePropagationRequest,
-    propagation_snapshots: &[LineagePropagationSnapshot],
-    response_models: &[LineagePropagationAssayResponseModel],
-    posterior_particle_weights_million: &[u32],
+    lineage_inputs: LineagePropagationGuidedCampaignInputs<'_>,
     gateway: &mut G,
     interpreter: &mut I,
 ) -> Result<GliomaStatePlasticityInstrumentRun, GliomaStatePlasticityInstrumentError>
@@ -837,11 +843,8 @@ where
     execute_glioma_lineage_propagation_guided_state_plasticity_campaign_with_target(
         request,
         inputs,
-        propagation_request,
-        propagation_snapshots,
-        response_models,
+        lineage_inputs,
         None,
-        posterior_particle_weights_million,
         gateway,
         interpreter,
     )
@@ -852,11 +855,8 @@ where
 pub fn execute_glioma_lineage_propagation_guided_state_plasticity_campaign_for_target<G, I>(
     request: &GliomaStatePlasticityInstrumentRequest,
     inputs: &GliomaStatePlasticityInstrumentInputs<'_>,
-    propagation_request: &LineagePropagationRequest,
-    propagation_snapshots: &[LineagePropagationSnapshot],
-    response_models: &[LineagePropagationAssayResponseModel],
+    lineage_inputs: LineagePropagationGuidedCampaignInputs<'_>,
     target: &LineagePropagationAcquisitionTarget,
-    posterior_particle_weights_million: &[u32],
     gateway: &mut G,
     interpreter: &mut I,
 ) -> Result<GliomaStatePlasticityInstrumentRun, GliomaStatePlasticityInstrumentError>
@@ -867,11 +867,8 @@ where
     execute_glioma_lineage_propagation_guided_state_plasticity_campaign_with_target(
         request,
         inputs,
-        propagation_request,
-        propagation_snapshots,
-        response_models,
+        lineage_inputs,
         Some(target),
-        posterior_particle_weights_million,
         gateway,
         interpreter,
     )
@@ -880,11 +877,8 @@ where
 fn execute_glioma_lineage_propagation_guided_state_plasticity_campaign_with_target<G, I>(
     request: &GliomaStatePlasticityInstrumentRequest,
     inputs: &GliomaStatePlasticityInstrumentInputs<'_>,
-    propagation_request: &LineagePropagationRequest,
-    propagation_snapshots: &[LineagePropagationSnapshot],
-    response_models: &[LineagePropagationAssayResponseModel],
+    lineage_inputs: LineagePropagationGuidedCampaignInputs<'_>,
     target: Option<&LineagePropagationAcquisitionTarget>,
-    posterior_particle_weights_million: &[u32],
     gateway: &mut G,
     interpreter: &mut I,
 ) -> Result<GliomaStatePlasticityInstrumentRun, GliomaStatePlasticityInstrumentError>
@@ -892,6 +886,12 @@ where
     G: InstrumentProtocolGateway,
     I: GliomaInstrumentOutcomeInterpreter,
 {
+    let LineagePropagationGuidedCampaignInputs {
+        request: propagation_request,
+        snapshots: propagation_snapshots,
+        response_models,
+        posterior_particle_weights_million,
+    } = lineage_inputs;
     if !inputs.initial_observations.is_empty() && posterior_particle_weights_million.is_empty() {
         return Err(GliomaStatePlasticityInstrumentError::InvalidInput(
             "resuming with prior assay observations requires the aligned lineage-posterior particle weights from the previous run".into(),
@@ -996,10 +996,12 @@ where
     let campaign_result = if let Some(acquisition_policy) = lineage_acquisition_policy {
         execute_glioma_simulation_gated_assay_campaign_with_lineage_acquisition(
             &request.assay_campaign.campaign,
-            &guided_strata,
-            inputs.candidates,
-            inputs.initial_observations,
-            inputs.routes,
+            SimulationGatedAssayCampaignInputs {
+                strata: &guided_strata,
+                candidates: inputs.candidates,
+                initial_observations: inputs.initial_observations,
+                routes: inputs.routes,
+            },
             acquisition_policy,
             gateway,
             interpreter,
@@ -1007,10 +1009,12 @@ where
     } else {
         execute_glioma_simulation_gated_assay_campaign(
             &request.assay_campaign.campaign,
-            &guided_strata,
-            inputs.candidates,
-            inputs.initial_observations,
-            inputs.routes,
+            SimulationGatedAssayCampaignInputs {
+                strata: &guided_strata,
+                candidates: inputs.candidates,
+                initial_observations: inputs.initial_observations,
+                routes: inputs.routes,
+            },
             gateway,
             interpreter,
         )
