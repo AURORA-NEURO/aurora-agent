@@ -267,6 +267,30 @@ impl Server {
             }
             "glioma_release_preview" => self.glioma_release_preview(&arguments),
             "glioma_release_queue_snapshot" => self.glioma_release_queue_snapshot(&arguments),
+            "glioma_archive_migration_execute" => self.glioma_archive_migration_execute(&arguments),
+            "glioma_multistudy_release_compose" => {
+                self.glioma_multistudy_release_compose(&arguments)
+            }
+            "glioma_comparative_release_explore" => {
+                self.glioma_comparative_release_explore(&arguments)
+            }
+            "glioma_continuous_release_compile" => {
+                self.glioma_continuous_release_compile(&arguments)
+            }
+            "glioma_release_event_protocol_replay" => {
+                self.glioma_release_event_protocol_replay(&arguments)
+            }
+            "glioma_version_retention_plan" => self.glioma_version_retention_plan(&arguments),
+            "glioma_distributed_archive_mirror" => {
+                self.glioma_distributed_archive_mirror(&arguments)
+            }
+            "glioma_release_queue_schedule" => self.glioma_release_queue_schedule(&arguments),
+            "glioma_research_object_exchange_plan" => {
+                self.glioma_research_object_exchange_plan(&arguments)
+            }
+            "glioma_research_object_dependency_leakage_audit" => {
+                self.glioma_research_object_dependency_leakage_audit(&arguments)
+            }
             "glioma_compute_environment_lock" => self.glioma_compute_environment_lock(&arguments),
             "glioma_environment_resolution" => self.glioma_environment_resolution(&arguments),
             "glioma_reproducible_task_submit" => self.glioma_reproducible_task_submit(&arguments),

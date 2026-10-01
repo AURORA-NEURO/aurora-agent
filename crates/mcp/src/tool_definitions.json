@@ -28499,5 +28499,175 @@
         "request"
       ]
     }
+  },
+  {
+    "name": "glioma_archive_migration_execute",
+    "description": "Migrate a legacy archived research object through explicit field rules, semantic-loss limits, and rollback requirements.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ArchiveMigrationRequest1@1 with source object, target schema, migration rules, semantic-loss bound, optional-drop policy, and rollback requirement."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_multistudy_release_compose",
+    "description": "Compose multiple digest-bound preclinical study objects into a comparable cross-study research object.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ComparativeReleaseRequest1@1 with ordered study objects, assay mappings, required concepts, and explicit comparable-pooling policy."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_comparative_release_explore",
+    "description": "Create an access-scoped comparative view with study-level cache isolation and bounded concept selections.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ComparativeReleaseExplorerRequest1@1 with comparative object, studies, audience, access scope, concept and study selections, and access epoch."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_continuous_release_compile",
+    "description": "Compile a continuous-release candidate by reconciling event history against required programs, artifacts, schema, and policy.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ContinuousReleaseRequest1@1 with candidate identity, ordered release events, policy rules, current epoch, and optional prior candidate."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_release_event_protocol_replay",
+    "description": "Replay and validate the digest-linked release lifecycle event chain without changing release state.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReleaseEventProtocolRequest1@1 with ordered content-bound events, authority policy, initial and required terminal states, and replay limits."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_version_retention_plan",
+    "description": "Plan archive, retention, or deletion actions against immutable version lineage, replica health, and legal holds.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "RetentionGovernorRequest1@1 with version lineage, storage health, retention policy, and current epoch."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_distributed_archive_mirror",
+    "description": "Assess distributed archive replica health and return a bounded synchronization or repair plan.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "DistributedMirrorRequest1@1 with source versions, replica inventory, regional policy, freshness limit, and repair-task bound."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_release_queue_schedule",
+    "description": "Build a fair, capacity-bounded release schedule that exposes candidates blocked on gates, reviewers, risk, or deadlines.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReleaseQueueScheduleRequest1@1 with release candidates and explicit compute, reviewer, fairness, risk, and time-horizon capacity."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_research_object_exchange_plan",
+    "description": "Plan an authorized resumable chunk exchange for a signed research object without transferring its payload.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ResearchObjectExchangeRequest1@1 with signed object manifest, chunk digests and acknowledgments, recipient policy, and resume cursor."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_research_object_dependency_leakage_audit",
+    "description": "Audit a release dependency graph for unsafe paths, sensitive content, embedded secrets, and export-scope violations.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReleaseDependencyLeakageRequest1@1 with candidate manifest digest, bounded dependency nodes, allowed export prefixes, and depth limit."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
   }
 ]
