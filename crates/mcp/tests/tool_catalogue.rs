@@ -281,7 +281,7 @@ fn all_embedded_tools_have_unique_names_and_closed_required_field_schemas() {
         ContentHash::of_value(&Value::Array(tools.clone()))
             .unwrap()
             .to_string(),
-        "44e8753e41159636ba046d52879cf640b67be204231cd431c702432b5fed3b51"
+        "955bf738d43d700239b57b13732d0f32dc9f9bd9c233c601e4f47d9b43acdb1c"
     );
 
     let mut names = BTreeSet::new();
