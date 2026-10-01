@@ -138,11 +138,7 @@ impl QueryLens {
 
     /// The optic kind implied by the steps.
     pub fn kind(&self) -> OpticKind {
-        if self
-            .steps
-            .iter()
-            .any(|s| matches!(s, Focus::SumOf { .. }))
-        {
+        if self.steps.iter().any(|s| matches!(s, Focus::SumOf { .. })) {
             return OpticKind::Getter;
         }
         if self
@@ -467,7 +463,9 @@ pub fn check_laws(
                             put_put = LawStatus::Fails {
                                 document: document.clone(),
                                 replacement: replacement.clone(),
-                                detail: format!("a second identical put changed the document: {twice}"),
+                                detail: format!(
+                                    "a second identical put changed the document: {twice}"
+                                ),
                             };
                         }
                     }
@@ -601,10 +599,7 @@ impl TransformRegistry {
             index.entry(dimension.clone()).or_insert(value.clone());
         }
         Ok(IndexedLens {
-            lens: QueryLens::new(
-                format!("{}∘{}", left.lens.name, right.lens.name),
-                steps,
-            ),
+            lens: QueryLens::new(format!("{}∘{}", left.lens.name, right.lens.name), steps),
             index,
         })
     }
@@ -627,16 +622,12 @@ pub struct ViewReceipt {
 }
 
 /// Builds the receipt for one application of an indexed view.
-pub fn view_receipt(
-    view: &IndexedLens,
-    document: &Value,
-) -> Result<ViewReceipt, EpistemicError> {
-    let digest = bioprism_ids::sha256_hex_of_value(document).map_err(|e| {
-        EpistemicError::FocusFailed {
+pub fn view_receipt(view: &IndexedLens, document: &Value) -> Result<ViewReceipt, EpistemicError> {
+    let digest =
+        bioprism_ids::sha256_hex_of_value(document).map_err(|e| EpistemicError::FocusFailed {
             lens: view.lens.name.clone(),
             detail: e.to_string(),
-        }
-    })?;
+        })?;
     Ok(ViewReceipt {
         optic: view.lens.name.clone(),
         kind: view.lens.kind(),

@@ -33,13 +33,21 @@ fn agents(pairs: &[(&str, &[&str])]) -> BTreeMap<String, BTreeSet<String>> {
 fn tree_graph() -> FactorGraph {
     FactorGraph::new(vec![
         table("lesion_prior", &["lesion"], &[0.3, 0.7]),
-        table("lesion_mapping", &["lesion", "mapping"], &[0.8, 0.2, 0.35, 0.65]),
+        table(
+            "lesion_mapping",
+            &["lesion", "mapping"],
+            &[0.8, 0.2, 0.35, 0.65],
+        ),
         table(
             "mapping_specimen",
             &["mapping", "specimen"],
             &[0.6, 0.4, 0.25, 0.75],
         ),
-        table("specimen_call", &["specimen", "call"], &[0.9, 0.1, 0.2, 0.8]),
+        table(
+            "specimen_call",
+            &["specimen", "call"],
+            &[0.9, 0.1, 0.2, 0.8],
+        ),
     ])
     .expect("unique factor ids")
 }
@@ -270,12 +278,7 @@ fn a_factor_repeating_a_variable_in_its_scope_is_refused() {
 fn a_query_variable_the_root_does_not_hold_is_refused_rather_than_widening_the_root() {
     let graph = tree_graph();
     let partition = tree_partition(&graph);
-    let outcome = collect(
-        &graph,
-        &partition,
-        "molecular",
-        &["lesion".to_string()],
-    );
+    let outcome = collect(&graph, &partition, "molecular", &["lesion".to_string()]);
     assert!(matches!(
         outcome,
         Err(EpistemicError::UnknownIdentifier { .. })

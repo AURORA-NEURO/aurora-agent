@@ -101,7 +101,8 @@ pub const DIMENSIONS: &[ScopeDimension] = &[
     ScopeDimension {
         name: "aliquot",
         class: ScopeClass::Specimen,
-        erasure_error: "quantity is not conserved across a split, so more material is spent than existed",
+        erasure_error:
+            "quantity is not conserved across a split, so more material is spent than existed",
     },
     ScopeDimension {
         name: "cell",
@@ -131,7 +132,8 @@ pub const DIMENSIONS: &[ScopeDimension] = &[
     ScopeDimension {
         name: "coordinate_frame",
         class: ScopeClass::Coordinate,
-        erasure_error: "a viewport voxel is dragged onto a pathology region and silently identified",
+        erasure_error:
+            "a viewport voxel is dragged onto a pathology region and silently identified",
     },
     ScopeDimension {
         name: "units",
@@ -243,7 +245,11 @@ pub enum Observation {
     /// Nobody looked. Carries no information about the value at all.
     Missing { reason: String },
     /// The value is known to lie beyond a bound, without being known.
-    Censored { bound: f64, unit: String, above: bool },
+    Censored {
+        bound: f64,
+        unit: String,
+        above: bool,
+    },
     /// The assay ran and did not produce a usable result. Distinct from `Negative`: a failed run
     /// licenses nothing, and treating it as a negative is how a detection limit gets credited to
     /// an assay that never reported one.
@@ -293,7 +299,10 @@ impl NegativeResult {
         pipeline_version: impl Into<String>,
     ) -> Result<Self, EpistemicError> {
         let assay = assay.into();
-        for (label, value) in [("purity", purity), ("limit_of_detection", limit_of_detection)] {
+        for (label, value) in [
+            ("purity", purity),
+            ("limit_of_detection", limit_of_detection),
+        ] {
             if !value.is_finite() || !(0.0..=1.0).contains(&value) {
                 return Err(EpistemicError::InadmissibleCost {
                     item: format!("{assay}/{label}"),
