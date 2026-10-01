@@ -240,6 +240,12 @@ impl Server {
                 self.glioma_decision_context_campaign_execute(&arguments)
             }
             "glioma_decision_context_query" => self.glioma_decision_context_query(&arguments),
+            "glioma_partition_resilient_context_checkpoint" => {
+                self.glioma_partition_resilient_context_checkpoint(&arguments)
+            }
+            "glioma_aggregate_phenotype_summary_compile" => {
+                self.glioma_aggregate_phenotype_summary_compile(&arguments)
+            }
             "glioma_decision_context_update" => self.glioma_decision_context_update(&arguments),
             "glioma_decision_context_snapshot_store" => {
                 self.glioma_decision_context_snapshot_store(&arguments)

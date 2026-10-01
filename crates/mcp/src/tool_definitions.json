@@ -28922,5 +28922,25 @@
       "properties": {"request": {"type": "object", "description": "ReplayFidelityRequest1@1 with candidate manifest, replay bundle, task DAG, environment digests, resource cap, retries, and required coverage."}},
       "required": ["request"]
     }
+  },
+  {
+    "name": "glioma_partition_resilient_context_checkpoint",
+    "description": "Reconcile quorum-bounded, digest-validated site context deltas after a partition while preserving conflicts under the declared policy.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "PartitionResilientContextCheckpointRequest1@1 with study and epoch, checkpoint anchor, quorum, site deltas, network state, staleness bounds, and conflict policy."}},
+      "required": ["request"]
+    }
+  },
+  {
+    "name": "glioma_aggregate_phenotype_summary_compile",
+    "description": "Compile a provenance-bound aggregate phenotype summary under a versioned site-local dictionary and bounded comparability policy.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "AggregatePhenotypeRequest1@1 with site and dictionary digests, mapped phenotype fields, source counts, uncertainty, suppression, and required-concept policy."}},
+      "required": ["request"]
+    }
   }
 ]

@@ -3,6 +3,29 @@
 use super::*;
 
 impl Server {
+    /// Compile a shareable aggregate phenotype summary under a versioned site-local dictionary.
+    pub(super) fn glioma_aggregate_phenotype_summary_compile(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: AggregatePhenotypeRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_aggregate_phenotype_summary_compile requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma aggregate phenotype request: {error}"))?;
+        let summary = compile_glioma_aggregate_phenotype_summary(&request)
+            .map_err(|error| format!("glioma aggregate phenotype compilation refused: {error}"))?;
+        Ok(json!({
+            "summary": summary,
+            "dispatch": "not_started",
+            "guarantees": [
+                "phenotype concept mappings, source counts, uncertainty, suppression, and required estimands are checked before aggregation",
+                "local dictionary and source digests bind the summary to its provenance",
+                "only aggregate values are returned; no site-level or raw observation data is exchanged"
+            ]
+        }))
+    }
+
     pub(super) fn protocol_assurance_harness(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")

@@ -3,6 +3,31 @@
 use super::*;
 
 impl Server {
+    /// Reconcile quorum-bounded, digest-validated site deltas after a partition.
+    pub(super) fn glioma_partition_resilient_context_checkpoint(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: PartitionResilientContextCheckpointRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_partition_resilient_context_checkpoint requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma partition checkpoint request: {error}"))?;
+        let checkpoint =
+            reconcile_partition_resilient_context_checkpoint(&request).map_err(|error| {
+                format!("glioma partition checkpoint reconciliation refused: {error}")
+            })?;
+        Ok(json!({
+            "checkpoint": checkpoint,
+            "dispatch": "not_started",
+            "guarantees": [
+                "site quorum, epoch, parent checkpoint, local-data assertions, staleness, signer identity, and delta digests are validated",
+                "conflicting values are preserved according to the declared policy and never silently overwritten",
+                "reconciliation returns a checkpoint only; it does not write to a remote site"
+            ]
+        }))
+    }
+
     /// Turn typed glioma knowledge gaps into executable candidates for the bounded action
     /// selector. The returned candidates are still caller-dispatched and cannot touch instruments
     /// or export data without the selector's explicit policy gates.
