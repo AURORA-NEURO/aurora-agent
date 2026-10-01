@@ -1199,6 +1199,7 @@ mod glioma_computation;
 mod glioma_decision;
 mod glioma_evidence;
 mod glioma_experiments;
+mod glioma_federation_ops;
 mod glioma_instrument_ops;
 mod glioma_knowledge;
 mod glioma_mechanism;

@@ -249,6 +249,60 @@ impl Server {
             "glioma_benchmark_director_snapshot" => {
                 self.glioma_benchmark_director_snapshot(&arguments)
             }
+            "glioma_federated_aggregate_anomaly_detect" => {
+                self.glioma_federated_aggregate_anomaly_detect(&arguments)
+            }
+            "glioma_federated_site_selection_plan" => {
+                self.glioma_federated_site_selection_plan(&arguments)
+            }
+            "glioma_federation_capacity_plan" => self.glioma_federation_capacity_plan(&arguments),
+            "glioma_federated_benchmark_dry_run" => {
+                self.glioma_federated_benchmark_dry_run(&arguments)
+            }
+            "glioma_federated_replay_discrepancy_scan" => {
+                self.glioma_federated_replay_discrepancy_scan(&arguments)
+            }
+            "glioma_federated_workflow_template_exchange" => {
+                self.glioma_federated_workflow_template_exchange(&arguments)
+            }
+            "glioma_federated_replay_conformance" => {
+                self.glioma_federated_replay_conformance(&arguments)
+            }
+            "glioma_federated_compute_capacity_exchange" => {
+                self.glioma_federated_compute_capacity_exchange(&arguments)
+            }
+            "glioma_federated_decision_capsule" => {
+                self.glioma_federated_decision_capsule(&arguments)
+            }
+            "glioma_cross_site_protocol_conformance" => {
+                self.glioma_cross_site_protocol_conformance(&arguments)
+            }
+            "glioma_federated_device_capability_manifest" => {
+                self.glioma_federated_device_capability_manifest(&arguments)
+            }
+            "glioma_federated_instrument_operations" => {
+                self.glioma_federated_instrument_operations(&arguments)
+            }
+            "glioma_federated_release_compile" => self.glioma_federated_release_compile(&arguments),
+            "glioma_federated_release_sharing_check" => {
+                self.glioma_federated_release_sharing_check(&arguments)
+            }
+            "glioma_consortium_publication_steward" => {
+                self.glioma_consortium_publication_steward(&arguments)
+            }
+            "glioma_site_capability_envelope_compile" => {
+                self.glioma_site_capability_envelope_compile(&arguments)
+            }
+            "glioma_cross_site_evidence_explore" => {
+                self.glioma_cross_site_evidence_explore(&arguments)
+            }
+            "glioma_site_participation_review" => self.glioma_site_participation_review(&arguments),
+            "glioma_federation_operations_snapshot" => {
+                self.glioma_federation_operations_snapshot(&arguments)
+            }
+            "glioma_federated_benchmark_record_execute" => {
+                self.glioma_federated_benchmark_record_execute(&arguments)
+            }
             "glioma_benchmark_job_execute" => self.glioma_benchmark_job_execute(&arguments),
             "glioma_continual_benchmark_monitor" => {
                 self.glioma_continual_benchmark_monitor(&arguments)
