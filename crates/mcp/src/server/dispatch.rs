@@ -257,6 +257,16 @@ impl Server {
             "glioma_release_shareability_check" => {
                 self.glioma_release_shareability_check(&arguments)
             }
+            "glioma_release_metadata_normalize" => {
+                self.glioma_release_metadata_normalize(&arguments)
+            }
+            "glioma_release_attestation_issue" => self.glioma_release_attestation_issue(&arguments),
+            "glioma_release_signature_verify" => self.glioma_release_signature_verify(&arguments),
+            "glioma_research_object_conformance_check" => {
+                self.glioma_research_object_conformance_check(&arguments)
+            }
+            "glioma_release_preview" => self.glioma_release_preview(&arguments),
+            "glioma_release_queue_snapshot" => self.glioma_release_queue_snapshot(&arguments),
             "glioma_compute_environment_lock" => self.glioma_compute_environment_lock(&arguments),
             "glioma_environment_resolution" => self.glioma_environment_resolution(&arguments),
             "glioma_reproducible_task_submit" => self.glioma_reproducible_task_submit(&arguments),

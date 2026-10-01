@@ -28397,5 +28397,107 @@
         "request"
       ]
     }
+  },
+  {
+    "name": "glioma_release_metadata_normalize",
+    "description": "Normalize release metadata through approved field mappings and controlled vocabularies, preserving conflicts and reversible changes.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReleaseMetadataNormalizationRequest1@1 with target schema, source fields, controlled vocabularies, approved mapping rules, and explicit inference approvals."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_release_attestation_issue",
+    "description": "Issue a content-bound release attestation only when manifest, release gate, signer authority, and verifier evidence satisfy policy.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "SignedReleaseAttestationRequest1@1 with manifest, provenance and gate digests, gate status, signer authority, verification results, and issuance epoch."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_release_signature_verify",
+    "description": "Verify a signed release attestation against expected identity, policy scope, trust roots, revocation state, and age limits.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReleaseSignatureVerificationRequest1@1 with attestation, expected manifest and provenance digests, policy scope, verification epoch, age bound, and trust roots."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_research_object_conformance_check",
+    "description": "Assess a research object against a versioned release schema, evidence profile, artifact requirements, and optional signature or migration.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ConformanceRequest1@1 with object fields and artifacts, target conformance profile, optional verified signature, and migration route."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_release_preview",
+    "description": "Build a bounded audience-specific preview that applies release section and artifact visibility controls.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReleasePreviewRequest1@1 with prepared manifest, audience, export profile, section and artifact allowlists, redactions, and prior preview state."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_release_queue_snapshot",
+    "description": "Reconcile release candidates and event history into a bounded queue snapshot with reviewer capacity and stale telemetry visible.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "ReleaseQueueRequest1@1 with release candidates, event ledger, reviewer assignments, current epoch, and telemetry freshness bound."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
   }
 ]
