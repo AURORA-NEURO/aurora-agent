@@ -385,7 +385,7 @@ pub fn run_federated_retrieval_synthesis(
     }
     let disposition = if global {
         FederatedRetrievalDisposition::Blocked
-    } else if missing.len() > 0 || unresolved.len() > 0 || selected.is_empty() {
+    } else if !missing.is_empty() || !unresolved.is_empty() || selected.is_empty() {
         FederatedRetrievalDisposition::Partial
     } else {
         FederatedRetrievalDisposition::Qualified
@@ -396,7 +396,7 @@ pub fn run_federated_retrieval_synthesis(
     let selected_order = selected.into_iter().collect::<Vec<_>>();
     let unresolved_order = unresolved.into_iter().collect::<Vec<_>>();
     let blocked_order = if global {
-        candidate_order.iter().cloned().collect()
+        candidate_order.to_vec()
     } else {
         Vec::new()
     };
