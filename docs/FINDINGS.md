@@ -380,6 +380,23 @@ shadowed fact `Unknown` and voids the sufficiency claim. Scoring the smaller sel
 there would credit the compiler for the gap.
 `a_shadowed_provider_outside_the_closure_separates_them_with_neither_pass_firing` pins it.
 
+## 8. A governing policy must itself be available at the decision cut
+
+The temporal cut used to filter selected evidence ran after policy admission. `PolicyEnvelope`
+therefore read `data_policy` before checking whether an event releasing that variable had occurred
+by `query.decision_time`. A future grant could authorize a policy-scoped fact in an earlier
+decision, even though the policy fact itself would later be removed from the compiled section.
+
+`PolicyEnvelope::resolve` now checks the event cut before reading the governing policy and refuses
+with `DataPolicyUnavailableAtCut` when the release has not happened. The regression case pins both
+sides: a January decision is refused when the policy releases in June, while the same query after
+the release compiles and includes the restricted evidence. It is in
+[`crates/fiber/tests/policy_pass.rs`](../crates/fiber/tests/policy_pass.rs).
+
+This changes no shipped reference digest: those fixtures have no event-gated `data_policy` fact.
+The new behavior is covered by a constructed Rust regression case; the CPython reference has not
+been extended for this policy-release scenario.
+
 ## Reproducing
 
 ```bash

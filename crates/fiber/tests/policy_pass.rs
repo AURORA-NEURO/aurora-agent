@@ -394,6 +394,49 @@ fn a_data_policy_that_is_not_a_clause_list_is_refused_rather_than_ignored() {
     }
 }
 
+/// A future data-policy release cannot authorize an earlier decision.
+///
+/// The policy fact itself is protected, but it is still unsafe to consult before the temporal
+/// cut: doing so would let its grant release the separate restricted fact below.
+#[test]
+fn a_governing_policy_is_unavailable_until_its_release_event() {
+    let world = World::from_json(json!({
+        "schema_version": "fiber-world/0.1",
+        "world_id": "future-policy-release-v1",
+        "events": [{
+            "id": "event.policy-release",
+            "event_time": "2025-06-01T00:00:00Z",
+            "availability_time": "2025-06-01T00:00:00Z",
+            "produces": ["data_policy"],
+            "causal_parents": []
+        }],
+        "factors": [{
+            "id": "factor.check",
+            "inputs": ["restricted_reading", "cohort_id"],
+            "outputs": ["split_integrity_status"],
+            "kind": "rule",
+            "scope": {}
+        }],
+        "facts": [
+            {"id": "fact.cohort", "provides": "cohort_id", "value": "FP-001", "scope": {}, "tags": ["protected"]},
+            {"id": "fact.policy", "provides": "data_policy", "value": ["research-only"], "scope": {}, "tags": ["protected"]},
+            {"id": "fact.restricted", "provides": "restricted_reading", "value": 1.0, "scope": {"policy": "research-only"}, "tags": []}
+        ]
+    }))
+    .expect("world loads");
+
+    match compile(&world, &variation_query(&["research-only"])) {
+        Err(FiberError::Policy(PolicyViolation::DataPolicyUnavailableAtCut { .. })) => {}
+        other => panic!("a future governing policy must refuse early access, got {other:?}"),
+    }
+
+    let mut later_query = variation_query(&["research-only"]).raw().clone();
+    later_query["decision_time"] = json!("2025-07-01T00:00:00Z");
+    let later_query = Query::from_json(later_query).expect("query loads");
+    let output = compile(&world, &later_query).expect("policy is available after release");
+    assert!(output.section.evidence_ids().contains(&"fact.restricted"));
+}
+
 /// Policy is the stronger exclusion: a fact excluded by both reasons is reported as policy.
 ///
 /// Reporting it as `DeferredAcquisition` would promise a retry after the cut advances, and the

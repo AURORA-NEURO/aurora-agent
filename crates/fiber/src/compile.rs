@@ -12,10 +12,11 @@
 //! visible rather than pre-filtered away. [`crate::policy::screen`] carries that argument in full.
 //!
 //! The one gate that runs ahead of every pass is [`crate::policy::PolicyEnvelope::resolve`]. It
-//! needs no evidence — one `data_policy` lookup — so a query whose declared clauses conflict with
-//! the corpus is refused before any closure, slice or materialisation happens. It emits no pass
-//! receipt because it selects nothing; it is an admission check on the query-world pair, in the
-//! same family as the schema-version check in [`Query::from_json`].
+//! checks the event cut and one `data_policy` lookup, so a query whose declared clauses conflict
+//! with the corpus — or whose governing policy is not yet available — is refused before any
+//! closure, slice or materialisation happens. It emits no pass receipt because it selects nothing;
+//! it is an admission check on the query-world pair, in the same family as the schema-version
+//! check in [`Query::from_json`].
 
 use crate::closure::{dropped_protected, protected_closure, unmatched_tags};
 use crate::error::FiberError;
