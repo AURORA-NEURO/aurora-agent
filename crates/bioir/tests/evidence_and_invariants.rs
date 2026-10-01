@@ -262,7 +262,9 @@ fn a_sequence_locator_without_a_reference_build_is_not_resolvable() {
         start: 55_019_017,
         end: 55_019_365,
     };
-    let error = ledger.insert(variant).expect_err("a coordinate needs a build");
+    let error = ledger
+        .insert(variant)
+        .expect_err("a coordinate needs a build");
     assert!(error.to_string().contains("reference build"));
 }
 
@@ -401,7 +403,9 @@ fn the_counterfactual_support_boundary_is_unrepresentable_in_this_crate() {
         .unrepresentable
         .contains(&ProtectedClass::CounterfactualSupport));
     assert!(
-        !report.omitted.contains(&ProtectedClass::CounterfactualSupport),
+        !report
+            .omitted
+            .contains(&ProtectedClass::CounterfactualSupport),
         "a class this crate cannot carry is not the caller's omission"
     );
     assert_eq!(
@@ -420,11 +424,11 @@ fn an_empty_projection_omits_every_representable_protected_class() {
 #[test]
 fn a_full_projection_retains_every_representable_protected_class() {
     use bioprism_bioir::{
-        AssayLens, Calibration, CohortDefinition, CohortId, ComparabilityRule,
-        EligibilityRule, ErrorModel, Estimand, GroupingKey, Identifiability, LensCatalog,
-        LineageGraph, MaterialRequirement, MeasurementScale, MeasurementTarget, MissingnessClass,
-        Predicate, ProtocolChain, QcContract, Representation, Specimen, TimeAnchor,
-        UncertaintyBudget, UncertaintyComponent, UncertaintyKind, UnitOfAnalysis,
+        AssayLens, Calibration, CohortDefinition, CohortId, ComparabilityRule, EligibilityRule,
+        ErrorModel, Estimand, GroupingKey, Identifiability, LensCatalog, LineageGraph,
+        MaterialRequirement, MeasurementScale, MeasurementTarget, MissingnessClass, Predicate,
+        ProtocolChain, QcContract, Representation, Specimen, TimeAnchor, UncertaintyBudget,
+        UncertaintyComponent, UncertaintyKind, UnitOfAnalysis,
     };
 
     let ledger = contextual_ledger();

@@ -1,5 +1,3 @@
-#![allow(clippy::all)]
-
 //! Biological IR: the contracts that make measured biology replayable.
 //!
 //! Implements blueprint section 25 (Biological IR and Language), specifically modules

@@ -20,7 +20,9 @@ pub enum LineageError {
     #[error("specimen {specimen:?} is not in the lineage graph")]
     UnknownSpecimen { specimen: String },
 
-    #[error("specimen {specimen:?} was inserted twice; 25.04 requires duplicate identifier detection")]
+    #[error(
+        "specimen {specimen:?} was inserted twice; 25.04 requires duplicate identifier detection"
+    )]
     DuplicateSpecimen { specimen: String },
 
     #[error("specimen {child:?} declares parent {parent:?}, which is not in the lineage graph")]
@@ -158,10 +160,18 @@ pub enum UncertaintyError {
     },
 
     #[error("budget for {subject:?} declares {kind} uncertainty twice")]
-    DuplicateKind { subject: String, kind: UncertaintyKind },
+    DuplicateKind {
+        subject: String,
+        kind: UncertaintyKind,
+    },
 
-    #[error("decision {subject:?} requires {kind} uncertainty and the budget does not account for it")]
-    UnaccountedKind { subject: String, kind: UncertaintyKind },
+    #[error(
+        "decision {subject:?} requires {kind} uncertainty and the budget does not account for it"
+    )]
+    UnaccountedKind {
+        subject: String,
+        kind: UncertaintyKind,
+    },
 
     #[error("adjudication by {adjudicator:?} drops reviewer {reviewer:?}; 25.12 requires expert disagreement to remain visible")]
     DissentErased {

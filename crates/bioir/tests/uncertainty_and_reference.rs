@@ -98,7 +98,10 @@ fn a_decision_requiring_distribution_shift_accounting_fails_on_a_budget_without_
     }
 
     assert_eq!(
-        budget.accounts_for("claim-1", &[UncertaintyKind::Aleatoric, UncertaintyKind::Epistemic]),
+        budget.accounts_for(
+            "claim-1",
+            &[UncertaintyKind::Aleatoric, UncertaintyKind::Epistemic]
+        ),
         Ok(())
     );
     assert_eq!(
@@ -158,7 +161,10 @@ fn a_probability_outside_the_unit_interval_is_refused() {
 fn an_inverted_interval_and_an_impossible_coverage_are_both_refused() {
     let mut budget = UncertaintyBudget::new();
     assert!(matches!(
-        budget.declare("claim-1", component(UncertaintyKind::Epistemic, interval(0.7, 0.2))),
+        budget.declare(
+            "claim-1",
+            component(UncertaintyKind::Epistemic, interval(0.7, 0.2))
+        ),
         Err(UncertaintyError::InvertedInterval { .. })
     ));
     assert!(matches!(
@@ -208,7 +214,11 @@ fn adjudication_carrying_every_dissenter_is_accepted() {
         adjudicator: "neuro-radiology board".to_string(),
         outcome: "progression".to_string(),
         method: "majority".to_string(),
-        dissent: vec![ReviewerAssessment::new("reader-2", "pseudoprogression", true)],
+        dissent: vec![ReviewerAssessment::new(
+            "reader-2",
+            "pseudoprogression",
+            true,
+        )],
     };
     assert_eq!(record.validate(&panel()), Ok(()));
 }
@@ -249,7 +259,9 @@ fn an_ungradable_case_carries_its_reason_instead_of_a_number() {
         )
         .expect("an ungradable component is a legitimate component");
     assert!(matches!(
-        budget.component(UncertaintyKind::Expert).map(|c| &c.representation),
+        budget
+            .component(UncertaintyKind::Expert)
+            .map(|c| &c.representation),
         Some(Representation::Ungradable { .. })
     ));
 }
@@ -305,7 +317,9 @@ fn a_scope_incomparable_with_the_fitting_scope_does_not_inherit_the_calibration(
 
 #[test]
 fn expected_calibration_error_is_a_property_of_one_curve_and_not_of_a_budget() {
-    let error = curve().expected_calibration_error().expect("bins are populated");
+    let error = curve()
+        .expected_calibration_error()
+        .expect("bins are populated");
     assert!((error - 0.05).abs() < 1e-9);
 
     let empty = CalibrationCurve {

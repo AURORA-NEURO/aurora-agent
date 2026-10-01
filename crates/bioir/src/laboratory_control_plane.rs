@@ -212,7 +212,7 @@ pub fn preflight_instrument_action(
         request
             .target_instrument_id
             .as_ref()
-            .map_or(true, |id| id == &c.instrument_id)
+            .is_none_or(|id| id == &c.instrument_id)
             && c.semantic_profile == request.semantic_profile
             && c.supported_operation_order.contains(&request.operation)
             && required_caps.is_subset(&c.supported_operation_order.iter().cloned().collect())
@@ -233,13 +233,13 @@ pub fn preflight_instrument_action(
     let missing_capability = request
         .required_capability_order
         .iter()
-        .filter(|x| matching.map_or(true, |c| !c.supported_operation_order.contains(x)))
+        .filter(|x| matching.is_none_or(|c| !c.supported_operation_order.contains(x)))
         .cloned()
         .collect::<Vec<_>>();
     let missing_interlock = request
         .required_interlock_order
         .iter()
-        .filter(|x| matching.map_or(true, |c| !c.interlock_order.contains(x)))
+        .filter(|x| matching.is_none_or(|c| !c.interlock_order.contains(x)))
         .cloned()
         .collect::<Vec<_>>();
     let mut omissions = BTreeSet::new();

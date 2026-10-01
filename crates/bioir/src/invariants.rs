@@ -166,9 +166,9 @@ fn carrier_state(projection: &ContextProjection<'_>, class: ProtectedClass) -> C
         ProtectedClass::UnitsAndReference => {
             projection.lenses.is_some_and(|catalog| !catalog.is_empty())
                 || projection.evidence.is_some_and(|ledger| {
-                    ledger.iter().any(|object| {
-                        matches!(object.locator, Locator::SequenceRange { .. })
-                    })
+                    ledger
+                        .iter()
+                        .any(|object| matches!(object.locator, Locator::SequenceRange { .. }))
                 })
         }
         ProtectedClass::VersionAndProtocol => {
@@ -193,11 +193,14 @@ fn carrier_state(projection: &ContextProjection<'_>, class: ProtectedClass) -> C
         // cannot make that claim either way.
         ProtectedClass::ContradictoryEvidence => projection.evidence.is_some(),
         ProtectedClass::AccessAndConsent => {
-            projection.evidence.is_some_and(|ledger| {
-                ledger.iter().any(|object| !object.access.labels.is_empty())
-            }) || projection.lineage.is_some_and(|graph| {
-                graph.iter().any(|specimen| !specimen.consent_labels.is_empty())
-            })
+            projection
+                .evidence
+                .is_some_and(|ledger| ledger.iter().any(|object| !object.access.labels.is_empty()))
+                || projection.lineage.is_some_and(|graph| {
+                    graph
+                        .iter()
+                        .any(|specimen| !specimen.consent_labels.is_empty())
+                })
         }
         // Modality is mandatory on every evidence object and separates expert interpretation
         // from a measured observation, which is the part of this distinction 25.11 carries.

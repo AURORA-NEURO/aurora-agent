@@ -418,9 +418,7 @@ mod tests {
             permitted_labels: Default::default(),
             max_sources: 10,
         };
-        let result = KnowledgeCompiler::default()
-            .compile(&ledger, &query)
-            .unwrap();
+        let result = KnowledgeCompiler.compile(&ledger, &query).unwrap();
         assert_eq!(result.policy.decision, PolicyDecision::Unresolved);
         assert_eq!(result.receipt.sources.len(), 0);
         assert_eq!(result.receipt.omissions.len(), 1);
@@ -442,10 +440,8 @@ mod tests {
             permitted_labels: Default::default(),
             max_sources: 10,
         };
-        let a = KnowledgeCompiler::default().compile(&left, &query).unwrap();
-        let b = KnowledgeCompiler::default()
-            .compile(&right, &query)
-            .unwrap();
+        let a = KnowledgeCompiler.compile(&left, &query).unwrap();
+        let b = KnowledgeCompiler.compile(&right, &query).unwrap();
         assert_eq!(a.artifact.content_hash, b.artifact.content_hash);
     }
 
@@ -463,9 +459,7 @@ mod tests {
             permitted_labels: Default::default(),
             max_sources: 10,
         };
-        let synthesis = KnowledgeCompiler::default()
-            .compile(&ledger, &query)
-            .unwrap();
+        let synthesis = KnowledgeCompiler.compile(&ledger, &query).unwrap();
         let payload = json!({
             "feature_id": FEATURE_ID,
             "query_id": "q-digest",
