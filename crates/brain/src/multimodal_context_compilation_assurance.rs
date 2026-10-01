@@ -365,7 +365,7 @@ mod tests {
                 evidence_digest: Some(r.clone()),
                 provenance_digest: Some(r.clone()),
                 replay_identity: r.clone(),
-                state: state.clone(),
+                state,
                 comparable: true,
                 raw_data_local: true,
                 boundary: PRECLINICAL_BOUNDARY.into(),

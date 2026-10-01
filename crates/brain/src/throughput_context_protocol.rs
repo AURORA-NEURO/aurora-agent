@@ -372,7 +372,7 @@ mod tests {
                 context_digest: r.clone(),
                 section_digest: r.clone(),
                 replay_identity: r.clone(),
-                state: state.clone(),
+                state,
                 ready: true,
                 cost_units: 1,
                 raw_data_local: true,
@@ -440,7 +440,7 @@ mod tests {
         let mut x = request(EvidenceState::Supported);
         x.max_concurrency = 1;
         let r = serve_throughput_context_protocol(&x).unwrap();
-        assert!(r.unknown_order.len() > 0)
+        assert!(!r.unknown_order.is_empty())
     }
     #[test]
     fn policy_returns_403() {

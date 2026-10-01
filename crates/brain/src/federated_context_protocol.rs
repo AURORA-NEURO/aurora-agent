@@ -809,7 +809,7 @@ mod tests {
                 context_digest: replay.clone(),
                 section_digest: replay.clone(),
                 replay_identity: replay.clone(),
-                state: state.clone(),
+                state,
                 signed_approval: true,
                 raw_data_local: true,
                 aggregate_only: true,
