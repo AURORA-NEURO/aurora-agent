@@ -246,6 +246,28 @@ impl Server {
             "glioma_aggregate_phenotype_summary_compile" => {
                 self.glioma_aggregate_phenotype_summary_compile(&arguments)
             }
+            "glioma_benchmark_director_snapshot" => {
+                self.glioma_benchmark_director_snapshot(&arguments)
+            }
+            "glioma_benchmark_job_execute" => self.glioma_benchmark_job_execute(&arguments),
+            "glioma_continual_benchmark_monitor" => {
+                self.glioma_continual_benchmark_monitor(&arguments)
+            }
+            "glioma_contribution_integrity_verify" => {
+                self.glioma_contribution_integrity_verify(&arguments)
+            }
+            "glioma_multisite_benchmark_workflow" => {
+                self.glioma_multisite_benchmark_workflow(&arguments)
+            }
+            "glioma_participant_exchange_execute" => {
+                self.glioma_participant_exchange_execute(&arguments)
+            }
+            "glioma_quorum_admission_assess" => self.glioma_quorum_admission_assess(&arguments),
+            "glioma_signed_aggregate_submit" => self.glioma_signed_aggregate_submit(&arguments),
+            "glioma_site_provenance_attest" => self.glioma_site_provenance_attest(&arguments),
+            "glioma_benchmark_governance_cycle_compile" => {
+                self.glioma_benchmark_governance_cycle_compile(&arguments)
+            }
             "glioma_decision_context_update" => self.glioma_decision_context_update(&arguments),
             "glioma_decision_context_snapshot_store" => {
                 self.glioma_decision_context_snapshot_store(&arguments)

@@ -3,6 +3,235 @@
 use super::*;
 
 impl Server {
+    /// Build an immutable overview of run status, costs, privacy spend, and governance alerts.
+    pub(super) fn glioma_benchmark_director_snapshot(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: BenchmarkDirectorRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_benchmark_director_snapshot requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma benchmark director request: {error}"))?;
+        let snapshot = build_glioma_benchmark_director_snapshot(&request)
+            .map_err(|error| format!("glioma benchmark director snapshot refused: {error}"))?;
+        Ok(json!({
+            "snapshot": snapshot,
+            "dispatch": "not_started",
+            "guarantees": [
+                "run status, quorum, scientific success, release readiness, budget, privacy, uncertainty, freshness, and deadline signals remain separately inspectable",
+                "reallocation proposals are bounded and never permit benchmark dispatch or data release"
+            ]
+        }))
+    }
+
+    /// Fold an ordered benchmark job event log into an idempotent, bounded execution record.
+    pub(super) fn glioma_benchmark_job_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: BenchmarkJobRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_benchmark_job_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma benchmark job request: {error}"))?;
+        let job = execute_glioma_benchmark_job(&request)
+            .map_err(|error| format!("glioma benchmark job evaluation refused: {error}"))?;
+        Ok(json!({
+            "job": job,
+            "dispatch": "not_started",
+            "guarantees": [
+                "approval, site quorum, retries, event ordering, idempotency, cost, privacy, and result digests are replay-validated",
+                "the route evaluates caller-supplied events and dispatches no site query or benchmark job"
+            ]
+        }))
+    }
+
+    /// Monitor benchmark windows for drift, change points, gaps, and calibration changes.
+    pub(super) fn glioma_continual_benchmark_monitor(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ContinualBenchmarkMonitorRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_continual_benchmark_monitor requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma continual benchmark request: {error}"))?;
+        let assessment = monitor_glioma_federated_benchmark_continuity(&request)
+            .map_err(|error| format!("glioma continual benchmark assessment refused: {error}"))?;
+        Ok(json!({
+            "assessment": assessment,
+            "dispatch": "not_started",
+            "guarantees": [
+                "immutable aggregate windows are checked for identity, quorum, uncertainty, calibration, epoch gaps, drift, and change points",
+                "alerts remain evidence for review and cannot promote or release a benchmark automatically"
+            ]
+        }))
+    }
+
+    /// Verify signatures, approval, freshness, provenance, locality, and policy on site contributions.
+    pub(super) fn glioma_contribution_integrity_verify(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ContributionIntegrityRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_contribution_integrity_verify requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma contribution-integrity request: {error}"))?;
+        let integrity = verify_glioma_contribution_integrity(&request).map_err(|error| {
+            format!("glioma contribution-integrity verification refused: {error}")
+        })?;
+        Ok(json!({
+            "integrity": integrity,
+            "dispatch": "not_started",
+            "guarantees": [
+                "contribution identity, signature, authorization, revocation, freshness, schema, aggregate-only status, and source locality are checked",
+                "aggregate-consumption permission is returned as a gate and does not submit or consume a contribution"
+            ]
+        }))
+    }
+
+    /// Compile a deterministic multisite benchmark workflow from site policies and recorded events.
+    pub(super) fn glioma_multisite_benchmark_workflow(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedBenchmarkWorkflowRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multisite_benchmark_workflow requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma multisite benchmark workflow request: {error}")
+            })?;
+        let workflow = execute_glioma_multisite_benchmark_workflow(&request)
+            .map_err(|error| format!("glioma multisite benchmark workflow refused: {error}"))?;
+        Ok(json!({
+            "workflow": workflow,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "site policy, stage dependencies, recorded events, query quorum, retry limits, and workflow budgets are validated",
+                "the route computes from caller-provided policy and event records and contacts no federation site"
+            ]
+        }))
+    }
+
+    /// Evaluate a participant exchange request and produce an idempotent local receipt.
+    pub(super) fn glioma_participant_exchange_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederationParticipantRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_participant_exchange_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma participant exchange request: {error}"))?;
+        let exchange = execute_glioma_participant_exchange(&request)
+            .map_err(|error| format!("glioma participant exchange refused: {error}"))?;
+        Ok(json!({
+            "exchange": exchange,
+            "dispatch": "not_started",
+            "guarantees": [
+                "API version, idempotency, participant capability, local approval, revocation, scope, and payload digests are checked",
+                "the exchange receipt is local and no contribution or raw data is transmitted"
+            ]
+        }))
+    }
+
+    /// Assess whether eligible independent-site contributions satisfy benchmark admission policy.
+    pub(super) fn glioma_quorum_admission_assess(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: QuorumAdmissionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_quorum_admission_assess requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma quorum-admission request: {error}"))?;
+        let decision = assess_glioma_quorum_admission(&request)
+            .map_err(|error| format!("glioma quorum-admission assessment refused: {error}"))?;
+        Ok(json!({
+            "decision": decision,
+            "dispatch": "not_started",
+            "guarantees": [
+                "independent-site quorum, benchmark and schema alignment, signatures, approvals, freshness, privacy budget, and aggregate-only policy are fail-closed",
+                "query_admission_permitted is an assessment result and does not dispatch a federated query"
+            ]
+        }))
+    }
+
+    /// Validate a signed aggregate submission and return its local contribution receipt.
+    pub(super) fn glioma_signed_aggregate_submit(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: SignedAggregateSubmissionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_signed_aggregate_submit requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma signed aggregate request: {error}"))?;
+        let contribution = submit_glioma_signed_aggregate(&request)
+            .map_err(|error| format!("glioma signed aggregate submission refused: {error}"))?;
+        Ok(json!({
+            "contribution": contribution,
+            "dispatch": "not_started",
+            "guarantees": [
+                "submission identity, idempotency, benchmark, schema, scope, signature, calibration, provenance, privacy spend, and locality are checked",
+                "the receipt is produced locally; no aggregate is transmitted or persisted remotely"
+            ]
+        }))
+    }
+
+    /// Attest aggregate contribution provenance using the declared local signer chain.
+    pub(super) fn glioma_site_provenance_attest(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SiteProvenanceAttestationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_site_provenance_attest requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma site-provenance request: {error}"))?;
+        let attestation = attest_glioma_site_contribution(&request)
+            .map_err(|error| format!("glioma site-provenance attestation refused: {error}"))?;
+        Ok(json!({
+            "attestation": attestation,
+            "dispatch": "not_started",
+            "guarantees": [
+                "aggregate and source digests, lineage, analysis version, calibration, policy decision, environment lock, signer chain, revocation, and freshness are bound into the attestation",
+                "the local deterministic signing seam creates no external signature or network transmission"
+            ]
+        }))
+    }
+
+    /// Compile policy-authorized benchmark governance transitions and quorum votes.
+    pub(super) fn glioma_benchmark_governance_cycle_compile(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GovernanceCycleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_benchmark_governance_cycle_compile requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma benchmark governance-cycle request: {error}")
+            })?;
+        let cycle = compile_glioma_benchmark_governance_cycle(&request).map_err(|error| {
+            format!("glioma benchmark governance-cycle compilation refused: {error}")
+        })?;
+        Ok(json!({
+            "cycle": cycle,
+            "dispatch": "not_started",
+            "guarantees": [
+                "proposal identity, policy version, authorized transitions, site quorum, role and vote rules, rationale digests, and epochs are validated",
+                "the cycle records governance status and does not publish a benchmark or initiate site activity"
+            ]
+        }))
+    }
+
     /// Compile a shareable aggregate phenotype summary under a versioned site-local dictionary.
     pub(super) fn glioma_aggregate_phenotype_summary_compile(
         &self,

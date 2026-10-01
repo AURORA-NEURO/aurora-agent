@@ -28942,5 +28942,55 @@
       "properties": {"request": {"type": "object", "description": "AggregatePhenotypeRequest1@1 with site and dictionary digests, mapped phenotype fields, source counts, uncertainty, suppression, and required-concept policy."}},
       "required": ["request"]
     }
+  },
+  {
+    "name": "glioma_benchmark_director_snapshot",
+    "description": "Summarize federated benchmark run status, quorum, scientific success, release readiness, privacy, cost, freshness, deadlines, and bounded reallocation opportunities.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "BenchmarkDirectorRequest1@1 with run status, quorum, cost and privacy limits, thresholds, and current tick."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_benchmark_job_execute",
+    "description": "Replay a bounded federated benchmark job event log through quorum, approval, idempotency, retry, budget, and privacy gates without dispatching site queries.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "BenchmarkJobRequest1@1 with participating sites, ordered events, quorum, retry, event, budget, and privacy bounds."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_continual_benchmark_monitor",
+    "description": "Monitor immutable benchmark windows for quorum, calibration changes, epoch gaps, uncertainty, drift, and change points.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "ContinualBenchmarkMonitorRequest1@1 with benchmark identity, bounded window history, calibration states, and drift thresholds."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_contribution_integrity_verify",
+    "description": "Verify federated contribution signatures, authorization, revocation, freshness, schema, provenance, aggregate-only status, and raw-data locality.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "ContributionIntegrityRequest1@1 with benchmark and policy identity, ordered contributions, current tick, staleness, and signature requirements."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_multisite_benchmark_workflow",
+    "description": "Compile a replayable multisite benchmark workflow from site policies, recorded stage events, retry limits, query quorum, and workflow budgets.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedBenchmarkWorkflowRequest1@1 with benchmark, site policy inputs, event log, and bounded workflow budget."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_participant_exchange_execute",
+    "description": "Evaluate a versioned participant exchange request and return an idempotent local receipt without transmitting contribution or raw-data payloads.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederationParticipantRequest1@1 with participant, exchange action, idempotency, capability, approval, revocation, policy scope, and payload digests."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_quorum_admission_assess",
+    "description": "Assess independent-site, signature, freshness, privacy, schema, assay, and model-system quorum before federated benchmark admission.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "QuorumAdmissionRequest1@1 with benchmark identity, contribution records, independent-site floor, privacy budget, and signature policy."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_signed_aggregate_submit",
+    "description": "Validate a signed aggregate contribution and produce a local receipt bound to benchmark, schema, policy, calibration, provenance, privacy, and locality.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "SignedAggregateSubmissionRequest1@1 with aggregate and signature digests, approval, calibration, provenance, privacy, and idempotency."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_site_provenance_attest",
+    "description": "Bind aggregate contribution provenance, environment, policy, signer chain, revocation, and freshness into a site attestation.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "SiteProvenanceAttestationRequest1@1 with source digests, lineage, analysis, calibration, environment, policy, signer chain, and validity window."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_benchmark_governance_cycle_compile",
+    "description": "Compile authorized benchmark governance transitions and quorum votes into a replayable governance-cycle record.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "GovernanceCycleRequest1@1 with proposal, policy version, allowed transitions, votes, quorum, and epoch."}}, "required": ["request"]}
   }
 ]
