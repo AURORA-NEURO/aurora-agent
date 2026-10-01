@@ -657,6 +657,9 @@ use bioprism_research::{
     replay_glioma_multi_study_context_epochs, revise_glioma_beliefs,
     route_glioma_multimodal_evidence_gaps, schedule_glioma_computation_placement,
     schedule_glioma_federated_evidence_batch, schedule_glioma_frontier_campaign,
+    audit_glioma_assay_provenance, approve_glioma_instrument_action,
+    monitor_glioma_instrument_fleet_health, plan_glioma_acquisition_capacity,
+    plan_glioma_acquisition_operations, plan_glioma_instrument_maintenance,
     schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
     simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
     simulate_glioma_protocol, simulate_glioma_protocol_scenario_ensemble,
@@ -795,7 +798,9 @@ use bioprism_research::{
     InformationAcquisitionObjective, InformationDesignRequest,
     InstrumentAssayEvidenceRunObservation, InstrumentCampaignRequest,
     InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
-    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
+    AcquisitionCapacityRequest, AcquisitionOperationsRequest, AssayProvenanceAuditRequest,
+    FleetHealthMonitorRequest, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
+    InstrumentInterlockSnapshot,
     InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InstrumentRecoveryRequest,
     InstrumentResearchFrontierRequest, InstrumentScienceLoopRequest, InstrumentSignalPoint,
     InstrumentSignalRun, InterpretationSynthesisRequest, InvarianceMechanism,
@@ -871,8 +876,9 @@ use bioprism_research::{
     TemporalMultimodalMechanismFusionRequest, TemporalObservation,
     LineagePropagationAnalysis, LineagePropagationRequest, LineagePropagationSnapshot,
     LineageResponseDecompositionRequest, LineageTransportRequest, LineageTransportStudy,
-    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
+    MaintenanceWindowRequest, OperatorApprovalRequest, TemporalSpatialAlignmentRequest,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest, TypedKnowledge,
+    ValidationBatchAssessmentRequest,
     ValidationCampaignRequest, ValidationReplicationCampaignRequest,
     ValidationReplicationGateRequest, ValidationReplicationTransportRequest,
     WorkflowAdmissionRequest, WorkflowRecoveryRequest,
@@ -1178,6 +1184,7 @@ mod glioma_computation;
 mod glioma_decision;
 mod glioma_evidence;
 mod glioma_experiments;
+mod glioma_instrument_ops;
 mod glioma_knowledge;
 mod glioma_mechanism;
 mod glioma_missions;

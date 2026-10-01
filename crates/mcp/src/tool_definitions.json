@@ -28832,5 +28832,65 @@
       },
       "required": ["request", "studies"]
     }
+  },
+  {
+    "name": "glioma_instrument_fleet_health",
+    "description": "Assess instrument-level throughput, quality, downtime, calibration, and fleet-alert trends from replay-validated local summaries.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "FleetHealthMonitorRequest1@1 with fleet identity, ordered instrument summaries, baseline and recent windows, alert thresholds, current tick, and site-masking policy."}},
+      "required": ["request"]
+    }
+  },
+  {
+    "name": "glioma_acquisition_capacity_plan",
+    "description": "Allocate approved acquisition demand across bounded local capacity, budget, operator, maintenance, deadline, priority, and fairness constraints.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "AcquisitionCapacityRequest1@1 with acquisition demands, resource limits, horizon, budget, and approvals."}},
+      "required": ["request"]
+    }
+  },
+  {
+    "name": "glioma_instrument_maintenance_plan",
+    "description": "Propose bounded instrument maintenance windows around service deadlines, calibration expiry, device health, and existing reservations.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "MaintenanceWindowRequest1@1 with device health, service and calibration dates, reservation windows, and planning horizon."}},
+      "required": ["request"]
+    }
+  },
+  {
+    "name": "glioma_assay_provenance_audit",
+    "description": "Audit assay sample scope, protocol, instrument calibration, operator authority, clock, lifecycle, and artifact continuity before analysis admission.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "AssayProvenanceAuditRequest1@1 with ordered run records, digest bindings, clock tolerances, and operator and artifact-continuity requirements."}},
+      "required": ["request"]
+    }
+  },
+  {
+    "name": "glioma_acquisition_operations_snapshot",
+    "description": "Summarize acquisition queue service and risk using device readiness, calibration, operator capacity, telemetry freshness, and bounded reorder proposals.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "AcquisitionOperationsRequest1@1 with queue items, device summaries, time horizon, telemetry freshness, fairness floor, and reorder bound."}},
+      "required": ["request"]
+    }
+  },
+  {
+    "name": "glioma_instrument_operator_approval",
+    "description": "Compile a single-use operator approval bound to an instrument plan, sample scope, operator authority, live interlocks, effect order, uncertainty, and expiry.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"request": {"type": "object", "description": "OperatorApprovalRequest1@1 with plan and scope digests, operator authority, interlock observations, confirmation, expiry, use policy, and stop path."}},
+      "required": ["request"]
+    }
   }
 ]

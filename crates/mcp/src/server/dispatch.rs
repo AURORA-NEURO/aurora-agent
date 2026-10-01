@@ -823,6 +823,18 @@ impl Server {
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_instrument_fleet_schedule" => self.glioma_instrument_fleet_schedule(&arguments),
             "glioma_instrument_fleet_execute" => self.glioma_instrument_fleet_execute(&arguments),
+            "glioma_instrument_fleet_health" => self.glioma_instrument_fleet_health(&arguments),
+            "glioma_acquisition_capacity_plan" => self.glioma_acquisition_capacity_plan(&arguments),
+            "glioma_instrument_maintenance_plan" => {
+                self.glioma_instrument_maintenance_plan(&arguments)
+            }
+            "glioma_assay_provenance_audit" => self.glioma_assay_provenance_audit(&arguments),
+            "glioma_acquisition_operations_snapshot" => {
+                self.glioma_acquisition_operations_snapshot(&arguments)
+            }
+            "glioma_instrument_operator_approval" => {
+                self.glioma_instrument_operator_approval(&arguments)
+            }
             "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
             "glioma_instrument_recovery_plan" => self.glioma_instrument_recovery_plan(&arguments),
             "glioma_instrument_campaign_execute" => {
