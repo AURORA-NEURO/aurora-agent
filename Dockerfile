@@ -14,7 +14,7 @@ FROM debian:bookworm-slim
 
 LABEL io.modelcontextprotocol.server.name="io.github.MurariAmbati/aurora-agent" \
       org.opencontainers.image.title="AURORA Agent" \
-      org.opencontainers.image.description="FIBER decision-context compiler: bioprism-mcp stdio MCP server (893 tools) and bioprism CLI. Local-first, no telemetry or background network activity; source HTTP is denied by default." \
+      org.opencontainers.image.description="FIBER decision-context compiler: bioprism-mcp stdio MCP server (983 tools) and bioprism CLI. Local-first, no telemetry or background network activity; source HTTP is denied by default." \
       org.opencontainers.image.source="https://github.com/AURORA-NEURO/aurora-agent" \
       org.opencontainers.image.url="https://aurora-neuro.github.io/aurora-agent/" \
       org.opencontainers.image.licenses="Apache-2.0"

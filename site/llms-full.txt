@@ -23,7 +23,7 @@ whole knowledge structure by default."
 
 Surfaces:
 
-- 893 MCP tools via the `bioprism-mcp` stdio server (JSON-RPC 2.0 over newline-delimited stdio,
+- 983 MCP tools via the `bioprism-mcp` stdio server (JSON-RPC 2.0 over newline-delimited stdio,
   full MCP lifecycle).
 - A CLI (`bioprism`), with `--json` envelopes and a 10-exit-code retryability matrix: every failure
   code carries exactly one retry decision, so a caller holding nothing but the process status can

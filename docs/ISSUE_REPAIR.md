@@ -434,7 +434,7 @@ changed files or validate the assertion independently.
 `repair_plan` and `repair_verify`, both root-confined exactly as `project_ingest` and
 `project_audit` are: every path parameter — `root`, `issues`, `criteria`, `plan`, `out` — resolves
 through the server's root confinement, so planning a repair cannot become a way to read or write an
-arbitrary file. The MCP server currently advertises 893 tools, with catalogue parity asserted by
+arbitrary file. The MCP server currently advertises 983 tools, with catalogue parity asserted by
 the `capability_audit` integration test.
 
 `repair_plan` mirrors `project plan`, including the `--criteria` document, and follows the server's
