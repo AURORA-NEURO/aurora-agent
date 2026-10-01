@@ -118,8 +118,12 @@ pub enum TypedDeterminismAssuranceError {
     Output(String),
 }
 
-fn nonempty(value: &str) -> bool { !value.trim().is_empty() }
-fn canonical(values: &[String]) -> bool { values.windows(2).all(|pair| pair[0] < pair[1]) }
+fn nonempty(value: &str) -> bool {
+    !value.trim().is_empty()
+}
+fn canonical(values: &[String]) -> bool {
+    values.windows(2).all(|pair| pair[0] < pair[1])
+}
 fn digest(value: &ContentHash) -> bool {
     value.as_str().len() == 64 && value.as_str().bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -161,7 +165,9 @@ impl CanonicalCapabilityOutput7 {
             || self.effect_receipts.is_empty()
             || !["qualified", "unresolved", "blocked"].contains(&self.disposition.as_str())
         {
-            return Err(TypedDeterminismAssuranceError::Output("identity, closure, locality, or effect metadata is incomplete".into()));
+            return Err(TypedDeterminismAssuranceError::Output(
+                "identity, closure, locality, or effect metadata is incomplete".into(),
+            ));
         }
         for values in [
             &self.implementation_order,
@@ -176,26 +182,56 @@ impl CanonicalCapabilityOutput7 {
             &self.effect_receipts,
         ] {
             if !canonical(values) {
-                return Err(TypedDeterminismAssuranceError::Output("output ordering is not canonical".into()));
+                return Err(TypedDeterminismAssuranceError::Output(
+                    "output ordering is not canonical".into(),
+                ));
             }
         }
-        let all = self.implementation_order.iter().cloned().collect::<BTreeSet<_>>();
-        let parts = self.verified_order.iter().chain(&self.mismatch_order).chain(&self.unresolved_order).chain(&self.blocked_order).cloned().collect::<BTreeSet<_>>();
+        let all = self
+            .implementation_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let parts = self
+            .verified_order
+            .iter()
+            .chain(&self.mismatch_order)
+            .chain(&self.unresolved_order)
+            .chain(&self.blocked_order)
+            .cloned()
+            .collect::<BTreeSet<_>>();
         if all.len() != self.implementation_order.len() || parts != all {
-            return Err(TypedDeterminismAssuranceError::Output("implementation states do not partition the input".into()));
+            return Err(TypedDeterminismAssuranceError::Output(
+                "implementation states do not partition the input".into(),
+            ));
         }
-        if !digest(&self.input_digest) || !digest(&self.canonical_output_digest) || !digest(&self.replay_identity) || !digest(&self.receipt_digest) || self.artifact.content_hash != self.receipt_digest {
-            return Err(TypedDeterminismAssuranceError::Output("content digests are invalid".into()));
+        if !digest(&self.input_digest)
+            || !digest(&self.canonical_output_digest)
+            || !digest(&self.replay_identity)
+            || !digest(&self.receipt_digest)
+            || self.artifact.content_hash != self.receipt_digest
+        {
+            return Err(TypedDeterminismAssuranceError::Output(
+                "content digests are invalid".into(),
+            ));
         }
-        if self.effect_receipts.iter().any(|effect| effect != "block:unsafe-release" && !effect.starts_with("verify:canonical-parity:")) {
-            return Err(TypedDeterminismAssuranceError::Output("effect is outside the parity gate".into()));
+        if self.effect_receipts.iter().any(|effect| {
+            effect != "block:unsafe-release" && !effect.starts_with("verify:canonical-parity:")
+        }) {
+            return Err(TypedDeterminismAssuranceError::Output(
+                "effect is outside the parity gate".into(),
+            ));
         }
         Ok(())
     }
 
     pub fn digest(&self) -> Result<ContentHash, TypedDeterminismAssuranceError> {
         self.validate()?;
-        ContentHash::of_value(&serde_json::to_value(self).map_err(|error| TypedDeterminismAssuranceError::Output(error.to_string()))?).map_err(|error| TypedDeterminismAssuranceError::Output(error.to_string()))
+        ContentHash::of_value(
+            &serde_json::to_value(self)
+                .map_err(|error| TypedDeterminismAssuranceError::Output(error.to_string()))?,
+        )
+        .map_err(|error| TypedDeterminismAssuranceError::Output(error.to_string()))
     }
 }
 
@@ -216,7 +252,9 @@ fn validate_input(input: &TypedCapabilityInput4) -> Result<(), TypedDeterminismA
         || !input.raw_data_local
         || !input.aggregate_only
     {
-        return Err(TypedDeterminismAssuranceError::Invalid("input identity, fields, digests, locality, or boundary is invalid".into()));
+        return Err(TypedDeterminismAssuranceError::Invalid(
+            "input identity, fields, digests, locality, or boundary is invalid".into(),
+        ));
     }
     let mut ids = BTreeSet::new();
     for implementation in &input.implementations {
@@ -232,17 +270,24 @@ fn validate_input(input: &TypedCapabilityInput4) -> Result<(), TypedDeterminismA
             || !canonical(&implementation.omission_order)
             || !ids.insert(implementation.implementation_id.clone())
         {
-            return Err(TypedDeterminismAssuranceError::Invalid("implementation identity, ordering, digests, or uniqueness is invalid".into()));
+            return Err(TypedDeterminismAssuranceError::Invalid(
+                "implementation identity, ordering, digests, or uniqueness is invalid".into(),
+            ));
         }
     }
     Ok(())
 }
 
-pub fn assure_typed_determinism(input: &TypedCapabilityInput4) -> Result<CanonicalCapabilityOutput7, TypedDeterminismAssuranceError> {
+pub fn assure_typed_determinism(
+    input: &TypedCapabilityInput4,
+) -> Result<CanonicalCapabilityOutput7, TypedDeterminismAssuranceError> {
     validate_input(input)?;
     let mut implementations = input.implementations.clone();
     implementations.sort_by(|left, right| left.implementation_id.cmp(&right.implementation_id));
-    let implementation_order = implementations.iter().map(|item| item.implementation_id.clone()).collect::<Vec<_>>();
+    let implementation_order = implementations
+        .iter()
+        .map(|item| item.implementation_id.clone())
+        .collect::<Vec<_>>();
     let mut verified = BTreeSet::new();
     let mut mismatch = BTreeSet::new();
     let mut unresolved = BTreeSet::new();
@@ -254,27 +299,42 @@ pub fn assure_typed_determinism(input: &TypedCapabilityInput4) -> Result<Canonic
     for item in &implementations {
         let id = item.implementation_id.clone();
         provenance.insert(item.provenance_digest.clone());
-        omission.extend(item.omission_order.iter().map(|value| format!("{id}:{value}")));
+        omission.extend(
+            item.omission_order
+                .iter()
+                .map(|value| format!("{id}:{value}")),
+        );
         if item.negative_result || item.evidence_state == CapabilityEvidenceState::Negative {
             negative.insert(format!("{id}:negative-result"));
         }
         if item.semantic_profile != input.semantic_profile || !item.local || !item.aggregate_only {
             blocked.insert(id.clone());
             omission.insert(format!("{id}:semantic-profile-or-locality-mismatch"));
-        } else if item.canonical_field_order != input.canonical_field_order || item.input_digest != input.input_digest || item.output_digest != input.expected_output_digest {
+        } else if item.canonical_field_order != input.canonical_field_order
+            || item.input_digest != input.input_digest
+            || item.output_digest != input.expected_output_digest
+        {
             mismatch.insert(id.clone());
             omission.insert(format!("{id}:canonical-input-or-output-mismatch"));
         } else if item.replay_identity != input.replay_identity || !item.signed {
             unresolved.insert(id.clone());
             uncertainty.insert(format!("{id}:replay-or-signature-unresolved"));
-        } else if !matches!(item.evidence_state, CapabilityEvidenceState::Proven | CapabilityEvidenceState::Supported) {
+        } else if !matches!(
+            item.evidence_state,
+            CapabilityEvidenceState::Proven | CapabilityEvidenceState::Supported
+        ) {
             unresolved.insert(id.clone());
             uncertainty.insert(format!("{id}:evidence-not-proven"));
         } else {
             verified.insert(id);
         }
     }
-    let global_block = !input.policy_allowed || !input.protected_closure || !input.signed_approval || !input.raw_data_local || !input.aggregate_only || !input.adversarial_events.is_empty();
+    let global_block = !input.policy_allowed
+        || !input.protected_closure
+        || !input.signed_approval
+        || !input.raw_data_local
+        || !input.aggregate_only
+        || !input.adversarial_events.is_empty();
     if global_block {
         blocked.extend(implementation_order.iter().cloned());
         verified.clear();
@@ -282,13 +342,29 @@ pub fn assure_typed_determinism(input: &TypedCapabilityInput4) -> Result<Canonic
         unresolved.clear();
         omission.insert("request:governance-or-adversarial-gate-blocked".into());
     }
-    uncertainty.extend(input.adversarial_events.iter().map(|event| format!("adversarial:{event}")));
+    uncertainty.extend(
+        input
+            .adversarial_events
+            .iter()
+            .map(|event| format!("adversarial:{event}")),
+    );
     let verified_order = verified.iter().cloned().collect::<Vec<_>>();
     let mismatch_order = mismatch.iter().cloned().collect::<Vec<_>>();
     let unresolved_order = unresolved.iter().cloned().collect::<Vec<_>>();
     let blocked_order = blocked.iter().cloned().collect::<Vec<_>>();
-    let disposition = if global_block || verified_order.is_empty() && unresolved_order.is_empty() { "blocked" } else if !mismatch_order.is_empty() || !unresolved_order.is_empty() || !blocked_order.is_empty() { "unresolved" } else { "qualified" };
-    if disposition != "qualified" { omission.insert("request:canonical-parity-not-closed".into()); }
+    let disposition = if global_block || verified_order.is_empty() && unresolved_order.is_empty() {
+        "blocked"
+    } else if !mismatch_order.is_empty()
+        || !unresolved_order.is_empty()
+        || !blocked_order.is_empty()
+    {
+        "unresolved"
+    } else {
+        "qualified"
+    };
+    if disposition != "qualified" {
+        omission.insert("request:canonical-parity-not-closed".into());
+    }
     let mut payload = json!({
         "schema_version": "aurora-research-contract/1.0", "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID,
         "request_id": input.request_id, "capability_id": input.capability_id, "scope": input.scope, "semantic_profile": input.semantic_profile,
@@ -299,11 +375,17 @@ pub fn assure_typed_determinism(input: &TypedCapabilityInput4) -> Result<Canonic
         "input_digest": input.input_digest, "canonical_output_digest": input.expected_output_digest, "replay_identity": input.replay_identity,
         "raw_data_local": true, "aggregate_only": true, "boundary": PRECLINICAL_BOUNDARY,
     });
-    let receipt_digest = ContentHash::of_value(&payload).map_err(|error| TypedDeterminismAssuranceError::Output(error.to_string()))?;
+    let receipt_digest = ContentHash::of_value(&payload)
+        .map_err(|error| TypedDeterminismAssuranceError::Output(error.to_string()))?;
     payload["receipt_digest"] = json!(receipt_digest);
     payload["artifact"] = json!({"artifact_id": format!("canonical-capability-output-7:{}", input.request_id), "content_type": CONTENT_TYPE, "content_hash": receipt_digest, "semantic_loss": omission.iter().cloned().collect::<Vec<_>>(), "provenance_digests": provenance.iter().cloned().collect::<Vec<_>>(), "boundary": PRECLINICAL_BOUNDARY});
-    payload["effect_receipts"] = json!(if disposition == "qualified" { vec![format!("verify:canonical-parity:{}", input.request_id)] } else { vec!["block:unsafe-release".to_string()] });
-    let output: CanonicalCapabilityOutput7 = serde_json::from_value(payload).map_err(|error| TypedDeterminismAssuranceError::Output(error.to_string()))?;
+    payload["effect_receipts"] = json!(if disposition == "qualified" {
+        vec![format!("verify:canonical-parity:{}", input.request_id)]
+    } else {
+        vec!["block:unsafe-release".to_string()]
+    });
+    let output: CanonicalCapabilityOutput7 = serde_json::from_value(payload)
+        .map_err(|error| TypedDeterminismAssuranceError::Output(error.to_string()))?;
     output.validate()?;
     Ok(output)
 }
@@ -311,11 +393,75 @@ pub fn assure_typed_determinism(input: &TypedCapabilityInput4) -> Result<Canonic
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn hash(value: &str) -> ContentHash { ContentHash::of_bytes(value.as_bytes()) }
-    fn implementation(id: &str) -> CapabilityImplementation5 { CapabilityImplementation5 { implementation_id: id.into(), origin: format!("origin:{id}"), semantic_profile: "canonical-json".into(), canonical_field_order: vec!["alpha".into(), "beta".into()], input_digest: hash("input"), output_digest: hash("output"), provenance_digest: hash("provenance"), replay_identity: hash("replay"), evidence_state: CapabilityEvidenceState::Proven, local: true, aggregate_only: true, signed: true, omission_order: vec![], negative_result: false } }
-    fn input() -> TypedCapabilityInput4 { TypedCapabilityInput4 { schema_version: INPUT_SCHEMA.into(), request_id: "typed:req".into(), capability_id: "cap:determinism".into(), scope: "study:local".into(), semantic_profile: "canonical-json".into(), canonical_field_order: vec!["alpha".into(), "beta".into()], input_digest: hash("input"), expected_output_digest: hash("output"), implementations: vec![implementation("b"), implementation("a")], replay_identity: hash("replay"), policy_allowed: true, protected_closure: true, signed_approval: true, raw_data_local: true, aggregate_only: true, adversarial_events: vec![], boundary: PRECLINICAL_BOUNDARY.into() } }
-    #[test] fn manifest_is_a1() { assert_eq!(typed_determinism_assurance_manifest()["autonomy_tier"], "A1"); }
-    #[test] fn qualified_parity_is_sorted() { let output = assure_typed_determinism(&input()).unwrap(); assert_eq!(output.disposition, "qualified"); assert_eq!(output.verified_order, vec!["a", "b"]); }
-    #[test] fn mismatch_is_preserved() { let mut request = input(); request.implementations[0].output_digest = hash("different"); let output = assure_typed_determinism(&request).unwrap(); assert_eq!(output.disposition, "unresolved"); assert!(!output.mismatch_order.is_empty()); }
-    #[test] fn policy_blocks() { let mut request = input(); request.policy_allowed = false; let output = assure_typed_determinism(&request).unwrap(); assert_eq!(output.disposition, "blocked"); assert_eq!(output.effect_receipts, vec!["block:unsafe-release"]); }
+    fn hash(value: &str) -> ContentHash {
+        ContentHash::of_bytes(value.as_bytes())
+    }
+    fn implementation(id: &str) -> CapabilityImplementation5 {
+        CapabilityImplementation5 {
+            implementation_id: id.into(),
+            origin: format!("origin:{id}"),
+            semantic_profile: "canonical-json".into(),
+            canonical_field_order: vec!["alpha".into(), "beta".into()],
+            input_digest: hash("input"),
+            output_digest: hash("output"),
+            provenance_digest: hash("provenance"),
+            replay_identity: hash("replay"),
+            evidence_state: CapabilityEvidenceState::Proven,
+            local: true,
+            aggregate_only: true,
+            signed: true,
+            omission_order: vec![],
+            negative_result: false,
+        }
+    }
+    fn input() -> TypedCapabilityInput4 {
+        TypedCapabilityInput4 {
+            schema_version: INPUT_SCHEMA.into(),
+            request_id: "typed:req".into(),
+            capability_id: "cap:determinism".into(),
+            scope: "study:local".into(),
+            semantic_profile: "canonical-json".into(),
+            canonical_field_order: vec!["alpha".into(), "beta".into()],
+            input_digest: hash("input"),
+            expected_output_digest: hash("output"),
+            implementations: vec![implementation("b"), implementation("a")],
+            replay_identity: hash("replay"),
+            policy_allowed: true,
+            protected_closure: true,
+            signed_approval: true,
+            raw_data_local: true,
+            aggregate_only: true,
+            adversarial_events: vec![],
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn manifest_is_a1() {
+        assert_eq!(
+            typed_determinism_assurance_manifest()["autonomy_tier"],
+            "A1"
+        );
+    }
+    #[test]
+    fn qualified_parity_is_sorted() {
+        let output = assure_typed_determinism(&input()).unwrap();
+        assert_eq!(output.disposition, "qualified");
+        assert_eq!(output.verified_order, vec!["a", "b"]);
+    }
+    #[test]
+    fn mismatch_is_preserved() {
+        let mut request = input();
+        request.implementations[0].output_digest = hash("different");
+        let output = assure_typed_determinism(&request).unwrap();
+        assert_eq!(output.disposition, "unresolved");
+        assert!(!output.mismatch_order.is_empty());
+    }
+    #[test]
+    fn policy_blocks() {
+        let mut request = input();
+        request.policy_allowed = false;
+        let output = assure_typed_determinism(&request).unwrap();
+        assert_eq!(output.disposition, "blocked");
+        assert_eq!(output.effect_receipts, vec!["block:unsafe-release"]);
+    }
 }
