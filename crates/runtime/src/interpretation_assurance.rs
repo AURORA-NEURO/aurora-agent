@@ -308,7 +308,6 @@ pub fn assure_interpretation(
     omissions.dedup();
     uncertainty.sort();
     uncertainty.dedup();
-    let mut negative_results = negative_results;
     negative_results.sort();
     let interpretation = InterpretationArtifact7 {
         request_id: request.request_id.clone(),

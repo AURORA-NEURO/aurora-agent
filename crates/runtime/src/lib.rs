@@ -1,5 +1,3 @@
-#![allow(clippy::all)]
-
 //! BioPRISM execution runtime: the layer that runs a trial and can prove what it did.
 //!
 //! Implements blueprint §05 (execution runtime): the run orchestrator (05.02), the executor

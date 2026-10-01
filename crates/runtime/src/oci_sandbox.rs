@@ -1215,7 +1215,7 @@ fn parse_artifact_path(path: &str) -> Result<String, OciSandboxError> {
         || path.starts_with('/')
         || path.starts_with('\\')
         || path.contains('\\')
-        || (path.as_bytes().len() >= 2
+        || (path.len() >= 2
             && path.as_bytes()[0].is_ascii_alphabetic()
             && path.as_bytes()[1] == b':')
     {
@@ -2084,8 +2084,10 @@ mod tests {
         );
 
         let second_staging = archive_staging_dir("stdout-limit");
-        let mut limits = SandboxLimits::default();
-        limits.max_output_bytes = 4;
+        let limits = SandboxLimits {
+            max_output_bytes: 4,
+            ..SandboxLimits::default()
+        };
         let parsed = extract_artifact_archive(&valid_tar_archive(), &second_staging, &limits)
             .expect("stdout limit is reported in the parse receipt");
         assert_eq!(parsed.stdout, b"hell");
@@ -2185,13 +2187,17 @@ mod tests {
         tar_entry(&mut oversized, "capture/", b'5', b"");
         tar_entry(&mut oversized, "capture/stdout", b'0', b"");
         oversized.resize(oversized.len() + 1_024, 0);
-        let mut limits = SandboxLimits::default();
-        limits.max_artifact_bytes = 1_024;
-        assert!(extract_artifact_archive(&oversized, &staging, &limits).is_err());
+        let artifact_limits = SandboxLimits {
+            max_artifact_bytes: 1_024,
+            ..SandboxLimits::default()
+        };
+        assert!(extract_artifact_archive(&oversized, &staging, &artifact_limits).is_err());
 
-        let mut limits = SandboxLimits::default();
-        limits.max_artifact_entries = 2;
-        assert!(extract_artifact_archive(&valid_tar_archive(), &staging, &limits).is_err());
+        let entry_limits = SandboxLimits {
+            max_artifact_entries: 2,
+            ..SandboxLimits::default()
+        };
+        assert!(extract_artifact_archive(&valid_tar_archive(), &staging, &entry_limits).is_err());
         let _ = fs::remove_dir_all(staging);
     }
 
@@ -2397,7 +2403,7 @@ mod tests {
         let staging = root.join("staging");
         let output = root.join("output");
         fs::create_dir_all(&input).expect("input directory");
-        fs::create_dir_all(&staging.join("nested")).expect("staging tree");
+        fs::create_dir_all(staging.join("nested")).expect("staging tree");
 
         let mut candidate = request(input.clone(), output.clone());
         assert!(validate_request(&candidate).is_ok());
