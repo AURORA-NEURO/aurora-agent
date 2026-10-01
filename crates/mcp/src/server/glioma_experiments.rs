@@ -108,8 +108,22 @@ impl Server {
                 .ok_or_else(|| "glioma_information_design requires actions".to_string())?,
         )
         .map_err(|error| format!("invalid glioma information-design actions: {error}"))?;
-        let output = plan_glioma_information_design(&request, &mechanisms, &actions)
-            .map_err(|error| format!("glioma information design refused: {error}"))?;
+        let acquisition_objective: InformationAcquisitionObjective = serde_json::from_value(
+            arguments
+                .get("acquisition_objective")
+                .cloned()
+                .unwrap_or_else(|| json!(InformationAcquisitionObjective::MechanismGini)),
+        )
+        .map_err(|error| {
+            format!("invalid glioma information-design acquisition objective: {error}")
+        })?;
+        let output = plan_glioma_information_design_with_objective(
+            &request,
+            acquisition_objective,
+            &mechanisms,
+            &actions,
+        )
+        .map_err(|error| format!("glioma information design refused: {error}"))?;
         serde_json::to_value(json!({
             "design": output,
             "dispatch": "not_started",

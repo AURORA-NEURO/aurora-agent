@@ -25960,11 +25960,16 @@
   },
   {
     "name": "glioma_information_design",
-    "description": "Select a bounded local preclinical glioma assay batch by expected reduction in mechanism uncertainty. Uses integer-only posterior Gini reduction over caller-declared outcome distributions, then applies feasibility, risk, cost, budget, and replicate gates while preserving deferred and unresolved assays; it never executes biology or makes a clinical decision.",
+    "description": "Select a bounded local preclinical glioma assay batch by expected reduction in mechanism uncertainty or panel predictive disagreement. Applies feasibility, risk, cost, budget, and replicate gates while preserving deferred and unresolved assays; it never executes biology or makes a clinical decision.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "acquisition_objective": {
+          "type": "string",
+          "enum": ["mechanism_gini", "panel_predictive_diameter"],
+          "description": "Optional acquisition score; defaults to mechanism_gini."
+        },
         "request": {
           "type": "object",
           "description": "InformationDesignRequest1@1 with objective, model system, budget, selection, information, feasibility, risk, cost, and risk-ceiling bounds."
@@ -28787,6 +28792,45 @@
       "required": [
         "request"
       ]
+    }
+  },
+  {
+    "name": "glioma_lineage_propagation_analyze",
+    "description": "Fit a replayable preclinical lineage-state propagation operator from local longitudinal snapshots with independent-unit resampling and held-out prediction diagnostics.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {"type": "object", "description": "LineagePropagationRequest1@3 with declared model system, control and treatment arms, state order, unit and lineage floors, bounded bootstrap policy, and effect margin."},
+        "snapshots": {"type": "array", "items": {"type": "object", "description": "LineagePropagationSnapshot1@1 with local artifact identity, biological unit, lineage, assay batch, timepoint, state counts, and capture fraction."}}
+      },
+      "required": ["request", "snapshots"]
+    }
+  },
+  {
+    "name": "glioma_lineage_response_decompose",
+    "description": "Standardize lineage propagation contrasts to a declared baseline mixture and separate net descendant yield from destination-state composition.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {"type": "object", "description": "LineageResponseDecompositionRequest1@1 with baseline source-state composition and minimum component effect."},
+        "analysis": {"type": "object", "description": "A digest-valid GliomaLineagePropagation1@3 analysis."}
+      },
+      "required": ["request", "analysis"]
+    }
+  },
+  {
+    "name": "glioma_lineage_transport_analyze",
+    "description": "Audit whether lineage-propagation contrasts persist across the explicitly represented preclinical model systems.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {"type": "object", "description": "LineageTransportRequest1@1 with model-system and study quorum, effect margins, and bounded nested bootstrap policy."},
+        "studies": {"type": "array", "items": {"type": "object", "description": "LineageTransportStudy1@1 with a digest-valid lineage propagation analysis and local aggregate artifact reference."}}
+      },
+      "required": ["request", "studies"]
     }
   }
 ]

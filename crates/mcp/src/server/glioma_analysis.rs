@@ -3,6 +3,104 @@
 use super::*;
 
 impl Server {
+    /// Fit a lineage-resolved finite-interval propagation operator from local preclinical snapshots.
+    pub(super) fn glioma_lineage_propagation_analyze(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: LineagePropagationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_lineage_propagation_analyze requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma lineage propagation request: {error}"))?;
+        let snapshots: Vec<LineagePropagationSnapshot> =
+            serde_json::from_value(arguments.get("snapshots").cloned().ok_or_else(|| {
+                "glioma_lineage_propagation_analyze requires snapshots".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma lineage propagation snapshots: {error}"))?;
+        let analysis = analyze_glioma_lineage_propagation(&request, &snapshots)
+            .map_err(|error| format!("glioma lineage propagation analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "lineage transitions describe effective interval propagation and descendant yield, not individual-cell switching probabilities",
+                "independent experimental units, assay-batch sensitivity, bootstrap uncertainty, and held-out prediction remain explicit",
+                "missing lineages and unresolved design ranks are not silently imputed"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma lineage propagation analysis: {error}"))
+    }
+
+    /// Decompose lineage propagation contrasts into net-yield and state-composition components.
+    pub(super) fn glioma_lineage_response_decompose(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: LineageResponseDecompositionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_lineage_response_decompose requires request".to_string())?,
+        )
+        .map_err(|error| {
+            format!("invalid glioma lineage response decomposition request: {error}")
+        })?;
+        let analysis: LineagePropagationAnalysis =
+            serde_json::from_value(arguments.get("analysis").cloned().ok_or_else(|| {
+                "glioma_lineage_response_decompose requires analysis".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma lineage propagation analysis: {error}"))?;
+        let decomposition = analyze_glioma_lineage_response_decomposition(&request, &analysis)
+            .map_err(|error| format!("glioma lineage response decomposition refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": decomposition,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "control and treatment propagation are standardized to the investigator-declared baseline state mixture",
+                "net descendant yield and destination composition are separated with reconstruction residuals and paired bootstrap uncertainty",
+                "yield combines proliferation and death, and composition does not identify individual-cell switching"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma lineage response decomposition: {error}"))
+    }
+
+    /// Audit lineage-propagation contrasts across explicitly represented preclinical model systems.
+    pub(super) fn glioma_lineage_transport_analyze(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: LineageTransportRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_lineage_transport_analyze requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma lineage transport request: {error}"))?;
+        let studies: Vec<LineageTransportStudy> = serde_json::from_value(
+            arguments
+                .get("studies")
+                .cloned()
+                .ok_or_else(|| "glioma_lineage_transport_analyze requires studies".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma lineage transport studies: {error}"))?;
+        let analysis = analyze_glioma_lineage_transport(&request, &studies)
+            .map_err(|error| format!("glioma lineage transport analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "studies are equally weighted within represented model systems, which are equally weighted in the transport summary",
+                "excluded studies, system-specific effects, heterogeneity, and leave-one-system-out shifts remain visible",
+                "transport describes observed preclinical systems and does not imply generalization to unobserved systems or clinical populations"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma lineage transport analysis: {error}"))
+    }
+
     /// Analyze local longitudinal preclinical glioma observations with deterministic per-unit
     /// slopes. This remains a value-only computation: it never fetches data, dispatches an assay,
     /// or turns a trajectory into a clinical conclusion.

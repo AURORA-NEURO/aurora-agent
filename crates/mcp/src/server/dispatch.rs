@@ -429,6 +429,13 @@ impl Server {
             }
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
+            "glioma_lineage_propagation_analyze" => {
+                self.glioma_lineage_propagation_analyze(&arguments)
+            }
+            "glioma_lineage_response_decompose" => {
+                self.glioma_lineage_response_decompose(&arguments)
+            }
+            "glioma_lineage_transport_analyze" => self.glioma_lineage_transport_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
             "glioma_transportability_analyze" => self.glioma_transportability_analyze(&arguments),
             "glioma_longitudinal_transport_analyze" => {
