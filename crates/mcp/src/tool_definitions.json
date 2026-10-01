@@ -28992,5 +28992,105 @@
     "name": "glioma_benchmark_governance_cycle_compile",
     "description": "Compile authorized benchmark governance transitions and quorum votes into a replayable governance-cycle record.",
     "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "GovernanceCycleRequest1@1 with proposal, policy version, allowed transitions, votes, quorum, and epoch."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_aggregate_anomaly_detect",
+    "description": "Assess aggregate-only glioma observations for robust outliers, temporal drift, suppression, and small-consortium bias while retaining the evidence behind each anomaly.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedAggregateAnomalyRequest1@1 with benchmark identity, site observations, privacy state, replication minimums, and anomaly thresholds."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_site_selection_plan",
+    "description": "Rank eligible preclinical glioma sites against capability, protocol, diversity, quorum, and workload constraints without reserving site capacity.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedSiteSelectionRequest1@1 with objective, required capability, site capability envelopes, eligibility policy, and bounded selection criteria."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federation_capacity_plan",
+    "description": "Forecast federated workload capacity from declared site windows and constraints; the plan does not schedule work or reserve resources.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederationCapacityRequest1@1 with site capacity windows, workload demand, planning horizon, and risk policy."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_benchmark_dry_run",
+    "description": "Preflight a synthetic federated benchmark against site eligibility, schema, approval, locality, failure-mode, quorum, and budget constraints without dispatching it.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedBenchmarkDryRunRequest1@1 with benchmark objective, required schema, synthetic site fixtures, approval state, and budget bounds."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_replay_discrepancy_scan",
+    "description": "Compare supplied federated replay attestations and report reproducibility discrepancies and diagnostic tasks without rerunning remote computations.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedReplayDiscrepancyScanRequest1@1 with replay identity, attested site results, comparability rules, and discrepancy thresholds."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_workflow_template_exchange",
+    "description": "Validate and package a reusable workflow template against its environment lock, validation card, site attestations, and sharing policy; no workflow is transmitted or run.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedWorkflowTemplateExchangeRequest1@1 with template manifest, locked environment, validation card, sharing policy, site attestations, and current tick."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_replay_conformance",
+    "description": "Evaluate site replay attestations against a shared reference and policy, preserving tolerance deviations, freshness, signatures, and quorum results without executing replays.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedReplayConformanceRequest1@1 with reference metrics, per-site replay attestations, tolerance policy, and current epoch."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_compute_capacity_exchange",
+    "description": "Compare policy-bound aggregate compute capacity and cost summaries to produce eligible site options; it does not reserve compute or send a workload.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedComputeCostExchangeRequest1@1 with workflow envelope, requested resources, site capacity summaries, exchange policy, and current tick."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_decision_capsule",
+    "description": "Validate and package a bounded local research decision context under site, age, expiry, locality, and action policy; the capsule does not authorize or execute actions.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedDecisionCapsuleRequest1@1 with a signed local context capsule, recipient and action policy, question scope, and current tick."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_cross_site_protocol_conformance",
+    "description": "Compare site protocol realizations with a reference protocol, checking step semantics, required capabilities, calibration, bounded adaptations, and quorum without executing the protocol.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "ProtocolConformanceRequest1@1 with a reference protocol, site realizations, conformance quorum, adaptation policy, and current tick."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_device_capability_manifest",
+    "description": "Validate a signed, time-bounded device capability manifest including calibration, availability, revocation, locality, and secret-exclusion claims without probing hardware.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedDeviceCapabilityRequest1@1 with device capabilities, availability, calibration and attestation digests, signer, policy, revocation state, and current tick."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_instrument_operations",
+    "description": "Aggregate eligible site instrument summaries into an operational capacity snapshot under freshness, privacy, calibration, approval, and metadata-sharing gates.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedInstrumentOperationsRequest1@1 with site summaries, current tick, privacy floor, staleness limit, quorum, and metadata-exchange policy."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_release_compile",
+    "description": "Compile an aggregate-only federated research object from site contributions under schema, policy, quorum, uncertainty, heterogeneity, and localization requirements; it is not published.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedReleaseRequest1@1 with research and study identity, aggregate contributions, release policy, and version."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_release_sharing_check",
+    "description": "Assess field-level sharing eligibility for a compiled federated object against recipient scope, quorum, revocation, locality, localization, and redaction policy without sharing the object.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedReleaseSharingRequest1@1 with the compiled object, requested fields, recipient scope, site state, and sharing policy."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_consortium_publication_steward",
+    "description": "Evaluate signed consortium publication decisions, quorum, dissent, correction state, and partial-publication policy without publishing the candidate.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "ConsortiumPublicationRequest1@1 with candidate and object digests, site decisions and authority state, quorum, and partial-publication policy."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_site_capability_envelope_compile",
+    "description": "Compile a site capability envelope from declared model systems, assays, standards, compute, review capacity, confidence, attestations, and policy.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "SiteCapabilityRequest1@1 with site and registry identity, capability records, validity, attestation digests, and eligibility policy."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_cross_site_evidence_explore",
+    "description": "Build a privacy-aware view over supplied comparable aggregate observations, applying suppression thresholds and indirect-query protection without querying sites or raw records.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "CrossSiteEvidenceExplorerRequest1@1 with research objective, aggregate observations, suppression threshold, mapping-confidence floor, and cell limit."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_site_participation_review",
+    "description": "Review a site participation request for purpose, protocol and field alignment, approval, workload capacity, privacy budget, withdrawal, aggregate-only use, and locality; it never dispatches the query.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "SiteParticipationRequest1@1 with benchmark and purpose, requested/local scope, protocol versions, workload and privacy budgets, approval, withdrawal, and data-boundary declarations."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federation_operations_snapshot",
+    "description": "Summarize supplied federation heartbeats, standards, incidents, maintenance, failover, and queue pressure into a readiness snapshot without contacting sites.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederationOperationsRequest1@1 with federation identity, freshness and pressure thresholds, required standards, and site operational summaries."}}, "required": ["request"]}
+  },
+  {
+    "name": "glioma_federated_benchmark_record_execute",
+    "description": "Fold supplied site contribution attestations into a deterministic benchmark execution record after identity, freshness, signature, quorum, replay, and data-boundary checks; it does not run the benchmark.",
+    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "object", "description": "FederatedBenchmarkExecutionRequest1@1 with benchmark and executor identity, replay and analysis digests, epoch and quorum bounds, and site contributions."}}, "required": ["request"]}
   }
 ]
