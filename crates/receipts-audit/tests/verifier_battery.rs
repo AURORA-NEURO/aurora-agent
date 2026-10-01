@@ -8,7 +8,7 @@
 //! This file does not reach every verifier in the workspace, and it no longer says it does.
 //! `every_document_verifier_in_the_workspace_is_covered_or_recorded` is what keeps that honest: it
 //! scans `crates/*/src` for verifier entry points and fails unless each one is either driven by a
-//! battery or written down with a reason. Twelve of them are document verifiers neither battery
+//! battery or written down with a reason. Fourteen of them are document verifiers neither battery
 //! reaches; they are named in `UNCOVERED_DOCUMENT_VERIFIERS` rather than left to be found later.
 //!
 //! # Two shapes of subject
@@ -864,7 +864,7 @@ const COVERED_BY_THE_RECEIPT_BATTERY: [(&str, &str); 5] = [
 ///
 /// A battery of document mutations has nothing to say to any of these: there is no document, or
 /// the integrity claim belongs to a chain, a key, or a live struct rather than to bytes on a wire.
-const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 66] = [
+const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 69] = [
     (
         "bundle/src/attestation.rs::verify",
         "a MAC tag over a key and purpose preimage, not a document",
@@ -1129,6 +1129,18 @@ const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 66] = [
         "research/src/glioma/programs/p11_research_object_release/signature_protocol.rs::verify_glioma_local_release_signature",
         "verifies a detached Ed25519 signature over canonical payload bytes using a caller-supplied key; it does not authenticate the signer or verify a self-sealed document",
     ),
+    (
+        "research/src/glioma/programs/p09_reproducible_computation/federated_replay_conformance.rs::verify_glioma_federated_replay_conformance",
+        "evaluates typed site replay summaries against a metric/tolerance contract and derives a report; it does not verify a persisted document",
+    ),
+    (
+        "research/src/glioma/programs/p11_research_object_release/release_signature_verifier.rs::verify_glioma_release_signature",
+        "checks a signed release object against caller-supplied trust roots and expected digests; it does not verify a self-sealed document",
+    ),
+    (
+        "research/src/glioma/programs/p12_federated_benchmarking/contribution_integrity.rs::verify_glioma_contribution_integrity",
+        "evaluates typed federated contribution declarations and derives a report; it does not verify a persisted document",
+    ),
 ];
 
 /// Document verifiers neither battery reaches. Recorded, not excused.
@@ -1136,7 +1148,7 @@ const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 66] = [
 /// Each one reads a serialized document and checks its own integrity, which is exactly what these
 /// generators are built to attack. They are listed so the gap is a number someone can act on
 /// rather than a silence, and so the module doc above cannot quietly regrow its old claim.
-const UNCOVERED_DOCUMENT_VERIFIERS: [(&str, &str); 12] = [
+const UNCOVERED_DOCUMENT_VERIFIERS: [(&str, &str); 14] = [
     (
         "bioworlds/src/slice.rs::digest_is_intact",
         "a per-slice self-seal; the catalogue report's own check never recurses into it",
@@ -1185,6 +1197,14 @@ const UNCOVERED_DOCUMENT_VERIFIERS: [(&str, &str); 12] = [
     (
         "autopilot/src/goal_control.rs::verify_goal_control_report",
         "verifies a serialized goal-control report, its cycle chain, aggregate budget, completion assertion, and mandatory limitations",
+    ),
+    (
+        "research/src/glioma/programs/p08_instrument_robotics/phase_resolved_invasion_schedule.rs::verify_digest",
+        "recomputes the content seal of a serialized phase-resolved invasion schedule",
+    ),
+    (
+        "research/src/glioma/programs/p09_reproducible_computation/phase_resolved_imaging_handoff.rs::verify_digest",
+        "validates a serialized phase-resolved imaging handoff and its content seal",
     ),
 ];
 
@@ -1379,9 +1399,9 @@ fn every_document_verifier_in_the_workspace_is_covered_or_recorded() {
             NOT_A_DOCUMENT_VERIFIER.len(),
             UNCOVERED_DOCUMENT_VERIFIERS.len(),
         ),
-        (11, 5, 66, 12),
-        "eleven entry points driven here, five by the first battery, sixty-six that verify \
-         something other than a document, and twelve document verifiers no battery reaches yet"
+        (11, 5, 69, 14),
+        "eleven entry points driven here, five by the first battery, sixty-nine that verify \
+         something other than a document, and fourteen document verifiers no battery reaches yet"
     );
 }
 
