@@ -610,18 +610,19 @@ impl CliError {
     }
 }
 
-/// Splits 40.25's policy failures between a refusal and a malformed authority.
+/// Routes 40.25's policy failures by whether the remedy changes policy or the query.
 ///
-/// A refusal is a decision the platform made correctly and clears when a grant is obtained. A
-/// governing policy that does not parse, or a scope binding that names no clause, is a defect in
-/// the world document, and telling the caller to obtain a grant for it would send them to the
-/// wrong party.
+/// A clause conflict or withheld mandatory fact is a policy refusal, while malformed policy
+/// metadata and a decision cut before policy release require correcting the input/world timeline.
+/// Collapsing the temporal refusal into `PolicyDenied` would tell the caller to obtain a grant
+/// when the query's decision time is the value that must change.
 fn policy_code(violation: &PolicyViolation) -> ExitCode {
     match violation {
         PolicyViolation::Conflict { .. } | PolicyViolation::ProtectedClosureWithheld { .. } => {
             ExitCode::PolicyDenied
         }
-        PolicyViolation::MalformedDataPolicy { .. }
+        PolicyViolation::DataPolicyUnavailableAtCut { .. }
+        | PolicyViolation::MalformedDataPolicy { .. }
         | PolicyViolation::UninterpretableRequirement { .. } => ExitCode::InvalidInput,
     }
 }
@@ -706,6 +707,12 @@ mod tests {
                 fact_id: "f".into(),
                 variable: "data_policy",
                 found: "7".into(),
+            }),
+            ExitCode::InvalidInput
+        );
+        assert_eq!(
+            policy_code(&PolicyViolation::DataPolicyUnavailableAtCut {
+                decision_time: "2025-01-01T00:00:00Z".into(),
             }),
             ExitCode::InvalidInput
         );
