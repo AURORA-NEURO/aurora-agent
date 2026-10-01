@@ -3,6 +3,86 @@
 use super::*;
 
 impl Server {
+    /// Size a privacy-aware multi-site benchmark across heterogeneous sites and study systems.
+    pub(super) fn glioma_heterogeneity_adaptive_benchmark_power(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: HeterogeneityAdaptivePowerRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_heterogeneity_adaptive_benchmark_power requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma adaptive benchmark power request: {error}"))?;
+        let plan =
+            plan_glioma_heterogeneity_adaptive_benchmark_power(&request).map_err(|error| {
+                format!("glioma adaptive benchmark power planning refused: {error}")
+            })?;
+        Ok(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "site identity, data quality, modality coverage, attrition, privacy noise, heterogeneity, effect target, power, and total budget are evaluated together",
+                "adaptive sample-size recommendations are bounded by replicate multiplier and surface-point limits",
+                "the route performs aggregate planning only and does not dispatch benchmark jobs"
+            ]
+        }))
+    }
+
+    /// Select a diverse, heterogeneity-aware experiment portfolio with a reserved replication budget.
+    pub(super) fn glioma_heterogeneity_aware_experiment_portfolio(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: HeterogeneityAwareExperimentPortfolioRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_heterogeneity_aware_experiment_portfolio requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma heterogeneity-aware experiment portfolio request: {error}")
+            })?;
+        let portfolio =
+            plan_glioma_heterogeneity_aware_experiment_portfolio(&request).map_err(|error| {
+                format!("glioma heterogeneity-aware experiment portfolio refused: {error}")
+            })?;
+        Ok(json!({
+            "portfolio": portfolio,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "required model-system strata, power floor, risk ceiling, per-replicate costs, candidate availability, and portfolio size are enforced",
+                "replication reserve is protected before candidate selection and diversity remains explicit",
+                "unsafe, infeasible, and deferred candidates are returned without executing experiments"
+            ]
+        }))
+    }
+
+    /// Bind selected portfolio candidates to typed research actions for downstream scheduling.
+    pub(super) fn glioma_heterogeneity_portfolio_mission(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: HeterogeneityPortfolioMissionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_heterogeneity_portfolio_mission requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma heterogeneity portfolio mission request: {error}")
+            })?;
+        let plan = plan_glioma_heterogeneity_portfolio_mission(&request)
+            .map_err(|error| format!("glioma heterogeneity portfolio mission refused: {error}"))?;
+        Ok(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "portfolio candidate bindings, action DAG, completed work, observations, budget, beam, risk, autonomy, and instrument/federation approvals are checked",
+                "the mission returns typed scheduling actions but does not execute experiments or dispatch instruments",
+                "unapproved physical and federated effects remain unavailable"
+            ]
+        }))
+    }
+
     /// Select a bounded local glioma assay batch by expected reduction in mechanism uncertainty.
     /// The route is an information-design planner only: it does not execute biology, dispatch
     /// instruments, or turn a model declaration into a clinical conclusion.

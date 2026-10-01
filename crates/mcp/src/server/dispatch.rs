@@ -834,6 +834,15 @@ impl Server {
                 self.glioma_instrument_research_frontier_execute(&arguments)
             }
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
+            "glioma_heterogeneity_adaptive_benchmark_power" => {
+                self.glioma_heterogeneity_adaptive_benchmark_power(&arguments)
+            }
+            "glioma_heterogeneity_aware_experiment_portfolio" => {
+                self.glioma_heterogeneity_aware_experiment_portfolio(&arguments)
+            }
+            "glioma_heterogeneity_portfolio_mission" => {
+                self.glioma_heterogeneity_portfolio_mission(&arguments)
+            }
             "glioma_contrast_panel_design" => self.glioma_contrast_panel_design(&arguments),
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
             "glioma_replication_assess" => self.glioma_replication_assess(&arguments),

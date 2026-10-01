@@ -276,12 +276,12 @@ fn assert_closed_fixed_object_schemas(value: &Value, path: &str) {
 #[test]
 fn all_embedded_tools_have_unique_names_and_closed_required_field_schemas() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 935);
+    assert_eq!(tools.len(), 938);
     assert_eq!(
         ContentHash::of_value(&Value::Array(tools.clone()))
             .unwrap()
             .to_string(),
-        "33cd6825b5c8324b44442887372a3e47faf3c57546622969dbd5fb16352547aa"
+        "98d4d62dce6401212bfe339d0c65344155fe5de22a2159d3169ae1c95a31f5bb"
     );
 
     let mut names = BTreeSet::new();

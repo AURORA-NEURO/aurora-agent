@@ -28720,5 +28720,56 @@
         "request"
       ]
     }
+  },
+  {
+    "name": "glioma_heterogeneity_adaptive_benchmark_power",
+    "description": "Plan sample sizes and power for a multi-site benchmark while accounting for heterogeneity, attrition, modality coverage, privacy noise, and cost.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "HeterogeneityAdaptivePowerRequest1@1 with benchmark identity, target effects and power, site-level aggregate observations, quality, privacy, cost, and adaptive bounds."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_heterogeneity_aware_experiment_portfolio",
+    "description": "Select a diverse preclinical experiment portfolio across required model-system strata while protecting a replication reserve.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "HeterogeneityAwareExperimentPortfolioRequest1@1 with budget, replication reserve, required strata, candidate arms, minimum power, maximum risk, and portfolio size."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
+  },
+  {
+    "name": "glioma_heterogeneity_portfolio_mission",
+    "description": "Bind selected heterogeneity-aware experiment candidates to typed research actions and compile a risk-bounded mission plan.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "HeterogeneityPortfolioMissionRequest1@1 with portfolio, typed action bindings, completed actions, observations, autonomy approvals, and mission budgets."
+        }
+      },
+      "required": [
+        "request"
+      ]
+    }
   }
 ]
