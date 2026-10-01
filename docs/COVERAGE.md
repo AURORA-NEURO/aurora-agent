@@ -552,20 +552,24 @@ reconciliation against the backlog is a test, so the two cannot drift apart sile
 The primary distribution over the 44: **35 process, 2 foreign artifact, 7 discharged elsewhere,
 and 0 genuinely uncovered.** One module still carries work on a secondary reading. `crates/bioethics`
 discharges §36's sandboxing module; the residue register separately records that its thirteen
-controls remain incomplete. `bioprism-runtime::DockerSandbox` now offers a bounded, opt-in command
-boundary, but the SDK declaration path and trial provider do not invoke it, and scanning, quarantine,
-secret isolation, and deployment egress policy remain absent. The secondary verdict now describes
-that missing integrated control set rather than claiming no container API exists.
+controls remain incomplete. `bioprism-runtime::DockerSandbox` offers a bounded, opt-in command
+boundary, and `DockerProcessSource` now routes explicitly authorized recorded process effects
+through it and retains outputs in per-run quarantine. The SDK declaration path and trial provider do
+not invoke this adapter. Scanning, independent review and release, secret isolation, and deployment
+egress policy remain absent. The secondary verdict describes that missing integrated control set
+rather than claiming no container API exists.
 
-The sandbox surface has three distinct layers: `sandbox_admission_audit` checks whether a declaration
+The sandbox surface has four distinct layers: `sandbox_admission_audit` checks whether a declaration
 is eligible; `sandbox_runtime_simulate` evaluates an ordered bounded trace against it and preserves
 exact resource charges, refusals, and not-run suffixes; and `DockerSandbox` can execute a direct
-command inside an opt-in Docker Linux container with bounded resources and verified cleanup. Its
-output now uses a byte- and entry-limited tmpfs; only regular files with portable relative paths are
-accepted, each is hashed, and the output directory is atomically published after verified cleanup.
-Only this last layer creates a real process boundary, and it is not automatically selected by SDK
-plugin dispatch or the trial provider. This is partial runtime enforcement, not proof that the full
-declared sandbox control set is deployed.
+command inside an opt-in Docker Linux container with bounded resources and verified cleanup.
+`DockerProcessSource` connects that runner to the existing effect-policy and tape seam, retaining
+validated output in a private per-run quarantine and exposing only a quarantine id and artifact
+metadata to the workload. Docker output uses a byte- and entry-limited tmpfs; only regular files with
+portable relative paths are accepted, each is hashed, and the output directory is atomically
+published after verified cleanup. These layers provide a real process boundary for explicit
+callers, but are not automatically selected by SDK plugin dispatch or the trial provider. This is
+partial runtime enforcement, not proof that the full declared sandbox control set is deployed.
 
 Three categories in that table were discovered rather than planned, each by a crate that read its
 section and refused to pad:

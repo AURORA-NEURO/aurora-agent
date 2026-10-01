@@ -5,6 +5,51 @@ separate API from `ExecutorProvider`: the SDK plugin dispatcher, `SubprocessProv
 `ContainerProvider`, workflow runner, and trial lifecycle do not invoke it. A sandbox declaration
 or a successful simulation therefore does not show that this boundary was used.
 
+`DockerProcessSource` adapts `ProcessSpawn` effects to this runner for callers that explicitly
+construct a `RecordingHost`. The existing effect policy authorizes each request before the source
+is called, and the resulting bounded response is recorded on the `WorldTape` for deterministic
+replay. Configure one source per run with a fixed digest-pinned image, read-only input directory,
+resource limits, and a quarantine root. Each invocation writes to a new private per-run directory.
+The tape and workload receive only the quarantine identifier and artifact metadata; the trusted host
+can use `DockerProcessSource::quarantined_outputs` to locate the retained files. All outputs remain
+in quarantine because this crate does not implement artifact scanning, independent review, or
+release. Other effect kinds are delegated to the source's configured fallback, commonly
+`InProcessWorld`.
+
+```rust
+use bioprism_ids::RunId;
+use bioprism_runtime::{
+    DockerProcessConfig, DockerProcessSource, DockerSandbox, EffectKind, EffectPolicy,
+    InProcessWorld, LinuxPlatform, RecordingHost, SandboxLimits,
+};
+use std::path::PathBuf;
+
+fn configure() -> Result<(), Box<dyn std::error::Error>> {
+let source = DockerProcessSource::new(
+    DockerProcessConfig {
+        image: format!("registry.example/tools/runner@sha256:{}", "a".repeat(64)),
+        platform: LinuxPlatform::Amd64,
+        input_dir: PathBuf::from("/data/task-input"),
+        quarantine_root: PathBuf::from("/data/quarantine"),
+        limits: SandboxLimits::default(),
+    },
+    DockerSandbox::default(),
+    InProcessWorld::new(),
+)?;
+let policy = EffectPolicy::evaluation_default().declaring([EffectKind::ProcessSpawn]);
+let _host = RecordingHost::new(RunId::parse("trial-1")?, source, policy);
+Ok(())
+}
+```
+
+The source bounds each captured stream to at most 1 MiB so a single process result remains
+practical to record on the tape. Quarantine directories use mode `0700` on Unix; Windows applies
+the quarantine root's inherited access-control rules, so operators should create that root with an
+appropriate ACL.
+
+This connects one effect seam; it does not implement the asynchronous `ExecutorProvider` lifecycle
+or make plugin, workflow, or trial plans invoke Docker automatically.
+
 ## Use
 
 The request names an already available Linux image by immutable SHA-256 digest, an absolute
@@ -107,7 +152,8 @@ current user (mode `0600`) and directories are mode `0700`; on Windows the outpu
 parent directory's access-control rules.
 
 This boundary does not provide secret isolation for values embedded in the image, content scanning,
-artifact quarantine, result review, durable provenance, or an automatic policy/approval gate. It is
-not wired into the autonomous agent or trial provider. On a host without a reachable Docker Engine,
+artifact release, independent result review, durable provenance, or an automatic policy/approval
+gate. The explicit `DockerProcessSource` bridge leaves artifacts quarantined, but is not wired into
+the autonomous agent or trial provider. On a host without a reachable Docker Engine,
 `probe` and `run` fail closed; this checkout's Windows Docker Desktop Linux engine was unavailable
 during implementation, so a real-container integration run could not be performed here.

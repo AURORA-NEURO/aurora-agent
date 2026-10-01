@@ -60,6 +60,7 @@
 //! ```
 
 pub mod budget;
+pub mod container_effect;
 pub mod context_compilation_contract;
 pub mod effect;
 pub mod error;
@@ -81,6 +82,9 @@ pub mod workflow_execution;
 
 pub use budget::{
     Accounting, BudgetController, BudgetPlan, BudgetWarning, ChargeStatus, Limit, RuntimeResource,
+};
+pub use container_effect::{
+    DockerProcessConfig, DockerProcessSource, QuarantinedProcessOutput, SandboxCommandRunner,
 };
 pub use context_compilation_contract::{
     capability_manifest as context_compilation_capability_manifest,

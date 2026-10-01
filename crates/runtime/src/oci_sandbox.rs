@@ -122,6 +122,13 @@ pub struct SandboxRequest {
     pub limits: SandboxLimits,
 }
 
+impl SandboxRequest {
+    /// Validate paths, image identity, arguments, and resource limits without starting Docker.
+    pub fn validate(&self) -> Result<(), OciSandboxError> {
+        validate_request(self).map(|_| ())
+    }
+}
+
 /// A bounded result. Captured streams stay in memory; file contents are published only to the
 /// caller's new output path, while this receipt retains their exact path, size, and digest.
 #[derive(Debug, Clone, PartialEq, Eq)]

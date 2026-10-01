@@ -762,15 +762,17 @@ fn engineering_contracts() -> Result<Vec<Entry>, RegisterError> {
 /// positioned*. Both modules ask for controls at a boundary — process isolation, network policy,
 /// scanning, an independent team — and in both cases `bioprism-safety` already states the
 /// workspace's position under a section-13 id. `bioprism-runtime::DockerSandbox` now provides an
-/// opt-in direct-command boundary, but no generic declaration or trial path invokes it, and it
-/// does not implement the remaining scanner, quarantine, secret, or deployment controls.
+/// opt-in direct-command boundary and a policy-controlled `ProcessSpawn` effect adapter with
+/// per-run quarantine, but no generic declaration or trial path invokes them, and they do not
+/// implement artifact scanning, independent review/release, secret, or deployment controls.
 ///
 /// The sandboxing module carries a second verdict and the red-team module does not, and the
 /// difference is real rather than editorial. What is left of the red-team module after the discharge
 /// is a clause the blueprint never defines, so nobody could build it from the specification. What is
 /// left of the sandboxing module is a wider integrated control set: one partial command boundary now
-/// exists, while its declared requirements still lack policy wiring, artifact scanning, quarantine,
-/// and deployment-owned enforcement.
+/// exists, and the explicit process-effect path now carries policy decisions into that boundary and
+/// stores outputs in quarantine. Its declared requirements still lack SDK/provider wiring, artifact
+/// scanning and review/release, secret isolation, and deployment-owned enforcement.
 fn biology_governance() -> Result<Vec<Entry>, RegisterError> {
     let bioethics = |needle: &str, reasoning: &str, classification: Classification| {
         transcribed(
@@ -805,17 +807,21 @@ fn biology_governance() -> Result<Vec<Entry>, RegisterError> {
                      not classify it as work remaining. This register reads its own sentence — that \
                      all thirteen required controls need a process boundary, a network stack or a \
                      scanner — as evidence that the module's controls cross external boundaries. A \
-                     narrow opt-in Docker command runner now exists, but the SDK declaration path \
-                     and trial provider do not invoke it; scanning, quarantine, secret isolation, \
-                     and deployment egress policy remain absent. The second verdict records that \
-                     incomplete integrated control set rather than claiming no container API exists. \
+                     narrow opt-in Docker command runner and a policy-controlled process-effect \
+                     adapter with per-run quarantine now exist, but the SDK declaration path and \
+                     trial provider do not invoke them; scanning, independent review/release, secret \
+                     isolation, and deployment egress policy remain absent. The second verdict \
+                     records that incomplete integrated control set rather than claiming no \
+                     container API exists. \
                      The same crate reports six enforced safeguards and thirty-six declared, and \
                      states that not one of the six defends a perimeter.",
                     Classification::GenuinelyUncovered {
                         standing: UncoveredStanding::real_work_not_done(
-                            "the opt-in Docker command runner is not wired to the SDK declaration \
-                             path or trial provider, and artifact scanning, quarantine, secret \
-                             isolation, and deployment egress policy remain unimplemented; the \
+                            "the opt-in Docker command runner has an explicit policy-controlled \
+                             `ProcessSpawn` effect adapter with per-run quarantine, but is not wired \
+                             to the SDK declaration path or trial provider. Artifact scanning, \
+                             independent review and release, secret isolation, and deployment egress \
+                             policy remain unimplemented; the \
                              module's required control set is therefore incomplete",
                         )?,
                     },

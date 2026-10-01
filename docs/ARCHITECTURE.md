@@ -186,9 +186,11 @@ Signed bundles, signed webhook envelopes, and caller-supplied key-registry polic
 workspace does not own production key custody or deployment trust roots. `DockerSandbox` provides a
 separate opt-in Docker command boundary for a pinned Linux image. It resolves and pins the selected
 local daemon endpoint and refuses remote contexts because bind-mount paths are interpreted by the
-daemon host. It is not wired into the SDK plugin dispatcher or trial `ContainerProvider`. Its
-caller-managed output directory, image review, credential isolation, and deployment policy remain
-explicit responsibilities. See [OCI_SANDBOX.md](OCI_SANDBOX.md).
+daemon host. `DockerProcessSource` can route explicitly policy-authorized `ProcessSpawn` effects
+through that runner and retain outputs in per-run quarantine, but it is not wired into the SDK plugin
+dispatcher or trial `ContainerProvider`. Artifact scanning and independent release review, image
+review, credential isolation, and deployment policy remain explicit responsibilities. See
+[OCI_SANDBOX.md](OCI_SANDBOX.md).
 
 The backend portfolio for FAQ/InsideOut, worst-case-optimal joins, tensor networks, and decision
 diagrams is enumerated in `section::plan::Backend` so plans stay honest about which engine ran, but
