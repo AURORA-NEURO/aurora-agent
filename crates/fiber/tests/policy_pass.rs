@@ -180,7 +180,10 @@ fn a_policy_withheld_fact_is_classified_inaccessible_by_policy_and_not_merged() 
         .find(|g| g.influence == InfluenceClass::InaccessibleByPolicy)
         .expect("the policy group exists");
     assert_eq!(group.examples, vec!["fact.subject_aliases"]);
-    assert_eq!(group.bound, None, "no bound was computed, so none is claimed");
+    assert_eq!(
+        group.bound, None,
+        "no bound was computed, so none is claimed"
+    );
 }
 
 /// The oracle answers `valid`; the certificate refuses to call that answer sufficient.
@@ -210,8 +213,11 @@ fn an_oracle_verdict_reached_without_policy_withheld_evidence_is_not_sufficient(
 #[test]
 fn accepting_more_obligations_releases_more_evidence_and_changes_the_verdict() {
     let world = restricted_world();
-    let permitted = compile(&world, &with_clauses(&["research-only", "no-identifiable-export"]))
-        .expect("compiles");
+    let permitted = compile(
+        &world,
+        &with_clauses(&["research-only", "no-identifiable-export"]),
+    )
+    .expect("compiles");
 
     assert!(permitted.trace.policy.withheld.is_empty());
     assert_eq!(permitted.certificate.selected_facts.len(), 4);
@@ -226,7 +232,10 @@ fn accepting_more_obligations_releases_more_evidence_and_changes_the_verdict() {
 /// 40.25's named `policy conflict` failure, with a firing condition at last.
 #[test]
 fn a_clause_the_corpus_never_granted_is_a_policy_conflict_not_a_silent_grant() {
-    match compile(&restricted_world(), &with_clauses(&["research-only", "commercial-use"])) {
+    match compile(
+        &restricted_world(),
+        &with_clauses(&["research-only", "commercial-use"]),
+    ) {
         Err(FiberError::Policy(PolicyViolation::Conflict { clauses, governing })) => {
             assert_eq!(clauses, vec!["commercial-use"]);
             assert_eq!(governing, vec!["no-identifiable-export", "research-only"]);
@@ -308,7 +317,15 @@ fn a_world_declaring_no_data_policy_records_the_caller_clauses_as_unverified() {
 #[test]
 fn governing_clauses_the_caller_declined_are_named_on_the_trace() {
     let out = compile(&restricted_world(), &restricted_query()).expect("compiles");
-    assert_eq!(out.trace.policy.governing.as_deref(), Some(&["no-identifiable-export".to_string(), "research-only".to_string()][..]));
+    assert_eq!(
+        out.trace.policy.governing.as_deref(),
+        Some(
+            &[
+                "no-identifiable-export".to_string(),
+                "research-only".to_string()
+            ][..]
+        )
+    );
     assert_eq!(out.trace.policy.unaccepted, vec!["no-identifiable-export"]);
     assert!(out.trace.policy.unverified.is_empty());
     assert_eq!(out.trace.policy.requirements_seen, 1);
@@ -410,13 +427,21 @@ fn a_fact_excluded_by_both_policy_and_the_cut_is_reported_as_policy_not_deferred
 
     let out = compile(&world, &variation_query(&["research-only"])).expect("compiles");
     assert_eq!(out.trace.policy.withheld, vec!["fact.restricted"]);
-    assert!(out.certificate.omissions.inaccessible_selected_before_cut.is_empty());
+    assert!(out
+        .certificate
+        .omissions
+        .inaccessible_selected_before_cut
+        .is_empty());
     assert_eq!(
-        out.certificate.manifest.count_in(InfluenceClass::InaccessibleByPolicy),
+        out.certificate
+            .manifest
+            .count_in(InfluenceClass::InaccessibleByPolicy),
         1
     );
     assert_eq!(
-        out.certificate.manifest.count_in(InfluenceClass::DeferredAcquisition),
+        out.certificate
+            .manifest
+            .count_in(InfluenceClass::DeferredAcquisition),
         0
     );
 }
@@ -434,7 +459,10 @@ fn the_policy_screen_withholds_evidence_and_leaves_the_compiled_structure_intact
     );
     assert_eq!(out.certificate.plan.compiled_factor_count, 2);
     assert_eq!(out.certificate.plan.compiled_fact_count, 3);
-    assert!(!out.certificate.selected_facts.contains(&"fact.subject_aliases".to_string()));
+    assert!(!out
+        .certificate
+        .selected_facts
+        .contains(&"fact.subject_aliases".to_string()));
 }
 
 /// Every withheld fact is named twice: once as an obligation, once as a refinement.
@@ -445,8 +473,9 @@ fn a_policy_withheld_fact_is_named_in_an_obligation_and_in_the_refinement_fronti
     assert_eq!(
         out.section.unresolved_obligations,
         vec![UnresolvedObligation::PolicyBlocked {
-            detail: "fact.subject_aliases requires undeclared policy clauses: no-identifiable-export"
-                .into()
+            detail:
+                "fact.subject_aliases requires undeclared policy clauses: no-identifiable-export"
+                    .into()
         }]
     );
     assert!(out.section.requires_refinement());
@@ -482,7 +511,12 @@ fn the_policy_pass_runs_after_the_closure_and_before_the_temporal_cut() {
         ]
     );
 
-    let policy = out.trace.passes.iter().find(|p| p.name == "policy").unwrap();
+    let policy = out
+        .trace
+        .passes
+        .iter()
+        .find(|p| p.name == "policy")
+        .unwrap();
     assert_eq!(policy.retained, 3);
     assert_eq!(
         policy.note,
@@ -518,12 +552,20 @@ fn the_engine_and_the_cpython_reference_agree_on_the_restricted_world_digest() {
 /// nothing.
 #[test]
 fn the_reference_world_declares_no_policy_requirement_so_the_pass_removes_nothing() {
-    let path: PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", "..", "fixtures", "fiber-v0.1"]
-        .iter()
-        .collect();
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "fixtures",
+        "fiber-v0.1",
+    ]
+    .iter()
+    .collect();
     let world = World::from_json(
-        serde_json::from_str(&std::fs::read_to_string(path.join("radiogenomic_world.json")).unwrap())
-            .unwrap(),
+        serde_json::from_str(
+            &std::fs::read_to_string(path.join("radiogenomic_world.json")).unwrap(),
+        )
+        .unwrap(),
     )
     .expect("world loads");
     let query = Query::from_json(
@@ -538,7 +580,12 @@ fn the_reference_world_declares_no_policy_requirement_so_the_pass_removes_nothin
     assert_eq!(out.trace.policy.in_force, vec!["research-only"]);
     assert_eq!(
         out.trace.policy.governing.as_deref(),
-        Some(&["no-identifiable-export".to_string(), "research-only".to_string()][..]),
+        Some(
+            &[
+                "no-identifiable-export".to_string(),
+                "research-only".to_string()
+            ][..]
+        ),
         "the reference query accepts a strict subset of what the corpus grants"
     );
     assert_eq!(out.trace.policy.unaccepted, vec!["no-identifiable-export"]);

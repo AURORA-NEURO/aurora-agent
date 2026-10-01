@@ -79,7 +79,10 @@ fn an_uncostable_region_conforms_to_the_shipped_schemas_without_a_bump() {
 /// A compile that put withheld evidence to the analyser satisfies them too.
 #[test]
 fn a_compile_that_analyses_withheld_evidence_conforms_without_a_bump() {
-    let out = compile_example("deferred_evidence_world.json", "deferred_evidence_query.json");
+    let out = compile_example(
+        "deferred_evidence_world.json",
+        "deferred_evidence_query.json",
+    );
     assert_eq!(
         out.trace.withheld_influence.attempted.len(),
         2,
@@ -149,9 +152,10 @@ fn the_reference_digest_is_unmoved_by_the_portfolio_and_influence_passes() {
     ]
     .iter()
     .collect();
-    let world: Value =
-        serde_json::from_str(&std::fs::read_to_string(path.join("radiogenomic_world.json")).unwrap())
-            .unwrap();
+    let world: Value = serde_json::from_str(
+        &std::fs::read_to_string(path.join("radiogenomic_world.json")).unwrap(),
+    )
+    .unwrap();
     let query: Value =
         serde_json::from_str(&std::fs::read_to_string(path.join("leakage_query.json")).unwrap())
             .unwrap();
