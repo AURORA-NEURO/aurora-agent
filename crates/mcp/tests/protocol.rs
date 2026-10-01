@@ -427,42 +427,42 @@ fn risk_assessment(ratings: Value) -> Value {
 /// A truncated mandatory set is indistinguishable at the point of use from a complete one, so a
 /// budget that cannot hold it must surface as a refusal naming the shortfall — never as a
 /// smaller bundle that still claims to be the route.
-
+///
 /// Both limits here are headroom, not measurements. The mandatory closure of `README.md` under
 /// the normative policy grows whenever the repository's normative documents do — it passed
 /// 30000 estimated tokens when the project-modeling documents landed — so a limit pinned just
 /// above today's closure turns every documentation edit into a failure of this test. The two
 /// refusals the old tight limits covered incidentally are each asserted on their own, above and
 /// below, so the headroom costs no coverage.
-
+///
 /// The disclosure contract: L0 carries the decision and the omissions, never the evidence.
-
+///
 /// The 0.3 decision contract crosses the MCP boundary as an explicit, certificate-bound summary.
-
+///
 /// The 0.4 observed-evidence contract crosses MCP as a full, certificate-bound context audit.
-
+///
 /// The 0.5 adaptive contract crosses MCP as a certificate-bound plan, never as an execution
 /// receipt or authorization claim.
-
+///
 const TRADE_WORLD: &str = "fixtures/domains/trade-surveillance/world.json";
 const TRADE_QUERY: &str = "fixtures/domains/trade-surveillance/query.json";
 const TRADE_DOMAIN: &str = "fixtures/domains/trade-surveillance/domain.json";
 
 /// The domain parameter carries a non-biological world through the same pipeline: the pack's
 /// oracle judges it and the witness is checkable at l2, exactly as a leakage witness would be.
-
+///
 /// A required variable withheld by the temporal cut abstains the verdict: the unjudged world
 /// crosses MCP as underdetermined, never as valid.
-
+///
 /// Without the domain parameter nothing changed: the reference oracle judges, the pinned parity
 /// digest holds, and no domain object appears anywhere in the response.
-
+///
 /// A domain compile's refinement handle carries the pack binding, so descending recompiles under
 /// the same oracle and the certificate digest still verifies.
-
+///
 /// A pack cannot rewrite the query it judges — the certificate binds the query's bytes — so a
 /// missing protected tag or goal is reported as an advisory instead of being injected silently.
-
+///
 const DEMO_PROJECT: &str = "fixtures/projects/demo-app";
 const DEMO_PROJECT_ISSUES: &str = "fixtures/projects/demo-app/issues.json";
 
@@ -470,41 +470,41 @@ const DEMO_PROJECT_ISSUES: &str = "fixtures/projects/demo-app/issues.json";
 /// reason it failed is a checkable object — the dependency's own declaration string — rather
 /// than a readiness score. The pinned dependency must stay out of that set, or the witness
 /// would be naming the tree instead of the defect.
-
+///
 /// An issue's evidence region comes from the components it *declares*, resolved syntactically:
 /// the issue naming `src/lib.rs` gets the src inventory and not the unrelated assets one, and
 /// the issue naming nothing gets the aggregates alone rather than a guessed region. There is no
 /// semantic relevance step behind either result, so both must be visible on the wire.
-
+///
 /// The write is confined to the server root and reports every path it created, so a caller can
 /// check the claim against the filesystem rather than trusting the summary counts.
-
+///
 /// A preview whose file list does not match what confirming actually writes is worse than no
 /// preview, because the caller approves one effect and receives another. So the claim under test
 /// is not "performed is false" but the equality itself: the unconfirmed call names exactly the
 /// paths the confirmed call creates, and creates none of them. Issues are supplied because the
 /// per-issue query documents are the part a preview built from a fixed list would silently omit
 /// — the set of writes depends on the input, so it has to be computed, not assumed.
-
+///
 /// Every path parameter of both project tools is root-confined, on both separators, for
 /// traversal and for absolute paths alike — a project tool must never become a scanner of, or a
 /// writer into, arbitrary directories. The refused write is checked against the filesystem,
 /// because a refusal that still created the directory would be a refusal in name only.
-
+///
 /// Determinism has to survive the whole server surface, not just the library: the same tree
 /// ingested twice must produce the same world bytes, or a certificate over those bytes would
 /// change for reasons no reader could name.
-
+///
 /// `decision_time` reaches the world's scan event and every generated query, so an ungated
 /// malformed value comes back as the *assembled world* failing the reference validator — a
 /// message that blames the emitter for a string only the caller can edit. The refusal has to
 /// name the parameter instead.
-
+///
 /// An issue whose every declaration resolved to nothing compiles to the same region as an issue
 /// that declared nothing at all. Without the declarations on the wire a reader takes the second
 /// reading — the one that looks deliberate — so the two must be distinguishable in the response
 /// itself, not only inside the world document the response does not carry.
-
+///
 /// Writes a `bioprism-repair-declarations/0.1` document under the server root and returns the
 /// root-relative path `repair_plan` takes.
 fn write_repair_declarations(directory: &str, document: Value) -> String {
@@ -543,37 +543,37 @@ fn plan_demo_issue_one(server: &mut Server, out: &str, extra: &[(&str, Value)]) 
 /// comes back for an unrepaired tree says so: `not_met`, with the release check that fired when
 /// the plan was made still firing. A tool that congratulated the tree here would be the exact lie
 /// this surface exists to refuse.
-
+///
 /// A plan is bound to the world it was planned from, and a world that is not that world gets no
 /// verdict at all — not a verdict with a flag beside it, because a reader offered both takes the
 /// verdict and skips the flag. So the claim is the absence: no outcome, no item list, nothing
 /// evaluated. The two worlds are made to differ by scanning a genuinely different tree, so a
 /// passing run cannot mean the comparison was vacuous.
-
+///
 /// A preview whose file list does not match what confirming actually writes is worse than no
 /// preview, because the caller approves one effect and receives another. The claim under test is
 /// the equality itself, and the bytes: the confirmed write must be the plan document the preview
 /// already carried, not a second plan derived on a second pass.
-
+///
 /// Every path parameter of both repair tools is root-confined, on both separators, for traversal
 /// and for absolute paths alike — planning a repair must never become a way to read a criteria or
 /// plan document from, or write a plan into, an arbitrary directory. The refused write is checked
 /// against the filesystem, because a refusal that still created the file would be a refusal in
 /// name only.
-
+///
 /// A criterion the caller declared and a criterion the generator inferred carry different
 /// authority, so the wire must keep them apart — and a criterion whose variable the world does not
 /// carry must arrive as `not_evaluable` naming the obstruction, never as a failure. Both claims
 /// are checked over one plan, because it is the mixture that a tool folding the third value into
 /// the second would report as an ordinary `not_met`.
-
+///
 /// Three named refusals rather than one generic one, because the operator's next action differs.
 /// A `issue` naming something the declarations do not carry is a parameter to fix, and the refusal
 /// names the ids that are declared. An absent `issues` is a missing parameter, not an issue that
 /// does not exist. A declarations document with a misspelled key is a document to fix, and
 /// silently ignoring the key would produce a plan whose missing falsifier the author would then be
 /// blamed for.
-
+///
 fn routing_fingerprint_fixture() -> Fingerprint {
     Fingerprint {
         facts: 10,
