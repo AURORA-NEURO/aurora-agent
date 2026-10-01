@@ -401,9 +401,8 @@ pub fn negotiate_typed_determinism(
             && approval_required_order.is_empty())
     {
         "blocked"
-    } else if accepted_order.is_empty() && migrated_order.is_empty() {
-        "unresolved"
-    } else if !approval_required_order.is_empty()
+    } else if (accepted_order.is_empty() && migrated_order.is_empty())
+        || !approval_required_order.is_empty()
         || !incompatible_order.is_empty()
         || !blocked_order.is_empty()
     {

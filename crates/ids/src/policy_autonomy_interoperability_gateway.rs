@@ -298,7 +298,7 @@ pub fn admit_policy_autonomy(
             scope_mismatch.insert(id.clone());
             denied.insert(id.clone());
             omissions.insert(format!("{id}:scope-mismatch"));
-        } else if actor.authority == "" {
+        } else if actor.authority.is_empty() {
             missing_authority.insert(id.clone());
             approval_required.insert(id.clone());
             uncertainty.insert(format!("{id}:authority-missing"));
@@ -350,7 +350,7 @@ pub fn admit_policy_autonomy(
         "blocked"
     } else if !approval_order.is_empty()
         || !denied_order.is_empty()
-        || denied_action_order.len() > 0
+        || !denied_action_order.is_empty()
     {
         "unresolved"
     } else {

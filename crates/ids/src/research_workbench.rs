@@ -339,13 +339,13 @@ pub fn compile_research_workbench(
         .required_studies
         .iter()
         .filter(|s| !present.iter().any(|p| p.starts_with(&format!("{s}:"))))
-        .map(|s| s.clone())
+        .cloned()
         .collect::<BTreeSet<_>>();
     let missing_modalities = r
         .required_modalities
         .iter()
         .filter(|m| !present.iter().any(|p| p.ends_with(&format!(":{m}"))))
-        .map(|m| m.clone())
+        .cloned()
         .collect::<BTreeSet<_>>();
     if !missing_studies.is_empty() {
         uncertainty.insert("closure:study".into());

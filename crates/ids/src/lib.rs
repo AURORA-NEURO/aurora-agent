@@ -6,8 +6,6 @@
 //! Implements blueprint 40.05 (canonical identifiers and hashes) and supplies the hashing
 //! primitive that 43.26 (Context Certificate) requires to be replayable across languages.
 
-#![allow(clippy::all)]
-
 pub mod adversarial_recovery_workbench;
 pub mod bounded_evolution_control_plane;
 pub mod canonical;
