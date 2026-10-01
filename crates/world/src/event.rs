@@ -28,8 +28,10 @@ impl CausalEvent {
         let raw_id = required_str(map, "id", "event")?;
         let subject = format!("event {raw_id}");
 
-        let id = EventId::parse(raw_id.clone())
-            .map_err(|e| WorldError::Identifier { subject: subject.clone(), message: e.to_string() })?;
+        let id = EventId::parse(raw_id.clone()).map_err(|e| WorldError::Identifier {
+            subject: subject.clone(),
+            message: e.to_string(),
+        })?;
 
         let timestamp = |field: &'static str| -> Result<Timestamp, WorldError> {
             let text = required_str(map, field, &subject)?;

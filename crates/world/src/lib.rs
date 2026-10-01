@@ -8,8 +8,6 @@
 //! *which* of these objects a query needs belongs to the compiler, so that the world can be
 //! shared unchanged across queries, roles and policies.
 
-#![allow(clippy::all)]
-
 pub mod causal_integrity_support;
 pub mod error;
 pub mod event;

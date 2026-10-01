@@ -7,7 +7,10 @@
 use crate::error::WorldError;
 use serde_json::{Map, Value};
 
-pub(crate) fn object<'a>(value: &'a Value, subject: &str) -> Result<&'a Map<String, Value>, WorldError> {
+pub(crate) fn object<'a>(
+    value: &'a Value,
+    subject: &str,
+) -> Result<&'a Map<String, Value>, WorldError> {
     value.as_object().ok_or_else(|| WorldError::WrongType {
         field: "<root>",
         subject: subject.to_string(),
@@ -51,11 +54,13 @@ pub(crate) fn string_list(
         Some(Value::Array(items)) => items
             .iter()
             .map(|item| {
-                item.as_str().map(str::to_string).ok_or(WorldError::WrongType {
-                    field,
-                    subject: subject.to_string(),
-                    expected: "array of strings",
-                })
+                item.as_str()
+                    .map(str::to_string)
+                    .ok_or(WorldError::WrongType {
+                        field,
+                        subject: subject.to_string(),
+                        expected: "array of strings",
+                    })
             })
             .collect(),
         Some(_) => Err(WorldError::WrongType {

@@ -35,8 +35,10 @@ impl Factor {
         let raw_id = required_str(map, "id", "factor")?;
         let subject = format!("factor {raw_id}");
 
-        let id = FactorId::parse(raw_id.clone())
-            .map_err(|e| WorldError::Identifier { subject: subject.clone(), message: e.to_string() })?;
+        let id = FactorId::parse(raw_id.clone()).map_err(|e| WorldError::Identifier {
+            subject: subject.clone(),
+            message: e.to_string(),
+        })?;
 
         let parse_vars = |names: Vec<String>| -> Result<Vec<VariableName>, WorldError> {
             names
@@ -53,8 +55,10 @@ impl Factor {
         let scope = match map.get("scope") {
             None | Some(Value::Null) => None,
             Some(raw) => Some(
-                ScopeKey::from_json(raw)
-                    .map_err(|source| WorldError::Scope { subject: subject.clone(), source })?,
+                ScopeKey::from_json(raw).map_err(|source| WorldError::Scope {
+                    subject: subject.clone(),
+                    source,
+                })?,
             ),
         };
 
