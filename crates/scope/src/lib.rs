@@ -15,8 +15,6 @@
 //! - Execution of cross-scope data transfer. This crate validates scope relationships and records
 //!   declared information loss; adapters own any actual data transformation.
 
-#![allow(clippy::all)]
-
 pub mod class;
 pub mod error;
 pub mod federated_commons_interoperability_gateway;
