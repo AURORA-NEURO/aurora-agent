@@ -263,12 +263,11 @@ pub fn measure() -> Result<ReferenceMeasurement, InfluenceError> {
         });
     }
 
-    let valued = region
-        .clone()
-        .with_uniform_tables()
-        .map_err(|source| InfluenceError::PerturbedRegionRejected {
+    let valued = region.clone().with_uniform_tables().map_err(|source| {
+        InfluenceError::PerturbedRegionRejected {
             message: source.to_string(),
-        })?;
+        }
+    })?;
     let mut uniform_valuation = Vec::new();
     for factor in valued.factors() {
         uniform_valuation.push(FactorFinding {

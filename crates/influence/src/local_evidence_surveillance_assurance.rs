@@ -176,8 +176,9 @@ impl InfluenceQualifiedEvidenceSet {
 
     pub fn digest(&self) -> Result<ContentHash, InfluenceEvidenceSurveillanceError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| InfluenceEvidenceSurveillanceError::Serialization(error.to_string()))?;
+        let value = serde_json::to_value(self).map_err(|error| {
+            InfluenceEvidenceSurveillanceError::Serialization(error.to_string())
+        })?;
         ContentHash::of_value(&value)
             .map_err(|error| InfluenceEvidenceSurveillanceError::Serialization(error.to_string()))
     }
@@ -341,7 +342,10 @@ pub fn assure_local_evidence_surveillance(
         };
     let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_id": request.study_id, "scope": request.scope, "disposition": disposition, "candidate_order": candidate_order, "qualified_order": qualified, "blocked_order": blocked, "unknown_order": unknown, "source_order": sources, "modality_order": modalities, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
-        format!("influence-local-evidence-surveillance-assurance:{}", request.request_id),
+        format!(
+            "influence-local-evidence-surveillance-assurance:{}",
+            request.request_id
+        ),
         "application/vnd.aurora.qualified-evidence-set+json",
         &payload,
         Vec::new(),
@@ -387,7 +391,9 @@ pub fn assure_local_evidence_surveillance(
     Ok(receipt)
 }
 
-fn validate_request(request: &InfluenceEvidenceFeedRequest) -> Result<(), InfluenceEvidenceSurveillanceError> {
+fn validate_request(
+    request: &InfluenceEvidenceFeedRequest,
+) -> Result<(), InfluenceEvidenceSurveillanceError> {
     if request.request_id.trim().is_empty()
         || request.study_id.trim().is_empty()
         || request.scope.trim().is_empty()

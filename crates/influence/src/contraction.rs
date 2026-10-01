@@ -223,7 +223,7 @@ pub fn detect(region: &QueryRegion) -> Result<ChainStructure, UnknownReason> {
             region.variable_count()
         )));
     }
-    if variables.last() != Some(&terminal) {
+    if variables.last() != Some(terminal) {
         return Err(outside(format!(
             "the path ends at {:?} but the free variable is {terminal:?}",
             variables.last()
