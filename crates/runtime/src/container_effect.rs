@@ -550,3 +550,259 @@ fn source_failure(request: impl ToString, reason: impl ToString) -> RuntimeError
         reason: reason.to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DockerProcessConfig, DockerProcessSource, QuarantinedProcessOutput, SandboxCommandRunner,
+    };
+    use crate::effect::{DecisionOutcome, EffectKind, EffectPolicy, EffectRequest};
+    use crate::error::RuntimeError;
+    use crate::host::{EffectSource, Host, RecordingHost, ReplayHost};
+    use crate::oci_sandbox::{
+        DockerArtifact, LinuxPlatform, OciSandboxError, SandboxLimits, SandboxRequest,
+        SandboxRunResult,
+    };
+    use crate::sandbox::InProcessWorld;
+    use bioprism_ids::{ContentHash, RunId};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    static TEST_DIRECTORY_COUNTER: AtomicU64 = AtomicU64::new(0);
+    const ARTIFACT: &[u8] = b"quarantined artifact";
+
+    #[derive(Clone)]
+    struct FakeRunner {
+        calls: Arc<AtomicUsize>,
+        valid_artifact_metadata: bool,
+    }
+
+    impl FakeRunner {
+        fn new(valid_artifact_metadata: bool) -> Self {
+            FakeRunner {
+                calls: Arc::new(AtomicUsize::new(0)),
+                valid_artifact_metadata,
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl SandboxCommandRunner for FakeRunner {
+        fn run(&self, request: &SandboxRequest) -> Result<SandboxRunResult, OciSandboxError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            fs::create_dir(&request.output_dir).expect("test output directory is new");
+            fs::write(request.output_dir.join("result.txt"), ARTIFACT)
+                .expect("test artifact is writable");
+            Ok(SandboxRunResult {
+                container_id: Some("fake-container".into()),
+                exit_code: Some(0),
+                timed_out: false,
+                output_limit_exceeded: false,
+                cleanup_verified: true,
+                stdout: b"completed".to_vec(),
+                stderr: Vec::new(),
+                artifacts: vec![DockerArtifact {
+                    path: "result.txt".into(),
+                    bytes: ARTIFACT.len() as u64,
+                    sha256: if self.valid_artifact_metadata {
+                        ContentHash::of_bytes(ARTIFACT).to_string()
+                    } else {
+                        "sha256-invalid".into()
+                    },
+                }],
+            })
+        }
+    }
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let root = std::env::temp_dir()
+                .canonicalize()
+                .expect("system temporary directory resolves");
+            for _ in 0..128 {
+                let sequence = TEST_DIRECTORY_COUNTER.fetch_add(1, Ordering::Relaxed);
+                let path = root.join(format!(
+                    "aurora-runtime-container-effect-{}-{sequence}",
+                    std::process::id()
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return TestDirectory(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("create test directory: {error}"),
+                }
+            }
+            panic!("allocate unique test directory")
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let Ok(root) = std::env::temp_dir().canonicalize() else {
+                return;
+            };
+            let Ok(path) = self.0.canonicalize() else {
+                return;
+            };
+            if path != root && path.starts_with(&root) {
+                let _ = fs::remove_dir_all(path);
+            }
+        }
+    }
+
+    fn config(input_dir: &Path, quarantine_root: &Path) -> DockerProcessConfig {
+        DockerProcessConfig {
+            image: format!("registry.example/tools/runner@sha256:{}", "a".repeat(64)),
+            platform: LinuxPlatform::Amd64,
+            input_dir: input_dir.to_path_buf(),
+            quarantine_root: quarantine_root.to_path_buf(),
+            limits: SandboxLimits::default(),
+        }
+    }
+
+    fn process_request() -> EffectRequest {
+        EffectRequest::ProcessSpawn {
+            program: "/usr/bin/runner".into(),
+            args: vec!["--input".into(), "/aurora/input/task.json".into()],
+        }
+    }
+
+    fn test_source(
+        directory: &TestDirectory,
+        runner: FakeRunner,
+    ) -> DockerProcessSource<FakeRunner, InProcessWorld> {
+        let input = directory.path().join("input");
+        let quarantine = directory.path().join("quarantine");
+        fs::create_dir(&input).expect("input directory is new");
+        DockerProcessSource::new(config(&input, &quarantine), runner, InProcessWorld::new())
+            .expect("sandbox source configuration is valid")
+    }
+
+    #[test]
+    fn effect_policy_denial_stops_before_the_container_runner() {
+        let directory = TestDirectory::new();
+        let runner = FakeRunner::new(true);
+        let source = test_source(&directory, runner.clone());
+        let mut host = RecordingHost::new(
+            RunId::parse("policy-denial").expect("run id is valid"),
+            source,
+            EffectPolicy::evaluation_default(),
+        );
+
+        let error = host
+            .perform(process_request())
+            .expect_err("undeclared process execution is refused");
+
+        assert!(matches!(
+            error,
+            RuntimeError::UndeclaredEffect {
+                kind: EffectKind::ProcessSpawn
+            }
+        ));
+        assert_eq!(runner.calls(), 0);
+        assert!(matches!(
+            host.journal()[0].outcome,
+            DecisionOutcome::Denied { .. }
+        ));
+    }
+
+    #[test]
+    fn recorded_process_result_replays_without_a_second_runner_call() {
+        let directory = TestDirectory::new();
+        let runner = FakeRunner::new(true);
+        let source = test_source(&directory, runner.clone());
+        let policy = EffectPolicy::evaluation_default().declaring([EffectKind::ProcessSpawn]);
+        let request = process_request();
+        let mut recording = RecordingHost::new(
+            RunId::parse("process-replay").expect("run id is valid"),
+            source,
+            policy,
+        );
+
+        let recorded = recording
+            .perform(request.clone())
+            .expect("authorized request reaches fake runner");
+        let (tape, source, decisions, _) = recording.into_parts();
+        let quarantine: &QuarantinedProcessOutput = &source.quarantined_outputs()[0];
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(quarantine.artifacts.len(), 1);
+        assert!(quarantine.failure.is_none());
+        assert_eq!(
+            fs::read(quarantine.directory.join("output/result.txt"))
+                .expect("output is retained in quarantine"),
+            ARTIFACT
+        );
+        assert_eq!(recorded.text("stdout"), Some("completed"));
+        assert_eq!(runner.calls(), 1);
+
+        let mut replay = ReplayHost::new(tape);
+        let replayed = replay
+            .perform(request)
+            .expect("recorded process effect replays from tape");
+
+        assert_eq!(replayed, recorded);
+        assert_eq!(runner.calls(), 1);
+        assert!(replay.finish().is_ok());
+    }
+
+    #[test]
+    fn non_process_effects_use_the_configured_deterministic_fallback() {
+        let directory = TestDirectory::new();
+        let runner = FakeRunner::new(true);
+        let mut source = test_source(&directory, runner.clone());
+
+        let result = source
+            .perform(&EffectRequest::ClockNow)
+            .expect("clock request is handled by InProcessWorld");
+
+        assert_eq!(result.integer("task_millis"), Some(0));
+        assert_eq!(runner.calls(), 0);
+    }
+
+    #[test]
+    fn artifact_metadata_mismatch_is_refused_and_left_in_quarantine() {
+        let directory = TestDirectory::new();
+        let mut source = test_source(&directory, FakeRunner::new(false));
+
+        let error = source
+            .perform(&process_request())
+            .expect_err("unverified artifact metadata is refused");
+
+        assert!(matches!(error, RuntimeError::SourceFailure { .. }));
+        let quarantine = &source.quarantined_outputs()[0];
+        assert!(quarantine.failure.is_some());
+        assert!(quarantine.artifacts.is_empty());
+        assert_eq!(
+            fs::read(quarantine.directory.join("output/result.txt"))
+                .expect("failed output remains available to the host operator"),
+            ARTIFACT
+        );
+    }
+
+    #[test]
+    fn quarantine_nested_in_input_is_rejected_before_creating_anything() {
+        let directory = TestDirectory::new();
+        let input = directory.path().join("input");
+        let nested_quarantine = input.join("generated/quarantine");
+        fs::create_dir(&input).expect("input directory is new");
+
+        let result = DockerProcessSource::new(
+            config(&input, &nested_quarantine),
+            FakeRunner::new(true),
+            InProcessWorld::new(),
+        );
+
+        assert!(result.is_err());
+        assert!(!input.join("generated").exists());
+    }
+}
