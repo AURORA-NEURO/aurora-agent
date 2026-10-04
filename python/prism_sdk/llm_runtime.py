@@ -39,7 +39,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 from urllib.parse import urlsplit
 
-from .authoring import content_digest
+from .authoring import MAX_SAFE_JSON_INTEGER, content_digest
 from .autonomous_cost_budget import AutonomousCostReservationCallback
 
 if TYPE_CHECKING:
@@ -2545,13 +2545,13 @@ def _runtime_health_identifier(name: str, value: Any, *, max_bytes: int, provide
 
 
 def _runtime_health_count(name: str, value: Any) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 2**53 - 1:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > MAX_SAFE_JSON_INTEGER:
         raise ProviderError(f"{name} is outside its bounded health contract")
     return value
 
 
 def _runtime_health_metric(name: str, value: Any) -> int | float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0 or value > 2**53 - 1:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0 or value > MAX_SAFE_JSON_INTEGER:
         raise ProviderError(f"{name} is outside its bounded health contract")
     return value
 

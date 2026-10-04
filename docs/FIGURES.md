@@ -43,9 +43,14 @@ Detection classifies a document region into one of eight kinds:
 | `sweep-table` | `seed` and a `cells` array | 1 |
 | `mutation-diversity` | `instances`, `parents`, `families`, `signatures`, `equivalence_classes`, `inflation_ratio`, `caveat` | 1 |
 | `mutation-family` | `parent_id`, `parent_sha256`, `accepted`, `rejected`, `duplicates` | 0 |
-| `autopilot-report` | schema `bioprism-autopilot/report/0.1`, or `final_status`, `base_mission_id`, `attempts` and a `totals` block | 1 |
+| `autopilot-report` | schema `bioprism-autopilot/report/0.7`, `/0.6`, `/0.5`, `/0.4`, `/0.3`, `/0.2`, or legacy `/0.1`, or `final_status`, `base_mission_id`, `attempts` and a `totals` block | 1 |
 | `research-dossier` | schema `bioprism-research/dossier/0.1` | container |
 | `cli-envelope` | a boolean `ok` | container |
+
+The Autopilot Drive figure accepts `paused` and `outcome_unknown` reports as well as other terminal
+statuses. It labels a continuation boundary or an unknown mission outcome without interpreting
+either as mission completion, and distinguishes an invalid retained report from an undelivered
+dispatch.
 
 `mutation-family` is in that table on purpose. It is a document this workspace produces, it is
 recognised, and there is no renderer for it: the crate draws *effective diversity*, which is the

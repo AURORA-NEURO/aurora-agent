@@ -212,9 +212,7 @@ impl ContextCompilationAssuranceReceipt {
     }
     pub fn digest(&self) -> Result<ContentHash, ContextCompilationAssuranceError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|e| ContextCompilationAssuranceError::Artifact(e.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|e| ContextCompilationAssuranceError::Artifact(e.to_string()))
     }
 }

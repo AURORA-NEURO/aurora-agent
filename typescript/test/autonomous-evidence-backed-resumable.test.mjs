@@ -1086,6 +1086,43 @@ test("model failover receipts capture each distinct request-bound provider key",
   assert.equal(result.run.checkpoint.provider_dispatch_count, 2);
 });
 
+test("fallback transport never runs when its dispatch receipt checkpoint cannot commit", async () => {
+  const { state, store } = recordingCheckpointStore();
+  const { agent, registry, calls } = await setup({
+    providerOptions: { maxAttempts: 1 },
+    providerResponse: (_body, _call, url) => url.startsWith("https://resumable-provider.test")
+      ? jsonResponse({ error: "fail over" }, 503)
+      : { choices: [{ message: { role: "assistant", content: "must not reach fallback" }, finish_reason: "stop" }] },
+  });
+  const stableModel = { ...model(), provider: "resumable-stable", model: "resumable-stable-model", quality: 0.5 };
+  agent.llm.registerProvider(openaiCompatibleProvider("resumable-stable", "https://resumable-stable.test", { requiresCredential: false, maxAttempts: 1 }));
+  agent.registerModel(stableModel);
+  let dispatchCommits = 0;
+  const persistence = {
+    ...store,
+    writeDispatchIfUnchanged: (expected, checkpoint, receipt) => {
+      dispatchCommits += 1;
+      if (checkpoint.provider_dispatch_count === 2) return false;
+      return store.writeDispatchIfUnchanged(expected, checkpoint, receipt);
+    },
+  };
+  const controller = new AutonomousEvidenceBackedController(agent, "fallback-receipt-commit-failure-job", persistence);
+  const options = await optionsFor(agent, registry, "coding", new InMemoryAutonomousEvidenceRuntimeJournal(), {
+    run: { candidates: [model(), stableModel], maxProviderFailovers: 1 },
+  });
+  await assert.rejects(
+    () => controller.run("Refuse the fallback provider before transport if its receipt cannot commit.", options),
+    /dispatch transaction.*reload required/,
+  );
+  assert.equal(dispatchCommits, 2);
+  assert.equal(calls.provider, 1);
+  assert.deepEqual(calls.providerUrls, ["https://resumable-provider.test/v1/chat/completions"]);
+  assert.equal(state.dispatchReceipts.length, 1);
+  assert.equal(state.current.status, "provider_in_flight");
+  assert.equal(state.current.provider_dispatch_count, 1);
+  assert.equal(state.current.provider_dispatch_head_digest, state.dispatchReceipts[0].projection.receipt_digest);
+});
+
 test("nontransactional persistence and a losing CAS refuse provider dispatch", async () => {
   {
     const { agent, registry, calls } = await setup();

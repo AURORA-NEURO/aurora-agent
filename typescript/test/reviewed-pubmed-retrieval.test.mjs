@@ -10,6 +10,8 @@ import {
   REVIEWED_PUBMED_HOST,
   REVIEWED_PUBMED_RETRIEVAL_RECEIPT_SCHEMA,
   AutonomousEvidenceAdapterRegistry,
+  ReviewedNcbiGeneRetrievalAdapter,
+  ReviewedNcbiGeneRetrievalConfig,
   ReviewedPubMedRetrievalAdapter,
   ReviewedPubMedRetrievalConfig,
   ReviewedPubMedRetrievalError,
@@ -473,4 +475,34 @@ test("fixed specialty catalogue and endpoint arrays cannot be mutated", () => {
   assert.equal(Object.isFrozen(REVIEWED_PUBMED_ENDPOINTS), true);
   assert.throws(() => { PUBMED_SPECIALTY_LANES.glioma = "malicious"; }, TypeError);
   assert.throws(() => { REVIEWED_PUBMED_ENDPOINTS.push("evil.fcgi"); }, TypeError);
+});
+
+test("PubMed and Gene dispatches share one runtime rate limiter", async () => {
+  const dispatchTimes = [];
+  const pubmed = fixtureAdapter({ onFetch: () => { dispatchTimes.push(performance.now()); } });
+  const geneConfig = new ReviewedNcbiGeneRetrievalConfig({ geneSymbols: ["IDH1", "MGMT"], ...CUSTOM_TRANSPORT });
+  const gene = new ReviewedNcbiGeneRetrievalAdapter(geneConfig, {
+    fetch: () => {
+      dispatchTimes.push(performance.now());
+      return JSON.stringify({
+        header: { type: "esummary", version: "0.3" },
+        result: {
+          uids: ["3417", "4255"],
+          "3417": { uid: "3417", name: "IDH1", description: "IDH1", chromosome: "2", organism: { taxid: 9606 } },
+          "4255": { uid: "4255", name: "MGMT", description: "MGMT", chromosome: "10", organism: { taxid: 9606 } },
+        },
+      });
+    },
+  });
+
+  await Promise.all([
+    pubmed.adapter.execute(pubmed.adapter.prepare(), { approveSourceDispatch: true, retrievedAt: RETRIEVED_AT }),
+    gene.execute(gene.prepare(), { approveSourceDispatch: true, retrievedAt: RETRIEVED_AT }),
+  ]);
+
+  const ordered = dispatchTimes.sort((left, right) => left - right);
+  assert.equal(ordered.length, 4);
+  for (let index = 1; index < ordered.length; index += 1) {
+    assert.ok(ordered[index] - ordered[index - 1] >= 300, "all reviewed NCBI calls share the 340 ms slot spacing");
+  }
 });

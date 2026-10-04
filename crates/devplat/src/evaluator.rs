@@ -670,7 +670,6 @@ impl MissionEvaluatorCatalogue {
                 row["binding_posture"] = json!("ready");
                 row["proposed_binding"] = json!({
                     "id": selection.id,
-                    "claim_id": selection.claim_id,
                     "adapter_id": selection.adapter_id,
                     "domain": selection.domain,
                     "step_id": selection.step_id,

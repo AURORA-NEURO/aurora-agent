@@ -10,7 +10,7 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 238 callable tools. That count is intentionally
+The MCP integration layer currently exposes 983 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
@@ -501,6 +501,12 @@ planner: affected domains and claim-linked capabilities receive bounded, digest-
 boosts, unmatched actions remain counted, and ready assessments produce an explicit no-action
 result. This closes the metadata-only planning handoff without dispatching sources or turning a
 proposal into authorization.
+The reviewed execution return path now also has `settle_claim_integrity_acquisition` /
+`settleClaimIntegrityAcquisition`: it validates the exact binding-to-receipt-to-accepted-evaluator
+chain, restricts new evidence to claims covered by each selected candidate's integrity actions,
+requires a deployment-owned evidence authority to verify claim-level evidence, records both receipt
+chains, and creates the next assessment generation. The SDK binds the authority's receipt but does
+not supply its trust roots or claim-quality policy.
 The typed `BioAtlasPublicationAuditReport` and TypeScript `BioAtlasPublicationAuditResult` then
 preserve the next publication boundary: atlas aggregation, evidence-conditioned numeric scores,
 card disclosure, leaderboard ranking, ranked/unranked counts, and explicit target blockers remain
@@ -538,34 +544,41 @@ prose from the uncovered list before counting, which is why its figure was the c
 along. 702 + 57 = 759 now reconciles.
 
 
-Coverage is **93.7%** — 711 of 759 code-bearing modules. The remaining **48 are enumerated in
+Coverage is **94.2%** — 715 of 759 code-bearing modules. The remaining **44 are enumerated in
 `docs/BACKLOG.md` and explained in `crates/residue`**, which holds one typed verdict per module
 saying why no crate implements it, anchored to a sentence a classifying crate actually wrote. Its
 reconciliation against the backlog is a test, so the two cannot drift apart silently.
 
-The primary distribution over the 48: **37 process, 4 foreign artifact, 7 discharged elsewhere,
+The primary distribution over the 44: **35 process, 2 foreign artifact, 7 discharged elsewhere,
 and 0 genuinely uncovered.** One module still carries work on a secondary reading. `crates/bioethics`
-discharges §36's sandboxing module and in the same paragraph records that all thirteen of its
-required controls need a process boundary, a network stack or a scanner, none of which exists here
-— so the register carries a second verdict saying the control exists nowhere. A report hiding that
-secondary work because the primary bucket is discharged would be the flattering answer, and this
-file's own rule forbids it.
+discharges §36's sandboxing module; the residue register separately records that its thirteen
+controls remain incomplete. `bioprism-runtime::DockerSandbox` offers a bounded, opt-in command
+boundary, and `DockerProcessSource` now routes explicitly authorized recorded process effects
+through it and retains outputs in per-run quarantine. The SDK declaration path and trial provider do
+not invoke this adapter. Scanning, independent review and release, secret isolation, and deployment
+egress policy remain absent. The secondary verdict describes that missing integrated control set
+rather than claiming no container API exists.
 
-The sandbox surface now has both halves of its in-repository contract: `sandbox_admission_audit`
-checks whether a declaration is eligible, while `sandbox_runtime_simulate` evaluates an ordered
-bounded trace against that declaration and preserves exact resource charges, refusals, and
-not-run suffixes. This closes the deterministic policy/simulation artifact, not the external
-enforcement claim: no kernel/container launcher, syscall filter, namespace, cgroup, credential
-boundary, network appliance, quarantine store, or process execution is present in this repository.
+The sandbox surface has four distinct layers: `sandbox_admission_audit` checks whether a declaration
+is eligible; `sandbox_runtime_simulate` evaluates an ordered bounded trace against it and preserves
+exact resource charges, refusals, and not-run suffixes; and `DockerSandbox` can execute a direct
+command inside an opt-in Docker Linux container with bounded resources and verified cleanup.
+`DockerProcessSource` connects that runner to the existing effect-policy and tape seam, retaining
+validated output in a private per-run quarantine and exposing only a quarantine id and artifact
+metadata to the workload. Docker output uses a byte- and entry-limited tmpfs; only regular files with
+portable relative paths are accepted, each is hashed, and the output directory is atomically
+published after verified cleanup. These layers provide a real process boundary for explicit
+callers, but are not automatically selected by SDK plugin dispatch or the trial provider. This is
+partial runtime enforcement, not proof that the full declared sandbox control set is deployed.
 
 Three categories in that table were discovered rather than planned, each by a crate that read its
 section and refused to pad:
 
 - **Process** — describes what people do. `crates/stewardship` found 12 of §14's 18.
-- **Foreign artifact** — code-bearing, precise, testable, and not Rust and not in this repository.
-  `crates/devplat` now finds 3 of 20 in §11 and §19: the two GitHub Action modules and the full
-  Python SDK surface. The TypeScript gateway and Python pack/oracle/evaluation authoring clients
-  are now in this repository over authoritative Rust contracts.
+- **Foreign artifact** — a complete blueprint surface remains outside this repository.
+  `crates/devplat` now finds 2 of 20 in §11 and §19: hosted consumer CI execution and the full
+  Python SDK surface. The reusable composite action, TypeScript gateway, and Python
+  pack/oracle/evaluation authoring clients are in this repository over authoritative contracts.
 - **Discharged elsewhere** — the content exists under a different section's id. **11 verdicts name
   their own author as the discharger**, a crate that built the capability without ever citing the
   module, which a token scan structurally cannot see.
@@ -604,13 +617,13 @@ state is a backlog whose residue is explained rather than empty.
 | total content modules | 973 |
 | programme / prose modules | 214 |
 | **code-bearing modules** | **759** |
-| cited | 711 |
-| **code-bearing coverage** | **93.7%** |
+| cited | 715 |
+| **code-bearing coverage** | **94.2%** |
 
 ## Per section
 
 Worst-covered code-bearing sections first. **This table is a snapshot from an earlier batch and is
-now stale** — headline coverage has moved from 40.6% to 93.7% since it was taken. Regenerate with
+now stale** — headline coverage has moved from 40.6% to 94.2% since it was taken. Regenerate with
 `tools/coverage.sh` rather than trusting the rows below for anything load-bearing; they are kept
 because the *shape* they show is still the argument, and the shape has not changed.
 
@@ -701,7 +714,8 @@ repetitive; one is not, and the exception matters more than the average.
 | 12 | — | ~15 per 100-line file |
 | 11 | — | 18 unique in a 93-line module, frontmatter and title included |
 
-**§23 is the exception and it is a real one.** Measured three ways over all 48 modules: 16.2% of
+**§23 is the exception and it is a real one.** Measured three ways over the 48-module source
+snapshot used for this analysis: 16.2% of
 lines appear in more than one module, 51.2% by the rare-term method used for §28, and only 11.6% of
 802 headings recur verbatim. It is the most content-dense section in the blueprint, and its
 repetition is *shape* — frontmatter, Purpose, a taxonomy list, a pseudo-code fence, evaluation hooks

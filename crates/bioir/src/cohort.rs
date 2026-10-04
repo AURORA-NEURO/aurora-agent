@@ -77,7 +77,9 @@ pub enum UnitOfAnalysis {
     Lesion,
     /// One measurement occasion; the unit under which repeated measures are rows, not columns.
     Observation,
-    Custom { label: String },
+    Custom {
+        label: String,
+    },
 }
 
 impl fmt::Display for UnitOfAnalysis {
@@ -101,7 +103,9 @@ pub enum SplitUnit {
     Site,
     Observation,
     /// Any declared record attribute: a batch id, a scanner, a collection year.
-    Attribute { key: String },
+    Attribute {
+        key: String,
+    },
 }
 
 impl SplitUnit {
@@ -274,15 +278,34 @@ impl Truth {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "predicate", rename_all = "snake_case")]
 pub enum Predicate {
-    AttributeEquals { key: String, value: Value },
-    AttributeIn { key: String, values: BTreeSet<String> },
-    AttributeAtLeast { key: String, threshold: f64 },
+    AttributeEquals {
+        key: String,
+        value: Value,
+    },
+    AttributeIn {
+        key: String,
+        values: BTreeSet<String>,
+    },
+    AttributeAtLeast {
+        key: String,
+        threshold: f64,
+    },
     /// The only predicate that decides on missingness itself rather than inheriting it.
-    AttributePresent { key: String },
-    IndexDateWithin { window: Interval },
-    Not { inner: Box<Predicate> },
-    All { of: Vec<Predicate> },
-    Any { of: Vec<Predicate> },
+    AttributePresent {
+        key: String,
+    },
+    IndexDateWithin {
+        window: Interval,
+    },
+    Not {
+        inner: Box<Predicate>,
+    },
+    All {
+        of: Vec<Predicate>,
+    },
+    Any {
+        of: Vec<Predicate>,
+    },
 }
 
 impl Predicate {
@@ -688,10 +711,10 @@ impl SplitPlan {
         let mut by_subject: BTreeMap<SubjectId, BTreeMap<ObservationId, Option<Fold>>> =
             BTreeMap::new();
         for record in members {
-            by_subject.entry(record.subject.clone()).or_default().insert(
-                record.id.clone(),
-                self.fold_of(&record.id).cloned(),
-            );
+            by_subject
+                .entry(record.subject.clone())
+                .or_default()
+                .insert(record.id.clone(), self.fold_of(&record.id).cloned());
         }
         let policy = cohort.grouping.repeated_measures();
         for (subject, records) in by_subject {
@@ -787,7 +810,9 @@ impl SplitPlan {
                     left: (*left_id).clone(),
                     right: (*right_id).clone(),
                     ancestor,
-                    folds: [left_fold.clone(), right_fold.clone()].into_iter().collect(),
+                    folds: [left_fold.clone(), right_fold.clone()]
+                        .into_iter()
+                        .collect(),
                 });
             }
         }
@@ -806,7 +831,9 @@ pub enum LeakageFinding {
     #[error("observation {observation} is assigned to a fold but is not in the cohort")]
     AssignmentOutsideCohort { observation: ObservationId },
 
-    #[error("observation {observation} has no value for facet {facet}, so its fold cannot be checked")]
+    #[error(
+        "observation {observation} has no value for facet {facet}, so its fold cannot be checked"
+    )]
     UnkeyableObservation {
         observation: ObservationId,
         facet: SplitUnit,

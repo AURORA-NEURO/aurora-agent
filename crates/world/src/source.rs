@@ -10,6 +10,7 @@
 //! ask to iterate the corpus. That restriction is what allows a backend to make compile cost
 //! proportional to the compiled region rather than to the world — the whole point of 43.34.
 
+use crate::error::WorldSourceError;
 use crate::event::CausalEvent;
 use crate::fact::Fact;
 use crate::factor::Factor;
@@ -30,17 +31,20 @@ pub trait WorldSource {
     fn total_factors(&self) -> usize;
 
     /// How many facts in the whole world carry `tag`.
-    fn count_with_tag(&self, tag: &str) -> usize;
+    fn count_with_tag(&self, tag: &str) -> Result<usize, WorldSourceError>;
 
     /// Ids of every fact carrying at least one of `tags`. Backs the protected closure, which must
     /// be computed before any relevance step (43.13) and so cannot be derived from the slice.
-    fn fact_ids_with_any_tag(&self, tags: &BTreeSet<String>) -> BTreeSet<String>;
+    fn fact_ids_with_any_tag(
+        &self,
+        tags: &BTreeSet<String>,
+    ) -> Result<BTreeSet<String>, WorldSourceError>;
 
-    fn fact(&self, id: &str) -> Option<Fact>;
+    fn fact(&self, id: &str) -> Result<Option<Fact>, WorldSourceError>;
 
     /// The fact providing `variable`. Where several do, the last in document order wins, matching
     /// the reference runtime's dict-comprehension semantics.
-    fn fact_providing(&self, variable: &str) -> Option<Fact>;
+    fn fact_providing(&self, variable: &str) -> Result<Option<Fact>, WorldSourceError>;
 
     /// Ids of the facts providing `variable` that [`Self::fact_providing`] did *not* return.
     ///
@@ -54,12 +58,12 @@ pub trait WorldSource {
     /// exists and it was dropped by a document-order tiebreak; nobody bounded what the *other*
     /// value would have done to the decision. Counting the second as the first is the precise error
     /// `AGENTS.md` forbids — "provably cannot matter" and "nobody checked" sharing a representation.
-    fn shadowed_provider_ids(&self, variable: &str) -> Vec<String>;
+    fn shadowed_provider_ids(&self, variable: &str) -> Result<Vec<String>, WorldSourceError>;
 
-    fn factor(&self, id: &str) -> Option<Factor>;
+    fn factor(&self, id: &str) -> Result<Option<Factor>, WorldSourceError>;
 
     /// Ids of factors that output `variable`, in document order.
-    fn producer_ids(&self, variable: &str) -> Vec<String>;
+    fn producer_ids(&self, variable: &str) -> Result<Vec<String>, WorldSourceError>;
 
     /// The causal event structure. Small by construction — events describe releases, not records.
     fn events(&self) -> Vec<CausalEvent>;
@@ -82,41 +86,46 @@ impl WorldSource for World {
         self.factors.len()
     }
 
-    fn count_with_tag(&self, tag: &str) -> usize {
-        self.index().tagged(tag).len()
+    fn count_with_tag(&self, tag: &str) -> Result<usize, WorldSourceError> {
+        Ok(self.index().tagged(tag).len())
     }
 
-    fn fact_ids_with_any_tag(&self, tags: &BTreeSet<String>) -> BTreeSet<String> {
-        tags.iter()
+    fn fact_ids_with_any_tag(
+        &self,
+        tags: &BTreeSet<String>,
+    ) -> Result<BTreeSet<String>, WorldSourceError> {
+        Ok(tags
+            .iter()
             .flat_map(|tag| self.index().tagged(tag))
             .map(|&position| self.facts[position].id.as_str().to_string())
-            .collect()
+            .collect())
     }
 
-    fn fact(&self, id: &str) -> Option<Fact> {
-        World::fact(self, id).cloned()
+    fn fact(&self, id: &str) -> Result<Option<Fact>, WorldSourceError> {
+        Ok(World::fact(self, id).cloned())
     }
 
-    fn fact_providing(&self, variable: &str) -> Option<Fact> {
-        World::fact_providing(self, variable).cloned()
+    fn fact_providing(&self, variable: &str) -> Result<Option<Fact>, WorldSourceError> {
+        Ok(World::fact_providing(self, variable).cloned())
     }
 
-    fn shadowed_provider_ids(&self, variable: &str) -> Vec<String> {
-        self.index()
+    fn shadowed_provider_ids(&self, variable: &str) -> Result<Vec<String>, WorldSourceError> {
+        Ok(self
+            .index()
             .shadowed_providers(variable)
             .iter()
             .map(|&position| self.facts[position].id.as_str().to_string())
-            .collect()
+            .collect())
     }
 
-    fn factor(&self, id: &str) -> Option<Factor> {
-        World::factor(self, id).cloned()
+    fn factor(&self, id: &str) -> Result<Option<Factor>, WorldSourceError> {
+        Ok(World::factor(self, id).cloned())
     }
 
-    fn producer_ids(&self, variable: &str) -> Vec<String> {
-        World::producers_of(self, variable)
+    fn producer_ids(&self, variable: &str) -> Result<Vec<String>, WorldSourceError> {
+        Ok(World::producers_of(self, variable)
             .map(|factor| factor.id.as_str().to_string())
-            .collect()
+            .collect())
     }
 
     fn events(&self) -> Vec<CausalEvent> {

@@ -143,7 +143,7 @@ pub use verdict::{
 /// `crates/modalities` established the pattern: "no invented constants" is not expressible as a type,
 /// so it is expressed as a test over the text. `include_str!` bakes the sources in at compile time, so
 /// the test reads no files at runtime and stays deterministic.
-pub const SOURCES: [(&str, &str); 21] = [
+pub const SOURCES: [(&str, &str); 22] = [
     ("audit.rs", include_str!("audit.rs")),
     ("citation.rs", include_str!("citation.rs")),
     ("compose.rs", include_str!("compose.rs")),
@@ -155,6 +155,10 @@ pub const SOURCES: [(&str, &str); 21] = [
     ("error.rs", include_str!("error.rs")),
     ("execution.rs", include_str!("execution.rs")),
     ("identity.rs", include_str!("identity.rs")),
+    (
+        "interpretation_engine.rs",
+        include_str!("interpretation_engine.rs"),
+    ),
     ("lib.rs", include_str!("lib.rs")),
     ("longitudinal.rs", include_str!("longitudinal.rs")),
     ("missing.rs", include_str!("missing.rs")),

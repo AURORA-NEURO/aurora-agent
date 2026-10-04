@@ -17,23 +17,25 @@
 //! protocols are unrepresentable in the output, which is why [`crate::dossier::StepOutcome`] has
 //! exactly one variant.
 
-use crate::dossier::{artifact_record, build_dossier, step_record, StepOutcome};
+use crate::dossier::{StepOutcome, artifact_record, build_dossier, step_record};
 use crate::error::ResearchError;
 use crate::findings::{
-    comparison_findings, minimization_findings, mutation_findings, reference_anchor_finding,
-    sweep_findings, Finding,
+    Finding, comparison_findings, minimization_findings, mutation_findings,
+    reference_anchor_finding, sweep_findings,
 };
-use crate::protocol::{plan_protocol, ProtocolStep};
+use crate::protocol::{ProtocolStep, plan_protocol};
 use crate::request::ResearchRequest;
-use bioprism_baseline::{compare, default_panel, run_sweep, ContextStrategy, SweepGrid, SweepTable};
-use bioprism_fiber::{compile, CompileOutput, Query};
+use bioprism_baseline::{
+    ContextStrategy, SweepGrid, SweepTable, compare, default_panel, run_sweep,
+};
+use bioprism_fiber::{CompileOutput, Query, compile};
 use bioprism_ids::ContentHash;
 use bioprism_mutation::{generate as mutate, measure, standard_suite};
 use bioprism_prism::{minimize_world, preserves};
 use bioprism_section::{CertificateProfile, CertificateVerification, ContextCertificate};
 use bioprism_world::World;
-use bioprism_worldgen::{generate, DistractorAttachment, TagStyle};
-use serde_json::{json, Map, Value};
+use bioprism_worldgen::{DistractorAttachment, TagStyle, generate};
+use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
 /// The certificate digest three implementations agree on for the committed reference fixture:
@@ -45,8 +47,7 @@ pub const PINNED_REFERENCE_CERTIFICATE_SHA256: &str =
 /// Transcribed verbatim from `bioprism_baseline::sweep::SweepGrid`'s declaration (minus doc-link
 /// markup), carried on the sweep artifact because a document of the sweep must carry the sweep's
 /// own scope caveat.
-pub const UNSWEPT_KNOBS_CAVEAT: &str =
-    "The other WorldSpec knobs — skeleton, events, protected set, decision time, policy — are \
+pub const UNSWEPT_KNOBS_CAVEAT: &str = "The other WorldSpec knobs — skeleton, events, protected set, decision time, policy — are \
      deliberately not swept: they change what the decision is, not the structure around it, and a \
      sweep that varied them would be comparing strategies across different questions.";
 
@@ -98,12 +99,13 @@ fn compile_and_roundtrip(
         .map_err(canonicalisation)?;
     match ContextCertificate::verify(&certificate).map_err(canonicalisation)? {
         CertificateVerification::Valid => Ok((output, certificate)),
-        CertificateVerification::DigestMismatch { claimed, recomputed } => {
-            Err(ResearchError::CertificateRoundTrip {
-                world_id: world_id.to_string(),
-                reason: format!("digest mismatch: claimed {claimed}, recomputed {recomputed}"),
-            })
-        }
+        CertificateVerification::DigestMismatch {
+            claimed,
+            recomputed,
+        } => Err(ResearchError::CertificateRoundTrip {
+            world_id: world_id.to_string(),
+            reason: format!("digest mismatch: claimed {claimed}, recomputed {recomputed}"),
+        }),
         CertificateVerification::Malformed(reason) => Err(ResearchError::CertificateRoundTrip {
             world_id: world_id.to_string(),
             reason: format!("malformed: {reason}"),
@@ -219,13 +221,17 @@ pub fn run_research(request: &ResearchRequest) -> Result<Value, ResearchError> {
     for (step_index, step) in protocol.steps.iter().enumerate() {
         let record = match step {
             ProtocolStep::AnchorReferenceFixture => {
-                let world_value: Value = serde_json::from_str(REFERENCE_WORLD_JSON)
-                    .map_err(|error| ResearchError::ReferenceFixtureUnusable {
-                        reason: format!("world fixture does not parse: {error}"),
+                let world_value: Value =
+                    serde_json::from_str(REFERENCE_WORLD_JSON).map_err(|error| {
+                        ResearchError::ReferenceFixtureUnusable {
+                            reason: format!("world fixture does not parse: {error}"),
+                        }
                     })?;
-                let query_value: Value = serde_json::from_str(REFERENCE_QUERY_JSON)
-                    .map_err(|error| ResearchError::ReferenceFixtureUnusable {
-                        reason: format!("query fixture does not parse: {error}"),
+                let query_value: Value =
+                    serde_json::from_str(REFERENCE_QUERY_JSON).map_err(|error| {
+                        ResearchError::ReferenceFixtureUnusable {
+                            reason: format!("query fixture does not parse: {error}"),
+                        }
                     })?;
                 let world_digest = digest_of(&world_value)?;
                 let query_digest = digest_of(&query_value)?;

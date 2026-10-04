@@ -1,5 +1,3 @@
-#![allow(clippy::all)]
-
 //! The FIBER epistemic calculus, minus the parts other crates already own.
 //!
 //! Blueprint §43 is the thesis section of the distribution, and most of it is already implemented:

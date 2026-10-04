@@ -326,7 +326,7 @@ pub fn negotiate_interoperability(
     } else {
         Vec::new()
     };
-    if missing.len() > 0 {
+    if !missing.is_empty() {
         omissions.insert(format!(
             "capability:{}:missing",
             request.required_capability

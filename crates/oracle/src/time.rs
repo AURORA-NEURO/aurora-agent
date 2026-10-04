@@ -1,19 +1,18 @@
 //! Instants, and the validity windows built from them (31.16).
 //!
-//! `crates/fiber/src/oracle.rs` compares timestamps lexicographically on raw strings and records
-//! that as a known limitation: for mixed UTC offsets or differing precision, lexical order is not
-//! instant order, and the reference implementation it must stay bug-compatible with has the same
-//! flaw. This crate is new surface, so it takes the other route — constrain the representation
-//! until the cheap comparison becomes the correct one.
+//! `crates/fiber/src/oracle.rs` parses timestamps into absolute instants before comparison. This
+//! crate uses a narrower wire representation for oracle validity windows: constrain the
+//! representation until a cheap string comparison is guaranteed to equal chronological order.
 //!
 //! [`UtcTimestamp`] admits exactly `YYYY-MM-DDTHH:MM:SSZ`. Fixed width, zero offset, no
 //! fractional seconds, calendar-validated. Under that constraint byte order *is* chronological
 //! order, so the derived `Ord` is sound and no date library enters the dependency graph.
 //!
 //! Not implemented: sub-second precision, local offsets, leap seconds, and open-ended intervals
-//! keyed to anything other than wall-clock time. An oracle whose validity is keyed to a reference
-//! release rather than a date should carry that release in
-//! [`crate::OracleManifest::superseded_by`] instead.
+//! keyed to anything other than wall-clock time. This representation intentionally accepts less
+//! than the FIBER oracle's instant parser. An oracle whose validity is keyed to a reference release
+//! rather than a date should carry that release in [`crate::OracleManifest::superseded_by`]
+//! instead.
 
 use crate::error::OracleError;
 use serde::{Deserialize, Serialize};

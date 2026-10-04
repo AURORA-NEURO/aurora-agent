@@ -8,6 +8,18 @@ An MCP server and CLI built on the FIBER decision-context compiler: a typed deci
 compiled into the smallest decision-sufficient evidence region, delivered with a Context
 Certificate stating exactly what was omitted.
 
+The preclinical glioma engine now compiles a complete bounded research workflow, adapts its next
+stage from typed outcomes, and admits only capability-matched institution-local workers before
+dispatch. Worker routing is deterministic and fail-closed; the engine never turns an unimplemented
+stage into a generic action and never makes clinical decisions.
+The route can also drive the autonomous engine end to end through the typed stage/action adapter;
+MCP exposes this as a simulation-only rehearsal, while production hosts supply their own local
+workers.
+Evidence is an execution gate, not a passive report: P01 cross-family triangulation must qualify
+before the P07 stage router can admit a worker. The evidence-gated stage engine returns an explicit
+evidence hold or capability hold with next actions, and only then runs bounded evidence,
+multimodal, mechanism, experiment, computation, replication, release, and federation stages.
+
 [![CI](https://github.com/AURORA-NEURO/aurora-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/AURORA-NEURO/aurora-agent/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/AURORA-NEURO/aurora-agent)](https://github.com/AURORA-NEURO/aurora-agent/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -70,7 +82,55 @@ workspace actually covers, and which sections have nothing standing in for them:
 [docs/COVERAGE.md](docs/COVERAGE.md). The crate layout and the blueprint path:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+The Rust glioma research engine tracks executable capabilities in
+[`docs/glioma/PROGRAM_PLAN.md`](docs/glioma/PROGRAM_PLAN.md). P10 F32 adds longitudinal replication
+transport through `analyze_glioma_longitudinal_transport` and the MCP tool
+`glioma_longitudinal_transport_analyze`: studies must bind the same estimand and effect unit and
+cover one shared time grid, with incomplete studies excluded rather than imputed. Different model
+systems incur the maximum transport gap and are included only when the request explicitly allows
+that maximum; signature similarity weights admitted sources. Effects are bounded to ±1,000,000,000
+milli-units before fixed-point pooling. Its gate and threshold policy is
+explicitly repository-defined because this checkout has no configured detailed source blueprint
+for that slot.
+
+P10 F03 plans prospective resolvers for conflicting preclinical claims through
+`analyze_glioma_prospective_contradiction` and MCP `glioma_prospective_contradiction_plan`. Rival
+statements, evidence reports, design reports, and local artifacts remain digest-bound. Evidence is
+counted by independent group, shared support across rivals cannot establish exclusive support, and
+low-quality, null, and unresolved findings remain visible. Resolver prediction intervals must
+separate a rival pair and pass feasibility, risk, and budget gates. A `plan_ready` result means the
+bounded portfolio covers all declared rival pairs; it does not mean an experiment ran or a claim
+was resolved. Its contract is repository-defined because this checkout has no detailed P10-F03
+blueprint configured.
+
+P10 F02 compares independent study effects through `analyze_glioma_multistudy_concordance` and
+MCP `glioma_multistudy_concordance_analyze`. It binds an exact estimand and unit, reports every
+eligible same-model pair by interval overlap and confident direction, and keeps cross-model pairs
+incomparable. It retains null, unresolved, and low-quality studies without imputation or pooling.
+The contract is repository-defined because this checkout has no configured detailed P10-F02
+blueprint.
+
+P10 F04 audits registered-outcome reporting through
+`audit_glioma_registered_outcome_reporting` and MCP
+`glioma_registered_outcome_reporting_audit`. It compares local registry protocols with reviewed
+result-report metadata, marks overdue missing primary outcomes, and separates incomplete,
+ambiguous, unregistered, and not-yet-due outcomes. It accepts no effect values and treats reporting
+differences as review signals rather than proof of publication bias or misconduct. Its contract is
+repository-defined because this checkout has no detailed P10-F04 blueprint.
+
+P10 F05 adds `build_glioma_registered_outcome_record` and MCP
+`glioma_registered_outcome_record_build` for a single digest-bound study outcome. P10 F06 adds
+`build_glioma_registered_outcome_evidence_panel` and MCP
+`glioma_registered_outcome_evidence_panel` to combine compatible records across independent studies
+without pooling effects. The companion `glioma_registered_outcome_sensitivity_analyze` route
+evaluates caller-declared missing-result ranges as separate scenarios. These contracts are
+repository-defined because this checkout has no detailed P10-F05/F06 blueprints.
+
 ## Autonomous agent process boundary
+
+The Rust runtime also exposes an opt-in Docker-backed command boundary for callers that need an
+explicit Linux process boundary. It is not connected to agent tool dispatch or the trial provider;
+its limits and integration boundary are documented in [docs/OCI_SANDBOX.md](docs/OCI_SANDBOX.md).
 
 The Python SDK includes a secret-safe operator entry point for the autonomous brain:
 
@@ -777,6 +837,19 @@ receipt, and project only digest metadata without widening the approved source p
 first reviewed live-retrieval adapter, not general web research or evidence validation; broader
 sources, shared coordination, uncertain-call reconciliation, evidence-quality enforcement, and
 independent claim-integrity review remain deployment work.
+Python and TypeScript also expose `ReviewedCBioPortalRetrievalAdapter` for two fixed public
+catalogue lanes (`gbm_tcga`, `lgg_tcga`). After a network-free `prepare()` and literal dispatch
+approval, it issues exactly two bounded GETs per selected study: the study summary and one sorted
+`SUMMARY` molecular-profile page capped at 128 rows. It keeps only allow-listed study descriptors,
+aggregate sample counts, and profile metadata; sample, patient, clinical, and molecular-value routes
+are outside the plan. Plans bind the endpoint, fields, pagination, transport identity, and fixed
+study set. Receipts bind the normalized catalogue and counts; autonomous evidence receives only
+bundle/source digests. Full profile pages are refused as potentially truncated, missing counts remain
+unknown, and source metadata stays transient. The public API is documented as beta and can change;
+the adapter fails closed on identity, response, or profile-schema drift. See the official
+[API overview](https://docs.cbioportal.org/web-api-and-clients/) and
+[OpenAPI reference](https://www.cbioportal.org/api/swagger-ui/index.html?urls.primaryName=internal).
+It supplies catalogue coverage, not evidence quality or exhaustive glioma discovery.
 For a safe before/after refresh, use
 [`scripts/run_neurosurgical_public_literature_refresh_review.ps1`](scripts/run_neurosurgical_public_literature_refresh_review.ps1):
 it validates the baseline, creates a separate candidate, runs the cross-specialty refresh audit,
@@ -956,6 +1029,17 @@ exhausted grant therefore cannot contact a provider, while failover and streamin
 tenant/session boundary. The context never carries a key, prompt, message, response, or tool
 result; credentials remain caller-supplied opaque handles.
 
+Goal ledgers support canonical JSON persistence with atomic CAS. For a shared store, the TypeScript
+`AuthenticatedTransactionalJsonAutonomousGoalPersistence` and Python
+`AuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence` also authenticate snapshots
+with a deployment-owned, rotatable HMAC keyring. HMAC detects modification and untrusted origins;
+it does not encrypt snapshots or detect rollback to an older valid snapshot. The deployment still
+owns store authorization, encryption, and any trusted monotonic anti-rollback anchor.
+
+The goal worker's optional `persist_dispatch_intent` hook runs after it records `dispatch_started`
+and before the executor can run. Bind it to the deployment's journal/goal persistence transaction;
+a refused commit stops dispatch and leaves the journal held for conservative recovery.
+
 The same context can be passed to `AutonomousEvidenceRuntime.execute()` or the reviewed evidence
 execution controller. It authorizes `evidence_acquisition` immediately before each source adapter
 and `evaluation` immediately before each evaluator callback, binding the decision to a request or
@@ -983,14 +1067,14 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**83 crates, 538,938 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,358,874 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 
-The table below is generated. It used to be hand-maintained and drifted to claiming twenty-three
-crates and 820 tests — the same hand-copy drift [`crates/devx`](crates/devx)'s exit-code audit
-exists to catch, sitting in the README of the repository that wrote the audit. Regenerate it, and
-the test count, with:
+The table below is generated. The crate, tool, and Rust line counts are synchronized from Cargo
+metadata and the embedded MCP catalogue; CI checks that the public documentation stays current.
+Run `python tools/sync_repository_facts.py --write` after changing either source. The table and
+test count can be regenerated with:
 
 ```bash
 tools/status.sh --tests
@@ -1180,16 +1264,17 @@ neither; the registry it found them in is retained there as the audit's known-po
 - **VS Code**: sideload `aurora-agent-0.1.3.vsix` from the
   [v0.1.3 release](https://github.com/AURORA-NEURO/aurora-agent/releases/tag/v0.1.3)
   (`code --install-extension aurora-agent-0.1.3.vsix`). The extension registers the MCP
-  server with VS Code (1.101+) so Copilot agent mode can call the 264 tools, and adds
+  server with VS Code (1.101+) so Copilot agent mode can call tools from the resolved backend;
+  a backend built from this source revision exposes 983 tools. The extension also adds
   workflow/autopilot/pipeline views (see [editors/vscode](editors/vscode/)).
 - **MCP registry**: listed as `io.github.MurariAmbati/aurora-agent` on
   [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io/).
-- Privacy: local program, no network, no data collection — [PRIVACY.md](PRIVACY.md).
+- Privacy: local-first, no telemetry or background network activity; outbound source HTTP is denied by default and requires operator and plan opt-in — [PRIVACY.md](PRIVACY.md).
 
 ## Documentation
 
 Project site: [aurora-neuro.github.io/aurora-agent](https://aurora-neuro.github.io/aurora-agent/).
-The full reference lives in [docs/](docs/); contribution workflow in
+Browse the [documentation map](docs/README.md) for the full reference; contribution workflow in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Autonomous workflows, with receipts
@@ -1211,15 +1296,29 @@ tampered byte. `--dry-run` plans attempt 1 only — no dispatch, zero writes.
 ```bash
 bioprism workflow instantiate --workflow decision_context --mission-id demo --goal "compile and verify" --steps steps.json
 bioprism autopilot grant-template --json > grant.json
-bioprism autopilot run --instantiation instantiation.json --grant grant.json --report-out report.json
+bioprism autopilot run --instantiation instantiation.json --grant grant.json --report-out report.json --recovery-dir autopilot-state
+bioprism autopilot resume --instantiation instantiation.json --grant grant.json --recovery-dir autopilot-state
 bioprism autopilot verify --report report.json
 ```
 
-What it deliberately does not do: no recurrence, no MCP tool exposure of the driver itself, and
-no ownership of wall-clock deadlines. Grants can authorize deterministic logical-tick retry
-backoff; the host supplies the wait/deadline implementation. Restart is supported only through a caller-owned, metadata-only
-checkpoint: mission/report material is rehydrated by the host and matched by digest before the
-planner can continue. Full reference:
+The MCP server exposes this as autopilot_drive and autopilot_verify: preview is the default,
+execution needs the per-request grant, and every returned execution report includes an integrity
+check. `max_dispatches_this_call` can pause a longer drive and return a ready-to-submit
+caller-owned continuation request. Resume revalidates the digest-only checkpoint against the
+private attempt history before dispatch. The MCP server itself retains no recovery state,
+recurrence, or wall-clock deadlines. Grants can authorize deterministic logical-tick retry
+backoff; the MCP response records requested ticks as virtual clock events and does not sleep.
+Actual waiting and deadline enforcement remain caller-owned. The CLI's optional `--recovery-dir`
+keeps digest-only checkpoints separate from private rehydration files and writes a pending-dispatch
+marker before invoking tools, so an interrupted mission is not blindly replayed. The operator
+owns protection of those private files.
+
+The Rust kernel also exposes `drive_goal` for bounded caller-controlled continuation across
+multiple missions. It applies one aggregate dispatch ceiling and requires an explicit evaluator
+completion assertion. Safe stops can be persisted through the caller-owned goal checkpoint
+coordinator; the CLI and MCP surfaces still drive one mission at a time. See the
+[Autopilot reference](docs/AUTOPILOT.md#bounded-goal-level-continuation-in-the-rust-kernel).
+Full reference:
 [docs/AUTOPILOT.md](docs/AUTOPILOT.md).
 
 ## Autonomous research
@@ -1290,6 +1389,11 @@ handle, and *not* the evidence. An agent passes that handle to `fiber_refine` on
 is insufficient to act; the server recompiles and verifies the certificate digest before disclosing
 the requested layer. On the reference world L0 is ~204 estimated tokens against ~1,900 for the full
 section.
+
+The MCP server denies outbound source HTTP by default. To enable it, add one or more
+`--allow-http-origin <host[:port]>` options at startup; each retained source plan must also set
+`retrieval_policy.network` to `enabled` and include the requested host in `allowed_hosts`. The
+connector uses plain HTTP only and refuses HTTPS and redirects.
 
 The invariant that makes that safe: **omissions are reported at every layer**, so an agent that
 stops at L0 still knows what it does not have. Layering hides volume, never the fact of an
@@ -1369,10 +1473,13 @@ graphs, bindings, and execution policy before `agentMission()` is sent. Remote r
 visible rather than becoming success. `missionFromRoute()` connects the generic capability
 catalogue to that review while keeping candidate selection and arguments explicit.
 
-The repository ships `bioprism-api` for deployments that need a network boundary:
+The repository ships `bioprism-api` for deployments that need a network boundary. Anonymous use is
+limited to numeric loopback binds; wildcard, LAN, and hostname binds require a bearer token. Set
+`AURORA_API_TOKEN` to keep the secret out of shell history and process arguments:
 
 ```bash
-cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <visible-token> \
+export AURORA_API_TOKEN="<random-token>"
+cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 \
   --mission-state .local/mission-state.json --mission-queue-state .local/mission-queue.json \
   --event-state .local/event-state.json \
   --reconciliation-state .local/reconciliation-state.json
@@ -2303,10 +2410,14 @@ so, because an incomplete factor graph turns a zero-influence claim into an unkn
    **zero** from section 43, while `context_cards.jsonl` and `doc_graph.json` both carry all 51
    FIBER modules (994 rows each). `machine/README.md` claims one row per module. Any agent routing
    off the registry never sees the canonical runtime.
-2. **The reference runtime hard-codes a radiogenomic goal string** into every Decision Section,
-   and compares label timestamps **lexicographically as strings** rather than as parsed instants.
-   Both are reproduced for parity, both are flagged: see `REFERENCE_GOAL` in
-   [`qir.rs`](crates/fiber/src/qir.rs) and the note on `temporal_witnesses` in
+2. **The CPython reference runtime hard-codes a radiogenomic goal string** into every Decision
+   Section. The Rust compiler preserves that substitution only for the two legacy query versions
+   to retain their byte-parity contract; later query versions report a missing goal explicitly.
+   The CPython temporal oracle also compares timestamp strings lexicographically. The Rust oracle
+   instead compares civil dates at day precision and parses timezone-qualified timestamps as
+   absolute instants. Mixed date/instant comparisons fail closed; mixed-offset timestamp cases
+   intentionally differ from the reference while the canonical fixture remains unchanged. See
+   `REFERENCE_GOAL` in [`qir.rs`](crates/fiber/src/qir.rs) and `temporal_witnesses` in
    [`oracle.rs`](crates/fiber/src/oracle.rs).
 
 Only 131 of the 935 registered modules are marked `Build-Ready Specification`; **400 are
@@ -2331,7 +2442,7 @@ crates/           the workspace, bottom of the dependency DAG first
   weave/          the multi-agent microkernel                    (ids, section)
   mutation/       metamorphic instance generation                (fiber, section, world)
   cli/            the bioprism binary                            (all)
-docs/             ARCHITECTURE, FINDINGS, COVERAGE, the ADRs, and generated comparisons
+docs/             topic-grouped reference; start at docs/README.md
 fixtures/         golden worlds, queries and reference artifacts
 reference/        the CPython reference runtime, vendored as the parity oracle
 schemas/          fiber-world / fiber-query / fiber-context-certificate JSON Schemas
@@ -2440,10 +2551,12 @@ disclosures were sent, or controls are live. See docs/SECURITY_PROGRAM_AUDIT.md.
 
 ## Privacy Policy
 
-The MCP server and CLI are local programs: no network requests, no external
-services, no telemetry, and no collection, storage, or transmission of
-personal data. File access is confined to the data root you configure. Full
-policy: [PRIVACY.md](PRIVACY.md).
+The MCP server and CLI are local-first: no telemetry or background network
+activity. Explicit source HTTP retrieval is denied by default and requires an
+operator startup allow-list plus a caller plan that opts in; the request sends
+the selected locator path and query to that host over unencrypted HTTP. Local
+file access is confined to the configured data root. Full policy:
+[PRIVACY.md](PRIVACY.md).
 
 ## License
 

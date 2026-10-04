@@ -1,6 +1,6 @@
 # AURORA Agent
 
-> AURORA Agent (engine crates prefixed `bioprism-`) is a Rust workspace of 79 crates implementing the FIBER decision-context compiler: a typed decision query is compiled into the smallest decision-sufficient evidence region, delivered as a Decision Section plus a Context Certificate stating exactly what was omitted and whether the omission could have changed the decision. It ships 259 MCP tools via a stdio server, a CLI, and a local HTTP gateway. Fully local: no network access, no data collection. Apache-2.0. Research and developer infrastructure: it does not diagnose an individual, recommend treatment, triage care, enroll participants, or claim medical-device functionality.
+> AURORA Agent (engine crates prefixed `bioprism-`) is a Rust workspace of 88 crates implementing the FIBER decision-context compiler: a typed decision query is compiled into the smallest decision-sufficient evidence region, delivered as a Decision Section plus a Context Certificate stating exactly what was omitted and whether the omission could have changed the decision. It ships 983 MCP tools via a stdio server, a CLI, and a local HTTP gateway. Local-first with no telemetry or background network activity; outbound source HTTP is denied by default and requires operator and plan opt-in. Apache-2.0. Research and developer infrastructure: it does not diagnose an individual, recommend treatment, triage care, enroll participants, or claim medical-device functionality.
 
 Key facts: on the shipped reference world (761 facts), FIBER compiles the query to 11 facts (1.45%) and the deterministic oracle returns the correct verdict with all four leakage witnesses — but a 5-hop graph walk and BM25 at k=11 select the identical eleven facts. FIBER only separates from those baselines on a generated discriminating world. This deliberate negative headline is the product thesis. Cross-language parity digest c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4 is agreed by three implementations (CPython reference, eager Rust, indexed store).
 
@@ -19,7 +19,7 @@ Key facts: on the shipped reference world (761 facts), FIBER compiles the query 
 - [TypeScript SDK](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/TYPESCRIPT_SDK.md): Dependency-free Fetch client for browser and Node
 - [ADR-001 language strategy](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/ADR-001-language-strategy.md): Why Rust plus a CPython reference, and the indexed-store measurements
 - [Coverage](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/COVERAGE.md): How much of the blueprint the workspace covers, and what has nothing standing in for it
-- [Privacy policy](https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md): Local program, no network requests, no telemetry, no data collection
+- [Privacy policy](https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md): no telemetry or background requests; explicit source HTTP is default-deny and operator-configured
 
 ## Install
 

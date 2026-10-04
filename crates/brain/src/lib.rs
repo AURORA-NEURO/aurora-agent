@@ -21,8 +21,6 @@
 //! under a canonical domain/capability/risk/task-family digest and remains compatible with the
 //! legacy global arm ledger as a cold-start prior.
 
-#![allow(clippy::all)]
-
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -4460,6 +4458,6 @@ mod tests {
         assert!(duplicate_dependency
             .errors
             .iter()
-            .any(|error| error.contains("more than once")));
+            .any(|error| error.contains("repeats dependency")));
     }
 }

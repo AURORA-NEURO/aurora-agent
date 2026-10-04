@@ -9,6 +9,13 @@
 //! "FIBER compiles a smaller context" is unfalsifiable marketing; with them it is a measurement
 //! that can come out the other way — and if a graph baseline stays compact under equal
 //! optimisation, 43.41 requires reporting that result rather than burying it.
+//!
+//! # Not implemented
+//!
+//! - Open-ended model, agent, or human-judge evaluation. Comparisons use the supplied deterministic
+//!   oracle and the exact worlds and queries in the evaluation request.
+//! - General clinical or deployment-performance claims. Results describe those benchmark inputs;
+//!   they do not establish benefit on unmeasured populations or operating environments.
 
 pub mod compare;
 pub mod counterfactual_integrity_support;

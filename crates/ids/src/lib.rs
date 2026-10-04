@@ -6,8 +6,6 @@
 //! Implements blueprint 40.05 (canonical identifiers and hashes) and supplies the hashing
 //! primitive that 43.26 (Context Certificate) requires to be replayable across languages.
 
-#![allow(clippy::all)]
-
 pub mod adversarial_recovery_workbench;
 pub mod bounded_evolution_control_plane;
 pub mod canonical;
@@ -68,7 +66,10 @@ pub use bounded_evolution_control_plane::{
     CONTRACT_VERSION as IDS_BOUNDED_EVOLUTION_CONTRACT_VERSION,
     FEATURE_ID as IDS_BOUNDED_EVOLUTION_FEATURE_ID,
 };
-pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
+pub use canonical::{
+    python_repr_f64, to_canonical_bytes, to_canonical_bytes_serializable, to_canonical_string,
+    to_canonical_string_serializable,
+};
 pub use computational_execution_workbench::{
     compile_computational_execution, computational_execution_manifest, ComputationNode6,
     ComputationPeer6, ComputationalExecutionArtifact9, ComputationalExecutionError,
@@ -153,7 +154,7 @@ pub use federation_security_contract::{
     FederationSecurityError, CONTRACT_VERSION as IDS_FEDERATION_SECURITY_CONTRACT_VERSION,
     FEATURE_ID as IDS_FEDERATION_SECURITY_FEATURE_ID,
 };
-pub use hash::{sha256_hex_of_value, ContentHash};
+pub use hash::{sha256_hex_of_serializable, sha256_hex_of_value, ContentHash};
 pub use id::{EventId, FactId, FactorId, QueryId, RunId, VariableName, WorldId};
 pub use interoperability_extensibility_copilot::{
     interoperability_extensibility_copilot_manifest,

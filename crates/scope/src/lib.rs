@@ -7,8 +7,13 @@
 //! *where* a claim holds, the partial order that says when one scope is narrower than another,
 //! and the meet that says whether two scopes overlap at all — plus the vocabulary for moving
 //! evidence between scopes without pretending the move was free.
-
-#![allow(clippy::all)]
+//!
+//! # Not implemented
+//!
+//! - Authentication of real-world identities, consent, or legal data-use authority. Scope values
+//!   and policy inputs are caller-supplied declarations.
+//! - Execution of cross-scope data transfer. This crate validates scope relationships and records
+//!   declared information loss; adapters own any actual data transformation.
 
 pub mod class;
 pub mod error;

@@ -145,6 +145,28 @@ test("joint execution policy accepts negative evaluator credit for failure learn
   assert.equal(state.arms[0].last_reward, -1);
 });
 
+test("joint execution policy rejects non-finite numeric metadata", () => {
+  const policy = new AutonomousJointExecutionPolicy();
+  assert.throws(
+    () => policy.select({ requested_domains: ["coding"] }, [candidate("infinite-prior", "coding", { quality_prior: Number.POSITIVE_INFINITY })]),
+    /quality_prior is outside its numeric bound/,
+  );
+});
+
+test("joint execution policy text bounds count Unicode code points", () => {
+  const policy = new AutonomousJointExecutionPolicy();
+  const accepted = policy.select(
+    { requested_domains: ["coding"] },
+    [candidate("unicode-provider", "coding", { provider: "😀".repeat(256) })],
+  );
+  assert.equal(accepted.posture, "selected");
+  assert.equal(accepted.selected_candidate.candidate_digest, "046e214e0e0b3aaec11a86d49f69d3d74c7084b643d68a7a315b98020eadb0a6");
+  assert.throws(
+    () => policy.select({ requested_domains: ["coding"] }, [candidate("unicode-provider-too-long", "coding", { provider: "😀".repeat(257) })]),
+    /candidate provider is outside its bound/,
+  );
+});
+
 test("brain facade composes route admission with joint execution policy before dispatch", async () => {
   const facade = new AutonomousBrainFacade({
     agent: {

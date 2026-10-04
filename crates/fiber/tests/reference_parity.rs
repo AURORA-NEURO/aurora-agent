@@ -216,12 +216,14 @@ fn all_four_leakage_mechanisms_are_detected_with_witnesses() {
 #[test]
 fn the_temporal_cut_withholds_the_future_label() {
     let world = golden_world();
-    let at_training = temporal_cut(&world, Timestamp::parse("2025-01-01T00:00:00Z").unwrap());
+    let at_training = temporal_cut(&world, Timestamp::parse("2025-01-01T00:00:00Z").unwrap())
+        .expect("eager world source is available");
     assert!(!at_training.is_accessible("future_label_value"));
     assert!(at_training.is_accessible("split_assignment"));
     assert_eq!(at_training.withheld().count(), 1);
 
-    let retrospective = temporal_cut(&world, Timestamp::parse("2026-01-01T00:00:00Z").unwrap());
+    let retrospective = temporal_cut(&world, Timestamp::parse("2026-01-01T00:00:00Z").unwrap())
+        .expect("eager world source is available");
     assert!(retrospective.is_accessible("future_label_value"));
     assert_eq!(retrospective.withheld().count(), 0);
 }
@@ -229,7 +231,8 @@ fn the_temporal_cut_withholds_the_future_label() {
 #[test]
 fn slicing_terminates_and_selects_only_reachable_factors() {
     let world = golden_world();
-    let slice = backward_slice(&world, ["split_integrity_status"]);
+    let slice = backward_slice(&world, ["split_integrity_status"])
+        .expect("eager world source is available");
     assert_eq!(slice.selected_factors.len(), 6);
     assert!(slice.selected_factors.contains("factor.claim_support"));
     assert!(slice

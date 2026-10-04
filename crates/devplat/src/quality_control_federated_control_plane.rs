@@ -829,7 +829,7 @@ mod tests {
     #[test]
     fn missing_site_is_explicit() {
         let mut req = request();
-        req.objects.pop();
+        req.objects.remove(0);
         let receipt = assure_devplat_quality_control_federated_control_plane(&req).unwrap();
         assert_eq!(receipt.disposition, QualityVerdictDisposition::Unresolved);
         assert_eq!(receipt.missing_site_order, vec!["site-b"]);

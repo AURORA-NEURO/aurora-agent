@@ -227,7 +227,11 @@ fn the_reference_world_query_region_eliminates_at_induced_width_five() {
     assert_eq!(estimate.induced_width, Some(5));
     assert_eq!(estimate.order.len(), 16);
     assert!(
-        estimate.predicted_ops() < DirectMaterialization::new().estimate(&region).unwrap().predicted_ops(),
+        estimate.predicted_ops()
+            < DirectMaterialization::new()
+                .estimate(&region)
+                .unwrap()
+                .predicted_ops(),
         "elimination should be cheaper than enumerating this region's joint space"
     );
 }
@@ -249,7 +253,10 @@ fn cardinalities_come_from_the_providing_facts_and_defaults_are_declared_as_assu
     assert_eq!(region.cardinality_of("split_integrity_status"), Some(2));
 
     let assumed = region.assumed_cardinality_fraction();
-    assert!((assumed - 6.0 / 17.0).abs() < 1e-12, "assumed fraction {assumed}");
+    assert!(
+        (assumed - 6.0 / 17.0).abs() < 1e-12,
+        "assumed fraction {assumed}"
+    );
 
     let estimate = VariableElimination::default().estimate(&region).unwrap();
     assert_eq!(estimate.uncertainty, assumed);
@@ -278,7 +285,10 @@ fn free_variables_are_never_eliminated() {
                 "{strategy:?} eliminated the free variable {free}"
             );
         }
-        assert_eq!(order.order.len(), region.variable_count() - region.free_variables().len());
+        assert_eq!(
+            order.order.len(),
+            region.variable_count() - region.free_variables().len()
+        );
     }
 }
 
@@ -421,7 +431,10 @@ fn a_region_rejects_a_repeated_scope_variable_and_a_zero_cardinality() {
         .factor(RegionFactor::structural("f", vec!["a", "a"]))
         .build()
         .unwrap_err();
-    assert!(matches!(repeated, RegionError::RepeatedScopeVariable { .. }));
+    assert!(matches!(
+        repeated,
+        RegionError::RepeatedScopeVariable { .. }
+    ));
 
     let empty = QueryRegion::builder("bad")
         .variable("a", 0)
@@ -434,8 +447,8 @@ fn a_region_rejects_a_repeated_scope_variable_and_a_zero_cardinality() {
 fn a_budget_is_a_constraint_rather_than_a_cost_term() {
     let region = bioprism_backends::band_region(10, 6, 4, 0xC0);
     let generous = VariableElimination::default();
-    let cramped = VariableElimination::default()
-        .with_budget(Budget::default().with_max_peak_entries(1000.0));
+    let cramped =
+        VariableElimination::default().with_budget(Budget::default().with_max_peak_entries(1000.0));
 
     assert!(generous.estimate(&region).is_ok());
     let declined = cramped.estimate(&region).unwrap_err();

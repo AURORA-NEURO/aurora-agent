@@ -125,7 +125,10 @@ fn fence_for(text: &str) -> String {
 }
 
 fn step_label(step: &Value) -> String {
-    let kind = step.get("kind").and_then(Value::as_str).unwrap_or("unknown");
+    let kind = step
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
     match step.get("distractors").and_then(Value::as_u64) {
         Some(distractors) => format!("{} (d={distractors})", kind.replace('_', " ")),
         None => kind.replace('_', " "),
@@ -324,10 +327,7 @@ pub fn render_report(dossier: &Value) -> Result<RenderedReport, ResearchError> {
             .get("negative")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let level = entry
-            .get("level")
-            .and_then(Value::as_str)
-            .unwrap_or("?");
+        let level = entry.get("level").and_then(Value::as_str).unwrap_or("?");
         let level = if negative {
             format!("negative {level}")
         } else {

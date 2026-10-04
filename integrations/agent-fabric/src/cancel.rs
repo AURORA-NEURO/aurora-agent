@@ -54,6 +54,16 @@ impl CancelState {
         let reg = self.0.lock().expect("cancel lock");
         reg.generation(task) > seen_gen
     }
+
+    /// Replaces generations during checkpoint recovery. The caller must give this state only to
+    /// the restored fabric and its driver because all previously observed generations are stale.
+    pub(crate) fn restore_cancelled(&self, tasks: &[TaskId]) {
+        let mut generations = BTreeMap::new();
+        for task in tasks {
+            generations.insert(*task, 1);
+        }
+        self.0.lock().expect("cancel lock").generations = generations;
+    }
 }
 
 #[cfg(test)]

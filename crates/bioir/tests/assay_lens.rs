@@ -2,10 +2,10 @@
 
 use bioprism_bioir::{
     AssayLens, Calibration, CalibrationKind, ComparabilityRule, ErrorModel, Identifiability,
-    Incomparability, LensCatalog, LensError, LensId, LineageGraph, MaterialRequirement, Measurement,
-    MeasurementScale, MeasurementTarget, MissingnessClass, ProcessKind, ProcessingStep,
-    ProtocolChain, QcContract, QcMetric, QcOutcome, Quantity, Reading, Specimen, SpecimenId,
-    SubjectId,
+    Incomparability, LensCatalog, LensError, LensId, LineageGraph, MaterialRequirement,
+    Measurement, MeasurementScale, MeasurementTarget, MissingnessClass, ProcessKind,
+    ProcessingStep, ProtocolChain, QcContract, QcMetric, QcOutcome, Quantity, Reading, Specimen,
+    SpecimenId, SubjectId,
 };
 use bioprism_scope::Timestamp;
 use std::collections::BTreeSet;
@@ -174,7 +174,10 @@ fn comparing_across_processing_versions_names_the_step_that_changed() {
 fn a_step_present_on_only_one_lens_is_reported_as_absent_not_ignored() {
     let lens = expression_lens();
     let mut trimmed = expression_lens();
-    trimmed.protocol.steps.push(ProcessingStep::new("filter", "1.2.0"));
+    trimmed
+        .protocol
+        .steps
+        .push(ProcessingStep::new("filter", "1.2.0"));
 
     assert_eq!(
         lens.comparable_with(&trimmed),

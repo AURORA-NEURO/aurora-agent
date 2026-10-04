@@ -7,6 +7,7 @@ from prism_sdk import (
     AutonomousAgent,
     AutonomousSelectionPromotionLifecycle,
     AutonomousSelectionPromotionLifecycleStore,
+    ArgumentError,
     BrainRunError,
     LLMRuntime,
     ModelCatalogue,
@@ -103,6 +104,27 @@ def test_selection_lifecycle_applies_hold_admission_rollback_and_restore() -> No
     assert rolled_back.active_promotion_digest is None
     assert rolled_back.rollback_count == 1
     assert "private lifecycle task" not in str(rolled_back.to_dict())
+
+
+@pytest.mark.parametrize("reason", [None, "", " \t ", "bad\x00reason", "é" * 1_001])
+def test_selection_lifecycle_rejects_invalid_rollback_reasons(reason: str | None) -> None:
+    lifecycle = AutonomousSelectionPromotionLifecycle("selection-lifecycle-invalid-rollback", clock=lambda: 100)
+
+    with pytest.raises(ArgumentError, match="autonomous selection lifecycle last_reason is invalid"):
+        lifecycle.rollback(reason=reason)
+
+
+def test_selection_lifecycle_restore_rejects_unknown_state_and_snapshot_fields() -> None:
+    lifecycle = AutonomousSelectionPromotionLifecycle("selection-lifecycle-strict-restore", clock=lambda: 100)
+    state = lifecycle.state.to_dict()
+    with pytest.raises(ArgumentError, match="autonomous selection lifecycle state contains unsupported fields"):
+        type(lifecycle.state).from_mapping({**state, "unrecognized_extension": True})
+
+    store = AutonomousSelectionPromotionLifecycleStore()
+    store.save(lifecycle.state)
+    snapshot = store.snapshot()
+    with pytest.raises(ArgumentError, match="autonomous selection lifecycle snapshot contains unsupported fields"):
+        store.restore({**snapshot, "unrecognized_extension": True})
 
 
 def test_selection_lifecycle_joins_all_domain_readiness() -> None:

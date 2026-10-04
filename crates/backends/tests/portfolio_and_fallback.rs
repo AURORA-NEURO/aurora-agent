@@ -264,7 +264,10 @@ fn a_refusal_at_execution_time_is_replaced_by_the_conservative_plan_and_recorded
 
     let (computed, executed) = portfolio.execute(&region).unwrap();
     assert_eq!(executed.chosen, Backend::DirectMaterialization);
-    let fallback = executed.fallback.as_ref().expect("the substitution is recorded");
+    let fallback = executed
+        .fallback
+        .as_ref()
+        .expect("the substitution is recorded");
     assert_eq!(fallback.reason, FallbackReason::BackendExecutionFailure);
     assert!(fallback.detail.contains("re-ran the same logical query"));
 
@@ -322,8 +325,8 @@ fn charging_memory_more_heavily_abandons_elimination_at_a_lower_width() {
     let region = band_region(10, 7, 3, 0x5EED);
 
     let cheap_memory = Portfolio::reference().with_cost_model(CostModel::default());
-    let dear_memory = Portfolio::reference()
-        .with_cost_model(CostModel::default().with_memory_weight(200.0));
+    let dear_memory =
+        Portfolio::reference().with_cost_model(CostModel::default().with_memory_weight(200.0));
 
     assert_eq!(cheap_memory.cost_model().memory_weight, 4.0);
     assert_eq!(dear_memory.cost_model().memory_weight, 200.0);
@@ -343,8 +346,8 @@ fn charging_memory_more_heavily_abandons_elimination_at_a_lower_width() {
 #[test]
 fn invalid_budget_limits_are_refused_even_when_the_query_is_small() {
     let region = band_region(3, 1, 2, 0xB0);
-    let backend = DirectMaterialization::new()
-        .with_budget(Budget::default().with_max_ops(f64::NAN));
+    let backend =
+        DirectMaterialization::new().with_budget(Budget::default().with_max_ops(f64::NAN));
 
     assert!(matches!(
         backend.estimate(&region),

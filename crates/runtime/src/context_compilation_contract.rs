@@ -305,11 +305,7 @@ pub fn compile(query: &DecisionQuery) -> Result<ContextContractReceipt, ContextC
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    let mut ranked = query
-        .required_fact_order
-        .iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut ranked = query.required_fact_order.to_vec();
     ranked.sort_by(|left, right| {
         facts[right]
             .influence_milli

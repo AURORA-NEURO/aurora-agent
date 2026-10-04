@@ -4,11 +4,11 @@
 //! guarantee if it is checked byte for byte, because a certificate compiled against one backend is
 //! meant to replay against the other.
 
-use bioprism_fiber::{compile, Query};
+use bioprism_fiber::{compile, FiberError, Query};
 use bioprism_ids::to_canonical_string;
 use bioprism_section::CertificateProfile;
 use bioprism_store::{build, LazyWorld, SortedIndex, SortedIndexWriter, StoreError};
-use bioprism_world::{World, WorldSource};
+use bioprism_world::{World, WorldSource, WorldSourceError};
 use bioprism_worldgen::{generate, WorldSpec};
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -140,8 +140,9 @@ fn manifest_aggregates_match_the_eager_world() {
     assert_eq!(lazy.world_id(), WorldSource::world_id(&eager));
     assert_eq!(lazy.world_digest(), eager.content_hash());
     assert_eq!(
-        lazy.count_with_tag("exploratory"),
-        WorldSource::count_with_tag(&eager, "exploratory")
+        lazy.count_with_tag("exploratory")
+            .expect("lazy count succeeds"),
+        WorldSource::count_with_tag(&eager, "exploratory").expect("eager count succeeds")
     );
     assert_eq!(lazy.events().len(), eager.events.len());
 }
@@ -155,27 +156,41 @@ fn point_lookups_return_the_same_records() {
     let eager = World::from_json(generated.world).expect("world loads");
 
     for id in ["fact.subject_aliases", "fact.split", "fact.policy"] {
-        let from_lazy = lazy.fact(id).expect("present in store");
-        let from_eager = WorldSource::fact(&eager, id).expect("present in world");
+        let from_lazy = lazy
+            .fact(id)
+            .expect("lazy lookup succeeds")
+            .expect("present in store");
+        let from_eager = WorldSource::fact(&eager, id)
+            .expect("eager lookup succeeds")
+            .expect("present in world");
         assert_eq!(from_lazy.raw(), from_eager.raw(), "record {id} differs");
     }
 
     assert_eq!(
         lazy.fact_providing("split_assignment")
+            .expect("lazy lookup succeeds")
             .map(|f| f.id.as_str().to_string()),
         Some("fact.split".to_string())
     );
     assert_eq!(
-        lazy.producer_ids("identity_leakage"),
-        WorldSource::producer_ids(&eager, "identity_leakage")
+        lazy.producer_ids("identity_leakage")
+            .expect("lazy lookup succeeds"),
+        WorldSource::producer_ids(&eager, "identity_leakage").expect("eager lookup succeeds")
     );
-    assert!(lazy.fact("fact.does-not-exist").is_none());
-    assert!(lazy.producer_ids("no-such-variable").is_empty());
+    assert!(lazy
+        .fact("fact.does-not-exist")
+        .expect("missing lookup succeeds")
+        .is_none());
+    assert!(lazy
+        .producer_ids("no-such-variable")
+        .expect("missing lookup succeeds")
+        .is_empty());
 
     let protected: BTreeSet<String> = ["protected".to_string()].into_iter().collect();
     assert_eq!(
-        lazy.fact_ids_with_any_tag(&protected),
-        WorldSource::fact_ids_with_any_tag(&eager, &protected)
+        lazy.fact_ids_with_any_tag(&protected)
+            .expect("lazy lookup succeeds"),
+        WorldSource::fact_ids_with_any_tag(&eager, &protected).expect("eager lookup succeeds")
     );
 }
 
@@ -236,6 +251,37 @@ fn an_empty_index_is_openable_and_answers_nothing() {
     assert_eq!(index.get("anything").unwrap(), None);
 }
 
+#[test]
+fn corrupt_offset_tables_cannot_turn_records_into_absence() {
+    let empty_offsets_directory = scratch("missing-offsets");
+    let mut writer = SortedIndexWriter::new();
+    writer.insert("record", "value");
+    writer
+        .finish(&empty_offsets_directory, "index")
+        .expect("index writes");
+    std::fs::write(empty_offsets_directory.join("index.offs"), []).expect("offsets truncate");
+    assert!(matches!(
+        SortedIndex::open(&empty_offsets_directory, "index"),
+        Err(StoreError::CorruptIndex(_))
+    ));
+
+    let shifted_offsets_directory = scratch("shifted-offset");
+    let mut writer = SortedIndexWriter::new();
+    writer.insert("record", "value");
+    writer
+        .finish(&shifted_offsets_directory, "index")
+        .expect("index writes");
+    std::fs::write(
+        shifted_offsets_directory.join("index.offs"),
+        1u64.to_le_bytes(),
+    )
+    .expect("offset shifts");
+    assert!(matches!(
+        SortedIndex::open(&shifted_offsets_directory, "index"),
+        Err(StoreError::CorruptIndex(_))
+    ));
+}
+
 /// The third implementation must see shadowing too, or it would classify omissions differently.
 ///
 /// `bioprism-fiber` decides whether an omission is provably irrelevant or merely unexamined by
@@ -256,14 +302,22 @@ fn the_lazy_path_reports_the_same_shadowed_providers_as_the_eager_world() {
     let eager = World::from_json(world_json).expect("world loads");
 
     assert_eq!(
-        eager.shadowed_provider_ids("risk_score"),
+        eager
+            .shadowed_provider_ids("risk_score")
+            .expect("eager lookup succeeds"),
         vec!["fact.risk_score_provisional".to_string()]
     );
     assert_eq!(
-        lazy.shadowed_provider_ids("risk_score"),
-        eager.shadowed_provider_ids("risk_score")
+        lazy.shadowed_provider_ids("risk_score")
+            .expect("lazy lookup succeeds"),
+        eager
+            .shadowed_provider_ids("risk_score")
+            .expect("eager lookup succeeds")
     );
-    assert!(lazy.shadowed_provider_ids("cohort_id").is_empty());
+    assert!(lazy
+        .shadowed_provider_ids("cohort_id")
+        .expect("lazy lookup succeeds")
+        .is_empty());
 
     let from_eager = compile(&eager, &query).expect("eager compiles");
     let from_lazy = compile(&lazy, &query).expect("lazy compiles");
@@ -286,6 +340,32 @@ fn the_lazy_path_reports_the_same_shadowed_providers_as_the_eager_world() {
         "the two backends must agree about which omission was proved and which was not"
     );
     assert!(!from_lazy.certificate.manifest.supports_sufficiency_claim());
+}
+
+#[test]
+fn a_corrupt_lazy_record_is_a_source_error_not_absent_evidence() {
+    let world_json = reference_fixture("radiogenomic_world.json");
+    let query = Query::from_json(reference_fixture("leakage_query.json")).unwrap();
+    let directory = scratch("corrupt-record");
+    build(&world_json, &directory).expect("store builds");
+    let lazy = LazyWorld::open(&directory).expect("store opens");
+
+    let mut records = std::fs::read(directory.join("facts.keys")).expect("records readable");
+    for byte in &mut records {
+        if *byte == b'\t' {
+            *byte = b' ';
+        }
+    }
+    std::fs::write(directory.join("facts.keys"), records).expect("corruption planted");
+
+    assert!(matches!(
+        WorldSource::fact(&lazy, "fact.split"),
+        Err(WorldSourceError::Corrupt(_))
+    ));
+    assert!(matches!(
+        compile(&lazy, &query),
+        Err(FiberError::WorldSource(WorldSourceError::Corrupt(_)))
+    ));
 }
 
 /// A store written before the `shadowed` index existed is refused rather than read as unshadowed.

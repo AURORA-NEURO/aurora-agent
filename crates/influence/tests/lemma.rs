@@ -19,7 +19,10 @@ fn reweighted_total_variation(base: &[f64], weights: &[f64]) -> f64 {
 #[test]
 fn the_identity_perturbation_has_a_bound_of_exactly_zero() {
     assert_eq!(RatioRange::identity().total_variation_bound(), 0.0);
-    assert_eq!(RatioRange::new(3.5, 3.5).unwrap().total_variation_bound(), 0.0);
+    assert_eq!(
+        RatioRange::new(3.5, 3.5).unwrap().total_variation_bound(),
+        0.0
+    );
 }
 
 #[test]

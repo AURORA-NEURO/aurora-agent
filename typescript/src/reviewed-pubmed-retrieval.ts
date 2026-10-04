@@ -1,4 +1,5 @@
 import { ArgumentError, isObject } from "./errors.js";
+import { acquireNcbiRequestSlot } from "./ncbi-rate-limit.js";
 import type { AutonomousEvidenceAdapterRegistrationInput } from "./autonomous-evidence-adapters.js";
 import type { AutonomousEvidenceAcquisitionContext, AutonomousEvidenceObservationInput } from "./autonomous-evidence-runtime.js";
 import { canonicalJson, digestBytesSync, digestJsonSync } from "./tooling.js";
@@ -1369,9 +1370,6 @@ const NativeURL = globalThis.URL;
 const NativeAbortController = globalThis.AbortController;
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
 const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
-const nativeMonotonicNow = globalThis.performance && typeof globalThis.performance.now === "function" ? globalThis.performance.now.bind(globalThis.performance) : Date.now.bind(Date);
-let builtinRateTail: Promise<void> = Promise.resolve();
-let builtinLastDispatchAt: number | null = null;
 
 function buildRequestUrl(endpoint: Endpoint, parameters: readonly (readonly [string, string])[]): string {
   const quote = (value: string): string => {
@@ -1444,29 +1442,6 @@ function assertExactRequestUrl(url: string, endpoint: Endpoint, parameters: read
     if (parameters[index]?.[0] !== required[index]) fail("PubMed request parameters differ from the reviewed scope");
   }
   if (parameters.length === required.length + 2 && (parameters[required.length]?.[0] !== "tool" || parameters[required.length + 1]?.[0] !== "email")) fail("PubMed request parameters differ from the reviewed scope");
-}
-
-async function delay(milliseconds: number): Promise<void> {
-  await new Promise<void>((resolve) => nativeSetTimeout(resolve, milliseconds));
-}
-
-async function acquireBuiltinRateSlot(): Promise<void> {
-  const predecessor = builtinRateTail;
-  let release!: () => void;
-  builtinRateTail = new Promise<void>((resolve) => { release = resolve; });
-  await predecessor;
-  try {
-    if (builtinLastDispatchAt !== null) {
-      while (true) {
-        const remaining = 340 - (nativeMonotonicNow() - builtinLastDispatchAt);
-        if (remaining <= 0) break;
-        await delay(remaining);
-      }
-    }
-    builtinLastDispatchAt = nativeMonotonicNow();
-  } finally {
-    release();
-  }
 }
 
 async function readBoundedResponse(response: Response, expectedUrl: string, maximum: number): Promise<Uint8Array> {
@@ -1657,8 +1632,6 @@ interface AdapterState {
   readonly fetchAnchor: ReviewedPubMedFetch;
   readonly builtinImplementation: typeof globalThis.fetch | null;
   readonly entries: readonly (readonly [ReviewedPubMedSpecialtyLane, string])[];
-  readonly now: () => number;
-  lastDispatchAt: number | null;
 }
 
 export interface ReviewedPubMedRetrievalAdapterOptions {
@@ -1688,19 +1661,6 @@ function guardAdapter(adapter: ReviewedPubMedRetrievalAdapter, plan: ReviewedPub
   return state;
 }
 
-async function observeRateLimit(state: AdapterState): Promise<void> {
-  if (state.builtinImplementation !== null) {
-    await acquireBuiltinRateSlot();
-    return;
-  }
-  if (state.lastDispatchAt === null) return;
-  while (true) {
-    const remaining = 340 - (state.now() - state.lastDispatchAt);
-    if (remaining <= 0) return;
-    await delay(remaining);
-  }
-}
-
 interface ExecutionCounters {
   requestCount: number;
   responseBytes: number;
@@ -1715,13 +1675,12 @@ async function performRequest(
 ): Promise<JsonObject | XmlNode> {
   let state = guardAdapter(adapter, plan);
   if (counters.requestCount >= state.data.specialtyLanes.length * 3) fail("PubMed retrieval exceeded its reviewed request count");
-  await observeRateLimit(state);
+  await acquireNcbiRequestSlot();
   state = guardAdapter(adapter, plan);
   const expectedEndpoint = REVIEWED_PUBMED_ENDPOINTS[counters.requestCount % REVIEWED_PUBMED_ENDPOINTS.length];
   if (expectedEndpoint !== endpoint) fail("PubMed retrieval departed from its exact reviewed request sequence");
   const url = buildRequestUrl(endpoint, parameters);
   assertExactRequestUrl(url, endpoint, parameters);
-  state.lastDispatchAt = state.now();
   counters.requestCount += 1;
   let raw: ReviewedPubMedRawResponse;
   let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | undefined;
@@ -1914,8 +1873,6 @@ export class ReviewedPubMedRetrievalAdapter {
       fetchAnchor: selectedFetch,
       builtinImplementation,
       entries: queryEntries(data.specialtyLanes),
-      now: nativeMonotonicNow,
-      lastDispatchAt: null,
     });
     assertConfigLive(config, data);
     nativeObjectFreeze(this);

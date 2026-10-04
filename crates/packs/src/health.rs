@@ -73,12 +73,35 @@ pub enum ContaminationSignal {
     },
 }
 
+impl ContaminationSignal {
+    fn validate(&self) -> Result<(), PackError> {
+        if let ContaminationSignal::MemorizationGap { public, held_out } = self {
+            public.validate()?;
+            held_out.validate()?;
+        }
+        Ok(())
+    }
+}
+
 /// Everything measured *about* a pack, as opposed to declared by it.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Observations {
     pub calibration: DifficultyCalibration,
     pub trivial_baselines: Vec<TrivialBaseline>,
     pub contamination: Vec<ContaminationSignal>,
+}
+
+impl Observations {
+    fn validate(&self) -> Result<(), PackError> {
+        self.calibration.validate()?;
+        for baseline in &self.trivial_baselines {
+            baseline.observation.validate()?;
+        }
+        for signal in &self.contamination {
+            signal.validate()?;
+        }
+        Ok(())
+    }
 }
 
 /// Thresholds for the health checks that are not already covered by [`CalibrationPolicy`].
@@ -107,6 +130,29 @@ impl Default for HealthPolicy {
             memorization_margin: 0.10,
             materialization_floor: 0.01,
         }
+    }
+}
+
+impl HealthPolicy {
+    /// Thresholds are fractions, so values outside `[0, 1]` can silently disable or distort a
+    /// health gate. Validate them before either assessing observations or publishing a score.
+    pub fn validate(&self) -> Result<(), PackError> {
+        self.calibration.validate()?;
+        let thresholds = [
+            self.degenerate_absolute,
+            self.degenerate_margin,
+            self.memorization_margin,
+            self.materialization_floor,
+        ];
+        if thresholds
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+        {
+            return Err(PackError::InvalidPolicy(
+                "health thresholds must be finite fractions in [0, 1]".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -214,11 +260,17 @@ impl HealthFinding {
                     "contaminated: pack released {pack_release}, before the model cutoff \
                      {model_cutoff}; memorization cannot be ruled out"
                 ),
-                ContaminationSignal::MemorizationGap { public, held_out } => format!(
-                    "contaminated: {:.3} on public instances against {:.3} held out",
-                    public.pass_rate().unwrap_or(0.0),
-                    held_out.pass_rate().unwrap_or(0.0)
-                ),
+                ContaminationSignal::MemorizationGap { public, held_out } => {
+                    let public_rate = public
+                        .pass_rate()
+                        .map_or_else(|| "unmeasured".to_string(), |rate| format!("{rate:.3}"));
+                    let held_out_rate = held_out
+                        .pass_rate()
+                        .map_or_else(|| "unmeasured".to_string(), |rate| format!("{rate:.3}"));
+                    format!(
+                        "contaminated: {public_rate} on public instances against {held_out_rate} held out"
+                    )
+                }
             },
             HealthFinding::NoGroundedOracle { tiers } => format!(
                 "no execution-grounded oracle; declared tiers are {tiers:?}, so no disagreement \
@@ -314,6 +366,13 @@ impl PackAssessment {
     /// two: an unevaluated pack has no pass rate, and returning 0.0 for it would put "hard" and
     /// "unmeasured" in the same column.
     pub fn reportable_score(&self, pack: &PackIr) -> Result<ReportedScore, PackError> {
+        self.policy.validate()?;
+        self.calibration.validate()?;
+        for finding in &self.health.findings {
+            if let HealthFinding::Contaminated { signal } = finding {
+                signal.validate()?;
+            }
+        }
         let presented = pack.digest()?;
         if presented != self.pack_digest {
             return Err(PackError::AssessmentDigestMismatch {
@@ -362,6 +421,8 @@ pub fn assess(
     observations: &Observations,
     policy: &HealthPolicy,
 ) -> Result<PackAssessment, PackError> {
+    policy.validate()?;
+    observations.validate()?;
     let digest = pack.digest()?;
     let mut findings = Vec::new();
 

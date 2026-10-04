@@ -217,10 +217,7 @@ fn validate_run(run: &ValidatedResearchRun) -> Result<(), GovernanceReleaseError
         || run.artifact_ids.is_empty()
         || run.evidence_receipt_ids.is_empty()
         || run.source_contract_version.trim().is_empty()
-        || run
-            .localization_statement
-            .to_ascii_lowercase()
-            .contains("local")
+        || !valid_localization_statement(&run.localization_statement)
         || !run.raw_data_local
         || !run.provenance_complete
         || run.artifact_ids.len() > MAX_ID_COUNT
@@ -250,6 +247,16 @@ fn validate_run(run: &ValidatedResearchRun) -> Result<(), GovernanceReleaseError
         &run.signer_public_key_hex,
         &run.signer_signature_hex,
     )
+}
+
+fn valid_localization_statement(value: &str) -> bool {
+    let lower = value.trim().to_ascii_lowercase();
+    !lower.is_empty()
+        && value == value.trim()
+        && !value.chars().any(char::is_control)
+        && lower.contains("local")
+        && !lower.contains("not local")
+        && !lower.contains("non-local")
 }
 
 fn verify_detached_signature(

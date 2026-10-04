@@ -46,43 +46,61 @@
 //!
 //! [`grant`], [`classify`], [`history`], [`planner`], [`report`], and the checkpoint projection are
 //! the pure kernel: no I/O, no clock, no randomness, every digest a function of its input.
-//! [`drive`] is the effectful module, and its only execution effect is calling a caller-supplied
-//! [`drive::MissionDispatch`] — in production a closure over the in-process MCP server's
-//! `execute_agent_mission` boundary, in tests a fake. The checkpoint store is caller-owned: this
-//! crate supplies strict JSON validation and compare-and-swap orchestration, never a file,
-//! database, or credential implementation.
+//! [`drive`] performs one caller-authorized mission, while [`goal_control`] can ask a caller-owned
+//! controller for a bounded sequence of missions under one cumulative dispatch allowance. Their
+//! only execution effect is calling a caller-supplied [`drive::MissionDispatch`] — in production a
+//! closure over the in-process MCP server's `execute_agent_mission` boundary, in tests a fake. The
+//! checkpoint store is caller-owned: this crate supplies strict JSON validation and
+//! compare-and-swap orchestration for mission history, never a file, database, or credential
+//! implementation.
 //!
 //! # Not implemented
 //!
-//! - **No recurrence.** A drive runs one mission to a stop state in one call. Bounded retry
-//!   backoff is available through [`RetrySchedule`] and a caller-owned [`AutopilotWait`] seam,
-//!   but this crate does not repeat a completed mission.
-//! - **No MCP tool exposure.** This crate is not an MCP tool and registers nothing with the
-//!   server; the drive *calls* the mission boundary through a seam the caller supplies.
-//! - **Metadata-only cross-process resume.** [`persistence`] seals a bounded checkpoint after
-//!   each dispatch and [`drive::resume_mission_with_checkpoint`] verifies caller-rehydrated
-//!   private attempts before planning continues. The checkpoint intentionally does not retain
-//!   mission arguments, provider output, credentials, or evidence; a caller that cannot rehydrate
-//!   those values must stop rather than guess.
+//! - **Mission-level recurrence is bounded to one mission.** [`drive`] stops when its mission is
+//!   complete. [`goal_control::drive_goal`] is the separate caller-controlled outer loop; a
+//!   successful mission never means the objective completed, and only a named evaluator's
+//!   explicit completion assertion can end a goal as `completed`.
+//! - **No trusted storage or anti-rollback root.** [`goal_persistence`] supplies canonical JSON
+//!   storage seams and an optional store-level CAS coordinator, while deployments still own
+//!   durable storage, authentication, anti-rollback policy, and recovery from an interrupted
+//!   mission.
+//! - **The MCP adapter stays outside this crate.** `bioprism-mcp` exposes a bounded,
+//!   grant-gated drive and report verifier; the kernel remains transport-agnostic and registers
+//!   no tools.
+//! - **The kernel does not own recovery storage.** [`persistence`] seals a bounded metadata-only
+//!   checkpoint and [`drive::resume_mission_with_checkpoint`] verifies caller-rehydrated private
+//!   attempts before planning continues. The CLI offers an opt-in append-only recovery directory
+//!   with separate private attempt files and a pre-dispatch marker. Neither layer encrypts the
+//!   private material; the operator owns filesystem protection and retention. A caller that cannot
+//!   rehydrate the original mission and reports must stop rather than guess.
 //! - **No wall-clock ownership or deadlines.** 40.36's `retryable_as_is` means "may succeed
 //!   later"; the grant can authorize deterministic logical-tick backoff, while the caller decides
 //!   how to wait and whether a deadline has elapsed.
-//! - **No retry of an undelivered dispatch.** A transport error leaves the mission outcome
-//!   unknown at mission level — side effects may have run — so the drive stops rather than
-//!   re-sending blind.
+//! - **No retry of an undelivered dispatch.** A transport error or caught dispatcher panic leaves
+//!   the mission outcome unknown at mission level — side effects may have run — so the drive stops
+//!   rather than re-sending blind. This catch works only with unwinding panic strategies.
+//! - **No retry after an invalid mission report.** The raw response and its digest are retained
+//!   with the validation error, and the drive checkpoints that attempt before stopping because
+//!   the work may already have run.
+//! - **A goal-controller panic is a refusal, not a lost cycle.** When unwinding is enabled, a
+//!   panic at the caller-owned planning/evaluation seam returns a digest-only controller-error
+//!   report with all completed mission cycles preserved; it cannot silently restart the goal.
 //! - **No re-dispatch of a succeeded step.** A repair re-materializes bindings from retained
 //!   results; when a needed payload was not retained, the dependent step is excluded and the
 //!   reason recorded, never "fixed" by re-running its already-succeeded dependency.
 //! - **No whole-plan reconciliation after a repair.** A repair attempt's reconciliation covers
 //!   exactly the re-dispatched subset and is labelled with that scope; the crate never
 //!   fabricates a merged mission report to make the original instantiation reconcile.
-//! - **No claim lineage past attempt 1.** A repair re-dispatches steps without the base
-//!   mission's claim requests or reviews; the stripped claim ids are disclosed on the repair
-//!   dispatch action, and the limitation is stated in every report.
+//! - **Claim lineage is attempt-scoped.** A repair carries only claim requests whose complete
+//!   `requires_steps` set is inside the repair subset; omitted claim ids are disclosed on the
+//!   repair action. It never combines current results with prior attempt results, and evaluator
+//!   and route reviews are not reused after their reviewed mission changes.
 
 pub mod classify;
 pub mod drive;
 pub mod error;
+pub mod goal_control;
+pub mod goal_persistence;
 pub mod grant;
 pub mod history;
 pub mod persistence;
@@ -94,12 +112,30 @@ pub use classify::{
     classify_missing_step_result, classify_step_result, RetryClass, StepClass, StepClassification,
 };
 pub use drive::{
-    drive_instantiation, drive_instantiation_with_checkpoint, drive_instantiation_with_schedule,
-    drive_mission, drive_mission_with_checkpoint, drive_mission_with_schedule,
+    drive_instantiation, drive_instantiation_bounded, drive_instantiation_with_checkpoint,
+    drive_instantiation_with_schedule, drive_mission, drive_mission_with_checkpoint,
+    drive_mission_with_schedule, resume_instantiation_bounded,
     resume_instantiation_with_checkpoint, resume_instantiation_with_schedule,
-    resume_mission_with_checkpoint, resume_mission_with_schedule, DriveOutcome, MissionDispatch,
+    resume_mission_with_checkpoint, resume_mission_with_schedule, BoundedDriveOptions,
+    DriveOutcome, MissionDispatch,
 };
 pub use error::{AutopilotError, GrantError};
+pub use goal_control::{
+    drive_goal, resume_goal, verify_goal_control_report, GoalControlBudget, GoalControlContext,
+    GoalControlError, GoalControlOutcome, GoalControlStatus, GoalController, GoalCycleSummary,
+    GoalDecision, GoalStopReason, GOAL_CONTROL_REPORT_SCHEMA, MAX_GOAL_CONTROL_CYCLES,
+    MAX_GOAL_CONTROL_DISPATCHES, REQUIRED_GOAL_CONTROL_LIMITATIONS,
+};
+pub use goal_persistence::{
+    resume_goal_from_checkpoint, seal_goal_control_checkpoint, validate_goal_control_checkpoint,
+    GoalControlCheckpointError, GoalControlCheckpointPersistence,
+    GoalControlCheckpointPersistenceCoordinator, GoalControlCheckpointStore,
+    JsonGoalControlCheckpointPersistence, TransactionalGoalControlCheckpointPersistence,
+    TransactionalGoalControlCheckpointPersistenceCoordinator,
+    TransactionalGoalControlCheckpointStore, TransactionalJsonGoalControlCheckpointPersistence,
+    GOAL_CONTROL_CHECKPOINT_MAX_BYTES, GOAL_CONTROL_CHECKPOINT_RETENTION,
+    GOAL_CONTROL_CHECKPOINT_SCHEMA,
+};
 pub use grant::{AutonomyGrant, AutonomyGrantDocument, RetryPolicy, RetryPolicyDocument};
 pub use history::{AttemptKind, AttemptRecord, DriveHistory};
 pub use persistence::{

@@ -44,8 +44,8 @@ fn the_default_compile_and_the_injected_reference_oracle_agree_byte_for_byte() {
     let world = golden_world();
     let query = leakage_query();
     let default_out = compile(&world, &query).expect("default compile succeeds");
-    let injected_out =
-        compile_with_oracle(&world, &query, &SplitIntegrityOracle).expect("injected compile succeeds");
+    let injected_out = compile_with_oracle(&world, &query, &SplitIntegrityOracle)
+        .expect("injected compile succeeds");
 
     for profile in [CertificateProfile::Reference, CertificateProfile::Extended] {
         assert_eq!(
@@ -93,7 +93,10 @@ fn a_custom_oracle_verdict_reaches_the_certificate_and_names_its_kind() {
     let out = compile_with_oracle(&golden_world(), &leakage_query(), &AlwaysFires)
         .expect("custom compile succeeds");
 
-    assert_eq!(out.certificate.oracle.oracle_kind, "rule/test-always-fires-v1");
+    assert_eq!(
+        out.certificate.oracle.oracle_kind,
+        "rule/test-always-fires-v1"
+    );
     assert_eq!(out.certificate.oracle.status, OracleStatus::Invalid);
     assert_eq!(out.certificate.oracle.witness_kinds(), vec!["domain_check"]);
     assert_eq!(out.section.oracle, out.certificate.oracle);
@@ -125,8 +128,12 @@ impl DecisionOracle for RequiresUnprovidedVariable {
 
 #[test]
 fn an_oracle_that_cannot_see_its_inputs_abstains_rather_than_validating() {
-    let out = compile_with_oracle(&golden_world(), &leakage_query(), &RequiresUnprovidedVariable)
-        .expect("abstaining compile succeeds");
+    let out = compile_with_oracle(
+        &golden_world(),
+        &leakage_query(),
+        &RequiresUnprovidedVariable,
+    )
+    .expect("abstaining compile succeeds");
 
     assert_eq!(out.certificate.oracle.status, OracleStatus::Underdetermined);
     assert!(out.certificate.oracle.witnesses.is_empty());

@@ -788,12 +788,12 @@ impl SharedExecutionAuthority {
                     break;
                 }
                 Err(error)
-                    if error.kind() == std::io::ErrorKind::AlreadyExists
+                    if authority_lock_is_contended(&error, lock_path)
                         && retry < AUTHORITY_LOCK_RETRIES =>
                 {
                     thread::sleep(AUTHORITY_LOCK_RETRY_DELAY);
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                Err(error) if authority_lock_is_contended(&error, lock_path) => {
                     return Err(FactoryError::AuthorityBusy {
                         path: lock_path.display().to_string(),
                     });
@@ -840,6 +840,24 @@ impl SharedExecutionAuthority {
         let path = self.lock_path.as_ref()?.join(AUTHORITY_LOCK_FILE);
         let bytes = fs::read(path).ok()?;
         serde_json::from_slice(&bytes).ok()
+    }
+}
+
+fn authority_lock_is_contended(error: &std::io::Error, lock_path: &Path) -> bool {
+    if error.kind() == std::io::ErrorKind::AlreadyExists {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        // CreateDirectoryW can report ACCESS_DENIED for a directory another thread is
+        // concurrently creating or holding. Treat it as contention only when the lock
+        // directory is actually present; unrelated permission failures still fail closed.
+        error.kind() == std::io::ErrorKind::PermissionDenied && lock_path.is_dir()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = lock_path;
+        false
     }
 }
 

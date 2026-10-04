@@ -419,11 +419,7 @@ pub fn route_federated_execution(
     let disposition =
         if global_block || !blocked.is_empty() && blocked.len() == candidate_order.len() {
             "blocked"
-        } else if !missing_study.is_empty()
-            || !missing_modality.is_empty()
-            || !unresolved.is_empty()
-            || selected.len() != 1
-        {
+        } else if !missing_study.is_empty() || !missing_modality.is_empty() || selected.len() != 1 {
             "unresolved"
         } else {
             "qualified"

@@ -176,9 +176,7 @@ impl FederatedIngestionReceipt {
 
     pub fn digest(&self) -> Result<ContentHash, FederatedIngestionError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| FederatedIngestionError::Serialization(error.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|error| FederatedIngestionError::Serialization(error.to_string()))
     }
 }

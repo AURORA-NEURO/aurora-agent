@@ -9,20 +9,20 @@
 //! `bioprism-examples` the vertical slices. This crate read what remained and classified it before
 //! writing a line of it.
 //!
-//! **Four of the twenty are implementable here. Sixteen are not, and the reason differs.**
+//! **Five of the twenty now have checkable implementations here. Fifteen remain, and the reason
+//! differs.**
 //!
 //! ```text
 //! process                 3  the design describes what a person does at an interface
-//! foreign artifact        3  code-bearing, but not Rust and not in this repository
+//! foreign artifact        2  complete blueprint artifact remains outside this repository
 //! covered elsewhere       10 an existing crate already owns the substance
-//! implemented here        4  predicates over an artifact this crate defines
+//! implemented here        5  predicates over an artifact this repository defines
 //! ```
 //!
 //! The middle bucket is the finding. It was expected — `crates/ops` needed the same category for
-//! its section — but not at this size: four of twenty remaining modules specify a real, precise,
-//! testable artifact that simply is not a Rust crate. A Python distribution with nine importable
-//! packages and composite GitHub Actions evaluated in somebody else's repository. Those are not
-//! vague and they are not process; they are elsewhere. The TypeScript and Python authoring clients
+//! its section — but not at this size: the remaining external modules specify real, precise,
+//! testable artifacts. The full nine-distribution Python SDK and hosted consumer workflow
+//! execution are not vague and they are not process; they remain external. The TypeScript and Python authoring clients
 //! are now in-tree integration artifacts over authoritative Rust contracts, so they are covered
 //! rather than counted as foreign. The [`mission`] module now composes those contracts with every
 //! other callable domain surface: it supplies deterministic DAG planning and a least-authority,
@@ -32,7 +32,7 @@
 //! contributor deciding what to work on.
 //!
 //! The full table, with the sentence that decided each row, is [`classify::classification`]. The
-//! sixteen unimplemented modules are named there **by title and never by id**, for a reason given
+//! fifteen unimplemented modules are named there **by title and never by id**, for a reason given
 //! below.
 //!
 //! # The one idea
@@ -48,8 +48,8 @@
 //! it also records for a symbol somebody deleted yesterday, and the two need opposite responses.
 //!
 //! So [`claim::Evidence`] has three states and the third is terminal. [`claim::ApiClaim`] checks
-//! evidence against [`surface::Surface`] at construction: a Python API cannot carry in-tree
-//! evidence, an in-tree crate cannot be excused as foreign, and "cannot be checked here" without a
+//! evidence against [`surface::Surface`] at construction: a foreign Python API cannot carry
+//! in-tree evidence, a local artifact cannot be excused as foreign, and "cannot be checked here" without a
 //! reason is refused. [`walkthrough::Walkthrough::standing`] is then *derived*, so a document
 //! cannot advertise itself as verified, and a document all of whose claims are foreign says so
 //! ([`walkthrough::Walkthrough::documents_absent_artifact`]).
@@ -66,9 +66,11 @@
 //! # Ok::<(), bioprism_devplat::WalkthroughError>(())
 //! ```
 //!
-//! Run over the quickstarts this section assumes, that produces the second finding: **the Python
-//! distribution and consumer-repository CI runner remain external artifacts.** A green test run
-//! here tells a reader nothing about an external package install or hosted runner. The in-tree
+//! Run over the quickstarts this section assumes, that produces the second finding: **the full
+//! Python distribution and hosted consumer-repository CI runner remain external artifacts.** A
+//! green test run here tells a reader nothing about an external package install or hosted runner.
+//! The repository contains a composite action and local execution fixture, but those cannot prove
+//! how an unrelated consumer workflow will run it. The in-tree
 //! [`workbench`] module now supplies the implementable contract layer around that gap: it validates
 //! authoring/notebook sessions and can generate a review-only CI plan, but it does not publish a
 //! package, contact GitHub, or execute a runner. See [`walkthrough::standard_walkthroughs`].
@@ -83,7 +85,7 @@
 //! [`classify::Verdict::ImplementedHere`] has a `module_id` field; the other three variants carry a
 //! title and structurally cannot hold an id. Second, [`citations::audit`] reimplements the coverage
 //! script's token rule and scans this crate's own source, and a test asserts the tokens found are
-//! exactly the four declared. Both mechanisms are cheap; the second is the one that would have
+//! exactly the five declared. Both mechanisms are cheap; the second is the one that would have
 //! caught the mistake this crate nearly made, which was writing a measured percentage to two
 //! decimal places whose integer part fell in the section range. Every figure below is written to
 //! one decimal place for that reason.
@@ -199,9 +201,9 @@
 //! Those are not these six. The overlap is empty: cookbook's blockers are about abstention, backend
 //! portfolios, mutation families, decision loss, a CLI with no library and a federated exchange.
 //! The six modules this crate faced are worked examples of artifacts — a decision cell, a routing
-//! decision, a weave program, a molecule, a figure reproduction, a security cell — and four of the
-//! six turned out to belong to a crate that already owns the artifact. That asymmetry is worth
-//! stating: a section can look two-thirds unimplemented while the platform underneath it is not.
+//! decision, a weave program, a molecule, a figure reproduction, a security cell — and three of
+//! the six turned out to belong to a crate that already owns the artifact. That asymmetry is worth
+//! stating: a section can look half-unimplemented while the platform underneath it is not.
 
 pub mod adapter_execution_evidence;
 pub mod adapter_execution_evidence_query;
@@ -451,7 +453,8 @@ pub use domain_evidence_source::{
     MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TIMEOUT_MS,
 };
 pub use domain_evidence_source_execution::{
-    execute_domain_evidence_source, DomainEvidenceSourceExecutionError,
+    execute_domain_evidence_source, execute_domain_evidence_source_with_http_policy,
+    DomainEvidenceSourceExecutionError, DomainEvidenceSourceHttpPolicy,
     DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW,
     MAX_DOMAIN_EVIDENCE_SOURCE_EXECUTION_HEADER_BYTES,
     MAX_DOMAIN_EVIDENCE_SOURCE_EXECUTION_PREVIEW_BYTES,

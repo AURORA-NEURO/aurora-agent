@@ -1,9 +1,16 @@
 import { ArgumentError, isObject } from "./errors.js";
-import { canonicalJson, digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestJsonSync, isUnicodeScalarString } from "./tooling.js";
+import {
+  migrateLegacyAutonomousGoalTimestampNs,
+  normalizeAutonomousGoalTimestampNs,
+  requireAutonomousGoalTimestampNsWire,
+  type AutonomousGoalLegacyTimestampUnit,
+} from "./autonomous-goal-time.js";
 import type { JsonObject } from "./types.js";
 
 /** Durable, metadata-only state for the outer autonomous goal control loop. */
-export const AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA = "bioprism-autonomous-goal-control-checkpoint/0.1" as const;
+export const AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01 = "bioprism-autonomous-goal-control-checkpoint/0.1" as const;
+export const AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA = "bioprism-autonomous-goal-control-checkpoint/0.2" as const;
 export const AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_RETENTION = "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained" as const;
 export const AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_CYCLES = 128;
 export const AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_RUNS = 8_192;
@@ -40,6 +47,11 @@ export interface AutonomousGoalControlLoopCheckpoint extends JsonObject {
   retention: typeof AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_RETENTION;
   secret_material: "never_returned";
   snapshot_digest: string;
+  migration?: {
+    source_schema: typeof AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01;
+    source_timestamp_unit: AutonomousGoalLegacyTimestampUnit;
+    source_snapshot_digest: string;
+  };
 }
 
 export interface AutonomousGoalControlLoopSnapshotTextStore {
@@ -78,7 +90,7 @@ function integer(name: string, value: unknown, minimum: number, maximum: number)
 }
 
 function text(name: string, value: unknown, maximum = 256): string {
-  if (typeof value !== "string" || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > maximum) fail(`${name} is outside its text bounds`);
+  if (typeof value !== "string" || !isUnicodeScalarString(value) || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > maximum) fail(`${name} is outside its text bounds`);
   return value.trim();
 }
 
@@ -111,12 +123,14 @@ function counts(name: string, value: unknown, maximum: number): Record<string, n
   return Object.fromEntries(Object.entries(result).sort(([left], [right]) => left.localeCompare(right)));
 }
 
-function signal(value: unknown, index: number): JsonObject {
+function signal(value: unknown, index: number, legacy = false): JsonObject {
   if (!isObject(value)) fail(`signal ${index} is malformed`);
   exactKeys(`signal ${index}`, value, ["goal_id", "priority", "urgency", "deadline_ns", "estimated_cost", "dependencies"]);
   if (!Array.isArray(value.dependencies) || value.dependencies.length > 64) fail(`signal ${index} dependencies are outside their bounds`);
   const dependencies = [...new Set(value.dependencies.map((item, dependencyIndex) => identifier(`signal ${index} dependency ${dependencyIndex}`, item)))].sort();
-  const deadline = value.deadline_ns === null ? null : integer(`signal ${index} deadline_ns`, value.deadline_ns, 0, Number.MAX_SAFE_INTEGER);
+  const deadline = value.deadline_ns === null ? null : legacy
+    ? integer(`signal ${index} deadline_ns`, value.deadline_ns, 0, Number.MAX_SAFE_INTEGER)
+    : requireAutonomousGoalTimestampNsWire(value.deadline_ns, `signal ${index} deadline_ns`);
   return {
     goal_id: identifier(`signal ${index} goal_id`, value.goal_id),
     priority: numberValue(`signal ${index} priority`, value.priority, 0, 1),
@@ -205,10 +219,11 @@ function learnerState(value: unknown): JsonObject {
   return { ...body, state_digest: value.state_digest as string };
 }
 
-function normalize(value: JsonObject, requireDigest: boolean): JsonObject {
+function normalize(value: JsonObject, requireDigest: boolean, legacy = false): JsonObject {
   const fields = ["schema", "run_id", "next_cycle", "cycle_summaries", "previous_cycle", "completed_cycles", "total_selected", "total_claimed", "total_runs", "status_counts", "domain_counts", "evaluation_count", "evaluation_digests", "learning_state_digest", "learned_signals", "learner_state", "stop_reason", "generation", "previous_snapshot_digest", "retention", "secret_material"];
-  exactKeys("snapshot", value, requireDigest ? [...fields, "snapshot_digest"] : fields);
-  if (value.schema !== AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA || value.retention !== AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_RETENTION || value.secret_material !== "never_returned") fail("snapshot markers are invalid");
+  exactKeys("snapshot", value, [...fields, ...(requireDigest ? ["snapshot_digest"] : []), ...(!legacy && "migration" in value ? ["migration"] : [])]);
+  const expectedSchema = legacy ? AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01 : AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA;
+  if (value.schema !== expectedSchema || value.retention !== AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_RETENTION || value.secret_material !== "never_returned") fail("snapshot markers are invalid");
   const completed = integer("completed_cycles", value.completed_cycles, 0, AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_CYCLES);
   const next = integer("next_cycle", value.next_cycle, 1, AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_CYCLES + 1);
   if (next !== completed + 1) fail("next_cycle is not bound to completed_cycles");
@@ -239,7 +254,7 @@ function normalize(value: JsonObject, requireDigest: boolean): JsonObject {
     evaluation_count: integer("evaluation_count", value.evaluation_count, 0, AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_CYCLES * AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_EVALUATIONS),
     evaluation_digests: evaluationDigests,
     learning_state_digest: digest("learning_state_digest", value.learning_state_digest, true),
-    learned_signals: value.learned_signals.map((item, index) => signal(item, index)),
+    learned_signals: value.learned_signals.map((item, index) => signal(item, index, legacy)),
     learner_state: value.learner_state === null ? null : learnerState(value.learner_state),
     stop_reason: value.stop_reason as string,
     generation: integer("generation", value.generation, 1, 2_147_483_647),
@@ -247,6 +262,17 @@ function normalize(value: JsonObject, requireDigest: boolean): JsonObject {
     retention: value.retention as string,
     secret_material: value.secret_material as string,
   };
+  if (!legacy && "migration" in value) {
+    if (!isObject(value.migration)) fail("migration provenance is malformed");
+    exactKeys("migration", value.migration, ["source_schema", "source_timestamp_unit", "source_snapshot_digest"]);
+    if (value.migration.source_schema !== AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01) fail("migration source schema is unsupported");
+    if (value.migration.source_timestamp_unit !== "milliseconds" && value.migration.source_timestamp_unit !== "nanoseconds") fail("migration timestamp unit is invalid");
+    body.migration = {
+      source_schema: AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01,
+      source_timestamp_unit: value.migration.source_timestamp_unit,
+      source_snapshot_digest: digest("migration source snapshot digest", value.migration.source_snapshot_digest)!,
+    };
+  }
   if (typeof value.stop_reason !== "string" || !STOP_REASONS.has(value.stop_reason)) fail("stop_reason is invalid");
   if (requireDigest) {
     const supplied = digest("snapshot_digest", value.snapshot_digest)!;
@@ -269,6 +295,29 @@ export function validateAutonomousGoalControlLoopSnapshot(value: JsonObject): Au
   return clone(normalized);
 }
 
+/** Verify a v0.1 checkpoint before converting its persisted learner deadlines to exact ns. */
+export function migrateLegacyAutonomousGoalControlLoopSnapshot(
+  value: JsonObject,
+  sourceUnit: AutonomousGoalLegacyTimestampUnit,
+): AutonomousGoalControlLoopCheckpoint {
+  if (sourceUnit !== "milliseconds" && sourceUnit !== "nanoseconds") fail("legacy checkpoint migration requires milliseconds or nanoseconds as the source unit");
+  if (jsonBytes(value) > AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SNAPSHOT_BYTES) fail("legacy snapshot exceeds its byte bound");
+  const normalized = normalize(value, true, true);
+  const sourceSnapshotDigest = digest("legacy snapshot_digest", normalized.snapshot_digest)!;
+  const descriptor: JsonObject = { ...normalized, schema: AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA };
+  delete descriptor.snapshot_digest;
+  descriptor.learned_signals = (normalized.learned_signals as JsonObject[]).map((raw) => ({
+    ...raw,
+    deadline_ns: raw.deadline_ns === null ? null : migrateLegacyAutonomousGoalTimestampNs(raw.deadline_ns, sourceUnit, "legacy checkpoint signal deadline_ns"),
+  }));
+  descriptor.migration = {
+    source_schema: AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA_V01,
+    source_timestamp_unit: sourceUnit,
+    source_snapshot_digest: sourceSnapshotDigest,
+  };
+  return sealAutonomousGoalControlLoopSnapshot(descriptor);
+}
+
 export class JsonAutonomousGoalControlLoopSnapshotPersistence implements AutonomousGoalControlLoopSnapshotPersistence {
   readonly store: AutonomousGoalControlLoopSnapshotTextStore;
   readonly max_bytes: number;
@@ -283,7 +332,7 @@ export class JsonAutonomousGoalControlLoopSnapshotPersistence implements Autonom
   async read(): Promise<AutonomousGoalControlLoopCheckpoint | null> {
     const encoded = await this.store.read();
     if (encoded === null) return null;
-    if (typeof encoded !== "string" || new TextEncoder().encode(encoded).byteLength > this.max_bytes) fail("stored JSON exceeds its byte bound");
+    if (typeof encoded !== "string" || !isUnicodeScalarString(encoded) || new TextEncoder().encode(encoded).byteLength > this.max_bytes) fail("stored JSON exceeds its byte bound");
     let raw: unknown;
     try { raw = JSON.parse(encoded); } catch { fail("stored JSON is invalid"); }
     if (!isObject(raw)) fail("stored JSON must be an object");

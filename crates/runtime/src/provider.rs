@@ -16,7 +16,7 @@
 //! provider that cannot run. [`ExecutorProvider::is_available`] states the same fact directly.
 
 use crate::budget::BudgetPlan;
-use crate::effect::{EffectPolicy, EffectRequest};
+use crate::effect::{EffectPolicy, EffectRequest, Provenance};
 use crate::error::RuntimeError;
 use crate::host::RecordingHost;
 use crate::orchestrator::{AttemptId, TrialId};
@@ -48,6 +48,48 @@ impl Capabilities {
     /// The honest answer for a provider that is not implemented.
     pub fn none() -> Self {
         Capabilities::default()
+    }
+
+    /// The first required capability this provider lacks, in stable diagnostic order.
+    fn first_missing(&self, required: &Self) -> Option<&'static str> {
+        [
+            (
+                required.container_isolation,
+                self.container_isolation,
+                "container_isolation",
+            ),
+            (
+                required.process_isolation,
+                self.process_isolation,
+                "process_isolation",
+            ),
+            (required.gpu, self.gpu, "gpu"),
+            (
+                required.process_checkpoints,
+                self.process_checkpoints,
+                "process_checkpoints",
+            ),
+            (required.state_merge, self.state_merge, "state_merge"),
+            (
+                required.network_fixtures,
+                self.network_fixtures,
+                "network_fixtures",
+            ),
+            (
+                required.filesystem_snapshots,
+                self.filesystem_snapshots,
+                "filesystem_snapshots",
+            ),
+            (
+                required.live_streaming,
+                self.live_streaming,
+                "live_streaming",
+            ),
+            (required.nested_forks, self.nested_forks, "nested_forks"),
+            (required.cache_reuse, self.cache_reuse, "cache_reuse"),
+        ]
+        .into_iter()
+        .find_map(|(required, available, name)| (required && !available).then_some(name))
     }
 }
 
@@ -127,6 +169,10 @@ pub struct StateHandle {
 }
 
 /// A file the trial produced or consumed.
+///
+/// For a file read that found content, `digest` and `bytes` describe the exact recorded content.
+/// A read that found no file (or was simulated without content) uses an empty digest and zero
+/// bytes; an existing empty file instead has the digest of the empty byte string.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Artifact {
     pub path: String,
@@ -310,35 +356,11 @@ impl ExecutorProvider for InProcessProvider {
             });
         }
         let available = self.capabilities();
-        for (needed, has, name) in [
-            (
-                plan.required.container_isolation,
-                available.container_isolation,
-                "container_isolation",
-            ),
-            (
-                plan.required.process_isolation,
-                available.process_isolation,
-                "process_isolation",
-            ),
-            (plan.required.gpu, available.gpu, "gpu"),
-            (
-                plan.required.process_checkpoints,
-                available.process_checkpoints,
-                "process_checkpoints",
-            ),
-            (
-                plan.required.state_merge,
-                available.state_merge,
-                "state_merge",
-            ),
-        ] {
-            if needed && !has {
-                return Err(RuntimeError::CapabilityUnsupported {
-                    provider: IN_PROCESS.to_string(),
-                    capability: name.to_string(),
-                });
-            }
+        if let Some(capability) = available.first_missing(&plan.required) {
+            return Err(RuntimeError::CapabilityUnsupported {
+                provider: IN_PROCESS.to_string(),
+                capability: capability.to_string(),
+            });
         }
 
         let trial = InProcessTrial {
@@ -487,10 +509,46 @@ impl ExecutorProvider for InProcessProvider {
         for entry in trial.tape.entries() {
             match &entry.effect.request {
                 EffectRequest::FileRead { path } => {
+                    let content = match entry.effect.provenance {
+                        Provenance::Simulated => None,
+                        Provenance::Performed => {
+                            let outcome = entry.effect.outcome.value();
+                            match outcome.get("found").and_then(serde_json::Value::as_bool) {
+                                Some(true) => Some(
+                                    entry.effect.outcome.text("content").ok_or_else(|| {
+                                        RuntimeError::InvariantViolation {
+                                            detail: format!(
+                                                "performed file read for {path} has no string content"
+                                            ),
+                                        }
+                                    })?,
+                                ),
+                                Some(false) if outcome.get("content").is_none() => None,
+                                Some(false) => {
+                                    return Err(RuntimeError::InvariantViolation {
+                                        detail: format!(
+                                            "performed missing-file read for {path} carries content"
+                                        ),
+                                    });
+                                }
+                                None => {
+                                    return Err(RuntimeError::InvariantViolation {
+                                        detail: format!(
+                                            "performed file read for {path} has no boolean found status"
+                                        ),
+                                    });
+                                }
+                            }
+                        }
+                    };
                     artifacts.entry(path.clone()).or_insert(Artifact {
                         path: path.clone(),
-                        digest: String::new(),
-                        bytes: 0,
+                        digest: content.map_or_else(String::new, |content| {
+                            ContentHash::of_bytes(content.as_bytes())
+                                .as_str()
+                                .to_string()
+                        }),
+                        bytes: content.map_or(0, |content| content.len() as u64),
                         created: false,
                     });
                 }
@@ -606,3 +664,97 @@ fn unavailable(provider: &str, operation: &str) -> RuntimeError {
 
 unavailable_provider!(SubprocessProvider, "subprocess");
 unavailable_provider!(ContainerProvider, "container");
+
+#[cfg(test)]
+mod tests {
+    use super::Capabilities;
+
+    #[test]
+    fn every_declared_capability_participates_in_provider_admission() {
+        let requirements = [
+            (
+                "process_isolation",
+                Capabilities {
+                    process_isolation: true,
+                    ..Capabilities::none()
+                },
+            ),
+            (
+                "container_isolation",
+                Capabilities {
+                    container_isolation: true,
+                    ..Capabilities::none()
+                },
+            ),
+            (
+                "gpu",
+                Capabilities {
+                    gpu: true,
+                    ..Capabilities::none()
+                },
+            ),
+            (
+                "network_fixtures",
+                Capabilities {
+                    network_fixtures: true,
+                    ..Capabilities::none()
+                },
+            ),
+            (
+                "filesystem_snapshots",
+                Capabilities {
+                    filesystem_snapshots: true,
+                    ..Capabilities::none()
+                },
+            ),
+            (
+                "process_checkpoints",
+                Capabilities {
+                    process_checkpoints: true,
+                    ..Capabilities::none()
+                },
+            ),
+            (
+                "live_streaming",
+                Capabilities {
+                    live_streaming: true,
+                    ..Capabilities::none()
+                },
+            ),
+            (
+                "nested_forks",
+                Capabilities {
+                    nested_forks: true,
+                    ..Capabilities::none()
+                },
+            ),
+            (
+                "state_merge",
+                Capabilities {
+                    state_merge: true,
+                    ..Capabilities::none()
+                },
+            ),
+            (
+                "cache_reuse",
+                Capabilities {
+                    cache_reuse: true,
+                    ..Capabilities::none()
+                },
+            ),
+        ];
+
+        for (name, required) in requirements {
+            assert_eq!(
+                Capabilities::none().first_missing(&required),
+                Some(name),
+                "a provider that advertises none cannot satisfy {name}"
+            );
+            assert_eq!(
+                required.first_missing(&required),
+                None,
+                "a provider must satisfy the capability it advertises: {name}"
+            );
+        }
+    }
+}

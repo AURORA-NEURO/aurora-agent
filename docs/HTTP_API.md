@@ -4,7 +4,9 @@
 available as a library (`bioprism_api::ApiRouter`) and as the `bioprism-api` binary:
 
 ```bash
-cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16-visible-bytes> \
+export AURORA_API_TOKEN="<random-token>"
+cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 \
+  --allow-http-origin evidence.example.org:80 \
   --mission-state .local/mission-state.json --mission-queue-state .local/mission-queue.json \
   --event-state .local/event-state.json \
   --reconciliation-state .local/reconciliation-state.json \
@@ -13,8 +15,17 @@ cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16
 
 The gateway is intentionally bounded and one-request-per-connection. Headers default to 32 KiB,
 bodies to 2 MiB, event retention to 4,096 entries, and every route reports an `X-Request-Id`.
-When configured, bearer authentication protects every route except `/healthz`, `/readyz`, and the
-OpenAPI document. The server inherits MCP root confinement for every tool that reads a path.
+The binary permits anonymous access only when bound to a numeric loopback address. Any other bind,
+including wildcard, LAN, and hostname binds, requires a non-empty bearer token. Supply it with
+`--token` or through `AURORA_API_TOKEN`; the environment variable keeps the secret out of shell
+history and process arguments. When configured, bearer authentication protects every route except
+`/healthz`, `/readyz`, and the OpenAPI document. The crate's `serve()` entry point enforces the same
+non-loopback authentication requirement for embedded applications. Callers using a custom listener
+or server around `ApiRouter::handle()` must configure `ApiConfig::bearer_token` themselves when
+exposing it beyond loopback. The server inherits MCP root confinement for every tool that reads a
+path.
+The binary does not terminate TLS. Before exposing it outside a trusted loopback boundary, put it
+behind an operator-managed TLS endpoint; bearer credentials travel in plaintext without TLS.
 
 ## Routes
 
@@ -414,10 +425,16 @@ declared, a later `source_plan_digest`-bound intake is refused unless its canoni
 matches that expectation.
 `POST /v1/domain-evidence/sources/execute` is the controlled execution seam. It requires a retained
 plan, confines file reads to the configured server root, and permits plain HTTP only when the plan
-has `network: "enabled"` plus an exact `allowed_hosts` list. Reads enforce `max_bytes` and
+has `retrieval_policy.network: "enabled"` plus an `allowed_hosts` entry matching the request host,
+and the API server was started with `--allow-http-origin <host[:port]>` matching that exact origin.
+The operator allow-list is empty by default, so a caller-controlled plan cannot authorize its own
+network access. Reads enforce `max_bytes` and
 `timeout_ms`; redirects, HTTPS, credentials, unsupported connector families, traversal, and
 network-policy refusals remain explicit `refused` or `error` outcomes; the in-process kernel only
 executes `retrieval_mode: "content"`, leaving reference-only and metadata-only plans caller-managed.
+The equivalent MCP server option is `--allow-http-origin <host[:port]>`. Omitting the option denies
+all outbound source HTTP. Origins accept a host (port 80) or a host and exact port; this connector
+does not support TLS, redirects, or IPv6 literals.
 Successful reads expose an
 exact raw-byte digest and a separate canonical JSON response digest, then automatically retain the
 bounded response through `domain_evidence_intake` with both the plan identity and plan artifact
@@ -954,8 +971,9 @@ identity, and the same explicit non-claim about external effects.
 ## Explicit nonclaims
 
 The dependency-free boundary does not implement HTTP/2 gRPC, TLS termination, an identity provider,
-distributed event storage, a distributed mission queue, or a consumer-repository GitHub Action.
-Those are deployment/artifact surfaces. The optional event snapshot is bounded local recovery, not
+distributed event storage, a distributed mission queue, hosted consumer-workflow execution, or
+publishing a reviewed revision of the in-repository composite GitHub Action. Those are
+deployment/artifact surfaces. The optional event snapshot is bounded local recovery, not
 a consensus log or distributed delivery service; the mission snapshot restores bounded mission
 state and explicitly fails interrupted work instead of claiming recovery. The `capabilities`
 response reports these distinctions so clients can route to an operator's proxy, queue, or delivery

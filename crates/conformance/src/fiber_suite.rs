@@ -35,14 +35,14 @@
 //! is missing, so [`crate::case::OverrideOp::Insert`] leaves all four exactly where they were.
 //!
 //! The refusals are the other half of the same accounting. [`fiber_failure`], [`world_failure`]
-//! and [`policy_failure`] between them name twenty-three failure kinds, of which five have cases:
+//! and [`policy_failure`] between them name twenty-four failure kinds, of which five have cases:
 //! `budget_exceeded`, `unsupported_query_schema`, `unsupported_world_schema`,
 //! `invalid_identifier`, and — since the query format closed its key set — `undeclared_query_field`,
-//! exercised both at the top level and inside `budgets`. The other eighteen are declared in the
+//! exercised both at the top level and inside `budgets`. The other nineteen are declared in the
 //! taxonomy and unexercised here, and one of them is not merely unwritten but currently
 //! *inexpressible*: `missing_query_field` needs a variant with a key removed, and an override can
 //! change or add a key but never delete one (see [`crate::Override`]). That one needs a fixture
-//! too.
+//! too. The remaining eighteen kinds are explicit refusal taxonomy without a reference-world case.
 
 use crate::case::{CaseBuilder, CaseInput, ConformanceCase, Expectation, Layer};
 use crate::fixture::{FixtureCard, FixtureManifest, FixtureRole, FixtureShape};
@@ -53,7 +53,7 @@ use crate::implementation::{
 use crate::suite::Suite;
 use bioprism_fiber::{compile, CompileOutput, FiberError, PolicyViolation, Query};
 use bioprism_section::CertificateProfile;
-use bioprism_world::{World, WorldError};
+use bioprism_world::{World, WorldError, WorldSourceError};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -1135,12 +1135,17 @@ fn fiber_failure(error: FiberError) -> CompileFailure {
         FiberError::InvariantViolation(_) => "invariant_violation",
         FiberError::MissingQueryField(_) => "missing_query_field",
         FiberError::WrongQueryFieldType { .. } => "wrong_query_field_type",
+        FiberError::WrongOracleFieldType { .. } => "wrong_oracle_field_type",
         FiberError::InvalidIdentifier(_) => "invalid_identifier",
         FiberError::InvalidBudget(_) => "invalid_budget",
         FiberError::InvalidDecisionTime(_) => "invalid_decision_time",
+        FiberError::InvalidOracleTimestamp { .. } => "invalid_oracle_timestamp",
+        FiberError::IncomparableOracleTimePrecision { .. } => "incomparable_oracle_time_precision",
         FiberError::BudgetExceeded { .. } => "budget_exceeded",
         FiberError::UnorderableSplitGroups { .. } => "unorderable_split_groups",
         FiberError::World(inner) => return world_failure(inner.clone()),
+        FiberError::WorldSource(WorldSourceError::Unavailable(_)) => "world_source_unavailable",
+        FiberError::WorldSource(WorldSourceError::Corrupt(_)) => "corrupt_world_source",
         FiberError::Policy(inner) => return policy_failure(inner.clone()),
     };
     CompileFailure::new(kind, error.to_string())
@@ -1148,19 +1153,36 @@ fn fiber_failure(error: FiberError) -> CompileFailure {
 
 /// Names a policy refusal (43.33, 40.25).
 ///
-/// Kept separate from [`fiber_failure`] for the same reason [`world_failure`] is: the four kinds
+/// Kept separate from [`fiber_failure`] for the same reason [`world_failure`] is: the five kinds
 /// are decisions the compiler already distinguishes, and collapsing them here would tell a
 /// conformance consumer less than the compiler knows. `protected_closure_withheld_by_policy` in
-/// particular is not interchangeable with the other three — it is 43.13's mandatory closure
+/// particular is not interchangeable with the other four — it is 43.13's mandatory closure
 /// failing, which no grant obtained later can turn into a partial answer.
 fn policy_failure(error: PolicyViolation) -> CompileFailure {
     let kind = match &error {
         PolicyViolation::Conflict { .. } => "policy_conflict",
+        PolicyViolation::DataPolicyUnavailableAtCut { .. } => "data_policy_unavailable_at_cut",
         PolicyViolation::MalformedDataPolicy { .. } => "malformed_data_policy",
         PolicyViolation::UninterpretableRequirement { .. } => "uninterpretable_policy_requirement",
         PolicyViolation::ProtectedClosureWithheld { .. } => "protected_closure_withheld_by_policy",
     };
     CompileFailure::new(kind, error.to_string())
+}
+
+#[cfg(test)]
+mod policy_failure_tests {
+    use super::policy_failure;
+    use bioprism_fiber::PolicyViolation;
+
+    #[test]
+    fn governing_policy_unavailable_at_decision_cut_has_a_stable_failure_kind() {
+        let failure = policy_failure(PolicyViolation::DataPolicyUnavailableAtCut {
+            decision_time: "2025-01-01T00:00:00Z".into(),
+        });
+
+        assert_eq!(failure.kind, "data_policy_unavailable_at_cut");
+        assert!(failure.message.contains("not available at decision time"));
+    }
 }
 
 fn world_failure(error: WorldError) -> CompileFailure {

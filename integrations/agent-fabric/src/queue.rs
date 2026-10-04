@@ -1,9 +1,10 @@
 //! Bounded FIFO queues: the mechanism behind backpressure.
 //!
-//! Every queue in the fabric is bounded. `push` returns [`Backpressure`] when full and the
-//! caller decides — the queue never drops, never evicts, and never grows. The high-water mark is
-//! tracked so memory-bound tests can assert the bound held under load rather than trusting the
-//! capacity parameter.
+//! Every ready queue has a per-shard bound, and the scheduler also caps the combined number of
+//! pending tasks across queues, retries, and execution. `push` returns [`Backpressure`] when full
+//! and the caller decides — the queue never drops, never evicts, and never grows. The high-water
+//! mark is tracked so memory-bound tests can assert the bound held under load rather than trusting
+//! the capacity parameter.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -12,11 +13,26 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Backpressure {
     pub capacity: usize,
+    pub resource: BackpressureResource,
+}
+
+/// Which configured bound rejected new work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackpressureResource {
+    ReadyQueue,
+    PendingWork,
 }
 
 impl fmt::Display for Backpressure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "queue at capacity {}", self.capacity)
+        match self.resource {
+            BackpressureResource::ReadyQueue => {
+                write!(f, "ready queue at capacity {}", self.capacity)
+            }
+            BackpressureResource::PendingWork => {
+                write!(f, "fabric pending-work limit {}", self.capacity)
+            }
+        }
     }
 }
 
@@ -51,6 +67,10 @@ impl<T> BoundedQueue<T> {
         self.buf.is_empty()
     }
 
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
+        self.buf.iter()
+    }
+
     /// Highest length ever reached. Monotone; the observable for "the bound was never exceeded".
     pub fn high_water(&self) -> usize {
         self.hwm
@@ -59,7 +79,10 @@ impl<T> BoundedQueue<T> {
     /// Enqueues or reports backpressure. Never blocks, never drops.
     pub fn push(&mut self, item: T) -> Result<(), Backpressure> {
         if self.buf.len() >= self.cap {
-            return Err(Backpressure { capacity: self.cap });
+            return Err(Backpressure {
+                capacity: self.cap,
+                resource: BackpressureResource::ReadyQueue,
+            });
         }
         self.buf.push_back(item);
         self.hwm = self.hwm.max(self.buf.len());
@@ -80,7 +103,13 @@ mod tests {
         let mut q: BoundedQueue<u32> = BoundedQueue::new(2);
         assert!(q.push(1).is_ok());
         assert!(q.push(2).is_ok());
-        assert_eq!(q.push(3), Err(Backpressure { capacity: 2 }));
+        assert_eq!(
+            q.push(3),
+            Err(Backpressure {
+                capacity: 2,
+                resource: BackpressureResource::ReadyQueue,
+            })
+        );
         assert_eq!(q.pop(), Some(1));
         assert!(q.push(3).is_ok());
     }

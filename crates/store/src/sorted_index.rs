@@ -115,11 +115,13 @@ impl SortedIndex {
         }
 
         let key_length = File::open(&keys_path)?.metadata()?.len();
-        if offsets.windows(2).any(|pair| pair[0] >= pair[1])
-            || offsets.last().is_some_and(|offset| *offset > key_length)
+        if offsets.is_empty() != (key_length == 0)
+            || offsets.first().is_some_and(|offset| *offset != 0)
+            || offsets.windows(2).any(|pair| pair[0] >= pair[1])
+            || offsets.last().is_some_and(|offset| *offset >= key_length)
         {
             return Err(StoreError::CorruptIndex(
-                "offsets must be strictly increasing and within the keys file".into(),
+                "offsets must cover a nonempty keys file, start at zero, increase strictly, and stay within the file".into(),
             ));
         }
 

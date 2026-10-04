@@ -3,6 +3,17 @@
 This package is the Python integration layer above the Rust AURORA/Prism kernel. It speaks the
 repository's newline-delimited JSON-RPC MCP transport using only the Python standard library.
 
+Install the dependency-free SDK and its `aurora-agent` command from a checkout with:
+
+```sh
+python -m pip install ./python
+aurora-agent --help
+```
+
+The wheel requires Python 3.11 or newer and declares no runtime dependencies. CI builds the wheel,
+checks that every SDK module and the CLI entry point are packaged, installs it into a clean virtual
+environment, and runs the installed command without importing from the checkout.
+
 ```python
 from prism_sdk import Client, Workspace
 
@@ -66,6 +77,19 @@ This is one bounded public-literature source, not general browsing or scientific
 Retrieved abstracts remain unverified source text and require independent evidence-quality and
 claim review. The adapter does not provide a shared durable coordinator, uncertain-call
 reconciliation, exactly-once delivery, or durable raw-bundle storage.
+
+`ReviewedCBioPortalRetrievalAdapter` provides a separate, explicitly approved metadata catalogue
+for the fixed public `gbm_tcga` and `lgg_tcga` studies. Its plan is network-free. Approved execution
+performs a study-summary GET and one sorted `SUMMARY` molecular-profile GET per study, capped at
+128 profiles. It retains only allow-listed descriptors and the source-reported aggregate sample
+count; samples, patients, clinical rows, and molecular values are not requested. Use
+`create_reviewed_cbioportal_autonomous_evidence_registration()` to bind one study plan to the
+evidence runtime. It validates the transient bundle and receipt, then returns only source and bundle
+digests. Missing counts remain unknown, and a full profile page is refused because it may be
+truncated. The [official cBioPortal API documentation](https://docs.cbioportal.org/web-api-and-clients/)
+links to the current [OpenAPI reference](https://www.cbioportal.org/api/swagger-ui/index.html?urls.primaryName=internal);
+that API is beta and may change, so the adapter refuses contract drift. It does not claim exhaustive
+glioma coverage or evidence quality.
 
 When an actual local model is available, `ollama_provider()` configures the Ollama
 OpenAI-compatible loopback server (`http://127.0.0.1:11434/v1`) without reading or requiring an
@@ -778,6 +802,12 @@ provider effect. `JsonAutonomousGoalWorkerJournalPersistence` and
 `AutonomousGoalWorkerJournalPersistenceCoordinator` provide canonical caller-owned snapshot
 storage with optional compare-and-swap fencing. Journal snapshots exclude task text, prompts,
 parameters, credentials, and executor results just like the goal ledger.
+When `max_concurrent` is greater than one, both SDK workers execute independent dependency waves
+concurrently up to that bound, then expose result rows in stable schedule order. Python runs the
+caller executor in a bounded thread pool, so opt-in executor callbacks must be concurrency-safe;
+the default one-goal schedule remains serial. If an unexpected worker error occurs, the worker
+waits for every already-started sibling in that wave to settle before it releases the journal's
+single-run fence and propagates the error. Journal event order reflects actual dispatch timing.
 The worker also verifies `goal_task_digest(resolved_task)` against the immutable ledger identity
 before it claims anything, so a stale or mis-keyed protected queue cannot execute a different task.
 When parameters are present, each journal event carries only an `execution_binding_digest`; this

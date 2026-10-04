@@ -1,6 +1,6 @@
 # Contributing to AURORA Agent
 
-AURORA Agent is a Rust workspace of 79 crates implementing the FIBER decision-context
+AURORA Agent is a Rust workspace of 88 crates implementing the FIBER decision-context
 compiler. Before contributing, read [AGENTS.md](AGENTS.md) — it is the single source of
 truth for how to work in this repository, and this document only distils it.
 

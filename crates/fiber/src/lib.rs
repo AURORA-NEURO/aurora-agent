@@ -1,5 +1,3 @@
-#![allow(clippy::all)]
-
 //! The FIBER query compiler.
 //!
 //! Implements blueprint 43.13 (protected closure), 43.17 (dependency slicing and obligation

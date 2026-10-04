@@ -1,7 +1,7 @@
 //! The crate scanning itself for the tokens it exists not to write.
 //!
 //! `tools/coverage.sh` counts a blueprint module as covered when its `NN.MM` token appears anywhere
-//! under `crates/` or `docs/`. This crate is a register of eighty-four modules that are *not*
+//! under `crates/` or `docs/`. This crate is a register of forty-four modules that are *not*
 //! covered, and it lives under `crates/`. Written the obvious way it would take the headline to
 //! 100% by itself.
 //!

@@ -62,6 +62,10 @@ pub enum PackError {
         trials: u32,
     },
 
+    /// Health thresholds must describe probabilities and require a nonzero evidence floor.
+    #[error("invalid pack assessment policy: {0}")]
+    InvalidPolicy(String),
+
     /// Blueprint invariant: every reported result is linked to an immutable benchmark-pack
     /// version. An assessment of one revision says nothing about another.
     #[error("assessment is bound to pack digest {assessed}, but the pack presented has digest {presented}")]

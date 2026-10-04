@@ -35,8 +35,11 @@
 //! - **No distribution.** Shards are logical partitions inside one process, not hosts. Leases,
 //!   quotas and idempotency windows are authoritative only within this process; a second process
 //!   pointing at the same "fabric" would share nothing.
-//! - **No durability.** Queues, leases and receipts are in-memory. A restart loses all state;
-//!   there is no journal, no replay, no persistence layer.
+//! - **No automatic durable store or journal.** [`scheduler::Fabric::checkpoint`] exports a
+//!   versioned recovery checkpoint and [`scheduler::Fabric::from_checkpoint`] restores it without
+//!   dispatching. Checkpoints refuse live leases and cannot resolve uncertain external effects;
+//!   callers own durable atomic storage and any idempotency or reconciliation needed after a
+//!   crash. The checkpoint checksum detects accidental corruption, not forgery.
 //! - **MCP adapter covers a subset**: `initialize`, `ping`, `tools/list`, `tools/call`
 //!   (`fabric.submit`, `fabric.cancel`) and cancellation notifications over line-delimited stdio
 //!   framing. No resources, prompts, sampling, logging, or progress notifications.
@@ -69,6 +72,7 @@ pub mod router;
 pub mod scheduler;
 pub mod shard;
 pub mod sim;
+pub mod snapshot;
 pub mod transport;
 
 pub use capability::{Capability, CapabilityError, CapabilitySet};
@@ -76,8 +80,10 @@ pub use digest::Digest;
 pub use envelope::{Completion, DispatchJob, Outcome, Receipt, TaskEnvelope};
 pub use exec::{Driver, Handler, InlineDriver, ThreadDriver};
 pub use ids::{AgentId, IdempotencyKey, LeaseEpoch, ShardId, TaskId};
+pub use queue::{Backpressure, BackpressureResource};
 pub use retry::RetryPolicy;
 pub use scheduler::{Fabric, FabricConfig, Metrics, Submission};
+pub use snapshot::SnapshotError;
 
 /// Crate-wide semantic-version guard used by tests to pin behaviour descriptions to a build.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

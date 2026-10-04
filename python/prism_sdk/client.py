@@ -32,6 +32,9 @@ from .errors import (
 )
 from .models import JsonObject, Session, ToolResult
 
+_MAX_STDERR_TAIL_BYTES = 64_000
+_STDERR_READ_CHUNK_BYTES = 4_096
+
 
 @dataclass(frozen=True)
 class ClientConfig:
@@ -47,8 +50,12 @@ class ClientConfig:
             raise ArgumentError("command must contain at least one non-empty string")
         if self.timeout <= 0:
             raise ArgumentError("timeout must be positive")
-        if self.max_frame_bytes <= 0:
-            raise ArgumentError("max_frame_bytes must be positive")
+        if (
+            isinstance(self.max_frame_bytes, bool)
+            or not isinstance(self.max_frame_bytes, int)
+            or self.max_frame_bytes <= 0
+        ):
+            raise ArgumentError("max_frame_bytes must be a positive integer")
         if self.cwd is not None and not isinstance(self.cwd, str):
             raise ArgumentError("cwd must be a string path or None")
 
@@ -58,40 +65,74 @@ class _LineReader:
         self._stream = stream
         self._max_frame_bytes = max_frame_bytes
         self._stderr = stderr
-        self._queue: queue.Queue[bytes | BaseException | None] = queue.Queue()
-        self._recent_stderr: deque[str] = deque(maxlen=64)
+        self._queue: queue.Queue[bytes | BaseException | None] = queue.Queue(maxsize=1)
+        self._recent_stderr: deque[bytes] = deque()
+        self._stderr_size = 0
+        self._stopped = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self) -> None:
         self._thread.start()
 
+    def stop(self) -> None:
+        self._stopped.set()
+
+    def _enqueue(self, item: bytes | BaseException | None) -> bool:
+        while not self._stopped.is_set():
+            try:
+                self._queue.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
+
     def _run(self) -> None:
         try:
-            while True:
-                line = self._stream.readline()
+            if self._stderr:
+                self._drain_stderr()
+                return
+            while not self._stopped.is_set():
+                # The size argument makes the frame limit a read bound, not a check made
+                # after an arbitrary peer line has already been accumulated in memory.
+                line = self._stream.readline(self._max_frame_bytes + 1)
                 if not line:
-                    self._queue.put(None)
+                    self._enqueue(None)
                     return
-                if self._stderr:
-                    self._recent_stderr.append(line.decode("utf-8", errors="replace"))
-                    continue
                 if len(line) > self._max_frame_bytes:
-                    self._queue.put(
+                    self._enqueue(
                         ProtocolError(
                             f"peer frame is {len(line)} bytes, over the "
                             f"{self._max_frame_bytes}-byte bound"
                         )
                     )
                     return
-                self._queue.put(line)
+                if not self._enqueue(line):
+                    return
         except BaseException as error:  # pragma: no cover - defensive transport boundary
-            self._queue.put(error)
+            self._enqueue(error)
+
+    def _drain_stderr(self) -> None:
+        while not self._stopped.is_set():
+            chunk = self._stream.read(_STDERR_READ_CHUNK_BYTES)
+            if not chunk:
+                return
+            self._recent_stderr.append(bytes(chunk))
+            self._stderr_size += len(chunk)
+            while self._stderr_size > _MAX_STDERR_TAIL_BYTES:
+                excess = self._stderr_size - _MAX_STDERR_TAIL_BYTES
+                oldest = self._recent_stderr[0]
+                if len(oldest) <= excess:
+                    self._recent_stderr.popleft()
+                    self._stderr_size -= len(oldest)
+                else:
+                    self._recent_stderr[0] = oldest[excess:]
+                    self._stderr_size -= excess
 
     def next(self, timeout: float) -> bytes | BaseException | None:
         return self._queue.get(timeout=timeout)
 
     def stderr(self) -> str:
-        return "".join(self._recent_stderr)
+        return b"".join(self._recent_stderr).decode("utf-8", errors="replace")
 
 
 class Client:
@@ -244,6 +285,9 @@ class Client:
             self._session = None
             if process is None:
                 return
+            for reader in (stdout_reader, stderr_reader):
+                if reader is not None:
+                    reader.stop()
             try:
                 if process.stdin is not None:
                     process.stdin.close()

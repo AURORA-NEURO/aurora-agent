@@ -117,7 +117,10 @@ fn the_abstract_interpretation_survives_a_falsification_search_under_a_stated_ra
             }
         }
     }
-    assert!(searched >= 10, "only {searched} range perturbations were searched");
+    assert!(
+        searched >= 10,
+        "only {searched} range perturbations were searched"
+    );
 }
 
 #[test]
@@ -197,12 +200,9 @@ fn a_factor_with_no_potential_is_refused_rather_than_bounded_by_one() {
         .free("b")
         .build()
         .unwrap();
-    let outcome = interpret_with_standard_domains(
-        &region,
-        &["f.ab".to_string()],
-        &Perturbation::Removal,
-    )
-    .expect("the region is well formed");
+    let outcome =
+        interpret_with_standard_domains(&region, &["f.ab".to_string()], &Perturbation::Removal)
+            .expect("the region is well formed");
     let reason = outcome.expect_err("a region with no potentials must not produce a bound");
     assert!(
         matches!(reason, UnknownReason::NoFactorTable { .. }),
@@ -221,20 +221,21 @@ fn a_zero_entry_is_refused_because_a_single_site_conditional_need_not_exist() {
             vec!["a", "b"],
             vec![1.0, 2.0, 3.0, 4.0],
         ))
-        .factor(RegionFactor::with_table("f.gate", vec!["a"], vec![0.0, 1.0]))
+        .factor(RegionFactor::with_table(
+            "f.gate",
+            vec!["a"],
+            vec![0.0, 1.0],
+        ))
         .free("b")
         .build()
         .unwrap();
-    assert!(!certainly_positive(
-        &bioprism_influence::Support::of_table(&[0.0, 1.0])
-    ));
-    let reason = interpret_with_standard_domains(
-        &region,
-        &["f.gate".to_string()],
-        &Perturbation::Removal,
-    )
-    .expect("the region is well formed")
-    .expect_err("a forbidden assignment must be refused, not approximated");
+    assert!(!certainly_positive(&bioprism_influence::Support::of_table(
+        &[0.0, 1.0]
+    )));
+    let reason =
+        interpret_with_standard_domains(&region, &["f.gate".to_string()], &Perturbation::Removal)
+            .expect("the region is well formed")
+            .expect_err("a forbidden assignment must be refused, not approximated");
     let text = reason.to_string();
     assert!(
         text.contains("zero or non-finite entry"),
@@ -309,8 +310,14 @@ fn the_suite_reports_what_widening_gave_away_and_what_narrowing_took_back() {
         interpretation.convergence.as_str(),
         truth
     );
-    assert!(interpretation.widened(), "this chain does not stabilise under join");
-    assert_eq!(interpretation.convergence, Convergence::WideningThenNarrowing);
+    assert!(
+        interpretation.widened(),
+        "this chain does not stabilise under join"
+    );
+    assert_eq!(
+        interpretation.convergence,
+        Convergence::WideningThenNarrowing
+    );
     assert!(
         interpretation.bound.value() >= exact[free] - 1e-9,
         "a post-fixpoint must dominate the exact solution it approximates"

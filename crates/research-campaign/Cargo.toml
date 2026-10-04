@@ -21,3 +21,5 @@ bioprism-brain = { workspace = true }
 bioprism-autopilot = { workspace = true }
 bioprism-neurosurgery = { workspace = true, optional = true }
 
+[dev-dependencies]
+bioprism-devplat = { workspace = true }

@@ -75,7 +75,9 @@ fn scattered_region(variables: usize, factors: usize, domain: usize, seed: u64) 
             table,
         ));
     }
-    builder.build().expect("the scattered region is well formed")
+    builder
+        .build()
+        .expect("the scattered region is well formed")
 }
 
 fn reference_region() -> QueryRegion {

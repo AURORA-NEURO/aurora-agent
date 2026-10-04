@@ -344,7 +344,7 @@ mod tests {
                 evidence_digest: Some(r.clone()),
                 provenance_digest: Some(r.clone()),
                 replay_identity: r.clone(),
-                state: state.clone(),
+                state,
                 ready: true,
                 cost_units: 1,
                 raw_data_local: true,

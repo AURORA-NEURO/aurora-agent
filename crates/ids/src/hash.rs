@@ -1,6 +1,6 @@
 //! Content addressing over canonical bytes.
 
-use crate::canonical::to_canonical_bytes;
+use crate::canonical::{to_canonical_bytes, to_canonical_bytes_serializable};
 use crate::error::{CanonicalError, IdError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -12,8 +12,20 @@ use std::fmt;
 pub struct ContentHash(String);
 
 impl ContentHash {
+    /// Hash a JSON value that has already been materialized.
+    ///
+    /// This cannot identify floats that a prior serializer converted to `null`; prefer
+    /// [`ContentHash::of_serializable`] while the typed source value is still available.
     pub fn of_value(value: &Value) -> Result<Self, CanonicalError> {
         Ok(Self::of_bytes(&to_canonical_bytes(value)?))
+    }
+
+    /// Hash serializable Rust data without allowing non-finite floats to become JSON nulls.
+    ///
+    /// Use this before converting a typed value to `serde_json::Value`; that conversion loses
+    /// whether a null originated as a stated null or as NaN/infinity.
+    pub fn of_serializable<T: Serialize + ?Sized>(value: &T) -> Result<Self, CanonicalError> {
+        Ok(Self::of_bytes(&to_canonical_bytes_serializable(value)?))
     }
 
     pub fn of_bytes(bytes: &[u8]) -> Self {
@@ -62,6 +74,12 @@ impl TryFrom<String> for ContentHash {
 
 pub fn sha256_hex_of_value(value: &Value) -> Result<String, CanonicalError> {
     ContentHash::of_value(value).map(|h| h.0)
+}
+
+pub fn sha256_hex_of_serializable<T: Serialize + ?Sized>(
+    value: &T,
+) -> Result<String, CanonicalError> {
+    ContentHash::of_serializable(value).map(|hash| hash.0)
 }
 
 fn hex_lower(bytes: &[u8]) -> String {

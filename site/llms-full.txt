@@ -11,7 +11,7 @@ triage care, enroll participants, or claim medical-device functionality.
 
 ## What it is
 
-AURORA Agent is a Rust workspace of 79 crates implementing the FIBER decision-context compiler.
+AURORA Agent is a Rust workspace of 88 crates implementing the FIBER decision-context compiler.
 The central idea, from README.md: context assembly is a compiler pass — instead of retrieval plus
 summarisation plus vibes-based compaction, a typed decision query is compiled into the smallest
 decision-sufficient evidence region, delivered as a Decision Section, and accompanied by a Context
@@ -23,14 +23,17 @@ whole knowledge structure by default."
 
 Surfaces:
 
-- 259 MCP tools via the `bioprism-mcp` stdio server (JSON-RPC 2.0 over newline-delimited stdio,
+- 983 MCP tools via the `bioprism-mcp` stdio server (JSON-RPC 2.0 over newline-delimited stdio,
   full MCP lifecycle).
 - A CLI (`bioprism`), with `--json` envelopes and a 10-exit-code retryability matrix: every failure
   code carries exactly one retry decision, so a caller holding nothing but the process status can
   decide whether to re-send.
 - A local HTTP gateway (`bioprism-api`) for deployments that need a network boundary.
 
-Privacy: fully local. No network access, no external services, no telemetry, no data collection.
+Privacy: local-first, no telemetry or background network activity. Local workflows can run offline.
+Outbound source HTTP is denied by default and requires an operator `--allow-http-origin <host[:port]>`
+startup option plus a caller plan that opts in and allows the requested host. The connector uses
+unencrypted HTTP and sends the locator path and query to the selected host. See PRIVACY.md.
 Policy: https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md
 
 ---
@@ -304,9 +307,11 @@ Claude Code: `claude plugin marketplace add AURORA-NEURO/aurora-agent` then
 v0.1.1. From source: `cargo build --release --offline`.
 
 Q: Does it phone home?
-A: No. It is a local program: no network requests, no external services, no telemetry, no
-analytics, no crash reporting, no account. The optional `bioprism-api` gateway binds to an address
-you choose (loopback by default) and serves only callers presenting your bearer token.
+A: No. There is no telemetry, analytics, crash reporting, account, or background network activity.
+Local workflows can run offline. Explicit source HTTP is denied by default and needs operator
+startup configuration plus caller-plan opt-in; requests use unencrypted HTTP. The optional
+`bioprism-api` gateway binds to an address you choose (loopback by default) and serves only callers
+presenting your bearer token when one is configured.
 
 Q: Can I use it for clinical decisions?
 A: No. Research and developer infrastructure: it does not diagnose an individual, recommend

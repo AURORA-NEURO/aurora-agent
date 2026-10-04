@@ -64,7 +64,7 @@ use bioprism_influence::{
     Perturbation,
 };
 use bioprism_section::OmissionGroup;
-use bioprism_world::WorldSource;
+use bioprism_world::{WorldSource, WorldSourceError};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
@@ -191,27 +191,28 @@ pub fn split_withheld<S: WorldSource + ?Sized>(
     region: Option<&QueryRegion>,
     withheld: &[String],
     cut: &TemporalCut,
-) -> WithheldSplit {
+) -> Result<WithheldSplit, WorldSourceError> {
     let mut split = WithheldSplit::default();
     if withheld.is_empty() {
-        return split;
+        return Ok(split);
     }
     let Some(region) = region else {
         split.deferred = withheld.to_vec();
-        return split;
+        return Ok(split);
     };
 
     let analyzer = InfluenceAnalyzer::default().structural_only();
     let mut bounded_subjects: BTreeSet<String> = BTreeSet::new();
 
     for fact_id in withheld {
-        let Some(fact) = source.fact(fact_id) else {
-            split.deferred.push(fact_id.clone());
-            continue;
-        };
+        let fact = source.fact(fact_id)?.ok_or_else(|| {
+            WorldSourceError::Corrupt(format!(
+                "withheld fact `{fact_id}` is missing from the source"
+            ))
+        })?;
         let variable = fact.provides.as_str().to_string();
         let subject_factors = subject_factors(region, &variable);
-        let correspondence = check_correspondence(source, &subject_factors, cut);
+        let correspondence = check_correspondence(source, &subject_factors, cut)?;
 
         let outcome = if subject_factors.is_empty() {
             Err(NotPosable::OutsideCompiledRegion {
@@ -258,7 +259,7 @@ pub fn split_withheld<S: WorldSource + ?Sized>(
         }
     }
 
-    split
+    Ok(split)
 }
 
 /// Region factors whose scope contains the withheld variable.
@@ -279,19 +280,21 @@ fn check_correspondence<S: WorldSource + ?Sized>(
     source: &S,
     subject_factors: &[String],
     cut: &TemporalCut,
-) -> CorrespondenceCheck {
+) -> Result<CorrespondenceCheck, WorldSourceError> {
     for factor_id in subject_factors {
-        let Some(factor) = source.factor(factor_id) else {
-            continue;
-        };
+        let factor = source.factor(factor_id)?.ok_or_else(|| {
+            WorldSourceError::Corrupt(format!(
+                "compiled region names missing factor `{factor_id}`"
+            ))
+        })?;
         for output in &factor.outputs {
             if cut.is_accessible(output.as_str()) {
-                return CorrespondenceCheck::TouchesDeliveredEvidence {
+                return Ok(CorrespondenceCheck::TouchesDeliveredEvidence {
                     factor: factor_id.clone(),
                     variable: output.as_str().to_string(),
-                };
+                });
             }
         }
     }
-    CorrespondenceCheck::OnlyWithheldEvidence
+    Ok(CorrespondenceCheck::OnlyWithheldEvidence)
 }

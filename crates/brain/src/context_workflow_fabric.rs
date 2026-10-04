@@ -180,7 +180,7 @@ impl ContextWorkflowReceipt {
         let expected_effect_receipts = if self.disposition == "admitted" {
             vec![format!("schedule:context-workflow:{}", self.workflow_id)]
         } else {
-            let mut effects = self.compensation_order.iter().cloned().collect::<Vec<_>>();
+            let mut effects = self.compensation_order.to_vec();
             effects.push("block:unsafe-release".into());
             effects.sort();
             effects
@@ -423,7 +423,6 @@ pub fn compile_context_workflow(
             request.workflow_id
         ));
     }
-    let stage_order = stage_order;
     let plan_order = plan.into_iter().collect::<Vec<_>>();
     let completed_order = completed;
     let blocked_order = blocked.into_iter().collect::<Vec<_>>();
@@ -437,7 +436,7 @@ pub fn compile_context_workflow(
     let effect_receipts = if disposition == "admitted" {
         vec![format!("schedule:context-workflow:{}", request.workflow_id)]
     } else {
-        let mut effects = compensation_order.iter().cloned().collect::<Vec<_>>();
+        let mut effects = compensation_order.to_vec();
         effects.push("block:unsafe-release".into());
         effects.sort();
         effects

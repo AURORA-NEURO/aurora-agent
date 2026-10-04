@@ -24,8 +24,8 @@ fn twenty_modules_are_classified_and_each_title_appears_once() {
 }
 
 #[test]
-fn the_four_buckets_are_three_three_ten_and_four() {
-    assert_eq!(verdict_counts(), [3, 3, 10, 4]);
+fn the_four_buckets_are_three_two_ten_and_five() {
+    assert_eq!(verdict_counts(), [3, 2, 10, 5]);
     assert_eq!(
         verdict_counts().iter().sum::<usize>(),
         classification().len()
@@ -46,7 +46,7 @@ fn only_an_implemented_verdict_can_carry_a_module_id() {
 }
 
 #[test]
-fn this_crate_cites_exactly_the_four_modules_it_implemented() {
+fn this_crate_cites_exactly_the_five_modules_it_implemented() {
     let declared = implemented_module_ids();
     let report =
         audit(&devplat_dir(), declared.iter().copied()).expect("the crate directory reads");
@@ -65,7 +65,7 @@ fn this_crate_cites_exactly_the_four_modules_it_implemented() {
 #[test]
 fn every_declared_module_id_actually_appears_in_the_source() {
     let declared = implemented_module_ids();
-    assert_eq!(declared.len(), 4);
+    assert_eq!(declared.len(), 5);
     let report =
         audit(&devplat_dir(), declared.iter().copied()).expect("the crate directory reads");
     assert!(
@@ -136,7 +136,7 @@ fn the_citation_audit_refuses_something_that_is_not_a_directory() {
 }
 
 #[test]
-fn the_foreign_census_and_the_classification_name_the_same_three_subjects() {
+fn the_foreign_census_and_the_classification_name_the_same_two_subjects() {
     let census: BTreeSet<&str> = foreign_subjects()
         .into_iter()
         .map(|subject| subject.title)
@@ -146,7 +146,7 @@ fn the_foreign_census_and_the_classification_name_the_same_three_subjects() {
         .filter(|row| matches!(row.verdict, Verdict::ForeignArtifact { .. }))
         .map(|row| row.title)
         .collect();
-    assert_eq!(census.len(), 3);
+    assert_eq!(census.len(), 2);
     assert_eq!(census, classified);
 }
 
@@ -168,9 +168,9 @@ fn every_foreign_subject_is_outside_this_repository() {
 }
 
 #[test]
-fn sixteen_modules_are_named_by_title_with_a_reason_and_never_by_id() {
+fn fifteen_modules_are_named_by_title_with_a_reason_and_never_by_id() {
     let rows = not_implemented();
-    assert_eq!(rows.len(), 16);
+    assert_eq!(rows.len(), 15);
     for (title, bucket, because) in rows {
         assert!(
             scan(title).is_empty(),
@@ -215,23 +215,38 @@ fn every_covered_elsewhere_verdict_names_at_least_one_crate() {
 }
 
 #[test]
-fn every_implemented_verdict_names_a_module_of_this_crate() {
+fn every_implemented_verdict_names_its_in_tree_artifact() {
     for row in classification() {
-        if let Verdict::ImplementedHere { rust_module, .. } = row.verdict {
-            assert!(
-                rust_module.starts_with("bioprism_devplat::"),
-                "`{rust_module}` is not a module of this crate"
-            );
+        if let Verdict::ImplementedHere {
+            in_tree_artifact, ..
+        } = row.verdict
+        {
+            if row.title == "GitHub Action for Consumer Repositories" {
+                assert_eq!(
+                    in_tree_artifact,
+                    ".github/actions/autonomous-run/action.yml + tools/autonomous_agent_action.py"
+                );
+                let root = bioprism_cookbook::verify::workspace_root();
+                assert!(root
+                    .join(".github/actions/autonomous-run/action.yml")
+                    .is_file());
+                assert!(root.join("tools/autonomous_agent_action.py").is_file());
+            } else {
+                assert!(
+                    in_tree_artifact.starts_with("bioprism_devplat::"),
+                    "`{in_tree_artifact}` is not a module of this crate"
+                );
+            }
         }
     }
 }
 
 #[test]
-fn the_module_ids_are_sorted_deduplicated_and_four() {
+fn the_module_ids_are_sorted_deduplicated_and_five() {
     let ids = implemented_module_ids();
     let mut sorted = ids.clone();
     sorted.sort_unstable();
     sorted.dedup();
     assert_eq!(ids, sorted);
-    assert_eq!(ids.len(), 4);
+    assert_eq!(ids.len(), 5);
 }

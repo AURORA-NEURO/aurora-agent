@@ -184,9 +184,7 @@ impl EvidenceWorkbenchReceipt {
 
     pub fn digest(&self) -> Result<ContentHash, EvidenceWorkbenchError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| EvidenceWorkbenchError::Serialization(error.to_string()))?;
-        ContentHash::of_value(&value)
+        ContentHash::of_serializable(self)
             .map_err(|error| EvidenceWorkbenchError::Serialization(error.to_string()))
     }
 }

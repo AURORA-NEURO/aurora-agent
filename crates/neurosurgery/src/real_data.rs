@@ -170,6 +170,9 @@ pub struct GuidelineReference {
     pub title: String,
     pub uri: String,
     pub publisher: String,
+    /// Calendar date printed by the source, distinct from when this snapshot was retrieved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_date: Option<String>,
 }
 
 /// Compact PubMed citation, abstract, and indexing metadata. An indexed citation or abstract is
@@ -406,6 +409,9 @@ pub struct RealDataQueryHit {
     /// Publication date copied from PubMed metadata, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication_date: Option<String>,
+    /// NCI PDQ page update date, when the source publishes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guideline_updated_date: Option<String>,
     /// Aggregate GDC file-type facets copied only for genomic-project hits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub genomic_data_type_counts: Vec<GenomicProjectDataTypeCount>,
@@ -485,6 +491,10 @@ impl RealDataQueryResult {
                         .as_deref()
                         .is_some_and(|date| !is_calendar_date(date))
                     || hit
+                        .guideline_updated_date
+                        .as_deref()
+                        .is_some_and(|date| !is_calendar_date(date))
+                    || hit
                         .enrollment_count
                         .is_some_and(|count| count > MAX_TRIAL_ENROLLMENT)
                     || hit
@@ -510,6 +520,8 @@ impl RealDataQueryResult {
                         && hit.sample_count.is_some())
                     || (hit.record_kind != RealDataRecordKind::LiteratureArticle
                         && hit.publication_date.is_some())
+                    || (hit.record_kind != RealDataRecordKind::GuidelineReference
+                        && hit.guideline_updated_date.is_some())
                     || (hit.record_kind != RealDataRecordKind::GenomicProject
                         && !hit.genomic_data_type_counts.is_empty())
                     || !valid_genomic_data_type_counts(&hit.genomic_data_type_counts)
@@ -1049,6 +1061,17 @@ impl RealGliomaBundle {
             validate_text(&reference.reference_id, "reference_id")?;
             validate_text(&reference.title, "reference.title")?;
             validate_text(&reference.publisher, "reference.publisher")?;
+            if let Some(updated_date) = &reference.updated_date {
+                validate_text(updated_date, "reference.updated_date")?;
+                if !is_calendar_date(updated_date) {
+                    return Err(NeurosurgeryError::RealDataRejected {
+                        reason: format!(
+                            "guideline reference {} has an invalid updated_date",
+                            reference.reference_id
+                        ),
+                    });
+                }
+            }
             if !reference.uri.starts_with("https://") || !is_allow_listed_uri(&reference.uri) {
                 return Err(NeurosurgeryError::RealDataRejected {
                     reason: "guideline reference is not an allow-listed HTTPS authority"
@@ -1527,14 +1550,16 @@ impl RealGliomaBundle {
                 ],
                 None,
             ) {
-                hits.push(self.hit(
+                let mut hit = self.hit(
                     RealDataRecordKind::GuidelineReference,
                     &record.reference_id,
                     &record.title,
                     None,
                     &record.source_id,
                     related_records,
-                )?);
+                )?;
+                hit.guideline_updated_date = record.updated_date.clone();
+                hits.push(hit);
             }
         }
         for record in &self.literature {
@@ -1803,6 +1828,7 @@ impl RealGliomaBundle {
             intervention_names: Vec::new(),
             sample_count: None,
             publication_date: None,
+            guideline_updated_date: None,
             genomic_data_type_counts: Vec::new(),
         })
     }

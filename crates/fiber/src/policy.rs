@@ -66,7 +66,9 @@
 //! * **No obligation discharge.** Accepting a clause is a claim the caller makes about itself.
 //!   Nothing here can tell an honoured obligation from an ignored one.
 
+use crate::error::FiberError;
 use crate::qir::Query;
+use crate::temporal::temporal_cut;
 use bioprism_world::{Fact, WorldSource};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -103,6 +105,14 @@ pub enum PolicyViolation {
         clauses: Vec<String>,
         governing: Vec<String>,
     },
+
+    /// The corpus's governing policy has not been released at the query's decision time.
+    ///
+    /// Reading a future policy here would let a grant authorize evidence before the grant exists.
+    /// The policy envelope is an admission check, so the only safe result is refusal until the
+    /// governing policy is available.
+    #[error("the world's governing data policy is not available at decision time {decision_time}")]
+    DataPolicyUnavailableAtCut { decision_time: String },
 
     /// The governing policy exists but does not parse as a clause list.
     ///
@@ -149,16 +159,22 @@ pub struct PolicyEnvelope {
 impl PolicyEnvelope {
     /// Reads the governing policy and checks the caller's declared clauses against it.
     ///
-    /// Runs before the protected closure, and is the only part of this module that does. It needs
-    /// no evidence beyond the single `data_policy` lookup, so gating here means a conflicting
-    /// query is refused before any closure, slice or materialisation happens — 43.33's
-    /// "enforced during compilation" taken at its word. The *screen* cannot move up with it, for
-    /// the reason given at [`screen`].
-    pub fn resolve<S: WorldSource + ?Sized>(
-        source: &S,
-        query: &Query,
-    ) -> Result<Self, PolicyViolation> {
-        let governing = match source.fact_providing(DATA_POLICY_VARIABLE) {
+    /// Runs before the protected closure, and is the only part of this module that does. It reads
+    /// the event structure and the single `data_policy` lookup, and refuses if that policy has not
+    /// been released by the decision cut. A future grant must not authorize an earlier decision.
+    /// Gating here means a conflicting or unavailable policy is refused before any closure, slice
+    /// or materialisation happens — 43.33's "enforced during compilation" taken at its word. The
+    /// *screen* cannot move up with it, for the reason given at [`screen`].
+    pub fn resolve<S: WorldSource + ?Sized>(source: &S, query: &Query) -> Result<Self, FiberError> {
+        let cut = temporal_cut(source, query.decision_time)?;
+        if !cut.is_accessible(DATA_POLICY_VARIABLE) {
+            return Err(PolicyViolation::DataPolicyUnavailableAtCut {
+                decision_time: cut.at.to_rfc3339(),
+            }
+            .into());
+        }
+
+        let governing = match source.fact_providing(DATA_POLICY_VARIABLE)? {
             Some(fact) => Some(governing_clauses(&fact)?),
             None => None,
         };
@@ -170,7 +186,8 @@ impl PolicyEnvelope {
                 return Err(PolicyViolation::Conflict {
                     clauses: ungranted,
                     governing: declared.iter().cloned().collect(),
-                });
+                }
+                .into());
             }
         }
 

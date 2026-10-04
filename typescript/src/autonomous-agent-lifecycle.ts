@@ -88,6 +88,16 @@ function errorClass(error: unknown): string {
   return /^[A-Za-z0-9_.-]{1,128}$/.test(name) ? name : "UnknownError";
 }
 
+function componentStatus(operation: AutonomousAgentPersistenceLifecycleOperation, value: unknown): AutonomousAgentPersistenceLifecycleComponentStatus {
+  if (value === null || value === undefined) return "empty";
+  if (operation === "restore" && isObject(value) && Object.prototype.hasOwnProperty.call(value, "restored")) {
+    const restored = value.restored;
+    if (typeof restored !== "boolean") throw new ArgumentError("lifecycle restored receipt flag must be boolean");
+    if (!restored) return "empty";
+  }
+  return operation === "restore" ? "restored" : "flushed";
+}
+
 function projection(value: unknown): { schema: string | null; snapshotDigest: string | null; stateDigest: string | null; generation: number | null } {
   if (!isObject(value)) return { schema: null, snapshotDigest: null, stateDigest: null, generation: null };
   const schema = typeof value.schema === "string" ? value.schema : null;
@@ -277,7 +287,7 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
       }
       try {
         const value = await this.invoke(componentId, operation);
-        results.push(await componentResult(componentId, operation, value === null ? "empty" : operation === "restore" ? "restored" : "flushed", value));
+        results.push(await componentResult(componentId, operation, componentStatus(operation, value), value));
       } catch (error) {
         results.push(await componentResult(componentId, operation, "failed", undefined, error));
         if (failedComponentId === null) failedComponentId = componentId;

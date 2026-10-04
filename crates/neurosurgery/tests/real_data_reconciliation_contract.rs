@@ -103,8 +103,28 @@ fn autonomous_workflow_turns_identifier_drift_into_a_provenance_action() {
             .expect("every source should have a hash")
             .clone();
     }
+    let query = bioprism_neurosurgery::RealDataAutonomousWorkflowQuery {
+        max_actions: bioprism_neurosurgery::MAX_REAL_DATA_AUTONOMOUS_ACTIONS,
+        packet: bioprism_neurosurgery::RealDataEvidencePacketQuery {
+            query: bioprism_neurosurgery::RealDataQuery {
+                limit: 128,
+                ..Default::default()
+            },
+            graph: bioprism_neurosurgery::EvidenceGraphQuery {
+                max_nodes: bioprism_neurosurgery::MAX_EVIDENCE_GRAPH_NODES,
+                max_edges: bioprism_neurosurgery::MAX_EVIDENCE_GRAPH_EDGES,
+                ..Default::default()
+            },
+            review_queue: bioprism_neurosurgery::RealDataReviewQueueQuery {
+                max_items: bioprism_neurosurgery::MAX_REAL_DATA_REVIEW_ITEMS,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let report = data
-        .autonomous_workflow(&Default::default())
+        .autonomous_workflow(&query)
         .expect("identifier drift should remain reviewable");
     assert!(report.actions.iter().any(|action| {
         action.kind == bioprism_neurosurgery::RealDataAutonomousActionKind::ReconcileIdentifiers

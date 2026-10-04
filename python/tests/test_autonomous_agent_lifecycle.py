@@ -5,6 +5,7 @@ import json
 import pytest
 
 from prism_sdk import (
+    ArgumentError,
     AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER,
     AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER,
     AutonomousAgentPersistenceLifecycleCoordinator,
@@ -28,6 +29,31 @@ from prism_sdk import (
 )
 
 
+def test_execution_settlement_failure_is_attached_to_original_error() -> None:
+    class FailingController:
+        def fail(self, *, reason: str) -> None:
+            raise OSError("private persistence detail")
+
+    original_error = RuntimeError("provider failed")
+
+    AutonomousAgent._finish_execution(FailingController(), error=original_error)
+
+    assert type(original_error) is RuntimeError
+    assert original_error.__notes__ == [
+        "autonomous execution failure status could not be confirmed in the journal "
+        "(OSError); inspect the journal before resuming"
+    ]
+    assert "private persistence detail" not in "\n".join(original_error.__notes__)
+
+
+class _LifecyclePersistenceStub:
+    def restore(self) -> None:
+        return None
+
+    def flush(self) -> None:
+        return None
+
+
 class _LifecycleAgent:
     def __init__(self, calls: list[str], *, fail: str | None = None) -> None:
         self.calls = calls
@@ -44,7 +70,8 @@ class _LifecycleAgent:
             "decision_cycle",
             "execution",
         ):
-            setattr(self, f"{component}_persistence", object())
+            persistence = _LifecyclePersistenceStub()
+            setattr(self, f"{component}_persistence", persistence)
 
     @staticmethod
     def _value(component: str, operation: str) -> dict[str, object]:
@@ -111,9 +138,9 @@ def test_lifecycle_restores_and_flushes_in_explicit_dependency_order() -> None:
         model_inventory_store=object(),
         activation_store=object(),
         selection_promotion_store=object(),
-        capability_journal_persistence=object(),
-        decision_cycle_persistence=object(),
-        execution_persistence=object(),
+        capability_journal_persistence=agent.capability_journal_persistence,
+        decision_cycle_persistence=agent.decision_cycle_persistence,
+        execution_persistence=agent.execution_persistence,
         require_all=True,
     )
 
@@ -169,6 +196,105 @@ def test_lifecycle_non_strict_mode_surfaces_unconfigured_components() -> None:
     assert report["status"] == "partial"
     assert "memory" in report["unconfigured_component_ids"]
     assert report["next_action"] == "bind_unconfigured_persistence_or_accept_partial_lifecycle"
+
+
+def test_lifecycle_rejects_persistence_coordinator_not_bound_to_agent() -> None:
+    agent = _LifecycleAgent([])
+    with pytest.raises(ArgumentError, match="must be bound to the agent"):
+        AutonomousAgentPersistenceLifecycleCoordinator(
+            agent,
+            capability_journal_persistence=_LifecyclePersistenceStub(),
+        )
+
+
+def test_lifecycle_rejects_malformed_bound_persistence_coordinator() -> None:
+    agent = _LifecycleAgent([])
+    malformed = object()
+    agent.capability_journal_persistence = malformed
+    with pytest.raises(ArgumentError, match="capability_journal_persistence is malformed"):
+        AutonomousAgentPersistenceLifecycleCoordinator(
+            agent,
+            capability_journal_persistence=malformed,
+        )
+
+
+def test_lifecycle_reports_explicit_missing_snapshots_as_empty_not_restored() -> None:
+    calls: list[str] = []
+
+    class EmptySnapshotAgent(_LifecycleAgent):
+        @staticmethod
+        def _value(component: str, operation: str) -> dict[str, object]:
+            return {"restored": False, "snapshot_digest": None, "schema": f"test/{component}/{operation}"}
+
+    agent = EmptySnapshotAgent(calls)
+    coordinator = AutonomousAgentPersistenceLifecycleCoordinator(
+        agent,
+        model_inventory_store=object(),
+        activation_store=object(),
+        selection_promotion_store=object(),
+        capability_journal_persistence=agent.capability_journal_persistence,
+        decision_cycle_persistence=agent.decision_cycle_persistence,
+        execution_persistence=agent.execution_persistence,
+        require_all=True,
+    )
+    report = coordinator.restore().to_dict()
+
+    assert report["status"] == "empty"
+    assert all(component["status"] == "empty" for component in report["components"])
+    assert report["completed_component_ids"] == list(AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER)
+
+
+def test_lifecycle_rejects_malformed_restore_receipt_flags() -> None:
+    calls: list[str] = []
+
+    class MalformedRestoreAgent(_LifecycleAgent):
+        @staticmethod
+        def _value(component: str, operation: str) -> dict[str, object]:
+            return {"restored": "false", "schema": f"test/{component}/{operation}"}
+
+    agent = MalformedRestoreAgent(calls)
+    coordinator = AutonomousAgentPersistenceLifecycleCoordinator(
+        agent,
+        model_inventory_store=object(),
+        activation_store=object(),
+        selection_promotion_store=object(),
+        capability_journal_persistence=agent.capability_journal_persistence,
+        decision_cycle_persistence=agent.decision_cycle_persistence,
+        execution_persistence=agent.execution_persistence,
+        require_all=True,
+    )
+    report = coordinator.restore(strict=False).to_dict()
+
+    assert report["status"] == "failed"
+    assert report["components"][0]["status"] == "failed"
+    assert report["components"][0]["error_class"] == "ArgumentError"
+    assert report["components"][1]["status"] == "not_attempted"
+
+
+def test_lifecycle_generation_projection_matches_javascript_nullish_and_safe_integer_rules() -> None:
+    calls: list[str] = []
+    agent = _LifecycleAgent(calls)
+    agent.restore_runtime_health = lambda: {
+        "generation": None,
+        "snapshot_generation": 7,
+    }
+    agent.restore_health = lambda: {
+        "generation": 9_007_199_254_740_992,
+    }
+    agent.restore_evaluator_calibration = lambda: {
+        "generation": 3.0,
+    }
+    coordinator = AutonomousAgentPersistenceLifecycleCoordinator(agent)
+
+    report = coordinator.restore(strict=False).to_dict()
+    generations = {
+        component["component_id"]: component["generation"]
+        for component in report["components"]
+    }
+
+    assert generations["runtime_health"] == 7
+    assert generations["health"] is None
+    assert generations["evaluator_calibration"] == 3
 
 
 def _runtime() -> LLMRuntime:

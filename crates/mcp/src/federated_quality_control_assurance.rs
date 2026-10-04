@@ -826,7 +826,7 @@ mod tests {
     #[test]
     fn missing_site_is_explicit() {
         let mut req = request();
-        req.objects.pop();
+        req.objects.retain(|object| object.site_id != "site-b");
         let receipt = assure_federated_quality(&req).unwrap();
         assert_eq!(receipt.disposition, QualityVerdictDisposition::Unresolved);
         assert_eq!(receipt.missing_site_order, vec!["site-b"]);

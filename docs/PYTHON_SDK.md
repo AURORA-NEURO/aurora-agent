@@ -11,6 +11,240 @@ the integration layer above the deterministic kernel described by [ADR-001](ADR-
 Python can orchestrate and author requests, while Rust remains the owner of canonical bytes,
 domain invariants, release gates, and evidence semantics.
 
+The generated package surface can include explicitly declared feature names that are not present
+in a particular Python distribution. Such known optional exports remain importable as placeholders
+and raise `ImportError` when used. Unknown names are not synthesized: attribute and typo checks
+raise `AttributeError` after package initialization. The import compatibility shim is scoped to
+package initialization and restores Python's original import function before `import prism_sdk`
+returns.
+
+## Reviewed NCBI Gene metadata retrieval
+
+`ReviewedNcbiGeneRetrievalAdapter` reads the fixed human-gene catalogue through the NCBI E-utilities
+ESummary endpoint. `prepare()` is network-free; approved execution makes exactly one request for the
+selected fixed GeneIDs. The result projects symbol, description, chromosome, map location, and
+bounded aliases. It excludes Gene summaries, sequence, variants, expression, samples, and patient
+data. The exact returned GeneIDs, human taxid, and catalogue symbols are checked before projection.
+
+```python
+from prism_sdk import (
+    ReviewedNcbiGeneRetrievalAdapter,
+    ReviewedNcbiGeneRetrievalConfig,
+    create_reviewed_ncbi_gene_autonomous_evidence_registration,
+    create_reviewed_ncbi_gene_execution_metadata,
+)
+
+config = ReviewedNcbiGeneRetrievalConfig(gene_symbols=("IDH1", "MGMT", "EGFR"))
+adapter = ReviewedNcbiGeneRetrievalAdapter(config)
+plan = adapter.prepare()  # deterministic; no network request
+review = create_reviewed_ncbi_gene_execution_metadata(
+    plan,
+    approve_source_dispatch=True,
+)
+registration = create_reviewed_ncbi_gene_autonomous_evidence_registration(adapter, plan)
+```
+
+The caller-owned transient bundle contains the metadata rows; the autonomous evidence registration
+validates the source and receipt digests and emits provenance digests only. The built-in transport
+caps response size, JSON tree size/depth, refuses redirects, applies a timeout, and paces requests
+within the process. A deployment must coordinate NCBI's request-rate policy across processes and
+hosts. An optional NCBI `tool` and developer `email` pair is included in each request and bound by
+digest, but the values are never copied into serialized plans, receipts, or source URIs; callers must
+register them with NCBI. This is fixed-catalogue metadata, not an exhaustive gene search or an
+assessment of disease relevance, variant effect, evidence quality, or clinical meaning. See the
+[NCBI E-utilities guide](https://www.ncbi.nlm.nih.gov/books/NBK25500/), [NCBI Gene FAQ](https://www.ncbi.nlm.nih.gov/books/NBK3840/), and [NCBI usage policy](https://www.ncbi.nlm.nih.gov/home/about/policies/).
+
+## Reviewed NCI GDC project-metadata retrieval
+
+`ReviewedGdcRetrievalAdapter` supports the fixed `TCGA-GBM` and `TCGA-LGG` project catalogue.
+`prepare()` is network-free. Approved execution makes one pinned request per project for summary
+and aggregate data-category metadata only. `create_reviewed_gdc_autonomous_evidence_registration()`
+binds a single-project plan to the evidence runtime and validates the transient source receipt before
+projecting provenance digests. Missing source totals stay `None` and produce `unknown` completeness.
+
+```python
+from prism_sdk import (
+    ReviewedGdcRetrievalAdapter,
+    ReviewedGdcRetrievalConfig,
+    create_reviewed_gdc_autonomous_evidence_registration,
+    create_reviewed_gdc_execution_metadata,
+)
+
+config = ReviewedGdcRetrievalConfig(project_ids=("TCGA-GBM",))
+adapter = ReviewedGdcRetrievalAdapter(config)
+plan = adapter.prepare()
+review = create_reviewed_gdc_execution_metadata(
+    plan,
+    approve_source_dispatch=True,
+)
+registration = create_reviewed_gdc_autonomous_evidence_registration(
+    adapter,
+    plan,
+    project_id="TCGA-GBM",
+)
+```
+
+The plan and review record do not dispatch; the evidence runtime consumes that record only at the
+approved acquisition boundary. Project names and aggregate counts remain in the caller-owned
+transient result, while durable evidence observations contain source and bundle digests only. The
+adapter does not query case, sample, file, molecular-value, or controlled-access endpoints. Its
+fixed catalogue is not exhaustive and does not establish patient eligibility, quality, outcomes, or
+clinical meaning. See the [GDC Search and Retrieval guide](https://docs.gdc.cancer.gov/API/Users_Guide/Search_and_Retrieval/).
+
+## Reviewed Open Targets association retrieval
+
+`ReviewedOpenTargetsRetrievalAdapter` supports only the fixed glioblastoma and low-grade glioma
+MONDO entities. `prepare()` is network-free; approved execution makes one pinned GraphQL POST per
+lane and retrieves the first page of at most 50 target associations. The bundle retains source
+rank, score, returned/omitted counts, and page coverage as caller-owned transient metadata. The
+autonomous evidence registration emits only bundle/source digests with `confidence=None`.
+
+```python
+from prism_sdk import (
+    ReviewedOpenTargetsRetrievalAdapter,
+    ReviewedOpenTargetsRetrievalConfig,
+    create_reviewed_open_targets_autonomous_evidence_registration,
+    create_reviewed_open_targets_execution_metadata,
+)
+
+config = ReviewedOpenTargetsRetrievalConfig(lanes=("gbm",), page_size=50)
+adapter = ReviewedOpenTargetsRetrievalAdapter(config)
+plan = adapter.prepare()
+review = create_reviewed_open_targets_execution_metadata(plan, approve_source_dispatch=True)
+registration = create_reviewed_open_targets_autonomous_evidence_registration(adapter, plan, lane="gbm")
+```
+
+The source's association scores are ranking aids, not confidence values, and disease pages may
+include indirect ontology-propagated evidence. A top-ranked page is not an exhaustive disease
+search, and this adapter does not establish evidence quality, causal effect, treatment benefit, or
+clinical meaning. See the [Open Targets GraphQL API](https://platform-docs.opentargets.org/data-access/graphql-api)
+and [association score interpretation](https://platform-docs.opentargets.org/associations).
+
+## Reviewed GWAS Catalog association retrieval
+
+`ReviewedGwasCatalogRetrievalAdapter` uses only GWAS Catalog REST API v2 and supports the fixed
+glioblastoma and glioma ontology lanes. `prepare()` is network-free. Approved execution follows a
+bounded number of same-origin pagination links for direct trait matches, with a process-wide
+request pace below the Catalog's documented rate limit. It validates page totals across the run,
+rejects duplicate association identifiers, and preserves returned/omitted counts and whether the
+page prefix covers the entire direct-trait result. Its caller-owned transient records contain
+curated association metadata; the autonomous evidence registration emits only verified digests.
+
+```python
+from prism_sdk import (
+    ReviewedGwasCatalogRetrievalAdapter,
+    ReviewedGwasCatalogRetrievalConfig,
+    create_reviewed_gwas_catalog_autonomous_evidence_registration,
+    create_reviewed_gwas_catalog_execution_metadata,
+)
+
+config = ReviewedGwasCatalogRetrievalConfig(
+    lanes=("gbm", "glioma"),
+    page_size=20,
+    max_pages=2,
+)
+adapter = ReviewedGwasCatalogRetrievalAdapter(config)
+plan = adapter.prepare()
+review = create_reviewed_gwas_catalog_execution_metadata(
+    plan,
+    approve_source_dispatch=True,
+)
+registration = create_reviewed_gwas_catalog_autonomous_evidence_registration(
+    adapter,
+    plan,
+    lane="gbm",
+)
+```
+
+The GWAS Catalog API provides literature-curated top associations, not complete genome-wide
+summary statistics. The returned page prefix follows API pagination order and is not an association
+ranking. The adapter uses direct ontology-trait matches only (`show_child_traits=false`), and p-values,
+reported traits, mapped genes, and locations remain source metadata; a source p-value of zero is
+explicitly marked as possibly precision-limited. These fields are not causal, clinical, or treatment
+claims. See the [GWAS Catalog REST API guide](https://www.ebi.ac.uk/gwas/docs/programmatic-access/rest-api/),
+[v2 API reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference), and
+[v1-to-v2 migration guide](https://www.ebi.ac.uk/gwas/docs/news/rest-api-v2-migration-guide/).
+
+## Reviewed GWAS Catalog study ancestry retrieval
+
+`ReviewedGwasCatalogAncestryRetrievalAdapter` queries the v2
+`/studies/{accession_id}/ancestries` collection for caller-selected, syntax-validated GCST study
+accessions. `prepare()` is network-free. Approved execution makes exactly one request per selected
+study, with at most 10 studies, 50 returned ancestry records per study, and the shared request,
+response, tree, aggregate-byte, and bundle limits. The v2 endpoint returns the complete collection
+in one response; the adapter validates every row, retains the source-order prefix if its output cap
+is crossed, and does not follow item links or fan out from association rows.
+
+```python
+from prism_sdk import (
+    ReviewedGwasCatalogAncestryRetrievalAdapter,
+    ReviewedGwasCatalogAncestryRetrievalConfig,
+    create_reviewed_gwas_catalog_ancestry_autonomous_evidence_registration,
+    create_reviewed_gwas_catalog_ancestry_execution_metadata,
+)
+
+config = ReviewedGwasCatalogAncestryRetrievalConfig(
+    study_accessions=("GCST90296481",),
+)
+adapter = ReviewedGwasCatalogAncestryRetrievalAdapter(config)
+plan = adapter.prepare()
+review = create_reviewed_gwas_catalog_ancestry_execution_metadata(
+    plan,
+    approve_source_dispatch=True,
+)
+registration = create_reviewed_gwas_catalog_ancestry_autonomous_evidence_registration(
+    adapter,
+    plan,
+    study_accession="GCST90296481",
+)
+```
+
+The transient bundle carries stage, source-reported individual count, ancestry labels, and origin
+and recruitment descriptors. A missing value remains `None`; a source-reported empty list remains
+empty. These descriptors do not give case/control counts, association-specific sample sizes,
+population representativeness, or genetic ancestry inference. The autonomous registration validates
+the plan-bound receipt and exposes provenance digests only, with `confidence=None`. See the
+[GWAS Catalog v2 reference](https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference),
+[REST API guide](https://www.ebi.ac.uk/gwas/docs/programmatic-access/rest-api/), and
+[population descriptors](https://www.ebi.ac.uk/gwas/population-descriptors).
+The built-in transport applies `timeout_ms`, refuses redirects, and shares the Catalog request
+pacer. An injected Python fetcher receives `timeout_ms` but must enforce it along with its own
+redirect, network, and credential policy.
+
+## Reviewed Europe PMC publication-metadata retrieval
+
+`ReviewedEuropePmcRetrievalAdapter` reads Europe PMC's fixed REST search endpoint in JSON `lite`
+mode. Constructing a config and calling `prepare()` are network-free; the plan binds a fixed lane
+catalogue, query-set digest, transport identity, page limits, and response/tree/bundle bounds.
+Execution requires `approve_source_dispatch=True`, refuses redirects in the built-in transport,
+rebuilds every cursor request against the pinned host, and never follows response-provided URLs.
+Injected transports must enforce timeout, redirect, and network policy under their declared identity.
+
+```python
+from prism_sdk.reviewed_europe_pmc_retrieval import (
+    ReviewedEuropePmcRetrievalAdapter,
+    ReviewedEuropePmcRetrievalConfig,
+)
+
+adapter = ReviewedEuropePmcRetrievalAdapter(
+    ReviewedEuropePmcRetrievalConfig(lanes=("glioma",), page_size=25, max_pages=2)
+)
+plan = adapter.prepare()
+result = adapter.execute(plan, approve_source_dispatch=True)
+transient_publications = result.bundle["publications"]
+metadata_only_receipt = result.receipt
+```
+
+`result.to_dict()` retains only the receipt and retention label; publication metadata stays in the
+caller-owned transient result. Stable totals and cursor state determine explicit `complete`,
+`partial`, or `unknown` coverage; a changing hit count is never treated as zero or complete. The
+single-lane `create_reviewed_europe_pmc_autonomous_evidence_registration()` helper checks
+publication-row shape, identifiers, lane/source membership, source-content digests, receipt totals,
+and coverage before projecting provenance-only evidence. Europe PMC `lite` provides bibliographic
+metadata rather than abstracts or full text, and fixed keyword lanes are discovery aids rather than
+an exhaustive review. See the [Europe PMC REST API](https://dev.europepmc.org/RestfulWebService)
+and its [web-service reference](https://dev.europepmc.org/docs/EBI_Europe_PMC_Web_Service_Reference.pdf).
+
 ### Restart-safe autonomous execution accounting
 
 `AutonomousExecutionController` is the Python policy boundary for provider turns, tool intents,
@@ -29,6 +263,11 @@ provider outcome also records a metadata-only `retryable` flag. With `stop_on_er
 non-retryable failure moves the controller to `error` and requires an explicit `fail()` decision;
 retryable failures remain eligible for the caller's bounded continuation ladder.
 
+If an agent operation fails and the journal cannot confirm the terminal failure transition, the
+original operation exception is preserved with a bounded Python exception note. Inspect the
+execution journal before resuming that id; the in-memory failure is not evidence that the journal
+recorded it.
+
 An evaluator-approved planning transition is recorded with
 `controller.replan(instruction_digest=..., reason=..., attempt=...)`. Only the instruction digest,
 bounded reason, attempt index, and incremented replan counter enter the journal. `max_replans`
@@ -39,6 +278,88 @@ share one linearizable provider/tool/cost budget; the journal lock alone is not 
 counter updates safe. The same metadata-only fields and serialized transition contract are
 validated by the TypeScript execution controller, preserving cross-SDK replay and failure
 semantics.
+
+### Long-horizon autonomous goals
+
+`AutonomousGoalLedger` stores bounded, value-only objective state and a verified event chain in
+SQLite. Goal timestamps now use exact decimal epoch-nanosecond strings on the shared 0.2 wire
+format. Python reads existing 0.1 SQLite databases only after the caller identifies the writer's
+old timestamp unit; the import verifies the original record and event digests and updates the
+database atomically while retaining the old chain head as migration provenance:
+
+```python
+from prism_sdk import AutonomousGoalLedger
+
+with AutonomousGoalLedger(
+    "goals.sqlite3",
+    legacy_timestamp_unit="nanoseconds",  # use the unit written by this database's SDK
+) as goals:
+    goals.verify_integrity()
+    snapshot = goals.snapshot()
+```
+
+For a portable v0.1 JSON snapshot, call `migrate_legacy_goal_snapshot(snapshot,
+source_unit="milliseconds" | "nanoseconds")` before restoring it. The function verifies the old
+snapshot digest and full event chain, converts timestamps exactly, re-hashes the 0.2 state, and
+records the original snapshot digest and chain head in the migrated snapshot. Timestamp units are
+never inferred. Migrated snapshots preserve that provenance through subsequent SQLite and JSON
+snapshot round trips.
+
+For an HMAC-protected shared snapshot store with rollback detection, use
+`MonotonicAnchoredAuthenticatedTransactionalJsonAutonomousGoalSnapshotPersistence` and supply an
+`anchor` implementing `read()` and `write_if_unchanged(expected_anchor_digest, state)`. The anchor
+must live in a separately protected, non-rollback trust domain. It advances before the snapshot
+store CAS, so interruption between the two writes fails closed and requires roll-forward from the
+matching anchor-bound snapshot with `roll_forward(snapshot)`. The TypeScript SDK exposes the same contract
+through `rollForward(snapshot)`.
+
+Preview-admission approvals also use exact nanosecond strings in schema 0.2. Existing 0.1 approval
+records and snapshots are refused with a re-review requirement: an old approval is not migrated
+into current authority. Supply `issued_at_ns`, `expires_at_ns`, and verification `now_ns` in the
+shared nanosecond contract.
+
+Worker-journal events, snapshots, authenticated envelopes, and dispatch-resolution receipts also
+use decimal-string epoch nanoseconds in schema 0.2. Python records its `time.time_ns()` clock
+exactly. `migrate_legacy_autonomous_goal_worker_journal_snapshot(snapshot, source_unit)` verifies
+the source snapshot digest and event chain before re-hashing it and
+preserves the source digest/head as migration provenance. For an authenticated 0.1 shared-store
+envelope, `migrate_legacy_authenticated_autonomous_goal_worker_journal_envelope(...)` verifies
+the old HMAC before converting and resealing with the selected current key. Write its returned
+envelope using the store's CAS with the old snapshot digest as the expected version. Old
+dispatch-resolution receipts require external re-verification and re-issuance under schema 0.2.
+Control-loop checkpoints also use schema 0.2; learned signal `deadline_ns` values are decimal
+strings. Convert a legacy checkpoint with
+`migrate_legacy_autonomous_goal_control_loop_snapshot(snapshot, source_unit)` to verify its source
+digest, convert deadlines using the explicitly chosen unit, and carry migration provenance through
+later checkpoint generations.
+
+Every persisted schema 0.2 replay artifact requires timestamps in canonical decimal-string form,
+including schedules, nested preview schedules, journal events, and dispatch receipts. Runtime
+arguments may accept integer nanoseconds, but validators reject numeric timestamp spellings inside
+persisted artifacts. The cross-SDK recovery scenario migrates goal, journal, and checkpoint state,
+persists a completed cycle, restarts, and verifies identical Python and TypeScript digests without
+re-executing the goal.
+
+`AutonomousGoalWorker.run_async()` supports native async resolvers and executors as well as the
+synchronous callbacks accepted by `run()`. Async callbacks passed to `run()` fail before any goal
+is claimed, with guidance to use `run_async()`. Scheduling, SQLite reads/writes, and deterministic
+settlement still use the same bounded worker path; callback coroutines run on the caller's event
+loop, and independent executor calls retain the schedule's `max_concurrent` bound and output order.
+If the awaiting task is cancelled, `run_async()` drains the worker before re-raising cancellation,
+because an in-flight external action cannot be safely force-cancelled or assumed not to have run.
+The same transient task/parameter and metadata-only journal boundary applies to both entry points.
+`AutonomousGoalControlLoop.run_async()` extends that boundary to asynchronous schedule-option,
+evaluator, learner, and checkpoint callbacks while keeping evaluation validation, learning-state
+digests, checkpoint sealing, and retry policy in the same deterministic control loop. Its sync
+`run()` rejects declared coroutine callbacks before any goal is claimed.
+
+`AutonomousAgent.run_goal_control_loop_async()` and `AutonomousGoalAgentRuntime.run_async()`/
+`run_with_trace_async()` carry async rehydration,
+runtime-option, action-handoff, evaluator, learner, and checkpoint callbacks through the complete
+application-facing goal lifecycle. The orchestration and existing recovery path run off the event
+loop; callback coroutines return to the caller's loop. The synchronous facade methods reject
+declared coroutine callbacks before starting goal execution, while protected rehydration and other
+synchronous callbacks remain supported by both entry points.
 
 ### Shared provider/model quota admission
 

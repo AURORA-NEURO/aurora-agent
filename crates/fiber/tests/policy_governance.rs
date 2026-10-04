@@ -80,8 +80,11 @@ fn a_policy_withholding_compile_conforms_to_the_shipped_schemas_without_a_bump()
 #[test]
 fn the_certificate_field_set_is_unchanged_and_classifies_as_compatible() {
     let classification = classify(
-        &diff(&known::certificate_reference(), &known::certificate_reference())
-            .expect("a format diffs against itself"),
+        &diff(
+            &known::certificate_reference(),
+            &known::certificate_reference(),
+        )
+        .expect("a format diffs against itself"),
     );
     assert_eq!(classification.class, CompatibilityClass::Compatible);
     assert!(classification.digest_affecting().is_empty());
@@ -104,15 +107,10 @@ fn adding_a_policy_block_to_the_certificate_would_have_been_a_breaking_change() 
     let digest_field = fields.pop().expect("the self-digest field is last");
     fields.push(FieldSpec::required("policy", FieldType::Object));
     fields.push(digest_field);
-    let hypothetical = SchemaDescriptor::new(
-        shipped.id.clone(),
-        shipped.mode,
-        fields,
-    )
-    .expect("the hypothetical field set is well formed");
+    let hypothetical = SchemaDescriptor::new(shipped.id.clone(), shipped.mode, fields)
+        .expect("the hypothetical field set is well formed");
 
-    let classification =
-        classify(&diff(&shipped, &hypothetical).expect("the two field sets diff"));
+    let classification = classify(&diff(&shipped, &hypothetical).expect("the two field sets diff"));
     assert_eq!(classification.class, CompatibilityClass::Breaking);
     assert_eq!(classification.digest_affecting().len(), 1);
     assert!(

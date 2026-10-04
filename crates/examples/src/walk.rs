@@ -122,7 +122,9 @@ pub fn sweep(world: &World, query: &Query, max_depth: usize) -> GraphWalkObserva
         .map(|fact| fact.id.as_str().to_string())
         .collect();
     let reference = verdict_over(world, &all_facts);
-    let protected = world.fact_ids_with_any_tag(&query.protected_tags);
+    let protected = world
+        .fact_ids_with_any_tag(&query.protected_tags)
+        .expect("eager world source is available");
     let compact_below = world.facts.len() / 2;
 
     let mut depths = Vec::new();

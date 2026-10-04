@@ -37,12 +37,23 @@ impl Fact {
         let raw_id = required_str(map, "id", "fact")?;
         let subject = format!("fact {raw_id}");
 
-        let id = FactId::parse(raw_id.clone())
-            .map_err(|e| WorldError::Identifier { subject: subject.clone(), message: e.to_string() })?;
-        let provides = VariableName::parse(required_str(map, "provides", &subject)?)
-            .map_err(|e| WorldError::Identifier { subject: subject.clone(), message: e.to_string() })?;
-        let scope = ScopeKey::from_json(required(map, "scope", &subject)?)
-            .map_err(|source| WorldError::Scope { subject: subject.clone(), source })?;
+        let id = FactId::parse(raw_id.clone()).map_err(|e| WorldError::Identifier {
+            subject: subject.clone(),
+            message: e.to_string(),
+        })?;
+        let provides =
+            VariableName::parse(required_str(map, "provides", &subject)?).map_err(|e| {
+                WorldError::Identifier {
+                    subject: subject.clone(),
+                    message: e.to_string(),
+                }
+            })?;
+        let scope = ScopeKey::from_json(required(map, "scope", &subject)?).map_err(|source| {
+            WorldError::Scope {
+                subject: subject.clone(),
+                source,
+            }
+        })?;
 
         Ok(Fact {
             id,

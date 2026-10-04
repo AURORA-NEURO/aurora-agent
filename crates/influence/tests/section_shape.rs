@@ -51,7 +51,9 @@ fn the_generated_reason_names_the_method_and_the_perturbation_class() {
     let group = manifest::omission_group_from_analysis(&analysis, 1, Vec::new());
     assert!(group.reason.contains("chain_contraction"));
     assert!(group.reason.contains("removal"));
-    assert!(group.reason.contains("total_variation_on_normalised_answer"));
+    assert!(group
+        .reason
+        .contains("total_variation_on_normalised_answer"));
 }
 
 #[test]
@@ -67,7 +69,9 @@ fn an_unknown_analysis_produces_a_group_that_voids_the_sufficiency_claim() {
     let group = manifest::omission_group_from_analysis(&analysis, 3, Vec::new());
     assert_eq!(group.influence, InfluenceClass::Unknown);
     assert_eq!(group.bound, None);
-    assert!(group.reason.contains("not bounded by any implemented method"));
+    assert!(group
+        .reason
+        .contains("not bounded by any implemented method"));
 
     let mut sheet = OmissionManifest::default();
     sheet.push(group);
@@ -83,7 +87,11 @@ fn a_manifest_of_bounded_groups_serialises_with_every_bound_on_the_wire() {
         let analysis = analyzer
             .analyse_factor(&region, factor.id(), &Perturbation::Removal)
             .unwrap();
-        sheet.push(manifest::omission_group_from_analysis(&analysis, 1, Vec::new()));
+        sheet.push(manifest::omission_group_from_analysis(
+            &analysis,
+            1,
+            Vec::new(),
+        ));
     }
 
     assert!(sheet.supports_sufficiency_claim());

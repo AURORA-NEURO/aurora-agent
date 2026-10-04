@@ -10,14 +10,14 @@
 //! record that makes the whole split invalid, and no downstream step can recover it. Closure is
 //! computed by tag membership and unioned into the selection regardless of what the slice found.
 
-use bioprism_world::WorldSource;
+use bioprism_world::{WorldSource, WorldSourceError};
 use std::collections::BTreeSet;
 
 /// Facts carrying at least one protected tag.
 pub fn protected_closure<S: WorldSource + ?Sized>(
     source: &S,
     protected_tags: &BTreeSet<String>,
-) -> BTreeSet<String> {
+) -> Result<BTreeSet<String>, WorldSourceError> {
     source.fact_ids_with_any_tag(protected_tags)
 }
 
@@ -29,12 +29,14 @@ pub fn protected_closure<S: WorldSource + ?Sized>(
 pub fn unmatched_tags<S: WorldSource + ?Sized>(
     source: &S,
     protected_tags: &BTreeSet<String>,
-) -> Vec<String> {
-    protected_tags
-        .iter()
-        .filter(|tag| source.count_with_tag(tag) == 0)
-        .cloned()
-        .collect()
+) -> Result<Vec<String>, WorldSourceError> {
+    let mut unmatched = Vec::new();
+    for tag in protected_tags {
+        if source.count_with_tag(tag)? == 0 {
+            unmatched.push(tag.clone());
+        }
+    }
+    Ok(unmatched)
 }
 
 /// Protected facts that the temporal cut or a policy filter removed from the selection.

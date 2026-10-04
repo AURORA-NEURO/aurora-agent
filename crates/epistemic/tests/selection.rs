@@ -101,10 +101,9 @@ fn regret_reduction_fails_the_monotonicity_check_on_the_misleading_instance() {
     let (function, _) = instance.tabulate().expect("tabulable");
     let report = check(&function).expect("checkable");
 
-    let violation = report
-        .monotone_violation
-        .as_ref()
-        .expect("an item that moves the action away from the full-evidence action lowers the value");
+    let violation = report.monotone_violation.as_ref().expect(
+        "an item that moves the action away from the full-evidence action lowers the value",
+    );
     assert!(violation.drop > 0.0);
     assert!(
         report.normalised,
@@ -244,8 +243,8 @@ fn lazy_greedy_returns_the_identical_set_when_the_objective_passed_the_check() {
     for (function, constraint) in coverage_family(0xFEED_BEEF, 30, 9, 11).expect("generable") {
         let report = check(&function).expect("checkable");
         assert!(report.monotone_submodular());
-        let plain = greedy(&function, &constraint, &BTreeSet::new(), Some(&report))
-            .expect("selectable");
+        let plain =
+            greedy(&function, &constraint, &BTreeSet::new(), Some(&report)).expect("selectable");
         let lazy = lazy_greedy(&function, &constraint, &BTreeSet::new(), Some(&report))
             .expect("selectable");
         assert_eq!(
@@ -349,7 +348,12 @@ fn hypothesis_elimination_is_a_coverage_function_and_passes_the_check() {
 fn expected_risk_reduction_is_monotone_and_not_submodular() {
     let problem = DecisionProblem::new(
         vec!["call".into(), "do_not_call".into()],
-        vec!["hi_gain".into(), "hi_flat".into(), "lo_gain".into(), "lo_flat".into()],
+        vec![
+            "hi_gain".into(),
+            "hi_flat".into(),
+            "lo_gain".into(),
+            "lo_flat".into(),
+        ],
         vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
     )
     .expect("well-formed");
@@ -405,9 +409,8 @@ fn a_knapsack_constraint_with_a_free_item_is_refused_rather_than_dividing_by_zer
 #[test]
 fn regret_reduction_is_normalised_so_the_empty_context_scores_exactly_zero() {
     for instance in regret_family(0x1111_2222, 20, 6, 4, 3).expect("generable") {
-        let function =
-            RegretReduction::new(&instance.problem, &instance.prior, &instance.pool)
-                .expect("constructible");
+        let function = RegretReduction::new(&instance.problem, &instance.prior, &instance.pool)
+            .expect("constructible");
         assert_eq!(
             function.value(&BTreeSet::new()).expect("evaluable"),
             0.0,

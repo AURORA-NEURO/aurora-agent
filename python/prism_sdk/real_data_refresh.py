@@ -17,6 +17,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+from html.parser import HTMLParser
 import json
 import os
 from pathlib import Path
@@ -214,7 +215,7 @@ def _allowed_url(url: str) -> bool:
 def _default_fetch(url: str, *, timeout: float) -> bytes:
     if not _allowed_url(url):
         raise RealDataRefreshError("refresh attempted a non-allow-listed URL")
-    request = Request(url, headers={"Accept": "application/json, application/xml", "User-Agent": "aurora-agent/0.1"})
+    request = Request(url, headers={"Accept": "application/json, application/xml, text/html;q=0.9", "User-Agent": "aurora-agent/0.1"})
     try:
         with build_opener(_AllowListedRedirectHandler()).open(request, timeout=timeout) as response:  # nosec B310 - URL is allow-listed above
             body = response.read(MAX_RESPONSE_BYTES + 1)
@@ -264,6 +265,71 @@ def _date(value: Any) -> str | None:
     # A year-only PubMed date is likewise retained as missing rather than assigned
     # an invented day.  The caller can still inspect the original source timestamp.
     return None
+
+
+class _NciPdqMetadataParser(HTMLParser):
+    """Read only the visible page title and NCI's machine-readable update date."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.titles: list[list[str]] = []
+        self.update_datetimes: list[str] = []
+        self._active_title: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag.casefold() == "h1":
+            current: list[str] = []
+            self.titles.append(current)
+            self._active_title = current
+        elif tag.casefold() == "time" and attributes.get("datetime"):
+            value = attributes["datetime"]
+            if value is not None:
+                self.update_datetimes.append(value)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() == "h1":
+            self._active_title = None
+
+    def handle_data(self, data: str) -> None:
+        if self._active_title is not None:
+            self._active_title.append(data)
+
+
+def _parse_nci_pdq_metadata(value: bytes | str | Mapping[str, Any] | list[Any]) -> tuple[str, str]:
+    """Validate the fixed NCI PDQ page and retain citation metadata, never page content."""
+
+    decoded = _decode(value)
+    if not isinstance(decoded, bytes):
+        raise RealDataRefreshError("NCI PDQ response must be HTML bytes or text")
+    try:
+        html = decoded.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RealDataRefreshError("NCI PDQ response is not valid UTF-8") from error
+    parser = _NciPdqMetadataParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception as error:
+        raise RealDataRefreshError("NCI PDQ HTML is malformed") from error
+
+    titles = [" ".join(parts).split() for parts in parser.titles]
+    title = _text(" ".join(titles[0]), "NCI PDQ title") if len(titles) == 1 else None
+    if (
+        title is None
+        or not title.casefold().startswith("central nervous system tumors treatment (pdq")
+        or not title.casefold().endswith("health professional version")
+    ):
+        raise RealDataRefreshError("NCI PDQ response title does not match the reviewed adult CNS summary")
+    if len(parser.update_datetimes) != 1:
+        raise RealDataRefreshError("NCI PDQ response must expose exactly one machine-readable update date")
+    updated_at = parser.update_datetimes[0]
+    if not isinstance(updated_at, str) or not _UTC_RE.fullmatch(updated_at):
+        raise RealDataRefreshError("NCI PDQ update date is not a UTC RFC3339 timestamp")
+    updated_date = _date(updated_at[:10])
+    if updated_date is None:
+        raise RealDataRefreshError("NCI PDQ update date is not a valid calendar date")
+    return title, updated_date
 
 
 def _list(value: Any) -> list[Any]:
@@ -397,13 +463,16 @@ def _canonical_record(kind: str, record: Mapping[str, Any]) -> dict[str, Any]:
             "patient_level": record["patient_level"],
         }
     if kind == "references":
-        return {
+        projected = {
             "source_id": record["source_id"],
             "reference_id": record["reference_id"],
             "title": record["title"],
             "uri": record["uri"],
             "publisher": record["publisher"],
         }
+        if record.get("updated_date") is not None:
+            projected["updated_date"] = record["updated_date"]
+        return projected
     if kind == "literature":
         projected = {
             "source_id": record["source_id"],
@@ -651,6 +720,8 @@ def validate_real_glioma_bundle(bundle: Mapping[str, Any]) -> None:
         _text(record.get("publisher"), "reference.publisher")
         if reference_id is None or uri is None or reference_id in seen_refs or not uri.startswith(NCI_BASE):
             raise RealDataRefreshError("guideline reference identity is invalid")
+        if record.get("updated_date") is not None and _date(record["updated_date"]) != record["updated_date"]:
+            raise RealDataRefreshError("guideline reference update date is invalid")
         seen_refs.add(reference_id)
 
     seen_pmids: set[str] = set()
@@ -1000,6 +1071,7 @@ def refresh_real_glioma_data(
     summary_uri = _pubmed_url("esummary.fcgi", db="pubmed", id=joined, retmode="json")
     fetch_uri = _pubmed_url("efetch.fcgi", db="pubmed", id=joined, rettype="abstract", retmode="xml")
     literature = _parse_pubmed(ids, _mapping(_json(_fetch_once(fetch, summary_uri)), "PubMed summary"), _xml(_fetch_once(fetch, fetch_uri)), pubmed_source_id)
+    pdq_title, pdq_updated_date = _parse_nci_pdq_metadata(_fetch_once(fetch, NCI_PDQ_URI))
 
     sources: list[dict[str, Any]] = [{
         "source_id": "clinicaltrials_glioblastoma",
@@ -1052,9 +1124,10 @@ def refresh_real_glioma_data(
         "references": [{
             "source_id": "nci_adult_cns_pdq",
             "reference_id": "NCI-PDQ-adult-CNS",
-            "title": "Central Nervous System Tumors Treatment (PDQ) - Health Professional Version",
+            "title": pdq_title,
             "uri": NCI_PDQ_URI,
             "publisher": NCI_AUTHORITY,
+            "updated_date": pdq_updated_date,
         }],
         "literature": literature,
     }

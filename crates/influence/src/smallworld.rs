@@ -159,7 +159,11 @@ fn chain(spec: &SmallWorldSpec) -> Result<QueryRegion, InfluenceError> {
         builder = builder.observed_variable(name, card);
     }
     let prior = stochastic_table(&mut rng, 1, card);
-    builder = builder.factor(RegionFactor::with_table("f.prior", vec![names[0].clone()], prior));
+    builder = builder.factor(RegionFactor::with_table(
+        "f.prior",
+        vec![names[0].clone()],
+        prior,
+    ));
     for index in 0..length {
         let table = stochastic_table(&mut rng, card, card);
         builder = builder.factor(RegionFactor::with_table(

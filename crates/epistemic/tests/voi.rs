@@ -10,7 +10,9 @@ fn problem(actions: usize, models: usize, rng: &mut SplitMix64) -> DecisionProbl
     DecisionProblem::new(
         (0..actions).map(|a| format!("a{a}")).collect(),
         (0..models).map(|m| format!("m{m}")).collect(),
-        (0..actions * models).map(|_| rng.between(0.0, 1.0)).collect(),
+        (0..actions * models)
+            .map(|_| rng.between(0.0, 1.0))
+            .collect(),
     )
     .expect("well-formed")
 }
@@ -101,7 +103,12 @@ fn an_acquisition_that_cannot_change_the_action_is_worth_nothing_however_informa
 fn the_value_of_two_acquisitions_together_can_exceed_the_sum_of_their_individual_values() {
     let problem = DecisionProblem::new(
         vec!["call".into(), "do_not_call".into()],
-        vec!["hi_gain".into(), "hi_flat".into(), "lo_gain".into(), "lo_flat".into()],
+        vec![
+            "hi_gain".into(),
+            "hi_flat".into(),
+            "lo_gain".into(),
+            "lo_flat".into(),
+        ],
         vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
     )
     .expect("well-formed");

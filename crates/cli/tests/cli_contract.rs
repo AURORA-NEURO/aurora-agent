@@ -5,7 +5,7 @@
 //! follow the published matrix, and artifacts are byte-identical to the reference runtime.
 
 use bioprism_devplat::{run_workbench, StudioSession, WorkbenchRequest};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -725,12 +725,59 @@ fn autopilot_grant(directory: &Path, allowed_tool: &str) -> PathBuf {
     grant
 }
 
+fn instantiated_mission(directory: &Path, mission_id: &str) -> Value {
+    let path = instantiated_workflow(directory, mission_id);
+    let instantiation: Value =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("read instantiation"))
+            .expect("valid instantiation");
+    instantiation["mission"].clone()
+}
+
+fn write_goal_request(directory: &Path, name: &str, request: &Value) -> PathBuf {
+    let path = directory.join(name);
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(request).expect("serialize goal request"),
+    )
+    .expect("write goal request");
+    path
+}
+
+fn run_goal_step(request: &Path, recovery_dir: &Path) -> Output {
+    run(&[
+        "--json",
+        "autopilot",
+        "goal-step",
+        "--request",
+        &request.display().to_string(),
+        "--recovery-dir",
+        &recovery_dir.display().to_string(),
+    ])
+}
+
+fn run_goal_step_with_report(request: &Path, recovery_dir: &Path, report_out: &Path) -> Output {
+    run(&[
+        "--json",
+        "autopilot",
+        "goal-step",
+        "--request",
+        &request.display().to_string(),
+        "--recovery-dir",
+        &recovery_dir.display().to_string(),
+        "--report-out",
+        &report_out.display().to_string(),
+    ])
+}
+
 #[test]
 fn help_documents_every_autopilot_subcommand_and_names_the_grant_as_the_only_authority() {
     let text = stdout(&run(&["--help"]));
     for expected in [
         "autopilot grant-template",
-        "autopilot run     --instantiation <path> --grant <path> [--report-out <path>] [--dry-run]",
+        "autopilot run     --instantiation <path> --grant <path> [--report-out <path>]",
+        "autopilot resume  --instantiation <path> --grant <path> --recovery-dir <dir>",
+        "autopilot goal-step --request <path> --recovery-dir <dir> [--report-out <path>]",
+        "autopilot goal-verify [--report <path>] [--checkpoint <path>]",
         "autopilot verify  --report <path>",
         "comes only from an explicit grant document",
         "Exit 1 reports a completed drive",
@@ -772,6 +819,7 @@ fn autopilot_run_dry_run_dispatches_nothing_writes_nothing_and_labels_itself_no_
     let instantiation = instantiated_workflow(&directory, "autopilot-dry");
     let grant = autopilot_grant(&directory, "workspace_capabilities");
     let report_out = directory.join("autopilot-report.json");
+    let recovery_dir = directory.join("autopilot-state");
     let files_before = std::fs::read_dir(&directory).unwrap().count();
 
     let output = run(&[
@@ -784,6 +832,8 @@ fn autopilot_run_dry_run_dispatches_nothing_writes_nothing_and_labels_itself_no_
         &grant.display().to_string(),
         "--report-out",
         &report_out.display().to_string(),
+        "--recovery-dir",
+        &recovery_dir.display().to_string(),
         "--dry-run",
     ]);
     assert_eq!(
@@ -835,7 +885,10 @@ fn autopilot_run_with_a_grant_that_does_not_cover_the_mission_tool_exits_seven()
     );
     let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
     assert_eq!(parsed["ok"], Value::Bool(false));
-    assert_eq!(parsed["error"]["kind"], Value::String("policy_denied".into()));
+    assert_eq!(
+        parsed["error"]["kind"],
+        Value::String("policy_denied".into())
+    );
 }
 
 #[test]
@@ -844,6 +897,7 @@ fn autopilot_run_drives_a_real_mission_to_success_and_verify_rejects_a_tampered_
     let instantiation = instantiated_workflow(&directory, "autopilot-live");
     let grant = autopilot_grant(&directory, "workspace_capabilities");
     let report_out = directory.join("autopilot-report.json");
+    let recovery_dir = directory.join("autopilot-state");
 
     let output = run(&[
         "--json",
@@ -855,6 +909,8 @@ fn autopilot_run_drives_a_real_mission_to_success_and_verify_rejects_a_tampered_
         &grant.display().to_string(),
         "--report-out",
         &report_out.display().to_string(),
+        "--recovery-dir",
+        &recovery_dir.display().to_string(),
     ]);
     assert_eq!(
         code(&output),
@@ -868,11 +924,85 @@ fn autopilot_run_drives_a_real_mission_to_success_and_verify_rejects_a_tampered_
     assert_eq!(parsed["final_status"], "succeeded");
     assert_eq!(parsed["attempts_used"], 1);
     assert_eq!(
-        parsed["report"]["attempts"][0]["reconciliation_status"]["completion"],
-        "complete",
+        parsed["report"]["attempts"][0]["reconciliation_status"]["completion"], "complete",
         "success must rest on a retained reconciliation, never inference"
     );
-    assert!(report_out.exists(), "the run must retain its report artifact");
+    assert!(
+        report_out.exists(),
+        "the run must retain its report artifact"
+    );
+    assert_eq!(parsed["recovery"]["generation"], 1);
+    let checkpoint_path = recovery_dir.join("checkpoint-000001.json");
+    let private_attempt_path = recovery_dir.join("attempt-000001.private.json");
+    assert!(
+        checkpoint_path.exists(),
+        "the digest-only checkpoint is retained"
+    );
+    assert!(
+        private_attempt_path.exists(),
+        "rehydration material is kept separately"
+    );
+    let checkpoint: Value =
+        serde_json::from_str(&std::fs::read_to_string(&checkpoint_path).unwrap()).unwrap();
+    assert_eq!(checkpoint["secret_material"], "never_returned");
+    assert!(checkpoint.get("mission").is_none());
+    assert!(checkpoint.get("report").is_none());
+    let private_attempt: Value =
+        serde_json::from_str(&std::fs::read_to_string(&private_attempt_path).unwrap()).unwrap();
+    assert!(private_attempt["attempt"].get("mission").is_some());
+    assert!(private_attempt["attempt"].get("report").is_some());
+
+    let resumed_report = directory.join("autopilot-resumed-report.json");
+    let resumed = run(&[
+        "--json",
+        "autopilot",
+        "resume",
+        "--instantiation",
+        &instantiation.display().to_string(),
+        "--grant",
+        &grant.display().to_string(),
+        "--recovery-dir",
+        &recovery_dir.display().to_string(),
+        "--report-out",
+        &resumed_report.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&resumed),
+        0,
+        "resume stdout: {}\nresume stderr: {}",
+        stdout(&resumed),
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    let resumed_json: Value = serde_json::from_str(&stdout(&resumed)).unwrap();
+    assert_eq!(resumed_json["workflow"], "autopilot_resume");
+    assert_eq!(resumed_json["resumed"], true);
+    assert_eq!(resumed_json["attempts_used"], 1);
+    assert_eq!(resumed_json["final_status"], "succeeded");
+
+    let mut checkpoint: Value =
+        serde_json::from_str(&std::fs::read_to_string(&checkpoint_path).unwrap()).unwrap();
+    checkpoint["base_mission_id"] = Value::String("edited-checkpoint".into());
+    std::fs::write(
+        &checkpoint_path,
+        serde_json::to_string_pretty(&checkpoint).unwrap(),
+    )
+    .unwrap();
+    let refused_resume_report = directory.join("refused-resume-report.json");
+    let refused_resume = run(&[
+        "--json",
+        "autopilot",
+        "resume",
+        "--instantiation",
+        &instantiation.display().to_string(),
+        "--grant",
+        &grant.display().to_string(),
+        "--recovery-dir",
+        &recovery_dir.display().to_string(),
+        "--report-out",
+        &refused_resume_report.display().to_string(),
+    ]);
+    assert_ne!(code(&refused_resume), 0);
+    assert!(!refused_resume_report.exists());
 
     let good = run(&[
         "autopilot",
@@ -981,7 +1111,12 @@ fn research_dry_run_prints_the_planned_protocol_and_writes_nothing() {
         &out_dir.display().to_string(),
         "--dry-run",
     ]);
-    assert_eq!(code(&output), 0, "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
     assert_eq!(parsed["dry_run"], Value::Bool(true));
     assert_eq!(parsed["no_dispatch"], Value::Bool(true));
@@ -1037,7 +1172,12 @@ fn research_run_writes_a_verifiable_dossier_and_a_tampered_one_exits_one() {
         "--out-dir",
         &out_dir.display().to_string(),
     ]);
-    assert_eq!(code(&output), 0, "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
     assert_eq!(parsed["ok"], Value::Bool(true));
     assert!(
@@ -1070,7 +1210,12 @@ fn research_run_writes_a_verifiable_dossier_and_a_tampered_one_exits_one() {
         "the report must carry its limitations block"
     );
 
-    let verified = run(&["research", "verify", "--dossier", &dossier.display().to_string()]);
+    let verified = run(&[
+        "research",
+        "verify",
+        "--dossier",
+        &dossier.display().to_string(),
+    ]);
     assert_eq!(
         code(&verified),
         0,
@@ -1080,7 +1225,10 @@ fn research_run_writes_a_verifiable_dossier_and_a_tampered_one_exits_one() {
 
     let text = std::fs::read_to_string(&dossier).expect("dossier readable");
     let tampered_text = text.replacen("fifty", "sixty", 1);
-    assert_ne!(text, tampered_text, "the tamper must actually change a byte");
+    assert_ne!(
+        text, tampered_text,
+        "the tamper must actually change a byte"
+    );
     std::fs::write(&dossier, tampered_text).expect("tampered dossier written");
     let tampered = run(&[
         "--json",
@@ -1094,4 +1242,283 @@ fn research_run_writes_a_verifiable_dossier_and_a_tampered_one_exits_one() {
     assert_eq!(verdict["ok"], Value::Bool(false));
     assert_eq!(verdict["valid"], Value::Bool(false));
     assert_eq!(verdict["digest_match"], Value::Bool(false));
+}
+
+#[test]
+fn autopilot_goal_step_runs_and_resumes_without_replaying_or_exposing_private_reports() {
+    let directory = scratch("autopilot-goal-resume");
+    let first_mission = instantiated_mission(&directory, "goal-cycle-one");
+    let second_mission = instantiated_mission(&directory, "goal-cycle-two");
+    let recovery_dir = directory.join("goal-state");
+    let first_request = write_goal_request(
+        &directory,
+        "goal-step-one.json",
+        &json!({
+            "goal_id": "goal-cli-resume",
+            "grant": {"allowed_tools": ["workspace_capabilities"], "max_attempts": 2},
+            "budget": {"max_cycles": 3, "max_total_dispatches": 6},
+            "decision": {"kind": "run_mission", "mission": first_mission},
+        }),
+    );
+    let first_report_path = directory.join("first-goal-report.json");
+    let first = run_goal_step_with_report(&first_request, &recovery_dir, &first_report_path);
+    assert_eq!(
+        code(&first),
+        0,
+        "stdout: {}\nstderr: {}",
+        stdout(&first),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_json: Value = serde_json::from_str(&stdout(&first)).expect("first goal-step JSON");
+    assert_eq!(first_json["workflow"], "autopilot_goal_step");
+    assert_eq!(first_json["goal_status"], "stopped");
+    assert_eq!(first_json["dispatch_started"], true);
+    assert_eq!(first_json["dispatches_this_call"], 1);
+    assert_eq!(first_json["recovery"]["state"], "safe_stop_checkpointed");
+    assert_eq!(first_json["report"]["total_dispatches"], 1);
+    assert_eq!(first_json["checkpoint_generation"], 1);
+    assert!(first_json.get("cycle_autopilot_reports").is_none());
+    assert!(first_json["report"]["cycles"][0].get("mission").is_none());
+    assert!(first_json["report"]["cycles"][0]
+        .get("autopilot_report")
+        .is_none());
+
+    let written_report: Value = serde_json::from_slice(
+        &std::fs::read(&first_report_path).expect("goal report artifact was written"),
+    )
+    .expect("goal report artifact is JSON");
+    assert_eq!(written_report, first_json["report"]);
+    let first_private = recovery_dir.join("cycle-report-000001.private.json");
+    assert!(
+        first_private.is_file(),
+        "the raw mission report is retained privately"
+    );
+    let private_text = std::fs::read_to_string(first_private).unwrap();
+    assert!(private_text.contains("autopilot_report"));
+    assert!(private_text.contains("workspace_capabilities"));
+
+    let second_request = write_goal_request(
+        &directory,
+        "goal-step-two.json",
+        &json!({
+            "goal_id": "goal-cli-resume",
+            "grant": {"allowed_tools": ["workspace_capabilities"], "max_attempts": 2},
+            "decision": {"kind": "run_mission", "mission": second_mission},
+        }),
+    );
+    let second = run_goal_step(&second_request, &recovery_dir);
+    assert_eq!(
+        code(&second),
+        0,
+        "stdout: {}\nstderr: {}",
+        stdout(&second),
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_json: Value = serde_json::from_str(&stdout(&second)).expect("second goal-step JSON");
+    assert_eq!(second_json["resumed"], true);
+    assert_eq!(second_json["goal_status"], "stopped");
+    assert_eq!(second_json["dispatch_started"], true);
+    assert_eq!(second_json["dispatches_this_call"], 1);
+    assert_eq!(second_json["report"]["cycles"].as_array().unwrap().len(), 2);
+    assert_eq!(second_json["report"]["total_dispatches"], 2);
+    assert_eq!(second_json["checkpoint_generation"], 2);
+    assert!(recovery_dir
+        .join("cycle-report-000002.private.json")
+        .is_file());
+    assert!(recovery_dir.join("checkpoint-000002.json").is_file());
+
+    let second_report_path = directory.join("second-goal-report.json");
+    let second_checkpoint_path = directory.join("second-goal-checkpoint.json");
+    std::fs::write(
+        &second_report_path,
+        serde_json::to_vec_pretty(&second_json["report"]).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        &second_checkpoint_path,
+        serde_json::to_vec_pretty(&second_json["checkpoint"]).unwrap(),
+    )
+    .unwrap();
+
+    let valid = run(&[
+        "--json",
+        "autopilot",
+        "goal-verify",
+        "--report",
+        &second_report_path.display().to_string(),
+        "--checkpoint",
+        &second_checkpoint_path.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&valid),
+        0,
+        "{}",
+        String::from_utf8_lossy(&valid.stderr)
+    );
+    let valid_json: Value = serde_json::from_str(&stdout(&valid)).unwrap();
+    assert_eq!(valid_json["ok"], true);
+    assert_eq!(valid_json["checkpoint_verification"]["generation"], 2);
+
+    let report_only = run(&[
+        "--json",
+        "autopilot",
+        "goal-verify",
+        "--report",
+        &first_report_path.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&report_only),
+        0,
+        "{}",
+        String::from_utf8_lossy(&report_only.stderr)
+    );
+    let report_only_json: Value = serde_json::from_str(&stdout(&report_only)).unwrap();
+    assert_eq!(report_only_json["ok"], true);
+
+    let checkpoint_only = run(&[
+        "--json",
+        "autopilot",
+        "goal-verify",
+        "--checkpoint",
+        &second_checkpoint_path.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&checkpoint_only),
+        0,
+        "{}",
+        String::from_utf8_lossy(&checkpoint_only.stderr)
+    );
+    let checkpoint_only_json: Value = serde_json::from_str(&stdout(&checkpoint_only)).unwrap();
+    assert_eq!(checkpoint_only_json["ok"], true);
+
+    let mismatched = run(&[
+        "--json",
+        "autopilot",
+        "goal-verify",
+        "--report",
+        &first_report_path.display().to_string(),
+        "--checkpoint",
+        &second_checkpoint_path.display().to_string(),
+    ]);
+    assert_ne!(
+        code(&mismatched),
+        0,
+        "a valid but unrelated report must not bind"
+    );
+
+    let tampered_recovery = directory.join("tampered-goal-state");
+    std::fs::create_dir_all(&tampered_recovery).unwrap();
+    for entry in std::fs::read_dir(&recovery_dir).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), tampered_recovery.join(entry.file_name())).unwrap();
+    }
+    let private_path = tampered_recovery.join("cycle-report-000001.private.json");
+    let mut private_record: Value =
+        serde_json::from_slice(&std::fs::read(&private_path).unwrap()).unwrap();
+    private_record["record_digest"] = json!("0".repeat(64));
+    std::fs::write(
+        &private_path,
+        serde_json::to_vec_pretty(&private_record).unwrap(),
+    )
+    .unwrap();
+    let tampered_resume = run_goal_step(&second_request, &tampered_recovery);
+    assert_ne!(
+        code(&tampered_resume),
+        0,
+        "a modified private report must prevent checkpoint rehydration"
+    );
+    assert!(
+        !tampered_recovery.join("pending.json").exists(),
+        "failed rehydration must stop before dispatch intent is written"
+    );
+}
+
+#[test]
+fn autopilot_goal_completion_is_terminal_and_cannot_resume() {
+    let directory = scratch("autopilot-goal-complete");
+    let mission = instantiated_mission(&directory, "goal-completion-cycle");
+    let recovery_dir = directory.join("goal-state");
+    let first_request = write_goal_request(
+        &directory,
+        "goal-step-one.json",
+        &json!({
+            "goal_id": "goal-cli-complete",
+            "grant": {"allowed_tools": ["workspace_capabilities"], "max_attempts": 2},
+            "budget": {"max_cycles": 2, "max_total_dispatches": 4},
+            "decision": {"kind": "run_mission", "mission": mission},
+        }),
+    );
+    let first = run_goal_step(&first_request, &recovery_dir);
+    assert_eq!(
+        code(&first),
+        0,
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let complete_request = write_goal_request(
+        &directory,
+        "goal-complete.json",
+        &json!({
+            "goal_id": "goal-cli-complete",
+            "grant": {"allowed_tools": ["workspace_capabilities"], "max_attempts": 2},
+            "decision": {
+                "kind": "complete",
+                "evaluator_id": "reviewed-evidence",
+                "evidence_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            },
+        }),
+    );
+    let complete = run_goal_step(&complete_request, &recovery_dir);
+    assert_eq!(
+        code(&complete),
+        0,
+        "stdout: {}\nstderr: {}",
+        stdout(&complete),
+        String::from_utf8_lossy(&complete.stderr)
+    );
+    let complete_json: Value = serde_json::from_str(&stdout(&complete)).unwrap();
+    assert_eq!(complete_json["goal_status"], "completed");
+    assert_eq!(complete_json["goal_complete"], true);
+    assert_eq!(complete_json["dispatch_started"], false);
+    assert!(recovery_dir.join("terminal.json").is_file());
+
+    let retry = run_goal_step(&complete_request, &recovery_dir);
+    assert_ne!(code(&retry), 0, "terminal goals must refuse resumption");
+    assert!(
+        stdout(&retry).contains("terminal and cannot resume")
+            || String::from_utf8_lossy(&retry.stderr).contains("terminal and cannot resume"),
+        "terminal refusal should explain why resumption stopped"
+    );
+}
+
+#[test]
+fn autopilot_goal_cannot_claim_completion_before_any_mission_or_create_recovery_state() {
+    let directory = scratch("autopilot-goal-empty-completion");
+    let recovery_dir = directory.join("goal-state");
+    let request = write_goal_request(
+        &directory,
+        "goal-complete.json",
+        &json!({
+            "goal_id": "goal-no-evidence",
+            "grant": {"allowed_tools": ["workspace_capabilities"], "max_attempts": 2},
+            "decision": {
+                "kind": "complete",
+                "evaluator_id": "reviewed-evidence",
+                "evidence_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            },
+        }),
+    );
+    let refused = run_goal_step(&request, &recovery_dir);
+    assert_ne!(code(&refused), 0, "empty goals cannot complete");
+    assert!(
+        stdout(&refused).contains("before a mission produces evidence")
+            || String::from_utf8_lossy(&refused.stderr)
+                .contains("before a mission produces evidence"),
+        "the refusal should state the missing evidence prerequisite"
+    );
+    assert!(
+        !recovery_dir.exists(),
+        "an invalid completion assertion must not leave an identity-only recovery directory"
+    );
 }

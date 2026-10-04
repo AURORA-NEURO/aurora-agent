@@ -680,6 +680,55 @@ fn render_context(
         if let Some(status) = &hit.status {
             block.push_str(&format!("status: {status}\n"));
         }
+        match hit.record_kind {
+            RealDataRecordKind::ClinicalTrial => {
+                if !hit.phases.is_empty() {
+                    block.push_str(&format!("phases: {}\n", hit.phases.join(" | ")));
+                }
+                if let Some(last_update) = &hit.last_update {
+                    block.push_str(&format!("last_update: {last_update}\n"));
+                }
+                if let Some(study_type) = &hit.study_type {
+                    block.push_str(&format!("study_type: {study_type}\n"));
+                }
+                if let Some(enrollment_count) = hit.enrollment_count {
+                    block.push_str(&format!("enrollment_count: {enrollment_count}\n"));
+                }
+                if !hit.intervention_names.is_empty() {
+                    block.push_str(&format!(
+                        "intervention_names: {}\n",
+                        hit.intervention_names.join(" | ")
+                    ));
+                }
+            }
+            RealDataRecordKind::PortalStudy => {
+                if let Some(sample_count) = hit.sample_count {
+                    block.push_str(&format!("sample_count: {sample_count}\n"));
+                }
+            }
+            RealDataRecordKind::LiteratureArticle => {
+                if let Some(publication_date) = &hit.publication_date {
+                    block.push_str(&format!("publication_date: {publication_date}\n"));
+                }
+            }
+            RealDataRecordKind::GuidelineReference => {
+                if let Some(updated_date) = &hit.guideline_updated_date {
+                    block.push_str(&format!("guideline_updated_date: {updated_date}\n"));
+                }
+            }
+            RealDataRecordKind::GenomicProject => {
+                if !hit.genomic_data_type_counts.is_empty() {
+                    let counts = hit
+                        .genomic_data_type_counts
+                        .iter()
+                        .map(|count| format!("{}={}", count.data_type, count.file_count))
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    block.push_str(&format!("genomic_data_type_counts: {counts}\n"));
+                }
+            }
+            RealDataRecordKind::PortalMolecularProfile => {}
+        }
         if !hit.related_records.is_empty() {
             let related = hit
                 .related_records

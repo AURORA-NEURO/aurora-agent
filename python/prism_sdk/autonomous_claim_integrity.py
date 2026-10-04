@@ -16,10 +16,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from hashlib import sha256
 import math
-from typing import Any, Mapping, Sequence
+import struct
+from types import MappingProxyType
+from typing import Any, Mapping, Protocol, Sequence
 
-from .authoring import content_digest
+from .authoring import MAX_SAFE_JSON_INTEGER, canonical_bytes, content_digest
 from .autonomous_information_acquisition import (
     AutonomousInformationAcquisitionCandidate,
     AutonomousInformationAcquisitionPlan,
@@ -38,6 +41,7 @@ AUTONOMOUS_CLAIM_INTEGRITY_ASSESSMENT_SCHEMA = "bioprism-python-autonomous-claim
 AUTONOMOUS_CLAIM_INTEGRITY_ACTION_SCHEMA = "bioprism-python-autonomous-claim-integrity-action/0.1"
 AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA = "bioprism-python-autonomous-claim-integrity-acquisition-bridge/0.1"
 AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BINDING_SCHEMA = "bioprism-python-autonomous-claim-integrity-acquisition-binding/0.1"
+AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_AUTHORITY_REVIEW_SCHEMA = "bioprism-autonomous-claim-integrity-evidence-authority-review/0.2"
 
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_CLAIMS = 128
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_EVIDENCE = 512
@@ -48,6 +52,15 @@ AUTONOMOUS_CLAIM_INTEGRITY_MAX_TEXT_BYTES = 256
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES = 16_384
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_AGE_SECONDS = 31_536_000
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS = 64
+
+
+class AutonomousClaimIntegrityEvidenceAuthority(Protocol):
+    """Deployment-owned, read-only verifier for acquired claim evidence and its quality receipt."""
+
+    authority_id: str
+    authority_version: str
+
+    def verify(self, review: Mapping[str, Any], /) -> str: ...
 
 AUTONOMOUS_CLAIM_INTEGRITY_STATUSES = (
     "supported",
@@ -183,12 +196,120 @@ def _safe_metadata(value: Any, *, name: str = "metadata", depth: int = 0) -> Non
     raise ArgumentError(f"{name} contains unsupported metadata")
 
 
+def _freeze_json(value: Any) -> Any:
+    """Give deployment verifiers a read-only projection rather than mutable SDK state."""
+
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze_json(child) for key, child in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(child) for child in value)
+    return value
+
+
 def _metadata_digest(value: Mapping[str, Any]) -> str:
+    return sha256(_canonical_metadata_bytes(value)).hexdigest()
+
+
+def _review_units(value: float) -> int:
+    """Encode [0, 1] values at the review contract's portable 1e-8 resolution."""
+
+    return math.floor(float(value) * 100_000_000 + 0.5)
+
+
+def _review_metadata_digest(value: Mapping[str, Any]) -> str:
+    """Hash JSON with typed nodes so Python and JavaScript agree on numeric bytes."""
+
+    _canonical_metadata_bytes(value)
+    return content_digest(_review_metadata_node(value))
+
+
+def _canonical_metadata_bytes(value: Mapping[str, Any]) -> bytes:
     _safe_metadata(value)
-    digest = content_digest(dict(value))
-    if len(digest.encode("utf-8")) > AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES:
-        raise ArgumentError("metadata digest is outside its bound")
-    return digest
+    _metadata_footprint(value)
+    encoded = canonical_bytes(dict(value))
+    if len(encoded) > AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES:
+        raise ArgumentError("metadata exceeds its canonical byte bound")
+    return encoded
+
+
+def _metadata_footprint(value: Any) -> None:
+    total = 0
+
+    def add(size: int) -> None:
+        nonlocal total
+        total += size
+        if total > AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES:
+            raise ArgumentError("metadata exceeds its bounded footprint")
+
+    def string_bytes(item: str) -> int:
+        if len(item) > AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES:
+            raise ArgumentError("metadata string exceeds its bound")
+        try:
+            return len(item.encode("utf-8"))
+        except UnicodeEncodeError as error:
+            raise ArgumentError("metadata contains invalid Unicode") from error
+
+    def visit(item: Any) -> None:
+        if item is None:
+            add(4)
+        elif isinstance(item, bool):
+            add(4 if item else 5)
+        elif isinstance(item, str):
+            add(string_bytes(item) + 2)
+        elif isinstance(item, int):
+            if abs(item) > MAX_SAFE_JSON_INTEGER:
+                raise ArgumentError("metadata contains an unsafe integer")
+            add(1)
+        elif isinstance(item, float):
+            if not math.isfinite(item):
+                raise ArgumentError("metadata contains a non-finite number")
+            if item.is_integer() and abs(item) > MAX_SAFE_JSON_INTEGER:
+                raise ArgumentError("metadata contains an unsafe integer")
+            add(1)
+        elif isinstance(item, Mapping):
+            add(2)
+            for index, (key, child) in enumerate(sorted(item.items(), key=lambda pair: pair[0].encode("utf-16-be", "surrogatepass"))):
+                if index > 0:
+                    add(1)
+                add(string_bytes(key) + 3)
+                visit(child)
+        elif isinstance(item, (list, tuple)):
+            add(2)
+            for index, child in enumerate(item):
+                if index > 0:
+                    add(1)
+                visit(child)
+        else:
+            raise ArgumentError("metadata contains unsupported JSON")
+
+    visit(value)
+
+
+def _review_metadata_node(value: Any) -> Any:
+    if value is None:
+        return ["null"]
+    if isinstance(value, bool):
+        return ["boolean", value]
+    if isinstance(value, str):
+        return ["string", value.encode("utf-16-be", "surrogatepass").hex()]
+    if isinstance(value, int):
+        if abs(value) > MAX_SAFE_JSON_INTEGER:
+            raise ArgumentError("authority review metadata contains an unsafe number")
+        number = float(value)
+    elif isinstance(value, float) and math.isfinite(value):
+        if value.is_integer() and abs(value) > MAX_SAFE_JSON_INTEGER:
+            raise ArgumentError("authority review metadata contains an unsafe number")
+        number = 0.0 if value == 0 else value
+    elif isinstance(value, Mapping):
+        items = sorted(value.items(), key=lambda pair: pair[0].encode("utf-16-be", "surrogatepass"))
+        return ["object", [[key.encode("utf-16-be", "surrogatepass").hex(), _review_metadata_node(child)] for key, child in items]]
+    elif isinstance(value, (list, tuple)):
+        return ["array", [_review_metadata_node(child) for child in value]]
+    else:
+        raise ArgumentError("authority review metadata contains unsupported JSON")
+    if number == 0:
+        number = 0.0
+    return ["number", struct.pack(">d", number).hex()]
 
 
 def _timestamp(name: str, value: Any) -> str:
@@ -1119,6 +1240,337 @@ def validate_autonomous_claim_integrity_acquisition_binding(
     return value
 
 
+def settle_autonomous_claim_integrity_acquisition(
+    previous: AutonomousClaimIntegrityAssessment,
+    bridge: AutonomousClaimIntegrityAcquisitionBridge,
+    binding: AutonomousClaimIntegrityAcquisitionBinding,
+    execution: Any,
+    *,
+    claims: Sequence[AutonomousClaimIntegrityClaim | Mapping[str, Any]],
+    existing_evidence: Sequence[AutonomousClaimIntegrityEvidence | Mapping[str, Any]],
+    acquired_evidence: Sequence[Mapping[str, Any]],
+    reference_time: str,
+    evidence_authority: AutonomousClaimIntegrityEvidenceAuthority,
+    policy: AutonomousClaimIntegrityPolicy | Mapping[str, Any] | None = None,
+) -> AutonomousClaimIntegrityAssessment:
+    """Reassess claims with evidence explicitly linked to its reviewed acquisition and evaluator.
+
+    The evaluator's accepted assessment must cover the same acquired evidence digest, and a
+    deployment-owned authority must independently verify the evidence projection against the exact
+    receipt, request, and claim contracts. The authority owns its trust roots and external proof
+    verification; this SDK binds the authority receipt into the next claim-integrity generation.
+    """
+
+    from .autonomous_evidence_execution import AutonomousEvidenceExecutionResult
+    from .autonomous_evidence_runtime import AUTONOMOUS_EVIDENCE_RUNTIME_SCHEMA
+    from .autonomous_evidence_execution_resumable import AutonomousEvidenceExecutionResumableRun
+
+    validate_autonomous_claim_integrity(previous)
+    validate_autonomous_claim_integrity_acquisition_bridge(bridge)
+    validate_autonomous_claim_integrity_acquisition_binding(binding)
+    if not callable(getattr(evidence_authority, "verify", None)):
+        raise ArgumentError("integrity settlement requires a deployment-owned independent evidence authority")
+    authority_id = _identifier("integrity evidence authority id", getattr(evidence_authority, "authority_id", None))
+    authority_version = _identifier("integrity evidence authority version", getattr(evidence_authority, "authority_version", None))
+    if bridge.assessment_digest != previous.assessment_digest or bridge.generation != previous.generation:
+        raise ArgumentError("integrity acquisition bridge is stale for the previous assessment")
+    if binding.assessment_digest != previous.assessment_digest or binding.bridge_digest != bridge.bridge_digest:
+        raise ArgumentError("integrity acquisition binding is stale for the selected bridge")
+    if bridge.status != "planned" or bridge.acquisition_plan is None:
+        raise ArgumentError("integrity acquisition settlement requires a planned bridge")
+    if binding.acquisition_plan_digest != bridge.acquisition_plan.plan_digest:
+        raise ArgumentError("integrity acquisition binding plan does not match its bridge")
+
+    result = execution.result if isinstance(execution, AutonomousEvidenceExecutionResumableRun) else execution
+    if not isinstance(result, AutonomousEvidenceExecutionResult):
+        raise ArgumentError("integrity acquisition settlement requires a completed reviewed execution result")
+    if tuple(result.plan.domains) != tuple(bridge.acquisition_plan.selected_domains):
+        raise ArgumentError("integrity acquisition execution domains do not match the reviewed plan")
+    runtime = result.runtime
+    runtime_descriptor = {
+        "schema": AUTONOMOUS_EVIDENCE_RUNTIME_SCHEMA,
+        "status": runtime.status,
+        "plan_digest": runtime.plan.plan_digest,
+        "receipt_digests": [item.receipt_digest for item in runtime.receipts],
+        "assessment_digests": [item.assessment_digest for item in runtime.assessments],
+        "completed_requirement_ids": sorted(runtime.completed_requirement_ids),
+        "pending_evaluation_requirement_ids": sorted(runtime.pending_evaluation_requirement_ids),
+        "missing_requirement_ids": sorted(runtime.missing_requirement_ids),
+        "next_stage_ids": sorted(runtime.next_stage_ids),
+        "omitted_request_digests": sorted(runtime.omitted_request_digests),
+        "retention": "metadata_only;raw_values_caller_owned",
+        "secret_material": "never_returned",
+    }
+    if content_digest(runtime_descriptor) != runtime.result_digest:
+        raise ArgumentError("integrity acquisition execution runtime digest is invalid")
+    if len(binding.requests) != len(binding.candidate_ids):
+        raise ArgumentError("integrity acquisition binding request batch is malformed")
+
+    selections = tuple(bridge.acquisition_plan.selected)
+    if tuple(selection.candidate_id for selection in selections) != binding.candidate_ids:
+        raise ArgumentError("integrity acquisition binding candidate order differs from the reviewed plan")
+    if tuple(selection.domain for selection in selections) != binding.domains:
+        raise ArgumentError("integrity acquisition binding domains differ from the reviewed plan")
+    action_by_id = {action.action_id: action for action in previous.actions}
+    normalized_claims = tuple(item if isinstance(item, AutonomousClaimIntegrityClaim) else AutonomousClaimIntegrityClaim.from_mapping(item) for item in claims)
+    if len(normalized_claims) != len(previous.claims):
+        raise ArgumentError("integrity settlement claim contracts do not match the previous assessment")
+    previous_claims = {item.claim_id: item.domain for item in previous.claims}
+    if {item.claim_id: item.domain for item in normalized_claims} != previous_claims:
+        raise ArgumentError("integrity settlement claim identities do not match the previous assessment")
+    claim_contracts = {
+        claim.claim_id: {
+            "claim_id": claim.claim_id,
+            "domain": claim.domain,
+            "claim_digest": claim.claim_digest,
+            "required_support_units_1e8": _review_units(claim.required_support),
+            "required_independent_sources": claim.required_independent_sources,
+            "required_reproducibility": claim.required_reproducibility,
+            "required_modalities": list(claim.required_modalities),
+            "priority_units_1e8": _review_units(claim.priority),
+            "metadata_digest": _review_metadata_digest(claim.metadata),
+        }
+        for claim in normalized_claims
+    }
+    authorized_claims_by_candidate: dict[str, set[str]] = {}
+    for match in bridge.candidate_action_matches:
+        candidate_id = match.get("candidate_id")
+        action_ids = match.get("action_ids")
+        if not isinstance(candidate_id, str) or not isinstance(action_ids, Sequence) or isinstance(action_ids, (str, bytes, bytearray)):
+            raise ArgumentError("integrity acquisition bridge action match is malformed")
+        claim_ids: set[str] = set()
+        for action_id in action_ids:
+            action = action_by_id.get(action_id)
+            if action is None:
+                raise ArgumentError("integrity acquisition bridge references a foreign claim action")
+            claim_ids.update(action.claim_ids)
+        authorized_claims_by_candidate[candidate_id] = claim_ids
+
+    expected_requests: dict[str, tuple[str, str, Mapping[str, Any]]] = {}
+    for selection, request, bound_request_digest in zip(selections, binding.requests, binding.request_digests):
+        metadata = request.get("metadata")
+        if not isinstance(metadata, Mapping):
+            raise ArgumentError("integrity acquisition bound request metadata is malformed")
+        if (
+            metadata.get("claim_integrity_assessment_digest") != previous.assessment_digest
+            or metadata.get("claim_integrity_bridge_digest") != bridge.bridge_digest
+            or metadata.get("claim_integrity_acquisition_plan_digest") != bridge.acquisition_plan.plan_digest
+            or metadata.get("claim_integrity_candidate_id") != selection.candidate_id
+            or metadata.get("claim_integrity_candidate_digest") != selection.candidate_digest
+        ):
+            raise ArgumentError("integrity acquisition bound request metadata was changed")
+        runtime_request_digest = content_digest({
+            "schema": AUTONOMOUS_EVIDENCE_RUNTIME_SCHEMA,
+            "plan_digest": result.plan.evidence_plan_digest,
+            "requirement_id": request["requirement_id"],
+            "source_id": request["source_id"],
+            "source_digest": request["source_digest"],
+            "request_id": request["request_id"],
+            "metadata": metadata,
+        })
+        if runtime_request_digest in expected_requests:
+            raise ArgumentError("integrity acquisition requests map to a duplicate runtime request")
+        expected_requests[runtime_request_digest] = (selection.candidate_id, selection.domain, request)
+
+    receipts_by_digest: dict[str, Any] = {}
+    receipt_to_candidate: dict[str, str] = {}
+    for receipt in result.runtime.receipts:
+        expected = expected_requests.get(receipt.request_digest)
+        if expected is None:
+            raise ArgumentError("integrity acquisition execution contains a receipt outside its request binding")
+        candidate_id, domain, request = expected
+        if receipt.request_digest in receipts_by_digest:
+            raise ArgumentError("integrity acquisition execution contains duplicate request receipts")
+        if (
+            receipt.plan_digest != result.plan.evidence_plan_digest
+            or receipt.requirement_id != request["requirement_id"]
+            or receipt.domain != domain
+            or receipt.source_id != request["source_id"]
+            or receipt.source_digest != request["source_digest"]
+        ):
+            raise ArgumentError("integrity acquisition receipt does not match its bound source request")
+        receipts_by_digest[receipt.receipt_digest] = receipt
+        receipt_to_candidate[receipt.receipt_digest] = candidate_id
+
+    settled_request_digests = {item.request_digest for item in receipts_by_digest.values()}
+    omitted_request_digests = set(runtime.omitted_request_digests)
+    if settled_request_digests.intersection(omitted_request_digests) or settled_request_digests.union(omitted_request_digests) != set(expected_requests):
+        raise ArgumentError("integrity acquisition execution does not account for the exact bound request batch")
+
+    assessments_by_digest: dict[str, Any] = {}
+    for assessment in result.runtime.assessments:
+        if assessment.receipt_digest not in receipts_by_digest:
+            raise ArgumentError("integrity acquisition assessment references a receipt outside the execution")
+        if assessment.receipt_digest in assessments_by_digest:
+            raise ArgumentError("integrity acquisition execution contains duplicate evaluator assessments")
+        assessments_by_digest[assessment.receipt_digest] = assessment
+
+    if isinstance(acquired_evidence, (str, bytes, bytearray)) or not isinstance(acquired_evidence, Sequence) or len(acquired_evidence) > AUTONOMOUS_CLAIM_INTEGRITY_MAX_EVIDENCE:
+        raise ArgumentError("integrity acquired evidence links are outside their bound")
+    pending_reviews: list[tuple[AutonomousClaimIntegrityEvidence, Any, Any, str, str, Mapping[str, Any]]] = []
+    seen_evidence_ids: set[str] = set()
+    reserved_metadata = {
+        "claim_integrity_acquisition_receipt_digest",
+        "claim_integrity_source_quality_assessment_digest",
+        "claim_integrity_source_quality_evaluator_id",
+        "claim_integrity_source_quality_evaluator_version",
+        "claim_integrity_evidence_authority_id",
+        "claim_integrity_evidence_authority_version",
+        "claim_integrity_evidence_authority_review_digest",
+        "claim_integrity_evidence_authority_receipt_digest",
+        "claim_integrity_acquisition_candidate_id",
+        "claim_integrity_acquisition_binding_digest",
+        "claim_integrity_acquisition_bridge_digest",
+    }
+    for index, link in enumerate(acquired_evidence):
+        if not isinstance(link, Mapping) or set(link) != {"receipt_digest", "assessment_digest", "evidence"}:
+            raise ArgumentError(f"integrity acquired evidence link {index} must contain receipt_digest, assessment_digest, and evidence")
+        receipt_digest = _digest(f"integrity acquired evidence link {index} receipt_digest", link.get("receipt_digest"))
+        assessment_digest = _digest(f"integrity acquired evidence link {index} assessment_digest", link.get("assessment_digest"))
+        receipt = receipts_by_digest.get(receipt_digest)
+        assessment = None if receipt is None else assessments_by_digest.get(receipt.receipt_digest)
+        if receipt is None or assessment is None or receipt.assessment_digest != assessment.assessment_digest:
+            raise ArgumentError("integrity acquired evidence link is not attached to an assessed receipt")
+        if assessment.assessment_digest != assessment_digest or assessment.verdict != "accepted" or assessment.evidence_digest is None:
+            raise ArgumentError("integrity acquired evidence requires the exact accepted source-quality assessment")
+        if receipt.status != "observed" or receipt.evidence_status != "declared_for_evaluator" or receipt.evaluator_status != "accepted":
+            raise ArgumentError("integrity acquired evidence requires a complete accepted acquisition receipt")
+        raw_evidence = link.get("evidence")
+        if isinstance(raw_evidence, Mapping):
+            allowed_evidence_fields = {
+                "evidence_id", "evidenceId", "domain", "claim_ids", "claimIds", "source_id", "sourceId",
+                "evidence_digest", "evidenceDigest", "source_digest", "sourceDigest", "observed_at", "observedAt",
+                "valid_from", "validFrom", "valid_until", "validUntil", "reliability", "support", "status",
+                "stance", "modality", "reproducibility", "metadata",
+            }
+            if set(raw_evidence).difference(allowed_evidence_fields):
+                raise ArgumentError(f"integrity acquired evidence link {index} contains unsupported evidence fields")
+        evidence_item = raw_evidence if isinstance(raw_evidence, AutonomousClaimIntegrityEvidence) else AutonomousClaimIntegrityEvidence.from_mapping(raw_evidence)
+        candidate_id = receipt_to_candidate[receipt.receipt_digest]
+        if (
+            evidence_item.domain != receipt.domain
+            or evidence_item.source_id != receipt.source_id
+            or evidence_item.source_digest != receipt.source_digest
+            or evidence_item.evidence_digest != assessment.evidence_digest
+        ):
+            raise ArgumentError("integrity acquired evidence does not match its assessed source receipt")
+        allowed_claims = authorized_claims_by_candidate.get(candidate_id)
+        if not allowed_claims or not set(evidence_item.claim_ids).issubset(allowed_claims):
+            raise ArgumentError("integrity acquired evidence targets claims outside the candidate's reviewed actions")
+        if reserved_metadata.intersection(evidence_item.metadata):
+            raise ArgumentError("integrity acquired evidence attempts to override settlement provenance")
+        if evidence_item.evidence_id in seen_evidence_ids:
+            raise ArgumentError("integrity acquired evidence contains duplicate identifiers")
+        review_body = {
+            "schema": AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_AUTHORITY_REVIEW_SCHEMA,
+            "authority_id": authority_id,
+            "authority_version": authority_version,
+            "context_digest": previous.context_digest,
+            "assessment_digest": previous.assessment_digest,
+            "bridge_digest": bridge.bridge_digest,
+            "binding_digest": binding.binding_digest,
+            "candidate_id": candidate_id,
+            "request_digest": receipt.request_digest,
+            "receipt": {
+                "receipt_digest": receipt.receipt_digest,
+                "request_digest": receipt.request_digest,
+                "requirement_id": receipt.requirement_id,
+                "domain": receipt.domain,
+                "source_id": receipt.source_id,
+                "source_digest": receipt.source_digest,
+                "status": receipt.status,
+                "evidence_status": receipt.evidence_status,
+                "evaluator_status": receipt.evaluator_status,
+            },
+            "source_quality_assessment": {
+                "assessment_digest": assessment.assessment_digest,
+                "receipt_digest": assessment.receipt_digest,
+                "requirement_id": assessment.requirement_id,
+                "evaluator_id": assessment.evaluator_id,
+                "evaluator_version": assessment.evaluator_version,
+                "verdict": assessment.verdict,
+                "score_units_1e8": _review_units(assessment.score),
+                "evidence_digest": assessment.evidence_digest,
+            },
+            "claim_contracts": [
+                claim_contracts[claim_id]
+                for claim_id in evidence_item.claim_ids
+                if claim_id in claim_contracts
+            ],
+            "evidence": {
+                "evidence_id": evidence_item.evidence_id,
+                "domain": evidence_item.domain,
+                "claim_ids": list(evidence_item.claim_ids),
+                "source_id": evidence_item.source_id,
+                "source_digest": evidence_item.source_digest,
+                "evidence_digest": evidence_item.evidence_digest,
+                "observed_at": evidence_item.observed_at,
+                "valid_from": evidence_item.valid_from,
+                "valid_until": evidence_item.valid_until,
+                "reliability_units_1e8": _review_units(evidence_item.reliability),
+                "support_units_1e8": _review_units(evidence_item.support),
+                "status": evidence_item.status,
+                "stance": evidence_item.stance,
+                "modality": evidence_item.modality,
+                "reproducibility": evidence_item.reproducibility,
+                "metadata_digest": _review_metadata_digest(evidence_item.metadata),
+            },
+        }
+        if len(review_body["claim_contracts"]) != len(evidence_item.claim_ids):
+            raise ArgumentError("integrity acquired evidence references a claim without a reviewed contract")
+        review_digest = content_digest(review_body)
+        review = _freeze_json({**review_body, "review_digest": review_digest})
+        seen_evidence_ids.add(evidence_item.evidence_id)
+        pending_reviews.append((evidence_item, receipt, assessment, candidate_id, review_digest, review))
+
+    prior_evidence = tuple(item if isinstance(item, AutonomousClaimIntegrityEvidence) else AutonomousClaimIntegrityEvidence.from_mapping(item) for item in existing_evidence)
+    unverified_evidence = tuple(item[0] for item in pending_reviews)
+    evidence_ids = [item.evidence_id for item in (*prior_evidence, *unverified_evidence)]
+    if len(evidence_ids) != len(set(evidence_ids)):
+        raise ArgumentError("integrity settlement evidence identifiers must be unique")
+    reassess_autonomous_claim_integrity(
+        previous,
+        claims=normalized_claims,
+        evidence=(*prior_evidence, *unverified_evidence),
+        reference_time=reference_time,
+        policy=policy,
+    )
+
+    linked_evidence: list[AutonomousClaimIntegrityEvidence] = []
+    for evidence_item, receipt, assessment, candidate_id, review_digest, review in pending_reviews:
+        try:
+            authority_receipt_digest = evidence_authority.verify(review)
+        except Exception as error:
+            raise ArgumentError("deployment evidence authority failed to verify acquired claim evidence") from error
+        authority_receipt_digest = _digest("integrity evidence authority receipt digest", authority_receipt_digest)
+        linked_evidence.append(replace(
+            evidence_item,
+            metadata={
+                **dict(evidence_item.metadata),
+                "claim_integrity_acquisition_receipt_digest": receipt.receipt_digest,
+                "claim_integrity_source_quality_assessment_digest": assessment.assessment_digest,
+                "claim_integrity_source_quality_evaluator_id": assessment.evaluator_id,
+                "claim_integrity_source_quality_evaluator_version": assessment.evaluator_version,
+                "claim_integrity_evidence_authority_id": authority_id,
+                "claim_integrity_evidence_authority_version": authority_version,
+                "claim_integrity_evidence_authority_review_digest": review_digest,
+                "claim_integrity_evidence_authority_receipt_digest": authority_receipt_digest,
+                "claim_integrity_acquisition_candidate_id": candidate_id,
+                "claim_integrity_acquisition_binding_digest": binding.binding_digest,
+                "claim_integrity_acquisition_bridge_digest": bridge.bridge_digest,
+            },
+        ))
+
+    all_evidence = prior_evidence + tuple(linked_evidence)
+    return reassess_autonomous_claim_integrity(
+        previous,
+        claims=normalized_claims,
+        evidence=all_evidence,
+        reference_time=reference_time,
+        policy=policy,
+    )
+
+
 def assess_autonomous_claim_integrity(
     *,
     context_digest: str,
@@ -1380,12 +1832,14 @@ __all__ = [
     "AUTONOMOUS_CLAIM_INTEGRITY_ACTION_SCHEMA",
     "AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA",
     "AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BINDING_SCHEMA",
+    "AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_AUTHORITY_REVIEW_SCHEMA",
     "AUTONOMOUS_CLAIM_INTEGRITY_STATUSES",
     "AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_STATUSES",
     "AUTONOMOUS_CLAIM_INTEGRITY_STANCES",
     "AUTONOMOUS_CLAIM_INTEGRITY_REPRODUCIBILITY",
     "AUTONOMOUS_CLAIM_INTEGRITY_TEMPORAL_STATES",
     "AUTONOMOUS_CLAIM_INTEGRITY_ACTION_TYPES",
+    "AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES",
     "AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS",
     "AutonomousClaimIntegrityPolicy",
     "AutonomousClaimIntegrityClaim",
@@ -1396,6 +1850,7 @@ __all__ = [
     "AutonomousClaimIntegrityAssessment",
     "AutonomousClaimIntegrityAcquisitionBridge",
     "AutonomousClaimIntegrityAcquisitionBinding",
+    "AutonomousClaimIntegrityEvidenceAuthority",
     "assess_autonomous_claim_integrity",
     "reassess_autonomous_claim_integrity",
     "plan_autonomous_claim_integrity_acquisition",
@@ -1404,4 +1859,5 @@ __all__ = [
     "validate_autonomous_claim_integrity_acquisition_bridge",
     "bind_autonomous_claim_integrity_acquisition_requests",
     "validate_autonomous_claim_integrity_acquisition_binding",
+    "settle_autonomous_claim_integrity_acquisition",
 ]

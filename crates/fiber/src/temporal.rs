@@ -14,7 +14,7 @@
 //! materialising an accessible-set is what keeps this pass independent of world size.
 
 use bioprism_scope::Timestamp;
-use bioprism_world::WorldSource;
+use bioprism_world::{WorldSource, WorldSourceError};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,7 +47,10 @@ impl TemporalCut {
     }
 }
 
-pub fn temporal_cut<S: WorldSource + ?Sized>(source: &S, at: Timestamp) -> TemporalCut {
+pub fn temporal_cut<S: WorldSource + ?Sized>(
+    source: &S,
+    at: Timestamp,
+) -> Result<TemporalCut, WorldSourceError> {
     let mut released = BTreeSet::new();
     let mut event_managed = BTreeSet::new();
 
@@ -61,9 +64,9 @@ pub fn temporal_cut<S: WorldSource + ?Sized>(source: &S, at: Timestamp) -> Tempo
         }
     }
 
-    TemporalCut {
+    Ok(TemporalCut {
         at,
         released,
         event_managed,
-    }
+    })
 }

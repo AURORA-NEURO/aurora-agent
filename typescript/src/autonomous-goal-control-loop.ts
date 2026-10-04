@@ -1,11 +1,13 @@
 import { ArgumentError, isObject } from "./errors.js";
 import { AutonomousGoalWorker, type AutonomousGoalWorkerBatch } from "./autonomous-goal-worker.js";
 import { InMemoryAutonomousGoalPreviewAdmissionLedger, validateAutonomousGoalPreviewAdmissionRecord, verifyAutonomousGoalPreviewApproval, type AutonomousGoalPreviewAdmissionRecord } from "./autonomous-goal-preview.js";
-import type { AutonomousGoalRecord, InMemoryAutonomousGoalLedger } from "./autonomous-goals.js";
-import type { AutonomousGoalSchedule, AutonomousGoalSchedulingSignal } from "./autonomous-goal-scheduler.js";
-import { digestJsonSync } from "./tooling.js";
+import { AUTONOMOUS_GOAL_MAX_GOALS, type AutonomousGoalRecord, type InMemoryAutonomousGoalLedger } from "./autonomous-goals.js";
+import { AUTONOMOUS_GOAL_SCHEDULE_MAX_SIGNALS, type AutonomousGoalSchedule, type AutonomousGoalScheduleSnapshot, type AutonomousGoalSchedulingSignal } from "./autonomous-goal-scheduler.js";
+import { autonomousGoalTimestampNowNs, normalizeAutonomousGoalTimestampNs } from "./autonomous-goal-time.js";
+import { compareUnicodeScalars, digestJsonSync, isUnicodeScalarString } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 import {
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA,
   sealAutonomousGoalControlLoopSnapshot,
   validateAutonomousGoalControlLoopSnapshot,
   type AutonomousGoalControlLoopCheckpoint,
@@ -19,6 +21,7 @@ export const AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS = 8_192;
 export const AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_BATCH_PREFIX_BYTES = 128;
 export const AUTONOMOUS_GOAL_CONTROL_EVALUATION_SCHEMA = "bioprism-autonomous-goal-control-evaluation/0.1" as const;
 export const AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA = "bioprism-autonomous-goal-control-bandit/0.1" as const;
+const AUTONOMOUS_GOAL_CONTROL_BANDIT_RETENTIONS = new Set(["value_only_goal_domain_bandit_state", "value_only_goal_contextual_bandit_state"]);
 export const AUTONOMOUS_GOAL_CONTROL_PREVIEW_SCHEMA = "bioprism-autonomous-goal-control-preview/0.1" as const;
 export const AUTONOMOUS_GOAL_CONTROL_PREVIEW_RETENTION = "metadata_only_goal_control_preview;tasks_prompts_parameters_credentials_and_results_not_retained" as const;
 export const AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS = 128;
@@ -129,7 +132,7 @@ function integer(name: string, value: unknown, minimum: number, maximum: number)
 }
 
 function prefix(value: unknown): string {
-  if (typeof value !== "string" || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_BATCH_PREFIX_BYTES) fail("batch_id_prefix is outside its bounded contract");
+  if (typeof value !== "string" || !isUnicodeScalarString(value) || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_BATCH_PREFIX_BYTES) fail("batch_id_prefix is outside its bounded contract");
   return value.trim();
 }
 
@@ -156,7 +159,7 @@ function allTerminal(ledger: InMemoryAutonomousGoalLedger): boolean {
 }
 
 function identifier(name: string, value: unknown, maximum = 256): string {
-  if (typeof value !== "string" || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > maximum) fail(`${name} is outside its bounded identifier contract`);
+  if (typeof value !== "string" || !isUnicodeScalarString(value) || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > maximum) fail(`${name} is outside its bounded identifier contract`);
   return value.trim();
 }
 
@@ -215,10 +218,32 @@ function normalizeLearningSignal(value: unknown, index: number): AutonomousGoalS
     goal_id: identifier(`learner signal ${index}.goal_id`, value.goal_id),
     priority: finite(`learner signal ${index}.priority`, value.priority ?? 0.5, 0, 1),
     urgency: finite(`learner signal ${index}.urgency`, value.urgency ?? 0, 0, 1),
-    deadline_ns: value.deadline_ns === undefined || value.deadline_ns === null ? null : integer(`learner signal ${index}.deadline_ns`, value.deadline_ns, 0, Number.MAX_SAFE_INTEGER),
+    deadline_ns: value.deadline_ns === undefined || value.deadline_ns === null ? null : normalizeAutonomousGoalTimestampNs(value.deadline_ns, `learner signal ${index}.deadline_ns`),
     estimated_cost: integer(`learner signal ${index}.estimated_cost`, value.estimated_cost ?? 1, 1, 1_000_000),
-    dependencies: [...new Set(dependencies.map((item, dependencyIndex) => identifier(`learner signal ${index}.dependencies[${dependencyIndex}]`, item)))].sort(),
+    dependencies: [...new Set(dependencies.map((item, dependencyIndex) => identifier(`learner signal ${index}.dependencies[${dependencyIndex}]`, item)))].sort(compareUnicodeScalars),
   };
+}
+
+/** Applies learner scores without allowing them to rewrite caller-owned scheduling structure. */
+function mergeLearnedSignalScores(callerSignalsValue: unknown, learnedSignals: readonly AutonomousGoalSchedulingSignal[]): AutonomousGoalSchedulingSignal[] {
+  const callerSignals = callerSignalsValue === undefined || callerSignalsValue === null ? [] : callerSignalsValue;
+  if (!Array.isArray(callerSignals) || callerSignals.length > AUTONOMOUS_GOAL_SCHEDULE_MAX_SIGNALS) fail("schedule signals are outside their bounds");
+  const byGoal = new Map<string, AutonomousGoalSchedulingSignal>();
+  callerSignals.forEach((raw, index) => {
+    if (!isObject(raw)) fail(`schedule signal ${index} is malformed`);
+    const goalId = identifier(`schedule signal ${index}.goal_id`, raw.goal_id);
+    if (byGoal.has(goalId)) fail(`schedule signals contain duplicate goal_id ${goalId}`);
+    byGoal.set(goalId, { ...raw, goal_id: goalId } as AutonomousGoalSchedulingSignal);
+  });
+  const learnedIds = new Set<string>();
+  for (const signal of learnedSignals) {
+    if (learnedIds.has(signal.goal_id)) fail(`learner signals contain duplicate goal_id ${signal.goal_id}`);
+    learnedIds.add(signal.goal_id);
+    const prior = byGoal.get(signal.goal_id) ?? { goal_id: signal.goal_id };
+    byGoal.set(signal.goal_id, { ...prior, priority: signal.priority, urgency: signal.urgency });
+  }
+  if (byGoal.size > AUTONOMOUS_GOAL_SCHEDULE_MAX_SIGNALS) fail("merged schedule signals exceed their bounds");
+  return [...byGoal.keys()].sort(compareUnicodeScalars).map((goalId) => byGoal.get(goalId)!);
 }
 
 type BanditArm = { pulls: number; failures: number; reward_sum: number };
@@ -240,7 +265,7 @@ export class AutonomousGoalBanditLearner {
     return value === null || value === undefined ? null : identifier(name, value, 128);
   }
 
-  private static context(name: string, value: JsonObject): BanditContext {
+  private static context(name: string, value: Record<string, unknown>): BanditContext {
     return {
       domain: identifier(`${name}.domain`, value.domain, 128),
       capability: AutonomousGoalBanditLearner.contextPart(`${name}.capability`, value.capability),
@@ -273,33 +298,55 @@ export class AutonomousGoalBanditLearner {
   }
 
   restore(state: JsonObject): void {
-    if (state.schema !== AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA) fail("bandit state schema is invalid");
-    this.exploration = finite("bandit state exploration", state.exploration ?? this.exploration, 0, 2);
-    this.generationValue = integer("bandit generation", state.generation, 0, 2_147_483_647);
-    if (!Array.isArray(state.arms) || state.arms.length > 128) fail("bandit arms are outside their bounds");
-    this.arms.clear();
-    this.contexts.clear();
-    for (const raw of state.arms) {
+    if (!isObject(state)) fail("bandit state must be an object");
+    // Canonical JSON hashes own enumerable fields, so restore from that same captured projection.
+    const stateValue = Object.fromEntries(Object.entries(state)) as JsonObject;
+    if (!Array.isArray(stateValue.arms) || stateValue.arms.length > 128) fail("bandit arms are outside their bounds");
+    stateValue.arms = stateValue.arms.map((raw) => {
       if (!isObject(raw)) fail("bandit arm is malformed");
+      return Object.fromEntries(Object.entries(raw)) as JsonObject;
+    });
+    const stateFields = ["schema", "generation", "arms", "exploration", "retention", "secret_material", "state_digest"];
+    if (Object.keys(stateValue).some((key) => !stateFields.includes(key)) || stateFields.some((key) => !Object.prototype.hasOwnProperty.call(stateValue, key))) fail("bandit state has unsupported or missing fields");
+    if (stateValue.schema !== AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA) fail("bandit state schema is invalid");
+    if (typeof stateValue.retention !== "string" || !AUTONOMOUS_GOAL_CONTROL_BANDIT_RETENTIONS.has(stateValue.retention) || stateValue.secret_material !== "never_returned") fail("bandit state retention markers are invalid");
+    const { state_digest: suppliedDigest, ...stateBody } = stateValue;
+    if (digest("bandit state_digest", suppliedDigest)! !== digestJsonSync(stateBody)) fail("bandit state digest mismatch");
+    const exploration = finite("bandit state exploration", stateValue.exploration, 0, 2);
+    const generation = integer("bandit generation", stateValue.generation, 0, 2_147_483_647);
+    if (!Array.isArray(stateValue.arms) || stateValue.arms.length > 128) fail("bandit arms are outside their bounds");
+    const arms = new Map<string, BanditArm>();
+    const contexts = new Map<string, BanditContext>();
+    for (const raw of stateValue.arms) {
+      if (!isObject(raw)) fail("bandit arm is malformed");
+      const requiredArmFields = ["domain", "pulls", "failures", "reward_sum"];
+      const allowedArmFields = new Set([...requiredArmFields, "capability", "risk_class", "arm_id"]);
+      if (Object.keys(raw).some((key) => !allowedArmFields.has(key)) || requiredArmFields.some((key) => !Object.prototype.hasOwnProperty.call(raw, key))) fail("bandit arm has unsupported or missing fields");
       const context = AutonomousGoalBanditLearner.context("bandit arm", raw);
       const expectedArmId = AutonomousGoalBanditLearner.armId(context);
       const armId = raw.arm_id === undefined || raw.arm_id === null ? expectedArmId : digest("bandit arm_id", raw.arm_id)!;
       if (armId !== expectedArmId) fail("bandit arm_id does not match its context");
-      if (this.arms.has(armId)) fail("bandit state contains duplicate contextual arms");
+      if (arms.has(armId)) fail("bandit state contains duplicate contextual arms");
       const pulls = integer("bandit arm pulls", raw.pulls, 0, 2_147_483_647);
       const failures = integer("bandit arm failures", raw.failures, 0, 2_147_483_647);
       if (failures > pulls) fail("bandit arm failures exceed pulls");
       const rewardSum = finite("bandit arm reward_sum", raw.reward_sum, -pulls, pulls);
-      this.arms.set(armId, { pulls, failures, reward_sum: rewardSum });
-      this.contexts.set(armId, context);
+      arms.set(armId, { pulls, failures, reward_sum: rewardSum });
+      contexts.set(armId, context);
     }
+    this.exploration = exploration;
+    this.generationValue = generation;
+    this.arms.clear();
+    this.contexts.clear();
+    for (const [armId, arm] of arms) this.arms.set(armId, arm);
+    for (const [armId, context] of contexts) this.contexts.set(armId, context);
   }
 
   snapshot(): JsonObject {
     const body: JsonObject = {
       schema: AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA,
       generation: this.generationValue,
-      arms: [...this.arms.keys()].sort().map((armId) => {
+      arms: [...this.arms.keys()].sort(compareUnicodeScalars).map((armId) => {
         const context = this.contexts.get(armId) ?? { domain: armId, capability: null, risk_class: null };
         const row: JsonObject = { domain: context.domain, ...this.arms.get(armId)! };
         if (context.capability !== null || context.risk_class !== null) {
@@ -317,31 +364,75 @@ export class AutonomousGoalBanditLearner {
   }
 
   update(evaluations: readonly AutonomousGoalEvaluation[], goals: readonly AutonomousGoalRecord[]): Record<string, unknown> {
-    if (!Array.isArray(evaluations) || evaluations.length > AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS) fail("bandit evaluations are outside their bounds");
-    const goalsById = new Map<string, AutonomousGoalRecord>();
-    for (const goal of goals) {
-      if (goalsById.has(goal.goal_id)) fail("bandit goals contain duplicate goal_id values");
-      goalsById.set(goal.goal_id, goal);
+    const previousGeneration = this.generationValue;
+    const previousArms = new Map([...this.arms].map(([armId, arm]) => [armId, { ...arm }]));
+    const previousContexts = new Map([...this.contexts].map(([armId, context]) => [armId, { ...context }]));
+    try {
+      return this.updateUnlocked(evaluations, goals);
+    } catch (error) {
+      this.generationValue = previousGeneration;
+      this.arms.clear();
+      this.contexts.clear();
+      for (const [armId, arm] of previousArms) this.arms.set(armId, arm);
+      for (const [armId, context] of previousContexts) this.contexts.set(armId, context);
+      throw error;
     }
-    for (const evaluation of evaluations) {
-      const domain = identifier("bandit evaluation domain", evaluation.domain, 128);
-      const reward = finite("bandit evaluation reward", evaluation.reward, -1, 1);
-      const evaluationGoal = goalsById.get(evaluation.goal_id);
-      const context = evaluationGoal === undefined
-        ? { domain, capability: null, risk_class: null }
-        : AutonomousGoalBanditLearner.context("bandit evaluation goal", evaluationGoal);
-      if (context.domain !== domain) fail("bandit evaluation domain does not match its goal");
-      const arm = this.ensureArm(context);
-      arm.pulls += 1;
-      arm.reward_sum += reward;
-      if (!evaluation.passed) arm.failures += 1;
+  }
+
+  private updateUnlocked(evaluations: readonly AutonomousGoalEvaluation[], goals: readonly AutonomousGoalRecord[]): Record<string, unknown> {
+    if (!Array.isArray(evaluations) || evaluations.length > AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS) fail("bandit evaluations are outside their bounds");
+    if (!Array.isArray(goals) || goals.length > AUTONOMOUS_GOAL_MAX_GOALS) fail("bandit goals are outside their bounds");
+
+    // Copy caller-owned rows once so validation and the resulting signals use the same values.
+    const evaluationRows: Record<string, unknown>[] = [];
+    const evaluationCount = evaluations.length;
+    for (let index = 0; index < evaluationCount; index += 1) {
+      if (evaluationRows.length >= AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS) fail("bandit evaluations are outside their bounds");
+      const evaluation = evaluations[index];
+      if (!isObject(evaluation)) fail("bandit evaluation is malformed");
+      evaluationRows.push({ ...evaluation });
+    }
+
+    const goalsById = new Map<string, Record<string, unknown>>();
+    const goalRows: Record<string, unknown>[] = [];
+    const goalCount = goals.length;
+    for (let index = 0; index < goalCount; index += 1) {
+      if (goalRows.length >= AUTONOMOUS_GOAL_MAX_GOALS) fail("bandit goals are outside their bounds");
+      const rawGoal = goals[index];
+      if (!isObject(rawGoal)) fail("bandit goal is malformed");
+      const goal = { ...rawGoal };
+      const goalId = identifier("bandit goal_id", goal.goal_id);
+      if (goalsById.has(goalId)) fail("bandit goals contain duplicate goal_id values");
+      goalsById.set(goalId, goal);
+      goalRows.push(goal);
     }
     if (this.generationValue >= 2_147_483_647) fail("bandit generation is exhausted");
+    const seenGoalIds = new Set<string>();
+    for (const evaluation of evaluationRows) {
+      const passed = evaluation.passed;
+      if (typeof passed !== "boolean") fail("bandit evaluation is malformed");
+      const domain = identifier("bandit evaluation domain", evaluation.domain, 128);
+      const goalId = identifier("bandit evaluation goal_id", evaluation.goal_id);
+      if (!goalsById.has(goalId)) fail("bandit evaluation references an unknown goal_id");
+      if (seenGoalIds.has(goalId)) fail("bandit evaluations contain duplicate goal_id values");
+      seenGoalIds.add(goalId);
+      const reward = finite("bandit evaluation reward", evaluation.reward, -1, 1);
+      const evaluationGoal = goalsById.get(goalId)!;
+      const context = AutonomousGoalBanditLearner.context("bandit evaluation goal", evaluationGoal);
+      if (context.domain !== domain) fail("bandit evaluation domain does not match its goal");
+      const arm = this.ensureArm(context);
+      if (arm.pulls >= 2_147_483_647) fail("bandit arm pulls are exhausted");
+      if (!passed && arm.failures >= 2_147_483_647) fail("bandit arm failures are exhausted");
+      arm.pulls += 1;
+      arm.reward_sum += reward;
+      if (!passed) arm.failures += 1;
+    }
     this.generationValue += 1;
     const totalPulls = Math.max(1, [...this.arms.values()].reduce((total, arm) => total + arm.pulls, 0));
     const signals: AutonomousGoalSchedulingSignal[] = [];
-    for (const goal of goals) {
-      if (!(["ready", "paused", "failed"] as readonly string[]).includes(goal.status)) continue;
+    for (const goal of goalRows) {
+      const status = goal.status;
+      if (typeof status !== "string" || !(["ready", "paused", "failed"] as readonly string[]).includes(status)) continue;
       const arm = this.armFor(AutonomousGoalBanditLearner.context("bandit goal", goal));
       const mean = arm.pulls === 0 ? 1 : (arm.reward_sum / arm.pulls + 1) / 2;
       const score = arm.pulls === 0 ? 1 : Math.min(1, Math.max(0, mean + this.exploration * Math.sqrt(Math.log(totalPulls + 1) / arm.pulls)));
@@ -349,7 +440,7 @@ export class AutonomousGoalBanditLearner {
       signals.push({ goal_id: identifier("bandit goal_id", goal.goal_id), priority: Math.round(score * 10_000) / 10_000, urgency: Math.round(urgency * 10_000) / 10_000, estimated_cost: 1, dependencies: [] });
       if (signals.length >= AUTONOMOUS_GOAL_CONTROL_MAX_SIGNALS) break;
     }
-    signals.sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0) || (right.urgency ?? 0) - (left.urgency ?? 0) || left.goal_id.localeCompare(right.goal_id));
+    signals.sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0) || (right.urgency ?? 0) - (left.urgency ?? 0) || compareUnicodeScalars(left.goal_id, right.goal_id));
     const state = this.snapshot();
     return {
       schema: AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA,
@@ -453,7 +544,7 @@ export class AutonomousGoalControlLoopResult {
 /** Provider-free explanation of the next scheduler decision. */
 export class AutonomousGoalControlLoopPreview {
   constructor(
-    readonly schedule: AutonomousGoalSchedule,
+    readonly schedule: AutonomousGoalScheduleSnapshot,
     readonly status: AutonomousGoalControlLoopPreviewStatus,
     readonly eligible_goal_count: number,
     readonly decision_counts: Readonly<Record<string, number>>,
@@ -467,7 +558,7 @@ export class AutonomousGoalControlLoopPreview {
   toJSON(): AutonomousGoalControlLoopPreviewJSON {
     return clone({
       schema: AUTONOMOUS_GOAL_CONTROL_PREVIEW_SCHEMA,
-      schedule: this.schedule,
+      schedule: structuredClone(this.schedule) as AutonomousGoalSchedule,
       status: this.status,
       eligible_goal_count: this.eligible_goal_count,
       decision_counts: { ...this.decision_counts },
@@ -513,7 +604,10 @@ export class AutonomousGoalControlLoop {
     if (!options || typeof options !== "object" || Array.isArray(options)) fail("preview options must be an object");
     if (options.schedule_options !== undefined && !isObject(options.schedule_options)) fail("preview schedule_options must be an object");
     const scheduleOptions = options.schedule_options === undefined ? {} : { ...options.schedule_options };
-    const schedule = this.worker.scheduler.plan(this.worker.ledger.list({ limit: 512 }), scheduleOptions);
+    // A preview may run while the admitted loop awaits external work. Derive its schedule
+    // and terminal status from one ledger read so the receipt describes a single view.
+    const goals = this.worker.ledger.list({ limit: AUTONOMOUS_GOAL_MAX_GOALS });
+    const schedule = this.worker.scheduler.plan(goals, scheduleOptions);
     const decisionCounts: Record<string, number> = {};
     const reasonCounts: Record<string, number> = {};
     const statusCounts: Record<string, number> = {};
@@ -528,7 +622,7 @@ export class AutonomousGoalControlLoop {
     }
     const status: AutonomousGoalControlLoopPreviewStatus = schedule.selected_goal_ids.length > 0
       ? "admissible_work"
-      : allTerminal(this.worker.ledger)
+      : goals.length > 0 && goals.every((goal) => goal.status === "completed" || goal.status === "cancelled")
         ? "all_terminal"
         : "no_admissible_work";
     const learningStateDigest = this.learner instanceof AutonomousGoalBanditLearner
@@ -537,7 +631,7 @@ export class AutonomousGoalControlLoop {
     const normalizedDecisionCounts = Object.fromEntries(Object.entries(decisionCounts).sort(([left], [right]) => left.localeCompare(right)));
     const normalizedReasonCounts = Object.fromEntries(Object.entries(reasonCounts).sort(([left], [right]) => left.localeCompare(right)));
     const normalizedStatusCounts = Object.fromEntries(Object.entries(statusCounts).sort(([left], [right]) => left.localeCompare(right)));
-    const dependencyBlockedGoalIds = [...new Set(dependencyBlocked)].sort();
+    const dependencyBlockedGoalIds = [...new Set(dependencyBlocked)].sort(compareUnicodeScalars);
     const body = {
       schema: AUTONOMOUS_GOAL_CONTROL_PREVIEW_SCHEMA,
       schedule: schedule,
@@ -608,8 +702,9 @@ export class AutonomousGoalControlLoop {
       const currentPreview = this.preview({ schedule_options: previewOptions });
       if (currentPreview.preview_digest !== expectedPreviewDigest) fail("expected_preview_digest does not match the current admission preview");
       if (previewApproval !== null) {
-        const rawNow = previewOptions.now_ns;
-        const approvalNow = rawNow === undefined ? Date.now() * 1_000_000 : integer("schedule_options.now_ns", rawNow, 0, Number.MAX_SAFE_INTEGER);
+        // A replayable scheduler clock is caller-controlled and can be stale; it must never
+        // extend the lifetime of an operator approval.
+        const approvalNow = autonomousGoalTimestampNowNs();
         verifyAutonomousGoalPreviewApproval(previewApproval, { current_preview_digest: currentPreview.preview_digest, now_ns: approvalNow });
       }
     }
@@ -659,7 +754,7 @@ export class AutonomousGoalControlLoop {
       if (options.checkpoint === undefined) return;
       const learnerState = this.learner instanceof AutonomousGoalBanditLearner ? this.learner.snapshot() : null;
       const descriptor: JsonObject = {
-        schema: "bioprism-autonomous-goal-control-checkpoint/0.1",
+        schema: AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA,
         run_id: checkpointRunId,
         next_cycle: history.length + 1,
         cycle_summaries: history,
@@ -687,6 +782,7 @@ export class AutonomousGoalControlLoop {
         previous_snapshot_digest: previousCheckpoint?.snapshot_digest ?? null,
         retention: "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained",
         secret_material: "never_returned",
+        ...(previousCheckpoint?.migration === undefined ? {} : { migration: previousCheckpoint.migration }),
       };
       const snapshot = sealAutonomousGoalControlLoopSnapshot(descriptor);
       await options.checkpoint(snapshot);
@@ -708,12 +804,12 @@ export class AutonomousGoalControlLoop {
         secret_material: "never_returned",
       };
       const scheduleOptions = { ...baseOptions };
-      if (learnedSignals !== null) scheduleOptions.signals = learnedSignals;
       if (options.options_factory) {
         const supplied = await options.options_factory(context);
         if (!isObject(supplied)) fail("options_factory must return an object");
         Object.assign(scheduleOptions, supplied);
       }
+      if (learnedSignals !== null) scheduleOptions.signals = mergeLearnedSignalScores(scheduleOptions.signals, learnedSignals);
       const requestedSelected = integer("schedule_options.max_selected", scheduleOptions.max_selected ?? 1, 1, 128);
       const effectiveSelected = Math.min(requestedSelected, remainingRuns);
       scheduleOptions.max_selected = effectiveSelected;
@@ -724,10 +820,11 @@ export class AutonomousGoalControlLoop {
       const batch = await this.worker.run({ schedule_options: scheduleOptions, batch_id: batchId });
       let evaluations: AutonomousGoalEvaluation[] = [];
       let nextSignals: readonly AutonomousGoalSchedulingSignal[] = [];
-      if (this.evaluator !== null && batch.runs.length > 0) {
+      const evaluableRuns = batch.runs.filter((run) => run.dispatched && run.error_class === null);
+      if (this.evaluator !== null && evaluableRuns.length > 0) {
         const rawEvaluations = await this.evaluator(new AutonomousGoalControlLoopCycle(cycleNumber, batch));
-        if (!Array.isArray(rawEvaluations) || rawEvaluations.length !== batch.runs.length || rawEvaluations.length > AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS) fail("evaluator must return exactly one evaluation for every worker run");
-        const runsByGoal = new Map(batch.runs.map((run) => [run.goal_id, run]));
+        if (!Array.isArray(rawEvaluations) || rawEvaluations.length !== evaluableRuns.length || rawEvaluations.length > AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS) fail("evaluator must return exactly one evaluation for every dispatched worker run with a known outcome");
+        const runsByGoal = new Map(evaluableRuns.map((run) => [run.goal_id, run]));
         const seen = new Set<string>();
         for (const raw of rawEvaluations) {
           const rawGoalId = isObject(raw) ? raw.goal_id : undefined;
@@ -742,7 +839,7 @@ export class AutonomousGoalControlLoop {
         }
         evaluationDigests.push(digestJsonSync(evaluations));
         evaluationCount += evaluations.length;
-        const goalsForLearning = this.worker.ledger.list({ limit: 512 });
+        const goalsForLearning = this.worker.ledger.list({ limit: AUTONOMOUS_GOAL_MAX_GOALS });
         if (this.learner !== null) {
           const update = this.learner instanceof AutonomousGoalBanditLearner
             ? this.learner.update(evaluations, goalsForLearning)

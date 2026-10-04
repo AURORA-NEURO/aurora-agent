@@ -478,9 +478,7 @@ pub fn close_ids_limitations(
         unresolved.clear();
         omissions.insert("request:governance-or-locality-denied".into());
     }
-    let mut disposition = if global_block {
-        "blocked"
-    } else if resolved.is_empty() && unresolved.is_empty() {
+    let mut disposition = if global_block || (resolved.is_empty() && unresolved.is_empty()) {
         "blocked"
     } else if resolved.is_empty() {
         "unknown"
@@ -596,7 +594,7 @@ pub fn close_ids_limitations(
         feature_id: FEATURE_ID.into(),
         request_id: request.request_id.clone(),
         semantic_profile: request.semantic_profile.clone(),
-        required_scope_order: required_scope_order,
+        required_scope_order,
         disposition: disposition.into(),
         case_order: payload["case_order"]
             .as_array()

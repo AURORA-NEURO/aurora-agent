@@ -12,10 +12,11 @@
 //! visible rather than pre-filtered away. [`crate::policy::screen`] carries that argument in full.
 //!
 //! The one gate that runs ahead of every pass is [`crate::policy::PolicyEnvelope::resolve`]. It
-//! needs no evidence — one `data_policy` lookup — so a query whose declared clauses conflict with
-//! the corpus is refused before any closure, slice or materialisation happens. It emits no pass
-//! receipt because it selects nothing; it is an admission check on the query-world pair, in the
-//! same family as the schema-version check in [`Query::from_json`].
+//! checks the event cut and one `data_policy` lookup, so a query whose declared clauses conflict
+//! with the corpus — or whose governing policy is not yet available — is refused before any
+//! closure, slice or materialisation happens. It emits no pass receipt because it selects nothing;
+//! it is an admission check on the query-world pair, in the same family as the schema-version
+//! check in [`Query::from_json`].
 
 use crate::closure::{dropped_protected, protected_closure, unmatched_tags};
 use crate::error::FiberError;
@@ -409,14 +410,14 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         });
     }
 
-    let protected = protected_closure(source, &query.protected_tags);
+    let protected = protected_closure(source, &query.protected_tags)?;
     passes.push(PassReceipt {
         name: "protected_closure",
         retained: protected.len(),
         note: format!("{} protected tags requested", query.protected_tags.len()),
     });
 
-    let slice = backward_slice(source, query.targets.iter().map(|t| t.as_str()));
+    let slice = backward_slice(source, query.targets.iter().map(|t| t.as_str()))?;
     passes.push(PassReceipt {
         name: "backward_slice",
         retained: slice.selected_factors.len(),
@@ -426,21 +427,24 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         ),
     });
 
-    let mut selected_facts: BTreeSet<String> = slice
-        .needed_variables
-        .iter()
-        .filter_map(|variable| source.fact_providing(variable))
-        .map(|fact| fact.id.as_str().to_string())
-        .collect();
+    let mut selected_facts: BTreeSet<String> = BTreeSet::new();
+    for variable in &slice.needed_variables {
+        if let Some(fact) = source.fact_providing(variable)? {
+            selected_facts.insert(fact.id.as_str().to_string());
+        }
+    }
     selected_facts.extend(protected.iter().cloned());
 
     // Materialise only the selected region. Everything downstream reads from this vector, so
     // compile cost tracks the compiled region rather than the corpus (43.34).
     let mut resolved: BTreeMap<String, Fact> = BTreeMap::new();
     for id in &selected_facts {
-        if let Some(fact) = source.fact(id) {
-            resolved.insert(id.clone(), fact);
-        }
+        let fact = source.fact(id)?.ok_or_else(|| {
+            FiberError::WorldSource(bioprism_world::WorldSourceError::Corrupt(format!(
+                "selected fact `{id}` is missing from the source"
+            )))
+        })?;
+        resolved.insert(id.clone(), fact);
     }
 
     let screen = policy::screen(&envelope, &resolved, &protected)?;
@@ -459,7 +463,7 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         ),
     });
 
-    let cut = temporal_cut(source, query.decision_time);
+    let cut = temporal_cut(source, query.decision_time)?;
     let inaccessible: Vec<String> = selected_facts
         .iter()
         .filter(|id| {
@@ -505,12 +509,15 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         .iter()
         .map(|fact| EvidenceCapsule::from_raw_fact(fact.raw()))
         .collect();
-    let selected_factor_docs: Vec<Value> = slice
-        .selected_factors
-        .iter()
-        .filter_map(|id| source.factor(id))
-        .map(|factor| factor.raw().clone())
-        .collect();
+    let mut selected_factor_docs: Vec<Value> = Vec::with_capacity(slice.selected_factors.len());
+    for id in &slice.selected_factors {
+        let factor = source.factor(id)?.ok_or_else(|| {
+            FiberError::WorldSource(bioprism_world::WorldSourceError::Corrupt(format!(
+                "selected factor `{id}` is missing from the source"
+            )))
+        })?;
+        selected_factor_docs.push(factor.raw().clone());
+    }
 
     // Obligations and refinements are listed in pass order, so a reader walking the section meets
     // the exclusions in the order the compiler decided them.
@@ -569,10 +576,20 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         query.query_id.as_str(),
         query.targets.iter().map(|t| t.as_str()),
     );
+    if let Err(RegionError::WorldSource(error)) = &region {
+        return Err(FiberError::WorldSource(error.clone()));
+    }
 
     // Counted, never enumerated: the omitted set is the corpus minus the selection, and
     // materialising it would reintroduce the very whole-world traversal the design rejects.
-    let omitted_total = source.total_facts().saturating_sub(selected_facts.len());
+    if selected_facts.len() > source.total_facts() {
+        return Err(FiberError::InvariantViolation(format!(
+            "selected {} facts from a source declaring only {}",
+            selected_facts.len(),
+            source.total_facts()
+        )));
+    }
+    let omitted_total = source.total_facts() - selected_facts.len();
     let reachable_but_unselected = reachable_but_unselected(
         source,
         region.as_ref(),
@@ -580,14 +597,18 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         &selected_facts,
         &withheld_by_policy,
         &inaccessible,
-    );
+    )?;
     let selected_exploratory = ordered_facts
         .iter()
         .filter(|fact| fact.has_tag("exploratory"))
         .count();
-    let omitted_exploratory = source
-        .count_with_tag("exploratory")
-        .saturating_sub(selected_exploratory);
+    let exploratory_total = source.count_with_tag("exploratory")?;
+    if selected_exploratory > exploratory_total {
+        return Err(FiberError::InvariantViolation(format!(
+            "selected {selected_exploratory} exploratory facts from a source declaring only {exploratory_total}"
+        )));
+    }
+    let omitted_exploratory = exploratory_total - selected_exploratory;
 
     let evaluation = plan::evaluate(region.as_ref());
     let plan = evaluation.descriptor(
@@ -595,7 +616,7 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         selected_facts.len(),
         source.total_factors(),
         source.total_facts(),
-        max_selected_arity(source, &slice.selected_factors),
+        max_selected_arity(source, &slice.selected_factors)?,
     );
     passes.push(PassReceipt {
         name: "plan_selection",
@@ -604,7 +625,7 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
     });
 
     let withheld_influence =
-        influence::split_withheld(source, region.as_ref().ok(), &inaccessible, &cut);
+        influence::split_withheld(source, region.as_ref().ok(), &inaccessible, &cut)?;
     let (manifest, unproven_remainder) = build_manifest(
         omitted_total,
         &withheld_influence,
@@ -663,7 +684,7 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         trace: CompileTrace {
             passes,
             deferred_passes: deferred_passes(query),
-            unmatched_protected_tags: unmatched_tags(source, &query.protected_tags),
+            unmatched_protected_tags: unmatched_tags(source, &query.protected_tags)?,
             dropped_protected: dropped_protected(&protected, &selected_facts),
             temporal_cut: cut,
             policy: PolicyOutcome::new(&envelope, &screen),
@@ -725,13 +746,13 @@ fn reachable_but_unselected<S: WorldSource + ?Sized>(
     selected: &BTreeSet<String>,
     withheld_by_policy: &[String],
     inaccessible: &[String],
-) -> ReachingOmissions {
+) -> Result<ReachingOmissions, FiberError> {
     let mut reaching = ReachingOmissions::default();
     let mut unselected: Vec<String> = Vec::new();
     let mut ambiguous: BTreeSet<String> = BTreeSet::new();
     for variable in needed {
-        let winner = source.fact_providing(variable);
-        for id in source.shadowed_provider_ids(variable) {
+        let winner = source.fact_providing(variable)?;
+        for id in source.shadowed_provider_ids(variable)? {
             if winner
                 .as_ref()
                 .is_some_and(|fact| fact.id.as_str() == id.as_str())
@@ -759,14 +780,14 @@ fn reachable_but_unselected<S: WorldSource + ?Sized>(
                 selected,
                 withheld_by_policy,
                 inaccessible,
-            );
+            )?;
             reaching.region_carried = carried.carried;
             ambiguous.extend(carried.ambiguous);
         }
         Err(error) => reaching.region_unavailable = Some(error.to_string()),
     }
     reaching.ambiguous_variables = ambiguous.into_iter().collect();
-    reaching
+    Ok(reaching)
 }
 
 /// Omitted facts providing a variable a selected factor carries but no target needs.
@@ -819,7 +840,7 @@ fn carried_by_region<S: WorldSource + ?Sized>(
     selected: &BTreeSet<String>,
     withheld_by_policy: &[String],
     inaccessible: &[String],
-) -> CarriedByRegion {
+) -> Result<CarriedByRegion, bioprism_world::WorldSourceError> {
     let mut sites: BTreeMap<&str, &str> = BTreeMap::new();
     for factor in region.factors() {
         for variable in factor.scope() {
@@ -835,12 +856,12 @@ fn carried_by_region<S: WorldSource + ?Sized>(
     let mut found = CarriedByRegion::default();
     for (variable, factor) in sites {
         let winner = source
-            .fact_providing(variable)
+            .fact_providing(variable)?
             .map(|fact| fact.id.as_str().to_string());
         for (position, id) in winner
             .iter()
             .cloned()
-            .chain(source.shadowed_provider_ids(variable))
+            .chain(source.shadowed_provider_ids(variable)?)
             .enumerate()
         {
             if position > 0 && winner.as_deref() == Some(id.as_str()) {
@@ -863,7 +884,7 @@ fn carried_by_region<S: WorldSource + ?Sized>(
     found
         .carried
         .sort_by(|left, right| left.fact.cmp(&right.fact));
-    found
+    Ok(found)
 }
 
 /// What [`carried_by_region`] found: the classified population, and the variables it could not

@@ -73,9 +73,7 @@ impl AbstractValue {
         }
         self.payload
             .downcast_ref::<D::Element>()
-            .ok_or_else(|| DomainError::ElementTypeMismatch {
-                id: domain.id(),
-            })
+            .ok_or_else(|| DomainError::ElementTypeMismatch { id: domain.id() })
     }
 }
 

@@ -171,17 +171,15 @@ impl InfluenceAnalyzer {
                 ));
                 best = Some(bound);
             }
-            Err(reason) => attempted.push(MethodOutcome::refused(BoundMethod::DynamicRange, reason)),
+            Err(reason) => {
+                attempted.push(MethodOutcome::refused(BoundMethod::DynamicRange, reason))
+            }
         }
 
         match contraction::detect(region) {
             Ok(chain) => {
-                match contraction::chain_contraction_bound(
-                    region,
-                    &chain,
-                    factor_id,
-                    perturbation,
-                )? {
+                match contraction::chain_contraction_bound(region, &chain, factor_id, perturbation)?
+                {
                     Ok(bound) => {
                         attempted.push(MethodOutcome::produced(
                             BoundMethod::ChainContraction,
@@ -192,13 +190,16 @@ impl InfluenceAnalyzer {
                             None => bound,
                         });
                     }
-                    Err(reason) => attempted
-                        .push(MethodOutcome::refused(BoundMethod::ChainContraction, reason)),
+                    Err(reason) => attempted.push(MethodOutcome::refused(
+                        BoundMethod::ChainContraction,
+                        reason,
+                    )),
                 }
             }
-            Err(reason) => {
-                attempted.push(MethodOutcome::refused(BoundMethod::ChainContraction, reason))
-            }
+            Err(reason) => attempted.push(MethodOutcome::refused(
+                BoundMethod::ChainContraction,
+                reason,
+            )),
         }
 
         let subject = vec![factor_id.to_string()];
@@ -226,12 +227,12 @@ impl InfluenceAnalyzer {
                     Ok(Err(reason)) => {
                         attempted.push(MethodOutcome::refused(BoundMethod::ExactRemoval, reason))
                     }
-                    Err(InfluenceError::UntabledFactor { factor }) => attempted.push(
-                        MethodOutcome::refused(
+                    Err(InfluenceError::UntabledFactor { factor }) => {
+                        attempted.push(MethodOutcome::refused(
                             BoundMethod::ExactRemoval,
                             UnknownReason::NoFactorTable { factor },
-                        ),
-                    ),
+                        ))
+                    }
                     Err(other) => return Err(other),
                 }
             } else {
@@ -277,21 +278,18 @@ impl InfluenceAnalyzer {
         attempted: &mut Vec<MethodOutcome>,
         best: &mut Option<InfluenceBound>,
     ) -> Result<(), InfluenceError> {
-        let outcome = match interpret::interpret_with_standard_domains(
-            region,
-            factor_ids,
-            perturbation,
-        ) {
-            Ok(outcome) => outcome,
-            Err(InfluenceError::UnknownFactor { factor, .. }) => Err(
-                UnknownReason::RegionOutsideMethodClass {
-                    method: BoundMethod::AbstractInterpretation.as_str().to_string(),
-                    handles: "perturbations of factors the region declares".to_string(),
-                    detail: format!("factor {factor:?} is not in the region"),
-                },
-            ),
-            Err(other) => return Err(other),
-        };
+        let outcome =
+            match interpret::interpret_with_standard_domains(region, factor_ids, perturbation) {
+                Ok(outcome) => outcome,
+                Err(InfluenceError::UnknownFactor { factor, .. }) => {
+                    Err(UnknownReason::RegionOutsideMethodClass {
+                        method: BoundMethod::AbstractInterpretation.as_str().to_string(),
+                        handles: "perturbations of factors the region declares".to_string(),
+                        detail: format!("factor {factor:?} is not in the region"),
+                    })
+                }
+                Err(other) => return Err(other),
+            };
         match outcome {
             Ok(interpretation) => {
                 attempted.push(MethodOutcome::produced(
@@ -352,9 +350,10 @@ impl InfluenceAnalyzer {
         }
 
         match composition_failed {
-            Some(reason) => {
-                attempted.push(MethodOutcome::refused(BoundMethod::RatioComposition, reason))
-            }
+            Some(reason) => attempted.push(MethodOutcome::refused(
+                BoundMethod::RatioComposition,
+                reason,
+            )),
             None => {
                 let multiplicative = composed.total_variation_bound();
                 let additive = union_bound(per_factor.iter().copied());
@@ -371,7 +370,10 @@ impl InfluenceAnalyzer {
                         region.label()
                     ),
                 )?;
-                attempted.push(MethodOutcome::produced(BoundMethod::RatioComposition, value));
+                attempted.push(MethodOutcome::produced(
+                    BoundMethod::RatioComposition,
+                    value,
+                ));
                 best = Some(bound);
             }
         }
@@ -395,9 +397,10 @@ impl InfluenceAnalyzer {
                     None => bound,
                 });
             }
-            Err(reason) => {
-                attempted.push(MethodOutcome::refused(BoundMethod::ChainContraction, reason))
-            }
+            Err(reason) => attempted.push(MethodOutcome::refused(
+                BoundMethod::ChainContraction,
+                reason,
+            )),
         }
 
         if self.execute {
@@ -424,12 +427,12 @@ impl InfluenceAnalyzer {
                     Ok(Err(reason)) => {
                         attempted.push(MethodOutcome::refused(BoundMethod::ExactRemoval, reason))
                     }
-                    Err(InfluenceError::UntabledFactor { factor }) => attempted.push(
-                        MethodOutcome::refused(
+                    Err(InfluenceError::UntabledFactor { factor }) => {
+                        attempted.push(MethodOutcome::refused(
                             BoundMethod::ExactRemoval,
                             UnknownReason::NoFactorTable { factor },
-                        ),
-                    ),
+                        ))
+                    }
                     Err(other) => return Err(other),
                 }
             }

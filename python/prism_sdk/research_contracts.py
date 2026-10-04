@@ -628,6 +628,28 @@ class EvidenceReceipt:
         if self.conclusion_state == "proven" and any(item.get("could_change_decision") != "no_known_impact" for item in self.omissions):
             raise ResearchContractError("protected omission blocks proven conclusion")
 
+    def digest(self) -> str:
+        """Return the canonical identity of this validated receipt envelope.
+
+        The digest covers receipt metadata, omissions, uncertainty, competing explanations and
+        negative evidence, but never source bytes.  It is therefore safe to use as a replay or
+        federation join key while protected evidence remains institution-local.
+        """
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "receipt_id": self.receipt_id,
+            "intent": self.intent,
+            "sources": [dict(source) for source in self.sources],
+            "derivation": list(self.derivation),
+            "uncertainty": [dict(item) for item in self.uncertainty],
+            "omissions": [dict(item) for item in self.omissions],
+            "competing_explanations": [dict(item) for item in self.competing_explanations],
+            "negative_evidence": [dict(item) for item in self.negative_evidence],
+            "conclusion_state": self.conclusion_state,
+            "boundary": self.boundary,
+        })
+
 
 @dataclass(frozen=True)
 class ReleaseReview:

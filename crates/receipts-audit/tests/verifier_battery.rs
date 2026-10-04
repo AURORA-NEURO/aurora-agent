@@ -8,7 +8,7 @@
 //! This file does not reach every verifier in the workspace, and it no longer says it does.
 //! `every_document_verifier_in_the_workspace_is_covered_or_recorded` is what keeps that honest: it
 //! scans `crates/*/src` for verifier entry points and fails unless each one is either driven by a
-//! battery or written down with a reason. Ten of them are document verifiers neither battery
+//! battery or written down with a reason. Fourteen of them are document verifiers neither battery
 //! reaches; they are named in `UNCOVERED_DOCUMENT_VERIFIERS` rather than left to be found later.
 //!
 //! # Two shapes of subject
@@ -306,7 +306,7 @@ const WORKBENCH_REQUEST_INPUT: &str = "a caller-supplied input to the verificati
     Refusing an unrecognised key on them would reject a forward-compatible request without \
     protecting any digest, so the reader drops it and this entry records the decision";
 
-const KNOWN_GAPS: [KnownGap; 34] = [
+const KNOWN_GAPS: [KnownGap; 36] = [
     KnownGap {
         label: "cookbook_report",
         mutator: "digest_length_change",
@@ -560,6 +560,23 @@ const KNOWN_GAPS: [KnownGap; 34] = [
         pointer: "/ci_replay",
         subtree: true,
         reason: DEFAULTED_FIELD,
+    },
+    KnownGap {
+        label: "workbench_verification",
+        mutator: "sibling_swap",
+        pointer: "/ci_replay/triggers",
+        subtree: false,
+        reason: "CiRequest triggers are a set semantically: `plan_ci` validates uniqueness and
+                 sorts them before rendering the content-addressed plan, so exchanging two
+                 trigger values leaves the requested workflow unchanged",
+    },
+    KnownGap {
+        label: "workbench_verification",
+        mutator: "array_reordering",
+        pointer: "/ci_replay/triggers",
+        subtree: false,
+        reason: "the same set semantics as sibling swaps: trigger order is canonicalized before
+                 the CI plan digest is produced",
     },
     KnownGap {
         label: "external_payload_replay_request",
@@ -847,7 +864,7 @@ const COVERED_BY_THE_RECEIPT_BATTERY: [(&str, &str); 5] = [
 ///
 /// A battery of document mutations has nothing to say to any of these: there is no document, or
 /// the integrity claim belongs to a chain, a key, or a live struct rather than to bytes on a wire.
-const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 31] = [
+const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 69] = [
     (
         "bundle/src/attestation.rs::verify",
         "a MAC tag over a key and purpose preimage, not a document",
@@ -972,6 +989,158 @@ const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 31] = [
         "fabric/src/synth.rs::verifying",
         "a builder that inserts a role edge; the name prefix is a coincidence",
     ),
+    (
+        "adapter/src/quality_control.rs::verify_payload",
+        "checks a caller-owned quality-control payload against a live artifact contract; it does not verify a self-sealed document",
+    ),
+    (
+        "adapter/src/research_ingest.rs::verify_ingestion",
+        "compares a live ingestion bundle with its local source manifest before publication",
+    ),
+    (
+        "bioethics/src/prospective_computational_execution_assurance.rs::verify",
+        "validates and plans a live ResearchWorkflowSpec; the returned execution run is not a document self-verifier",
+    ),
+    (
+        "bioethics/src/prospective_computational_execution_assurance.rs::verify_json",
+        "deserializes a workflow request and delegates to the live prospective execution assurance gate",
+    ),
+    (
+        "bioir/src/knowledge.rs::verify",
+        "checks a live evidence-synthesis object against a payload and policy, with no self-sealing digest",
+    ),
+    (
+        "brain/src/evidence_safety_assurance.rs::verify_evidence_safety",
+        "runs a live evidence-feed assurance harness and returns witnesses rather than verifying serialized bytes",
+    ),
+    (
+        "brain/src/federated_retrieval_assurance_harness.rs::verify_federated_retrieval_assurance",
+        "assures a live federated retrieval request through policy and locality gates",
+    ),
+    (
+        "brain/src/federated_safety_assurance.rs::verify_federated_safety",
+        "assures a live federation feed request; its result is a capability receipt, not a sealed input document",
+    ),
+    (
+        "brain/src/multimodal_retrieval_assurance_harness.rs::verify_multimodal_retrieval_assurance",
+        "assures a live multimodal retrieval query and its coverage witnesses",
+    ),
+    (
+        "brain/src/multimodal_safety_assurance.rs::verify_multimodal_safety",
+        "assures a live multimodal evidence feed against coverage and policy predicates",
+    ),
+    (
+        "brain/src/retrieval_assurance_harness.rs::verify_retrieval_assurance",
+        "assures a live scoped retrieval query and replay witnesses",
+    ),
+    (
+        "brain/src/throughput_retrieval_assurance_harness.rs::verify_throughput_retrieval_assurance",
+        "assures a live throughput retrieval request with queue and overflow witnesses",
+    ),
+    (
+        "brain/src/throughput_safety_assurance.rs::verify_throughput_safety",
+        "assures a live high-throughput evidence feed under capacity and replay constraints",
+    ),
+    (
+        "cli/src/computational_execution_assurance.rs::verify",
+        "validates a live computational execution request for the CLI surface",
+    ),
+    (
+        "cli/src/computational_execution_assurance.rs::verify_json",
+        "deserializes and validates a CLI computational execution request, not a self-sealed document",
+    ),
+    (
+        "cli/src/federated_retrieval_assurance.rs::verify",
+        "validates a live federated retrieval request for the CLI surface",
+    ),
+    (
+        "cli/src/federated_retrieval_assurance.rs::verify_json",
+        "deserializes and validates a CLI federated retrieval request",
+    ),
+    (
+        "cli/src/knowledge_interop.rs::verify",
+        "checks live knowledge interoperability constraints rather than a serialized digest",
+    ),
+    (
+        "cli/src/protocol_simulation_assurance.rs::verify",
+        "assures a live protocol-simulation request and returns a run projection",
+    ),
+    (
+        "cli/src/protocol_simulation_assurance.rs::verify_json",
+        "deserializes and validates a CLI protocol-simulation request",
+    ),
+    (
+        "cli/src/retrieval_synthesis_assurance.rs::verify",
+        "assures a live retrieval-synthesis request for the CLI surface",
+    ),
+    (
+        "cli/src/retrieval_synthesis_assurance.rs::verify_json",
+        "deserializes and validates a CLI retrieval-synthesis request",
+    ),
+    (
+        "evalengine/src/replication.rs::verify_payload",
+        "checks a caller-owned replication payload against an evaluation contract",
+    ),
+    (
+        "fiber/src/research_context.rs::verify_payload",
+        "checks a live research-context payload; integrity belongs to its referenced artifact",
+    ),
+    (
+        "foundation/src/research.rs::verify_payload",
+        "checks a live research payload against foundation invariants",
+    ),
+    (
+        "lab/src/experiment_design.rs::verify_artifact",
+        "verifies a referenced experiment-design artifact's bytes, not a serialized self-sealed record",
+    ),
+    (
+        "lab/src/protocol_simulation.rs::verify_artifact",
+        "verifies a referenced protocol-simulation artifact's bytes",
+    ),
+    (
+        "runtime/src/replay_audit.rs::verify_payload",
+        "checks a live replay-audit payload against its runtime contract",
+    ),
+    (
+        "runtime/src/research_run.rs::verify",
+        "validates a live research run and its execution state",
+    ),
+    (
+        "services/src/federation.rs::verify_signed_federation",
+        "verifies a signed federation artifact with a caller-supplied key and payload bytes",
+    ),
+    (
+        "services/src/federation.rs::verifying_key",
+        "derives an in-memory verification key; the name begins with verify but performs no verification",
+    ),
+    (
+        "services/src/research_release.rs::verify_research_release",
+        "verifies a signed research release using a receiving institution's key and live object",
+    ),
+    (
+        "research/src/glioma/programs/p01_evidence_surveillance/verification_gate.rs::verify_glioma_evidence",
+        "evaluates a typed evidence request and derives a report; it does not verify a persisted document",
+    ),
+    (
+        "research/src/glioma/programs/p03_multimodal_ingestion_qc/quality_recovery.rs::verify_glioma_multimodal_quality_recovery",
+        "evaluates typed remediation observations and derives a result; it does not verify a persisted document",
+    ),
+    (
+        "research/src/glioma/programs/p11_research_object_release/signature_protocol.rs::verify_glioma_local_release_signature",
+        "verifies a detached Ed25519 signature over canonical payload bytes using a caller-supplied key; it does not authenticate the signer or verify a self-sealed document",
+    ),
+    (
+        "research/src/glioma/programs/p09_reproducible_computation/federated_replay_conformance.rs::verify_glioma_federated_replay_conformance",
+        "evaluates typed site replay summaries against a metric/tolerance contract and derives a report; it does not verify a persisted document",
+    ),
+    (
+        "research/src/glioma/programs/p11_research_object_release/release_signature_verifier.rs::verify_glioma_release_signature",
+        "checks a signed release object against caller-supplied trust roots and expected digests; it does not verify a self-sealed document",
+    ),
+    (
+        "research/src/glioma/programs/p12_federated_benchmarking/contribution_integrity.rs::verify_glioma_contribution_integrity",
+        "evaluates typed federated contribution declarations and derives a report; it does not verify a persisted document",
+    ),
 ];
 
 /// Document verifiers neither battery reaches. Recorded, not excused.
@@ -979,7 +1148,7 @@ const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 31] = [
 /// Each one reads a serialized document and checks its own integrity, which is exactly what these
 /// generators are built to attack. They are listed so the gap is a number someone can act on
 /// rather than a silence, and so the module doc above cannot quietly regrow its old claim.
-const UNCOVERED_DOCUMENT_VERIFIERS: [(&str, &str); 10] = [
+const UNCOVERED_DOCUMENT_VERIFIERS: [(&str, &str); 14] = [
     (
         "bioworlds/src/slice.rs::digest_is_intact",
         "a per-slice self-seal; the catalogue report's own check never recurses into it",
@@ -1021,9 +1190,25 @@ const UNCOVERED_DOCUMENT_VERIFIERS: [(&str, &str); 10] = [
         "bioeval/src/credit.rs::verify",
         "replays the rule on the evidence, catching an edited fraction in a serialised award",
     ),
+    (
+        "research-campaign/src/reconciliation.rs::verify_campaign_reconciliation",
+        "verifies a serialized campaign receipt against the exact query and caller-owned execution journal",
+    ),
+    (
+        "autopilot/src/goal_control.rs::verify_goal_control_report",
+        "verifies a serialized goal-control report, its cycle chain, aggregate budget, completion assertion, and mandatory limitations",
+    ),
+    (
+        "research/src/glioma/programs/p08_instrument_robotics/phase_resolved_invasion_schedule.rs::verify_digest",
+        "recomputes the content seal of a serialized phase-resolved invasion schedule",
+    ),
+    (
+        "research/src/glioma/programs/p09_reproducible_computation/phase_resolved_imaging_handoff.rs::verify_digest",
+        "validates a serialized phase-resolved imaging handoff and its content seal",
+    ),
 ];
 
-/// Every `pub fn verify...` and `pub fn digest_is_intact` under `crates/*/src`.
+/// Every public `fn verify...` and `fn digest_is_intact` under `crates/*/src`.
 ///
 /// Returned as `<path under crates/>::<fn name>`, with path separators normalised, so the keys
 /// read the same on every platform.
@@ -1055,21 +1240,110 @@ fn verifier_entry_points(crates: &Path) -> BTreeSet<String> {
                 .to_string_lossy()
                 .replace('\\', "/");
             let text = fs::read_to_string(&path).expect("a source file is readable");
-            for line in text.lines() {
-                let Some(rest) = line.trim_start().strip_prefix("pub fn ") else {
+            let lines = text.lines().collect::<Vec<_>>();
+            for (line_index, line) in lines.iter().enumerate() {
+                if !line.trim_start().starts_with("pub") {
                     continue;
-                };
-                let name: String = rest
-                    .chars()
-                    .take_while(|character| character.is_alphanumeric() || *character == '_')
-                    .collect();
-                if name.starts_with("verify") || name == "digest_is_intact" {
-                    found.insert(format!("{relative}::{name}"));
+                }
+                let mut declaration = String::new();
+                for continuation in lines.iter().skip(line_index).take(8) {
+                    declaration.push_str(continuation.trim_start());
+                    if let Some(name) = public_verifier_name(&declaration) {
+                        found.insert(format!("{relative}::{name}"));
+                        break;
+                    }
+                    if declaration.contains(';') || declaration.contains('{') {
+                        break;
+                    }
+                    declaration.push(' ');
                 }
             }
         }
     }
     found
+}
+
+fn public_verifier_name(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix("pub")?;
+    if !rest.starts_with(char::is_whitespace) {
+        // Restricted visibility (`pub(crate)`, `pub(super)`, `pub(in path)`) is not public API.
+        return None;
+    }
+    let mut tokens = rest.split_whitespace().peekable();
+    while let Some(token) = tokens.next() {
+        match token {
+            "async" | "const" | "unsafe" => {}
+            "extern" => {
+                if tokens.peek().is_some_and(|next| next.starts_with('"')) {
+                    tokens.next();
+                }
+            }
+            "fn" => {
+                let declaration = tokens.next()?;
+                let name: String = declaration
+                    .chars()
+                    .take_while(|character| character.is_alphanumeric() || *character == '_')
+                    .collect();
+                return (name.starts_with("verify") || name == "digest_is_intact").then_some(name);
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+#[test]
+fn verifier_inventory_scanner_sees_planted_entries_and_ignores_nonverifiers() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace = manifest
+        .parent()
+        .and_then(Path::parent)
+        .expect("the crate sits inside the workspace");
+    let target = workspace
+        .join("target")
+        .canonicalize()
+        .expect("the workspace target directory exists");
+    let test_root = target.join(format!("verifier-inventory-fixture-{}", std::process::id()));
+    assert!(
+        !test_root.exists(),
+        "the isolated verifier scanner fixture must start absent"
+    );
+    let source = test_root.join("crates/synthetic/src/nested/inventory.rs");
+    fs::create_dir_all(source.parent().unwrap()).expect("the fixture source directory is created");
+    fs::write(
+        &source,
+        "pub fn verify_document() {}\npub async fn verify_async_document() {}\n\
+         pub\nasync\nfn verify_multiline_document() {}\n\
+         pub const fn verify_const_document() {}\npub unsafe fn verify_unsafe_document() {}\n\
+         pub extern \"C\" fn verify_abi_document() {}\npub fn digest_is_intact() {}\n\
+         pub fn verification_helper() {}\npub(crate) fn verify_private_document() {}\n",
+    )
+    .expect("the planted source file is written");
+
+    let crates = test_root.join("crates");
+    let found = verifier_entry_points(&crates);
+    assert_eq!(
+        found,
+        BTreeSet::from([
+            "synthetic/src/nested/inventory.rs::digest_is_intact".into(),
+            "synthetic/src/nested/inventory.rs::verify_abi_document".into(),
+            "synthetic/src/nested/inventory.rs::verify_async_document".into(),
+            "synthetic/src/nested/inventory.rs::verify_const_document".into(),
+            "synthetic/src/nested/inventory.rs::verify_document".into(),
+            "synthetic/src/nested/inventory.rs::verify_multiline_document".into(),
+            "synthetic/src/nested/inventory.rs::verify_unsafe_document".into(),
+        ]),
+        "the scanner must find public verifier shapes recursively and ignore ordinary/private functions"
+    );
+
+    let resolved_test_root = test_root
+        .canonicalize()
+        .expect("the isolated fixture root exists");
+    assert!(
+        resolved_test_root.starts_with(&target),
+        "the fixture cleanup target must remain inside workspace target"
+    );
+    fs::remove_dir_all(resolved_test_root).expect("the isolated fixture is removed");
 }
 
 #[test]
@@ -1125,9 +1399,9 @@ fn every_document_verifier_in_the_workspace_is_covered_or_recorded() {
             NOT_A_DOCUMENT_VERIFIER.len(),
             UNCOVERED_DOCUMENT_VERIFIERS.len(),
         ),
-        (11, 5, 31, 10),
-        "eleven entry points driven here, five by the first battery, thirty-one that verify \
-         something other than a document, and ten document verifiers no battery reaches yet"
+        (11, 5, 69, 14),
+        "eleven entry points driven here, five by the first battery, sixty-nine that verify \
+         something other than a document, and fourteen document verifiers no battery reaches yet"
     );
 }
 
@@ -1279,7 +1553,7 @@ fn the_whole_battery_finds_no_hole_outside_the_gaps_this_repository_has_named() 
     // about coverage, so exactness lives where it is meaningful and the total is a floor.
     assert_eq!(
         total_positions,
-        5_221,
+        5_223,
         "every position the battery visits is a pinned claim; bounds were:\n{}",
         bounds.join("\n")
     );
@@ -1446,7 +1720,7 @@ fn object_key_reordering_never_changes_a_verdict_at_any_position() {
         cases_run += cases.len();
     }
     assert_eq!(
-        cases_run, 1_271,
+        cases_run, 1_273,
         "reordering cases across thirteen documents"
     );
 }
@@ -1474,7 +1748,7 @@ fn array_reordering_always_changes_a_verdict_at_any_position() {
         cases_run, 541,
         "array reordering cases across thirteen documents"
     );
-    excused.pin(3, &[("repair_acceptance_report", 4)], "array reordering");
+    excused.pin(4, &[("repair_acceptance_report", 4)], "array reordering");
 }
 
 // -- absent, malformed, and mismatching digests stay three different answers ---------------------
@@ -1574,7 +1848,7 @@ fn deleting_any_field_at_any_visited_position_is_rejected_and_never_silently_acc
         }
         cases_run += cases.len();
     }
-    assert_eq!(cases_run, 5_208, "deletion cases across thirteen documents");
+    assert_eq!(cases_run, 5_210, "deletion cases across thirteen documents");
     excused.pin(23, &[("repair_acceptance_report", 16)], "deletion");
 }
 
@@ -1599,7 +1873,7 @@ fn replacing_any_visited_value_with_an_empty_string_or_null_is_rejected() {
         cases_run += cases.len();
     }
     assert_eq!(
-        cases_run, 10_400,
+        cases_run, 10_408,
         "empty-or-null cases across thirteen documents"
     );
     excused.pin(0, &[("repair_acceptance_report", 21)], "empty or null");
@@ -1647,8 +1921,8 @@ fn a_swapped_pair_of_same_typed_siblings_is_rejected_at_every_visited_container(
         }
         cases_run += cases.len();
     }
-    assert_eq!(cases_run, 1_018, "sibling swaps across thirteen documents");
-    excused.pin(2, &[("repair_acceptance_report", 3)], "sibling swap");
+    assert_eq!(cases_run, 1_020, "sibling swaps across thirteen documents");
+    excused.pin(3, &[("repair_acceptance_report", 3)], "sibling swap");
 }
 
 #[test]

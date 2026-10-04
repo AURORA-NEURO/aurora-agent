@@ -64,10 +64,11 @@ pub use events::{
 };
 pub use http::{read_request, HttpError, HttpRequest, HttpResponse};
 pub use router::{
-    ApiConfig, ApiRouter, API_VERSION, DEFAULT_EVENT_CAPACITY, DEFAULT_MAX_BODY_BYTES,
-    DEFAULT_MAX_HEADER_BYTES, MAX_MISSION_JOBS, MAX_MISSION_STATE_FILE_BYTES,
-    MAX_PERSISTED_MISSION_RESULT_BYTES, MAX_PERSISTED_MISSION_TRACE_EVENT_BYTES,
-    MISSION_QUEUE_LEASE_DURATION_NANOS, MISSION_STATE_SCHEMA_VERSION,
+    validate_bind_auth, ApiConfig, ApiRouter, API_VERSION, DEFAULT_EVENT_CAPACITY,
+    DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_HEADER_BYTES, MAX_MISSION_JOBS,
+    MAX_MISSION_STATE_FILE_BYTES, MAX_PERSISTED_MISSION_RESULT_BYTES,
+    MAX_PERSISTED_MISSION_TRACE_EVENT_BYTES, MISSION_QUEUE_LEASE_DURATION_NANOS,
+    MISSION_STATE_SCHEMA_VERSION,
 };
 
 use std::io::{BufReader, Write};
@@ -77,6 +78,10 @@ use std::time::Duration;
 
 /// Serves one bounded request per accepted connection until the listener fails.
 pub fn serve(listener: TcpListener, router: Arc<ApiRouter>) -> std::io::Result<()> {
+    let bind = listener.local_addr()?.to_string();
+    validate_bind_auth(&bind, router.bearer_token_configured())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::PermissionDenied, error))?;
+
     for incoming in listener.incoming() {
         let stream = incoming?;
         let router = Arc::clone(&router);
@@ -87,6 +92,25 @@ pub fn serve(listener: TcpListener, router: Arc<ApiRouter>) -> std::io::Result<(
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod serving_tests {
+    use super::{serve, ApiConfig, ApiRouter};
+    use std::net::TcpListener;
+    use std::sync::Arc;
+
+    #[test]
+    fn serve_refuses_a_non_loopback_listener_without_bearer_auth() {
+        let listener = TcpListener::bind("0.0.0.0:0").unwrap();
+        let router = Arc::new(
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap(),
+        );
+
+        let error = serve(listener, router).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains("require bearer authentication"));
+    }
 }
 
 fn serve_connection(stream: TcpStream, router: Arc<ApiRouter>) -> std::io::Result<()> {

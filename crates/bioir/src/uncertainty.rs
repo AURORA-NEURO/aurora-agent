@@ -202,7 +202,9 @@ pub enum Representation {
         coverage: f64,
     },
     /// A probability over a discrete support. Must normalise.
-    Categorical { probabilities: BTreeMap<String, f64> },
+    Categorical {
+        probabilities: BTreeMap<String, f64>,
+    },
     /// A standard error on the point estimate.
     StandardError { value: f64 },
     /// The raw panel, not a summary of it.

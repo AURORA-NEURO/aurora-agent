@@ -25,7 +25,9 @@ pub enum GrantError {
     DuplicateTool { tool: String },
     #[error("a grant cannot allow agent_mission: recursive mission dispatch is refused")]
     RecursiveTool,
-    #[error("max_attempts is {value}; the budget must be between 1 and {maximum} total dispatches")]
+    #[error(
+        "max_attempts is {value}; the budget must be between 1 and {maximum} total dispatches"
+    )]
     InvalidAttemptBudget { value: usize, maximum: usize },
     #[error(
         "retry schedule is invalid: base delay {base}, maximum delay {maximum}; both must be \
@@ -66,6 +68,11 @@ pub enum AutopilotError {
     /// rehydrated mission/grant/evidence.
     #[error("invalid autopilot checkpoint: {reason}")]
     InvalidCheckpoint { reason: String },
+    /// Per-invocation cap for a caller-chunked drive is zero or wider than the grant's total cap.
+    #[error(
+        "max_dispatches_this_call is {value}; it must be between 1 and the grant maximum {maximum}"
+    )]
+    InvalidInvocationDispatchLimit { value: usize, maximum: usize },
     /// A caller-owned checkpoint store could not be read or written.
     #[error("autopilot checkpoint persistence failed: {reason}")]
     Persistence { reason: String },
