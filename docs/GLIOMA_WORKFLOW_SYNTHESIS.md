@@ -85,6 +85,13 @@ question text are untrusted data, and no tools or additional source calls are ex
 Model output follows the existing `answer`, `unknowns`, and `claims` convention. Each claim declares
 its kind, scope, evidence state, exact citations, and field assertions:
 
+The generation schema excludes `clinical_action` and `patient_case` labels and requires at least
+one citation per claim. Its citation enums, including assertion citations, contain only the exact
+records admitted to that model context. The independent audit retains the broader schema so it can
+reject forged or imported forbidden claims explicitly. Claims are never silently relabelled into
+an allowed kind. These structural constraints do not establish scientific entailment or the
+meaning of free-form prose.
+
 ```json
 {
   "claim_id": "registry-status",

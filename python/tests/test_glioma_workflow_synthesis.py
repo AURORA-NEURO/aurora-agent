@@ -64,6 +64,15 @@ def _restamp(value, key):
     return value
 
 
+def _replace_draft(synthesis, draft):
+    """Represent an explicitly forged/imported draft while retaining its source/model ledger."""
+    synthesis = deepcopy(synthesis)
+    synthesis["draft"] = draft
+    synthesis["response_digest"] = content_digest(draft)
+    synthesis["claims_digest"] = content_digest(draft["claims"])
+    return _restamp(synthesis, "synthesis_digest")
+
+
 class GliomaWorkflowSynthesisTests(unittest.TestCase):
     def test_context_preserves_exact_public_record_fields_and_does_not_invent_abstracts(self):
         reconciliation = _reconciliation()
@@ -115,15 +124,16 @@ class GliomaWorkflowSynthesisTests(unittest.TestCase):
         all_context = prepare_glioma_synthesis_context(original)
         omitted = _record(all_context, "pubmed.search")
 
-        def omitted_claim(context):
-            return {"answer": "Unverified draft", "unknowns": [], "claims": [_claim(omitted)]}
+        def admitted_claim(context):
+            return {"answer": "Unverified draft", "unknowns": [], "claims": [_claim(context["records"][0], "title")]}
 
-        runtime, calls = _runtime(omitted_claim)
+        runtime, calls = _runtime(admitted_claim)
         synthesis = LocalGliomaWorkflowSynthesizer(runtime, "fixture-model", "fixture_glioma", max_records=1).synthesize(original, approve_provider_call=True)
         self.assertEqual(len(calls), 1)
         self.assertEqual(synthesis["context"]["omitted_record_count"], 2)
         self.assertNotIn(omitted["citation_id"], [row["citation_id"] for row in synthesis["context"]["records"]])
-        audit = audit_glioma_synthesis_draft(synthesis)
+        forged = _replace_draft(synthesis, {"answer": "Unverified draft", "unknowns": [], "claims": [_claim(omitted)]})
+        audit = audit_glioma_synthesis_draft(forged)
         self.assertEqual(audit["status"], "blocked")
         self.assertIsNone(audit["unverified_model_answer"])
         self.assertIn("citation_outside_exact_model_context", [row["code"] for row in audit["issues"]])
@@ -147,8 +157,9 @@ class GliomaWorkflowSynthesisTests(unittest.TestCase):
             other["citations"] = ["cite:" + "f" * 64]
             return {"answer": "Unverified draft", "unknowns": [], "claims": [claim, other]}
 
-        runtime, _ = _runtime(changed)
-        audit = audit_glioma_synthesis_draft(LocalGliomaWorkflowSynthesizer(runtime, "fixture", "fixture_glioma").synthesize(_reconciliation(), approve_provider_call=True))
+        runtime, _ = _runtime()
+        synthesis = LocalGliomaWorkflowSynthesizer(runtime, "fixture", "fixture_glioma").synthesize(_reconciliation(), approve_provider_call=True)
+        audit = audit_glioma_synthesis_draft(_replace_draft(synthesis, changed(synthesis["context"])))
         codes = {row["code"] for row in audit["issues"]}
         self.assertIn("citation_outside_exact_model_context", codes)
         self.assertIn("assertion_does_not_equal_supplied_metadata", codes)
@@ -175,10 +186,40 @@ class GliomaWorkflowSynthesisTests(unittest.TestCase):
                     claim["kind"] = mutation
                 return {"answer": "This output must be held.", "unknowns": [], "claims": [claim]}
 
-            runtime, _ = _runtime(outside)
-            audit = audit_glioma_synthesis_draft(LocalGliomaWorkflowSynthesizer(runtime, "fixture", "fixture_glioma").synthesize(_reconciliation(), approve_provider_call=True))
+            runtime, _ = _runtime()
+            synthesis = LocalGliomaWorkflowSynthesizer(runtime, "fixture", "fixture_glioma").synthesize(_reconciliation(), approve_provider_call=True)
+            forged = _replace_draft(synthesis, outside(synthesis["context"]))
+            audit = audit_glioma_synthesis_draft(forged)
             self.assertEqual(audit["status"], "blocked")
             self.assertIsNone(audit["unverified_model_answer"])
+            self.assertEqual(forged["draft"]["claims"][0]["scope"] if mutation == "patient_case" else forged["draft"]["claims"][0]["kind"], mutation)
+
+    def test_generation_schema_excludes_clinical_labels_and_binds_every_citation_to_included_records(self):
+        def one_record(context):
+            return {"answer": "Unverified metadata draft", "unknowns": [], "claims": [_claim(context["records"][0])]}
+
+        runtime, calls = _runtime(one_record)
+        synthesis = LocalGliomaWorkflowSynthesizer(runtime, "fixture", "fixture_glioma", max_records=1).synthesize(_reconciliation(), approve_provider_call=True)
+        schema = calls[0].response_schema
+        claim = schema["properties"]["claims"]["items"]["properties"]
+        self.assertNotIn("clinical_action", claim["kind"]["enum"])
+        self.assertNotIn("patient_case", claim["scope"]["enum"])
+        self.assertEqual(claim["citations"]["minItems"], 1)
+        expected_ids = sorted(row["citation_id"] for row in synthesis["context"]["records"])
+        self.assertEqual(claim["citations"]["items"]["enum"], expected_ids)
+        self.assertEqual(claim["assertions"]["items"]["properties"]["citation_id"]["enum"], expected_ids)
+        all_ids = {row["citation_id"] for row in prepare_glioma_synthesis_context(_reconciliation())["records"]}
+        self.assertEqual(len(all_ids - set(expected_ids)), 2)
+        self.assertEqual(set(claim["kind"]["enum"]), {"source_observation", "population_summary", "research_hypothesis", "limitation"})
+
+    def test_forged_empty_citations_are_still_blocked_by_the_broad_auditor(self):
+        runtime, _ = _runtime()
+        synthesis = LocalGliomaWorkflowSynthesizer(runtime, "fixture", "fixture_glioma").synthesize(_reconciliation(), approve_provider_call=True)
+        draft = deepcopy(synthesis["draft"])
+        draft["claims"][0]["citations"] = []
+        audit = audit_glioma_synthesis_draft(_replace_draft(synthesis, draft))
+        self.assertEqual(audit["status"], "blocked")
+        self.assertIn("claim_has_no_citations", [row["code"] for row in audit["issues"]])
 
     def test_explicit_hypothesis_is_retained_as_unverified_instead_of_supported_science(self):
         def hypothesis(context):

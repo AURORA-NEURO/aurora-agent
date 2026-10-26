@@ -276,6 +276,25 @@ def _draft_schema() -> dict[str, Any]:
     }}
 
 
+def _generation_schema(context: Mapping[str, Any]) -> dict[str, Any]:
+    """Constrain drafting to the research scope and exact admitted citation set.
+
+    The auditor deliberately keeps the broader schema so imported or forged forbidden claims
+    remain inspectable refusals instead of being silently rewritten into allowed claim kinds.
+    """
+    schema = _draft_schema()
+    claim = schema["properties"]["claims"]["items"]["properties"]
+    claim["kind"]["enum"] = [kind for kind in claim["kind"]["enum"] if kind != "clinical_action"]
+    claim["scope"]["enum"] = [scope for scope in claim["scope"]["enum"] if scope != "patient_case"]
+    citation_ids = sorted(row["citation_id"] for row in context["records"])
+    if not citation_ids:
+        raise ArgumentError("glioma draft generation requires at least one admitted citation")
+    claim["citations"]["minItems"] = 1
+    claim["citations"]["items"]["enum"] = citation_ids
+    claim["assertions"]["items"]["properties"]["citation_id"]["enum"] = citation_ids
+    return schema
+
+
 def _validate_draft(draft: Any) -> dict[str, Any]:
     value = _copy(draft, "glioma model draft", 512_000)
     if not isinstance(value, dict):
@@ -361,7 +380,7 @@ class LocalGliomaWorkflowSynthesizer:
             response = self.runtime.invoke(self.provider, ProviderRequest(model=self.model, messages=(
                 {"role": "system", "content": json.dumps(instructions, ensure_ascii=False)},
                 {"role": "user", "content": json.dumps(context, ensure_ascii=False, separators=(",", ":"))},
-            ), max_output_tokens=self.max_output_tokens, temperature=0, require_json=True, response_schema=_draft_schema()))
+            ), max_output_tokens=self.max_output_tokens, temperature=0, require_json=True, response_schema=_generation_schema(context)))
             if content_digest(self._provider_metadata()) != self._provider_digest:
                 raise ArgumentError("glioma synthesis provider configuration changed during invocation")
             if response.provider != self.provider or response.model != self.model or response.tool_calls:
