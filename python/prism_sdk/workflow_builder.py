@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+from threading import Event
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlsplit
 
@@ -35,17 +36,39 @@ from .workflow_requirements import (
 
 WORKFLOW_PLAN_SCHEMA = "aurora-executable-workflow-plan/0.1"
 WORKFLOW_CONTRACT_PLAN_SCHEMA = "aurora-executable-workflow-plan/0.2"
-WORKFLOW_CHECKPOINT_SCHEMA = "aurora-executable-workflow-checkpoint/0.1"
+WORKFLOW_CHECKPOINT_SCHEMA_V01 = "aurora-executable-workflow-checkpoint/0.1"
+WORKFLOW_CHECKPOINT_SCHEMA = "aurora-executable-workflow-checkpoint/0.2"
 MAX_WORKFLOW_STEPS = 32
 MAX_WORKFLOW_VALUE_BYTES = 8_000_000
 MAX_WORKFLOW_ATTEMPTS = 3
 _ID = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 _REFERENCE = re.compile(r"^([a-zA-Z][a-zA-Z0-9_-]{0,63})#((?:/.*)?)$")
-_CHECKPOINT_STATUSES = frozenset({"ready", "running", "paused", "approval_required", "retry_required", "attempt_limit", "blocked", "failed", "completed"})
+_CHECKPOINT_STATUSES = frozenset({"ready", "running", "paused", "approval_required", "retry_required", "attempt_limit", "blocked", "failed", "completed", "cancelled"})
 
 
 class WorkflowValidationError(ArgumentError):
     """A proposal, retained value, or catalogue failed its execution contract."""
+
+
+class WorkflowCancellationToken:
+    """Caller-owned, one-way stop request; an admitted synchronous call must still drain.
+
+    This follows the existing worker drain contract in ``_async_callback_bridge``. The token
+    grants no source or retry authority and is never part of a model proposal or checkpoint.
+    Use a fresh token when explicitly resuming a cancelled checkpoint.
+    """
+
+    __slots__ = ("_event",)
+
+    def __init__(self) -> None:
+        self._event = Event()
+
+    def cancel(self) -> None:
+        self._event.set()
+
+    @property
+    def cancellation_requested(self) -> bool:
+        return self._event.is_set()
 
 
 def _safe(value: Any, *, maximum: int = MAX_WORKFLOW_VALUE_BYTES) -> Any:
@@ -328,10 +351,18 @@ class WorkflowRun:
 
 def _checkpoint(value: Mapping[str, Any], plan: dict[str, Any], catalog: WorkflowOperationCatalog) -> dict[str, Any]:
     result = _verify(value, "checkpoint_digest")
-    if set(result) != {"schema", "plan_digest", "catalog_digest", "status", "output_ids", "results", "attempts", "failure", "in_flight"}:
+    legacy = result.get("schema") == WORKFLOW_CHECKPOINT_SCHEMA_V01
+    fields = {"schema", "plan_digest", "catalog_digest", "status", "output_ids", "results", "attempts", "failure", "in_flight"}
+    if set(result) != fields | (set() if legacy else {"cancel_requested"}):
         raise WorkflowValidationError("workflow checkpoint fields are invalid")
-    if result["schema"] != WORKFLOW_CHECKPOINT_SCHEMA or result["plan_digest"] != plan["plan_digest"] or result["catalog_digest"] != catalog.catalog_digest:
+    if result["schema"] not in (WORKFLOW_CHECKPOINT_SCHEMA_V01, WORKFLOW_CHECKPOINT_SCHEMA) or result["plan_digest"] != plan["plan_digest"] or result["catalog_digest"] != catalog.catalog_digest:
         raise WorkflowValidationError("workflow checkpoint belongs to a different plan or catalogue")
+    if legacy:
+        if result["status"] == "cancelled":
+            raise WorkflowValidationError("legacy workflow checkpoint cannot encode cancellation")
+        result.update(schema=WORKFLOW_CHECKPOINT_SCHEMA, cancel_requested=False)
+    if type(result["cancel_requested"]) is not bool or result["cancel_requested"] != (result["status"] == "cancelled"):
+        raise WorkflowValidationError("workflow checkpoint cancellation state is inconsistent")
     if result["output_ids"] != plan["outputs"] or not isinstance(result["results"], dict) or not isinstance(result["attempts"], dict):
         raise WorkflowValidationError("workflow checkpoint result identity is invalid")
     if not isinstance(result["status"], str) or result["status"] not in _CHECKPOINT_STATUSES:
@@ -369,7 +400,7 @@ def _checkpoint(value: Mapping[str, Any], plan: dict[str, Any], catalog: Workflo
             raise WorkflowValidationError("workflow checkpoint in-flight step is invalid")
         if any(dep not in result["results"] for dep in steps[in_flight]["depends_on"]):
             raise WorkflowValidationError("workflow checkpoint in-flight dependency is incomplete")
-        if result["status"] not in {"running", "retry_required", "approval_required"}:
+        if result["status"] not in {"running", "retry_required", "approval_required", "cancelled"}:
             raise WorkflowValidationError("workflow checkpoint drops its unknown-completion boundary")
     failure = result["failure"]
     if failure is not None:
@@ -378,7 +409,7 @@ def _checkpoint(value: Mapping[str, Any], plan: dict[str, Any], catalog: Workflo
         failed_step = failure["step_id"]
         if not isinstance(failed_step, str) or failed_step not in steps or failed_step in result["results"] or not isinstance(failure["error_type"], str) or not _ID.fullmatch(failure["error_type"]):
             raise WorkflowValidationError("workflow checkpoint failure identity is invalid")
-        if in_flight is not None or result["status"] not in {"blocked", "failed", "retry_required", "approval_required"}:
+        if in_flight is not None or result["status"] not in {"blocked", "failed", "retry_required", "approval_required", "cancelled"}:
             raise WorkflowValidationError("workflow checkpoint failure state is inconsistent")
         if any(dep not in result["results"] for dep in steps[failed_step]["depends_on"]):
             raise WorkflowValidationError("workflow checkpoint failure dependency is incomplete")
@@ -388,7 +419,7 @@ def _checkpoint(value: Mapping[str, Any], plan: dict[str, Any], catalog: Workflo
         raise WorkflowValidationError("workflow checkpoint failure status omits its failure")
     unfinished_attempts = set(result["attempts"]) - set(result["results"])
     permitted_unfinished = {in_flight} if in_flight is not None else {failure["step_id"]} if failure is not None else set()
-    if result["status"] == "attempt_limit":
+    if result["status"] == "attempt_limit" or (result["status"] == "cancelled" and unfinished_attempts and not permitted_unfinished):
         if len(unfinished_attempts) != 1 or any(result["attempts"][key] != MAX_WORKFLOW_ATTEMPTS for key in unfinished_attempts):
             raise WorkflowValidationError("workflow checkpoint attempt-limit state is inconsistent")
     elif unfinished_attempts - permitted_unfinished:
@@ -407,15 +438,20 @@ def execute_workflow_plan(
     checkpoint: Mapping[str, Any] | None = None, max_step_calls: int = MAX_WORKFLOW_STEPS,
     retry_failed: bool = False, retrieved_at: str | None = None,
     on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
+    cancellation: WorkflowCancellationToken | None = None, resume_cancelled: bool = False,
 ) -> WorkflowRun:
     """Run a bounded DAG, pausing durably before each external boundary and after results.
 
     Completed steps are not called again. A failed or interrupted step requires explicit retry;
     retry does not turn a transport failure into an empty or successful evidence result.
+    Cancellation prevents new dispatch at checked boundaries and drains an admitted synchronous
+    call. A persisted cancellation requires a separate explicit resume grant and a fresh token.
     """
     checked = validate_workflow_plan(plan, catalog).to_dict()
-    if type(approved) is not bool or type(retry_failed) is not bool:
+    if type(approved) is not bool or type(retry_failed) is not bool or type(resume_cancelled) is not bool:
         raise WorkflowValidationError("workflow approvals and retry flags must be literal booleans")
+    if cancellation is not None and not isinstance(cancellation, WorkflowCancellationToken):
+        raise WorkflowValidationError("workflow cancellation must be a caller-owned cancellation token")
     if type(max_step_calls) is not int or not 1 <= max_step_calls <= MAX_WORKFLOW_STEPS:
         raise WorkflowValidationError("workflow step-call budget is outside its bound")
     if on_checkpoint is not None and not callable(on_checkpoint):
@@ -423,27 +459,46 @@ def execute_workflow_plan(
     state = _checkpoint(checkpoint, checked, catalog) if checkpoint is not None else {
         "schema": WORKFLOW_CHECKPOINT_SCHEMA, "plan_digest": checked["plan_digest"],
         "catalog_digest": catalog.catalog_digest, "status": "ready", "output_ids": checked["outputs"],
-        "results": {}, "attempts": {}, "failure": None, "in_flight": None,
+        "results": {}, "attempts": {}, "failure": None, "in_flight": None, "cancel_requested": False,
     }
 
-    def snapshot(status: str) -> WorkflowRun:
+    def cancellation_pending() -> bool:
+        if cancellation is not None and cancellation.cancellation_requested:
+            state["cancel_requested"] = True
+        return state["cancel_requested"]
+
+    def snapshot(status: str, *, observe_cancellation: bool = True) -> WorkflowRun:
+        if observe_cancellation and cancellation_pending():
+            status = "cancelled"
         state["status"] = status
         run = WorkflowRun(_encode(_seal(state, "checkpoint_digest")))
         if on_checkpoint is not None:
             on_checkpoint(run.checkpoint)
+        # A persistence callback may itself receive a caller stop request. Retain the actual
+        # observation before recording that request; do not replace it with an empty result.
+        if observe_cancellation and status != "cancelled" and cancellation_pending():
+            return snapshot("cancelled")
         return run
 
+    if state["cancel_requested"] and resume_cancelled and not (cancellation is not None and cancellation.cancellation_requested):
+        state["cancel_requested"] = False
+    if cancellation_pending():
+        return snapshot("cancelled")
     if len(state["results"]) == len(checked["steps"]):
         return snapshot("completed")
+    if state["failure"] is None and state["in_flight"] is None and set(state["attempts"]) - set(state["results"]):
+        # A validated checkpoint can retain this boundary only at the hard attempt limit.
+        # Un-cancelling it must not replace that boundary with an unresumable approval hold.
+        return snapshot("attempt_limit")
     if not approved:
         return snapshot("approval_required")
     if (state["failure"] is not None or state["in_flight"] is not None) and not retry_failed:
         return snapshot("retry_required")
-    state["failure"] = None
-    state["in_flight"] = None
     for _ in range(max_step_calls):
         if catalog.catalog_digest != checked["catalog_digest"]:
             raise WorkflowValidationError("workflow catalogue changed during execution")
+        if cancellation_pending():
+            return snapshot("cancelled")
         ready = [step for step in checked["steps"] if step["id"] not in state["results"]
                  and all(dep in state["results"] for dep in step["depends_on"])]
         if not ready:
@@ -452,6 +507,8 @@ def execute_workflow_plan(
         step_id = step["id"]
         attempt = state["attempts"].get(step_id, 0) + 1
         if attempt > MAX_WORKFLOW_ATTEMPTS:
+            state["failure"] = None
+            state["in_flight"] = None
             return snapshot("attempt_limit")
         # Resolve and validate before changing dispatch state. Pointer/schema failures are holds.
         try:
@@ -464,13 +521,25 @@ def execute_workflow_plan(
                 if cap is not None and used >= cap:
                     raise WorkflowRequirementError("workflow dispatch would exceed its fixed operation call budget")
         except (ValueError, KeyError, TypeError) as error:
+            state["in_flight"] = None
             state["failure"] = {"step_id": step_id, "error_type": type(error).__name__}
             return snapshot("blocked")
+        prior_failure, prior_in_flight = state["failure"], state["in_flight"]
+        state["failure"] = None
         state["attempts"][step_id] = attempt
         state["in_flight"] = step_id
-        snapshot("running")  # A failed persistence callback prevents dispatch.
+        snapshot("running", observe_cancellation=False)  # A failed persistence callback prevents dispatch.
         if catalog.catalog_digest != checked["catalog_digest"]:
             raise WorkflowValidationError("workflow catalogue changed during checkpoint persistence")
+        if cancellation_pending():
+            # The persisted intent has not crossed the source boundary. Restore any earlier
+            # failed/interrupted boundary so cancellation cannot implicitly authorize its retry.
+            state["failure"], state["in_flight"] = prior_failure, prior_in_flight
+            if attempt == 1:
+                del state["attempts"][step_id]
+            else:
+                state["attempts"][step_id] = attempt - 1
+            return snapshot("cancelled")
         try:
             observation = catalog.execute(step["operation"], arguments, approve_source_dispatch=True, retrieved_at=retrieved_at)
             value, receipt = _safe(observation.value), _safe(observation.receipt)
@@ -483,7 +552,9 @@ def execute_workflow_plan(
             return snapshot("failed")
         state["results"][step_id] = row
         state["in_flight"] = None
-        snapshot("running")
+        settled = snapshot("running")
+        if state["cancel_requested"]:
+            return settled
     return snapshot("completed" if len(state["results"]) == len(checked["steps"]) else "paused")
 
 
