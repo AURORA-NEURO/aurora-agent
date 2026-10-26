@@ -7,11 +7,11 @@ platform descriptors nor fixture registration counts establish integration cover
 
 | Area | Current evidence | Required before claiming the requested end state |
 | --- | --- | --- |
-| Natural-language authoring | Local model -> schema/DAG validation; caller-bound operation/output/argument/value-flow contracts; up to four explicitly bounded planning attempts, with one attempt by default | Held-out multi-step task fidelity, reliable translation from free text into the right contract, ambiguity handling, graph editing, branching and bounded iteration |
-| Execution | Sequential read-only DAG, per-call budgets, public-value checkpoints, explicit retry, digest-checked resume | Cancellation, scheduling, concurrent independent branches, shared-worker fencing, effectful execution through the existing effect ledger, compensation/reconciliation policies |
+| Natural-language authoring | Local model -> schema/DAG validation; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Held-out general multi-step task fidelity, broader intent extraction and clarification UX, graph editing, branching and bounded iteration |
+| Execution | Sequential read-only DAG, per-call budgets, public-value checkpoints, explicit retry, digest-checked resume; durable cooperative cancellation and separate release grant | Scheduling, concurrent independent branches, shared-worker fencing, effectful execution through the existing effect ledger, compensation/reconciliation policies |
 | Integration breadth | Eleven concrete reviewed research adapters, including OpenAlex, Crossref and Zenodo; reviewed GET OpenAPI imports; reviewed tools from caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; recorded capabilities, availability, pagination, rate limits and failure behavior for each operation |
 | Authentication | Credentialless public research readers; application-owned transient headers for imported HTTP operations and application-owned MCP client credentials; no model-owned secrets | Protected OAuth/account connection lifecycle, scoped grants, token refresh/revocation, tenant isolation and auditable credential resolution |
-| Glioma research | Literature/trial registry/TCGA project metadata reconciliation; bounded local-model drafts; exact included-citation and metadata-field audits; explicit human-review holds | Composed molecular, imaging/pathology, longitudinal, single-cell/spatial and independent replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
+| Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular-profile catalogues, Entrez identities and Open Targets/GWAS association metadata with native replay and review holds | Actual molecular measurements and validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and independent replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
 | Evidence quality | Metadata provenance/omissions, explicit unknown states, preserved source partitions | Independent relevance/quality evaluation, contradiction and negative-result handling, cohort-overlap checks, freshness policies, source-specific quality failures |
 | Product interfaces | Dependency-free SDK and local CLI commands | An editable workflow UI, authenticated service API, operator views for runs/holds/recovery, accessible errors and installation/onboarding flows |
 | Reliability | Focused invariants, installed-wheel/API smoke, Python regressions, separate live source checks, contract checks on normalized dispatch and resume | Provider/source outage campaigns, process-termination recovery, task-quality and cost/latency measurements, cross-SDK contract support and release/deployment validation |
@@ -20,8 +20,10 @@ The eleven-adapter count names implemented reviewed readers, not eleven independ
 an assertion that every source is always available. PubMed and NCBI Gene, for example, share NCBI
 infrastructure. Approved one-record live queries verified OpenAlex, Crossref and Zenodo in the
 [research-source increment](RESEARCH_SOURCE_INTEGRATIONS.md); earlier live checks exercised the
-composed PubMed/ClinicalTrials.gov/GDC lane. Other source adapters retain their fixture/parser
-evidence independently of those live observations.
+composed PubMed/ClinicalTrials.gov/GDC lane. A later bounded molecular workflow observed
+cBioPortal, NCBI Gene, Open Targets and GWAS Catalog; Europe PMC was separately observed.
+All eleven current adapter paths therefore have bounded live observations. These are observations
+of those requests, not a continuous availability guarantee or eleven independent providers.
 
 The three additional readers are explicitly registered in the SDK or selected with the CLI's
 `--research-sources` option. The default catalogue remains stable for existing saved plans.
@@ -38,13 +40,35 @@ With local Ollama `qwen2.5:1.5b`, a caller-contracted one-step PubMed task produ
 plan with a two-record retrieval limit. A four-step PubMed plus ClinicalTrials.gov -> reconciliation
 -> review task did not produce an accepted plan within three bounded planning attempts, even
 after reference feedback. A grounded metadata draft was blocked for missing citations and a
-clinical claim. The draft reused cached public reconciliation data; these checks dispatched zero
+forbidden clinical/patient label. The draft reused cached public reconciliation data; these checks dispatched zero
 source calls and do not establish retrieval success for the newly proposed task.
 
 These are caller-contract cases, not a held-out natural-language benchmark. Repeated prompt
 checks are not independent task examples. The observations establish neither general multi-step
 task fidelity nor scientific or clinical adequacy; the failed planning and draft audits remain
 visible limitations.
+After tightening the generation schema to admitted research labels and exact citation IDs, a
+later small-model draft was refused by runtime structured-output validation. No repaired scientific
+answer was substituted for that refusal.
+
+The [typed glioma interpreter](GLIOMA_WORKFLOW_INTENT.md) is a separate model-free planning mode.
+It compiles supported source/limit clauses into the existing graph and binds normalized arguments,
+required outputs and value flow. Unsupported dates, molecular subtypes, interventions, effects,
+clinical requests and conflicting clauses retain their original spans and prevent compilation.
+This addresses graph wiring for that documented grammar; it is not unrestricted NLP or a held-out
+task benchmark. Additional caller contracts are conjoined, with tighter bounds and conflicting
+requirements refused instead of replaced.
+
+The [molecular metadata workflow](GLIOMA_MOLECULAR_WORKFLOW.md) completed six stages in a bounded
+live run with nine source requests and 46 citations. Its native source planes remain separate;
+profile availability is not a measured alteration, Entrez and Ensembl remain uncrosswalked,
+association rankings are not causality, and cohort overlap remains unknown. The report awaits
+scientific human review. A local replay made zero additional source/model requests.
+
+[Cancellation](WORKFLOW_CANCELLATION.md) prevents new dispatch, drains an admitted synchronous
+call and retains its actual result or failure. Checkpoint 0.2 retains cancellation through reload;
+releasing it grants neither source authority nor failed-call retry. The CLI supports a separate
+cancel signal file. This is a serial step-boundary control, not remote rollback or effect recovery.
 
 ## Next implementation order
 

@@ -5012,7 +5012,9 @@ def main(
         else:  # pragma: no cover - argparse enforces the command set
             raise ValueError("unknown command")
         _write_json(out, payload)
-        if args.command in WORKFLOW_CLI_COMMANDS and payload.get("status") in {"failed", "blocked", "retry_required", "attempt_limit", "approval_required"}:
+        if args.command in WORKFLOW_CLI_COMMANDS and payload.get("status") == "cancelled":
+            return 130
+        if args.command in WORKFLOW_CLI_COMMANDS and payload.get("status") in {"failed", "blocked", "retry_required", "attempt_limit", "approval_required", "needs_clarification"}:
             return 1
         return 0
     except (KeyboardInterrupt, EOFError):
