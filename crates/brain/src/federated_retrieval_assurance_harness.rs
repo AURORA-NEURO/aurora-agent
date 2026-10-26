@@ -179,12 +179,14 @@ impl FederatedRetrievalAssuranceReceipt {
                     .into(),
             ));
         }
-        for values in [&self.effect_receipts] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(FederatedRetrievalAssuranceError::Invalid(
-                    "federated assurance ordering is not canonical".into(),
-                ));
-            }
+        if self
+            .effect_receipts
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(FederatedRetrievalAssuranceError::Invalid(
+                "federated assurance ordering is not canonical".into(),
+            ));
         }
         for digest in [
             &self.comparability_digest,
