@@ -8,6 +8,7 @@ from email.parser import BytesParser
 from email.policy import default
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,9 @@ def verify_wheel(wheel_path: Path) -> int:
         missing = sorted(expected_modules - names)
         if missing:
             raise RuntimeError(f"wheel omits Python package modules: {missing[:12]!r}")
+        unexpected = sorted(name for name in names if name.endswith(".py") and not name.startswith("prism_sdk/"))
+        if unexpected:
+            raise RuntimeError(f"wheel includes Python files outside the SDK package: {unexpected[:12]!r}")
 
         metadata_paths = [name for name in names if name.endswith(".dist-info/METADATA")]
         if len(metadata_paths) != 1:
@@ -83,6 +87,14 @@ def main() -> int:
     clean_env["PYTHONDONTWRITEBYTECODE"] = "1"
     with tempfile.TemporaryDirectory(prefix="aurora-python-wheel-") as temporary:
         temporary_root = Path(temporary)
+        # Build from a pristine package copy. Repeated local wheel builds must not discover
+        # stale build/lib trees as namespace packages or recursively package earlier builds.
+        source_root = temporary_root / "source"
+        source_root.mkdir()
+        for name in ("pyproject.toml", "README.md"):
+            shutil.copy2(PYTHON_ROOT / name, source_root / name)
+        shutil.copytree(PACKAGE_ROOT, source_root / "prism_sdk",
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
         wheel_dir = temporary_root / "wheel"
         wheel_dir.mkdir()
         run(
@@ -95,7 +107,7 @@ def main() -> int:
                 "--no-deps",
                 "--wheel-dir",
                 str(wheel_dir),
-                str(PYTHON_ROOT),
+                str(source_root),
             ],
             cwd=temporary_root,
             env=clean_env,
@@ -158,7 +170,11 @@ def main() -> int:
                 "'audit_glioma_synthesis_draft', 'register_glioma_synthesis_operations', "
                 "'glioma_grounded_workflow_proposal', 'WorkflowRequirements', "
                 "'compile_workflow_requirements', 'validate_workflow_requirements', "
-                "'audit_workflow_requirements', 'enforce_workflow_step_requirements'); "
+                "'audit_workflow_requirements', 'enforce_workflow_step_requirements', 'merge_workflow_requirements', "
+                "'WorkflowCancellationToken', 'GliomaWorkflowIntent', 'interpret_glioma_workflow_request', "
+                "'compile_glioma_workflow_request', 'analyze_glioma_molecular_coverage', "
+                "'glioma_molecular_review_handoff', 'register_glioma_molecular_workflow_operations', "
+                "'glioma_molecular_workflow_proposal'); "
                 "assert all(name in prism_sdk.__all__ and callable(getattr(prism_sdk, name)) "
                 "and type(getattr(prism_sdk, name)).__name__ != '_UnavailableFeature' "
                 "for name in workflow_exports), 'new workflow exports must be real installed APIs'; "
@@ -185,6 +201,14 @@ def main() -> int:
                 "plan = prism_sdk.compile_workflow_plan(proposal, source_catalog, task=task, requirements=requirements); "
                 "assert plan.to_dict()['requirements']['requirements_digest'] == requirements.requirements_digest; "
                 "assert prism_sdk.audit_workflow_requirements(proposal, requirements, source_catalog)['contract_satisfied'] is True; "
+                "merged = prism_sdk.merge_workflow_requirements(task, requirements, requirements, catalog=source_catalog); "
+                "assert merged.requirements_digest == requirements.requirements_digest; "
+                "control = prism_sdk.WorkflowCancellationToken(); control.cancel(); "
+                "cancelled = prism_sdk.execute_workflow_plan(plan, source_catalog, cancellation=control); "
+                "assert cancelled.status == 'cancelled' and not cancelled.checkpoint['results']; "
+                "assert cancelled.checkpoint['cancel_requested'] is True; "
+                "intent = prism_sdk.interpret_glioma_workflow_request('Review public glioma evidence.'); "
+                "assert intent.status == 'ready' and intent.to_dict()['provider_calls'] == 0; "
                 "async_exports = ((AutonomousGoalWorker, 'run_async'), "
                 "(AutonomousGoalControlLoop, 'run_async'), "
                 "(AutonomousGoalAgentRuntime, 'run_async'), "
@@ -202,7 +226,7 @@ def main() -> int:
         help_output = run([str(executable), "--help"], cwd=temporary_root, env=clean_env)
         if "grounded-portfolio" not in help_output.stdout:
             raise RuntimeError("installed aurora-agent CLI help omits the grounded portfolio command")
-        for command in ("workflow-catalogue", "workflow-build", "workflow-run", "workflow-template", "workflow-execute"):
+        for command in ("workflow-catalogue", "workflow-build", "workflow-run", "workflow-template", "workflow-execute", "workflow-interpret"):
             if command not in help_output.stdout:
                 raise RuntimeError("installed aurora-agent CLI help omits a workflow command")
         catalogue_output = run([str(executable), "workflow-catalogue", "--research-sources"], cwd=temporary_root, env=clean_env)
@@ -217,6 +241,20 @@ def main() -> int:
         template = json.loads(template_path.read_text(encoding="utf-8"))
         if len(template["steps"]) != 5 or template["outputs"] != ["review"]:
             raise RuntimeError("installed workflow template does not compose its five evidence stages")
+        typed_path = temporary_root / "typed-plan.json"
+        run([str(executable), "workflow-build", "--planner", "glioma-intent", "--task",
+             "Review glioma evidence using PubMed only; exclude trials and TCGA.", "--out", str(typed_path)], cwd=temporary_root, env=clean_env)
+        typed = json.loads(typed_path.read_text(encoding="utf-8"))
+        if len(typed["steps"]) != 3 or typed["requirements"]["output_operations"] != ["glioma.evidence.review_handoff"]:
+            raise RuntimeError("installed typed request compiler did not bind its exact source/review contract")
+        molecular_path = temporary_root / "molecular-plan.json"
+        run([str(executable), "workflow-template", "--template", "molecular", "--task", "Review public glioma molecular catalogue metadata",
+             "--out", str(molecular_path)], cwd=temporary_root, env=clean_env)
+        molecular = json.loads(molecular_path.read_text(encoding="utf-8"))
+        if len(molecular["steps"]) != 6 or {step["operation"] for step in molecular["steps"]} != {
+                "cbioportal.studies", "ncbi_gene.summary", "open_targets.associations", "gwas_catalog.associations",
+                "glioma.molecular.coverage", "glioma.molecular.review_handoff"}:
+            raise RuntimeError("installed molecular workflow does not compose its real reviewed source operations")
 
     print(f"verified prism-sdk wheel: {module_count} modules installed; aurora-agent --help succeeded")
     return 0
