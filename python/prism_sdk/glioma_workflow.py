@@ -297,7 +297,7 @@ def glioma_evidence_review_handoff(reconciliation: Mapping[str, Any]) -> dict[st
     return {**unsigned, "handoff_digest": content_digest(unsigned)}
 
 
-def glioma_evidence_workflow_proposal(question: str, *, include_tcga: bool = True, literature_limit: int = 10, trial_page_size: int = 25, trial_max_pages: int = 2) -> dict[str, Any]:
+def glioma_evidence_workflow_proposal(question: str, *, include_tcga: bool = True, literature_limit: int = 10, trial_page_size: int = 25, trial_max_pages: int = 2, source_operations: Sequence[str] | None = None) -> dict[str, Any]:
     """Build a real public-retrieval DAG without contacting a source or a model."""
     question = _question(question)
     for name, value, maximum in (("literature_limit", literature_limit, 50), ("trial_page_size", trial_page_size, 100), ("trial_max_pages", trial_max_pages, 5)):
@@ -305,12 +305,18 @@ def glioma_evidence_workflow_proposal(question: str, *, include_tcga: bool = Tru
             raise ArgumentError(f"{name} must be an integer from 1 to {maximum}")
     if not isinstance(include_tcga, bool):
         raise ArgumentError("include_tcga must be boolean")
+    selected = list(_SOURCES) if include_tcga else ["pubmed.search", "clinical_trials.search"]
+    if source_operations is not None:
+        selected = _source_names(source_operations)
+        if not include_tcga and "gdc.projects" in selected:
+            raise ArgumentError("explicit TCGA source conflicts with include_tcga=False")
     steps = [
         {"id": "literature", "operation": "pubmed.search", "arguments": {"specialty_lanes": ["glioma"], "per_specialty_limit": literature_limit}, "depends_on": []},
         {"id": "trials", "operation": "clinical_trials.search", "arguments": {"condition_lanes": ["glioma"], "page_size": trial_page_size, "max_pages": trial_max_pages}, "depends_on": []},
     ]
     if include_tcga:
         steps.append({"id": "tcga", "operation": "gdc.projects", "arguments": {"project_ids": ["TCGA-GBM", "TCGA-LGG"]}, "depends_on": []})
+    steps = [step for step in steps if step["operation"] in selected]
     source_steps = list(steps)
     steps.append({
         "id": "reconcile",
