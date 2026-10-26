@@ -77,6 +77,10 @@ def verify_wheel(wheel_path: Path) -> int:
 
 
 def main() -> int:
+    clean_env = os.environ.copy()
+    clean_env.pop("PYTHONPATH", None)
+    # Bytecode caches are unnecessary for installed-source import and behavior checks.
+    clean_env["PYTHONDONTWRITEBYTECODE"] = "1"
     with tempfile.TemporaryDirectory(prefix="aurora-python-wheel-") as temporary:
         temporary_root = Path(temporary)
         wheel_dir = temporary_root / "wheel"
@@ -94,6 +98,7 @@ def main() -> int:
                 str(PYTHON_ROOT),
             ],
             cwd=temporary_root,
+            env=clean_env,
         )
         wheels = list(wheel_dir.glob("*.whl"))
         if len(wheels) != 1:
@@ -117,12 +122,12 @@ def main() -> int:
                 "--disable-pip-version-check",
                 "--no-deps",
                 "--no-index",
+                "--no-compile",
                 str(wheels[0]),
             ],
             cwd=temporary_root,
+            env=clean_env,
         )
-        clean_env = os.environ.copy()
-        clean_env.pop("PYTHONPATH", None)
         run(
             [
                 str(interpreter),
@@ -145,6 +150,41 @@ def main() -> int:
                 "for name in autonomy_exports), 'core autonomy exports must be implemented'; "
                 "assert all(callable(getattr(prism_sdk, name)) for name in autonomy_exports), "
                 "'core autonomy exports must be callable'; "
+                "workflow_exports = ('ResearchSourceQueryPlan', 'ResearchSourceHttpResponse', "
+                "'prepare_research_source_query', 'execute_research_source_query', "
+                "'register_research_source_operations', 'McpWorkflowError', "
+                "'mcp_workflow_server_identity', 'register_mcp_workflow_operations', "
+                "'LocalGliomaWorkflowSynthesizer', 'prepare_glioma_synthesis_context', "
+                "'audit_glioma_synthesis_draft', 'register_glioma_synthesis_operations', "
+                "'glioma_grounded_workflow_proposal', 'WorkflowRequirements', "
+                "'compile_workflow_requirements', 'validate_workflow_requirements', "
+                "'audit_workflow_requirements', 'enforce_workflow_step_requirements'); "
+                "assert all(name in prism_sdk.__all__ and callable(getattr(prism_sdk, name)) "
+                "and type(getattr(prism_sdk, name)).__name__ != '_UnavailableFeature' "
+                "for name in workflow_exports), 'new workflow exports must be real installed APIs'; "
+                "from prism_sdk import reviewed_research_sources, workflow_mcp, "
+                "glioma_workflow_synthesis, workflow_requirements; "
+                "assert prism_sdk.register_research_source_operations is "
+                "reviewed_research_sources.register_research_source_operations; "
+                "assert prism_sdk.register_mcp_workflow_operations is "
+                "workflow_mcp.register_mcp_workflow_operations; "
+                "assert prism_sdk.LocalGliomaWorkflowSynthesizer is "
+                "glioma_workflow_synthesis.LocalGliomaWorkflowSynthesizer; "
+                "assert prism_sdk.WorkflowRequirements is workflow_requirements.WorkflowRequirements; "
+                "source_catalog = prism_sdk.register_research_source_operations(prism_sdk.WorkflowOperationCatalog()); "
+                "assert {op.operation_id for op in source_catalog.operations()} == "
+                "{'openalex.search_works', 'crossref.search_works', 'zenodo.search_records'}; "
+                "task = 'Retrieve two public glioma metadata records'; "
+                "requirements = prism_sdk.compile_workflow_requirements(task, "
+                "required_operations=['crossref.search_works'], output_operations=['crossref.search_works'], "
+                "argument_rules=[{'operation': 'crossref.search_works', 'path': '/limit', "
+                "'comparison': 'equals', 'value': 2}], max_calls_by_operation={'crossref.search_works': 1}); "
+                "proposal = {'name': 'Installed contract smoke', 'steps': [{'id': 'metadata', "
+                "'operation': 'crossref.search_works', 'arguments': {'query': 'glioma', 'limit': 2}, "
+                "'depends_on': []}], 'outputs': ['metadata']}; "
+                "plan = prism_sdk.compile_workflow_plan(proposal, source_catalog, task=task, requirements=requirements); "
+                "assert plan.to_dict()['requirements']['requirements_digest'] == requirements.requirements_digest; "
+                "assert prism_sdk.audit_workflow_requirements(proposal, requirements, source_catalog)['contract_satisfied'] is True; "
                 "async_exports = ((AutonomousGoalWorker, 'run_async'), "
                 "(AutonomousGoalControlLoop, 'run_async'), "
                 "(AutonomousGoalAgentRuntime, 'run_async'), "
@@ -165,10 +205,11 @@ def main() -> int:
         for command in ("workflow-catalogue", "workflow-build", "workflow-run", "workflow-template", "workflow-execute"):
             if command not in help_output.stdout:
                 raise RuntimeError("installed aurora-agent CLI help omits a workflow command")
-        catalogue_output = run([str(executable), "workflow-catalogue"], cwd=temporary_root, env=clean_env)
+        catalogue_output = run([str(executable), "workflow-catalogue", "--research-sources"], cwd=temporary_root, env=clean_env)
         catalogue = json.loads(catalogue_output.stdout)
         identities = {operation["operation_id"] for operation in catalogue["operations"]}
-        if not {"pubmed.search", "glioma.evidence.reconcile", "glioma.evidence.review_handoff"}.issubset(identities):
+        if not {"pubmed.search", "openalex.search_works", "crossref.search_works", "zenodo.search_records",
+                "glioma.evidence.reconcile", "glioma.evidence.review_handoff"}.issubset(identities):
             raise RuntimeError("installed executable workflow catalogue omits its source or composition adapters")
         template_path = temporary_root / "glioma-plan.json"
         run([str(executable), "workflow-template", "--task", "Review public glioma research metadata",

@@ -57,6 +57,12 @@ live check produced a usable single-source plan; an attempted larger plan contai
 redundant reads. The compiler now rejects unused steps, but arbitrary multi-step task fidelity
 remains unmeasured. Use the reviewed template for the composed glioma workflow.
 
+Caller-authored [requirements](WORKFLOW_REQUIREMENTS.md) can bind exact operations, outputs,
+arguments, value flow and attempt caps into a plan. `--requirements FILE --planning-attempts 2`
+enables bounded repair with the same fixed contract. SDK providers must set `max_attempts=1`
+so transport retries cannot exceed the planning budget. See the
+[recorded small-model limitations](WORKFLOW_DEVELOPMENT_PLAN.md#observed-local-model-limits).
+
 ## Durable public-value checkpoints
 
 An explicit checkpoint contains completed public values, original receipts, their digests,
@@ -81,6 +87,13 @@ Eight concrete adapters are registered: PubMed, Europe PMC, ClinicalTrials.gov, 
 cBioPortal studies, NCBI Gene, Open Targets, and GWAS Catalog. Their source selectors and result
 scope remain bounded by each reviewed adapter. Two local glioma operations do metadata
 reconciliation and handoff; they are not additional external services.
+Three further reviewed readers are available with `--research-sources`: OpenAlex, Crossref
+and Zenodo. Their [bounded public metadata contract](RESEARCH_SOURCE_INTEGRATIONS.md) retains
+source-reported counts and unknown coverage. Existing default catalogue identities stay stable.
+The [MCP bridge](WORKFLOW_MCP.md) supports explicitly reviewed tools in an operator-configured
+connected session. `--grounded-glioma` adds the
+[local drafting and citation audit](GLIOMA_WORKFLOW_SYNTHESIS.md) operations; their outputs remain
+blocked or held for review according to the exact audit result.
 
 The [OpenAPI importer](WORKFLOW_OPENAPI.md) registers explicitly reviewed GET operations with
 fixed HTTPS hosts and application-owned transient auth headers. CLI imports use a JSON config

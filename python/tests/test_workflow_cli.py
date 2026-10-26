@@ -5,12 +5,15 @@ from __future__ import annotations
 import io
 import json
 import os
+from pathlib import Path
+import sys
 from datetime import datetime, timezone
 from unittest.mock import Mock
 
 import pytest
 
 from prism_sdk.cli import _parser, main
+from prism_sdk.client import Client
 from prism_sdk.glioma_workflow import GLIOMA_RECONCILE_OPERATION, GLIOMA_REVIEW_OPERATION
 from prism_sdk.llm_runtime import LLMRuntime
 from prism_sdk.workflow_builder import compile_workflow_plan, load_workflow_checkpoint, save_workflow_checkpoint, validate_workflow_plan
@@ -556,3 +559,457 @@ def test_one_shot_invalid_clock_is_rejected_before_authorized_model_work(monkeyp
                                    "--out", str(tmp_path / "plan.json"), "--retrieved-at", "2026-10-26T12:00:00.123Z",
                                    "--approve-provider-call", "--approve-source-dispatch")
     assert code == 2 and payload is None and requests == calls == []
+
+
+def _mcp_file(tmp_path, *, integration_id="external_fixture", file_name="mcp-config.json"):
+    target = tmp_path / file_name
+    target.write_text(json.dumps({"integration_id": integration_id,
+                                  "command": [sys.executable, "-u", str(Path(__file__).parent / "fake_mcp_server.py")],
+                                  "cwd": ".", "reviewed_read_only_tools": ["echo"]}), encoding="utf-8")
+    return target
+
+
+def _tracking_clients(monkeypatch, *, fail_call=False):
+    instances, discoveries, calls = [], [], []
+    class TrackingClient(Client):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            instances.append(self)
+        def request(self, method, params=None):
+            discoveries.append(method)
+            return super().request(method, params)
+        def call_tool(self, name, arguments=None):
+            calls.append((name, dict(arguments or {})))
+            if fail_call:
+                raise RuntimeError(ERROR_DETAIL)
+            return super().call_tool(name, arguments)
+    monkeypatch.setattr(workflow_cli, "Client", TrackingClient)
+    return instances, discoveries, calls
+
+
+def _mcp_proposal():
+    return {"name": "Reviewed external metadata", "steps": [{"id": "external", "operation": "external_fixture.echo",
+             "arguments": {"value": 3}, "depends_on": []}], "outputs": ["external"]}
+
+
+def test_research_sources_are_explicit_opt_in_without_changing_the_default_catalogue(monkeypatch):
+    factory, calls, _ = _fixture_catalog(monkeypatch)
+    code, default, errors = _invoke("workflow-catalogue")
+    assert code == 0 and default["catalog_digest"] == factory().catalog_digest
+    code, expanded, errors = _invoke("workflow-catalogue", "--research-sources")
+    assert code == 0 and errors == "" and expanded["operation_count"] == default["operation_count"] + 3
+    identifiers = {operation["operation_id"] for operation in expanded["operations"]}
+    assert {"openalex.search_works", "crossref.search_works", "zenodo.search_records"} <= identifiers
+    assert calls == [] and expanded["catalog_digest"] != default["catalog_digest"]
+    assert _invoke("workflow-catalogue")[1]["catalog_digest"] == default["catalog_digest"]
+
+
+def test_cli_mcp_catalogue_starts_two_reviewed_stdio_peers_and_closes_both_without_tool_calls(monkeypatch, tmp_path):
+    _fixture_catalog(monkeypatch)
+    first = _mcp_file(tmp_path)
+    second = _mcp_file(tmp_path, integration_id="second_fixture", file_name="second-config.json")
+    instances, discoveries, calls = _tracking_clients(monkeypatch)
+    code, payload, errors = _invoke("workflow-catalogue", "--mcp-config", str(first), "--mcp-config", str(second), "--approve-mcp-discovery")
+    assert code == 0 and errors == "" and payload["operation_count"] == 3
+    assert {"external_fixture.echo", "second_fixture.echo"} <= {operation["operation_id"] for operation in payload["operations"]}
+    assert discoveries == ["tools/list", "tools/list"] and calls == []
+    assert len(instances) == 2 and all(not client.running and client.session is None for client in instances)
+    assert all(client.config.cwd == str(tmp_path.resolve()) for client in instances)
+    assert str(Path(__file__).parent / "fake_mcp_server.py") not in json.dumps(payload)
+
+
+def test_cli_mcp_startup_and_discovery_require_a_separate_literal_flag_before_client_creation(monkeypatch, tmp_path):
+    _fixture_catalog(monkeypatch)
+    config = _mcp_file(tmp_path)
+    constructor = Mock(side_effect=AssertionError("unapproved client startup"))
+    monkeypatch.setattr(workflow_cli, "Client", constructor)
+    code, payload, errors = _invoke("workflow-catalogue", "--mcp-config", str(config))
+    assert code == 2 and payload is None
+    constructor.assert_not_called()
+
+
+@pytest.mark.parametrize("command", ["workflow-build", "workflow-execute", "workflow-template"])
+def test_session_bound_mcp_configs_are_refused_for_cross_process_plan_commands(monkeypatch, tmp_path, command):
+    _fixture_catalog(monkeypatch)
+    config = _mcp_file(tmp_path)
+    constructor = Mock(side_effect=AssertionError("unsupported command must not start MCP"))
+    monkeypatch.setattr(workflow_cli, "Client", constructor)
+    options = [command, "--mcp-config", str(config), "--approve-mcp-discovery"]
+    if command == "workflow-execute":
+        options.extend(["--plan", str(tmp_path / "plan.json")])
+    else:
+        options.extend(["--task", "Review public metadata", "--out", str(tmp_path / "plan.json")])
+        if command == "workflow-build":
+            options.extend(["--model", "fixture-model"])
+    code, payload, errors = _invoke(*options)
+    assert code == 2 and payload is None
+    constructor.assert_not_called()
+
+
+@pytest.mark.parametrize("edit", [
+    lambda value: value.update({"env": {"TOKEN": "must-not-be-accepted"}}),
+    lambda value: value.update({"command": "a shell command string"}),
+    lambda value: value.update({"command": []}),
+    lambda value: value.update({"command": ["x"] * 65}),
+    lambda value: value.update({"command": ["x" * 8193]}),
+    lambda value: value.update({"command": ["x" * 8192] * 5}),
+    lambda value: value.update({"command": ["invalid\x00argument"]}),
+    lambda value: value.update({"cwd": "nonexistent-cwd"}),
+    lambda value: value.update({"reviewed_read_only_tools": []}),
+    lambda value: value.update({"reviewed_read_only_tools": ["echo", "echo"]}),
+])
+def test_every_mcp_config_is_validated_before_any_subprocess_is_created(monkeypatch, tmp_path, edit):
+    _fixture_catalog(monkeypatch)
+    first = _mcp_file(tmp_path)
+    second = _mcp_file(tmp_path, integration_id="second_fixture", file_name="invalid-config.json")
+    value = json.loads(second.read_text(encoding="utf-8"))
+    edit(value)
+    second.write_text(json.dumps(value), encoding="utf-8")
+    constructor = Mock(side_effect=AssertionError("no client may start before all configs validate"))
+    monkeypatch.setattr(workflow_cli, "Client", constructor)
+    code, payload, errors = _invoke("workflow-catalogue", "--mcp-config", str(first), "--mcp-config", str(second), "--approve-mcp-discovery")
+    assert code == 2 and payload is None
+    constructor.assert_not_called()
+
+
+def test_cli_mcp_run_builds_and_executes_in_one_session_then_closes_it(monkeypatch, tmp_path):
+    _fixture_catalog(monkeypatch)
+    config = _mcp_file(tmp_path)
+    requests = _provider(monkeypatch, _mcp_proposal())
+    instances, discoveries, calls = _tracking_clients(monkeypatch)
+    target, checkpoint, outputs = tmp_path / "plan.json", tmp_path / "checkpoint.json", tmp_path / "outputs.json"
+    code, payload, errors = _invoke("workflow-run", "--task", "Review public metadata", "--model", "fixture-model", "--out", str(target),
+                                   "--checkpoint-store", str(checkpoint), "--outputs-file", str(outputs), "--mcp-config", str(config),
+                                   "--approve-mcp-discovery", "--approve-provider-call", "--approve-source-dispatch")
+    assert code == 0 and errors == "" and payload["status"] == "completed"
+    assert len(requests) == len(instances) == 1 and discoveries == ["tools/list", "tools/list"]
+    assert calls == [("echo", {"value": 3})] and not instances[0].running
+    assert json.loads(outputs.read_text(encoding="utf-8"))["outputs"] == {"external": {"ok": True, "echo": {"value": 3}}}
+
+
+def test_cli_mcp_discovery_and_provider_grants_do_not_authorize_a_tool_call(monkeypatch, tmp_path):
+    _fixture_catalog(monkeypatch)
+    config = _mcp_file(tmp_path)
+    requests = _provider(monkeypatch, _mcp_proposal())
+    instances, discoveries, calls = _tracking_clients(monkeypatch)
+    code, payload, errors = _invoke("workflow-run", "--task", "Review public metadata", "--model", "fixture-model", "--out", str(tmp_path / "plan.json"),
+                                   "--mcp-config", str(config), "--approve-mcp-discovery", "--approve-provider-call")
+    assert code == 1 and errors == "" and payload["status"] == "approval_required"
+    assert len(requests) == 1 and discoveries == ["tools/list"] and calls == [] and not instances[0].running
+
+
+@pytest.mark.parametrize("failure", ["registration", "provider", "source", "second_startup"])
+def test_cli_mcp_clients_close_after_registration_provider_source_or_subsequent_startup_failure(monkeypatch, tmp_path, failure):
+    _fixture_catalog(monkeypatch)
+    config = _mcp_file(tmp_path)
+    instances, discoveries, calls = _tracking_clients(monkeypatch, fail_call=failure == "source")
+    requests = _provider(monkeypatch, _mcp_proposal())
+    options = ["workflow-run", "--task", "Review public metadata", "--model", "fixture-model", "--out", str(tmp_path / "plan.json"),
+               "--mcp-config", str(config), "--approve-mcp-discovery", "--approve-provider-call", "--approve-source-dispatch"]
+    if failure == "registration":
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value["reviewed_read_only_tools"] = ["unavailable"]
+        config.write_text(json.dumps(value), encoding="utf-8")
+    elif failure == "provider":
+        def fail(*args, **kwargs):
+            raise RuntimeError(ERROR_DETAIL)
+        monkeypatch.setattr(workflow_cli, "LocalWorkflowBuilder", fail)
+    elif failure == "second_startup":
+        second = _mcp_file(tmp_path, integration_id="second_fixture", file_name="second-config.json")
+        value = json.loads(second.read_text(encoding="utf-8"))
+        value["command"] = [sys.executable, "-c", "raise SystemExit(3)"]
+        second.write_text(json.dumps(value), encoding="utf-8")
+        options.extend(["--mcp-config", str(second)])
+    code, payload, errors = _invoke(*options)
+    assert code in {1, 2} and ERROR_DETAIL not in errors + json.dumps(payload)
+    assert instances and all(not client.running and client.session is None for client in instances)
+    if failure in {"registration", "provider", "second_startup"}:
+        assert calls == [] and requests == []
+    else:
+        assert code == 1 and payload["status"] == "failed" and len(calls) == len(requests) == 1
+
+
+@pytest.mark.parametrize("role", ["plan", "checkpoint", "outputs"])
+def test_mcp_config_cannot_be_overwritten_by_any_run_artifact_before_startup(monkeypatch, tmp_path, role):
+    _fixture_catalog(monkeypatch)
+    config = _mcp_file(tmp_path)
+    before = config.read_bytes()
+    target, checkpoint, outputs = tmp_path / "plan.json", tmp_path / "checkpoint.json", tmp_path / "outputs.json"
+    if role == "plan":
+        target = config
+    elif role == "checkpoint":
+        checkpoint = config
+    else:
+        outputs = config
+    constructor = Mock(side_effect=AssertionError("config collision must predate startup"))
+    monkeypatch.setattr(workflow_cli, "Client", constructor)
+    code, payload, errors = _invoke("workflow-run", "--task", "Review public metadata", "--model", "fixture-model", "--out", str(target),
+                                   "--checkpoint-store", str(checkpoint), "--outputs-file", str(outputs), "--mcp-config", str(config),
+                                   "--approve-mcp-discovery", "--approve-provider-call", "--approve-source-dispatch")
+    assert code == 2 and payload is None and config.read_bytes() == before
+    constructor.assert_not_called()
+
+
+def test_requirements_file_and_planning_call_budget_are_forwarded_to_the_builder(monkeypatch, tmp_path):
+    from prism_sdk.workflow_requirements import compile_workflow_requirements
+    factory, calls, _ = _fixture_catalog(monkeypatch)
+    requirements = compile_workflow_requirements("Review public metadata", required_operations=["fixture.retrieve"], output_operations=["fixture.retrieve"])
+    requirements_file = tmp_path / "requirements.json"
+    requirements_file.write_text(json.dumps(requirements.to_dict()), encoding="utf-8")
+    received = []
+    class Builder:
+        def __init__(self, catalog, runtime, *, model):
+            self.catalog = catalog
+        def build(self, task, **options):
+            received.append((task, options))
+            return compile_workflow_plan(_proposal(), self.catalog, task=task)
+    monkeypatch.setattr(workflow_cli, "LocalWorkflowBuilder", Builder)
+    _provider(monkeypatch, _proposal())
+    code, payload, errors = _invoke("workflow-build", "--task", "Review public metadata", "--model", "fixture-model", "--out", str(tmp_path / "plan.json"),
+                                   "--requirements", str(requirements_file), "--planning-attempts", "3", "--approve-provider-call")
+    assert code == 0 and errors == "" and calls == [] and len(received) == 1
+    assert received[0][1]["requirements"] == requirements.to_dict() and received[0][1]["max_planning_attempts"] == 3
+
+
+@pytest.mark.parametrize("attempts", ["0", "5", "-1"])
+def test_planning_attempt_budget_outside_one_to_four_is_rejected_before_provider_calls(monkeypatch, tmp_path, attempts):
+    _fixture_catalog(monkeypatch)
+    requests = _provider(monkeypatch, _proposal())
+    code, payload, errors = _invoke("workflow-build", "--task", "Review public metadata", "--model", "fixture-model", "--out", str(tmp_path / "plan.json"),
+                                   "--planning-attempts", attempts, "--approve-provider-call")
+    assert code == 2 and payload is None and requests == []
+
+
+def test_requirement_task_mismatch_refuses_before_mcp_startup_and_provider_calls(monkeypatch, tmp_path):
+    from prism_sdk.workflow_requirements import compile_workflow_requirements
+    _fixture_catalog(monkeypatch)
+    config = _mcp_file(tmp_path)
+    requirements = compile_workflow_requirements("A different task", required_operations=["external_fixture.echo"])
+    requirements_file = tmp_path / "requirements.json"
+    requirements_file.write_text(json.dumps(requirements.to_dict()), encoding="utf-8")
+    constructor = Mock(side_effect=AssertionError("task mismatch must predate MCP startup"))
+    monkeypatch.setattr(workflow_cli, "Client", constructor)
+    requests = _provider(monkeypatch, _mcp_proposal())
+    code, payload, errors = _invoke("workflow-run", "--task", "Review public metadata", "--model", "fixture-model", "--out", str(tmp_path / "plan.json"),
+                                   "--requirements", str(requirements_file), "--mcp-config", str(config), "--approve-mcp-discovery", "--approve-provider-call")
+    assert code == 2 and payload is None and requests == []
+    constructor.assert_not_called()
+
+
+@pytest.mark.parametrize("role", ["plan", "checkpoint", "outputs"])
+def test_requirement_input_is_protected_from_all_one_shot_output_roles(monkeypatch, tmp_path, role):
+    from prism_sdk.workflow_requirements import compile_workflow_requirements
+    _fixture_catalog(monkeypatch)
+    requirements_file = tmp_path / "requirements.json"
+    requirements_file.write_text(json.dumps(compile_workflow_requirements("Review public metadata").to_dict()), encoding="utf-8")
+    before = requirements_file.read_bytes()
+    target, checkpoint, outputs = tmp_path / "plan.json", tmp_path / "checkpoint.json", tmp_path / "outputs.json"
+    if role == "plan":
+        target = requirements_file
+    elif role == "checkpoint":
+        checkpoint = requirements_file
+    else:
+        outputs = requirements_file
+    requests = _provider(monkeypatch, _proposal())
+    code, payload, errors = _invoke("workflow-run", "--task", "Review public metadata", "--model", "fixture-model", "--out", str(target),
+                                   "--checkpoint-store", str(checkpoint), "--outputs-file", str(outputs), "--requirements", str(requirements_file),
+                                   "--approve-provider-call", "--approve-source-dispatch")
+    assert code == 2 and payload is None and requests == [] and requirements_file.read_bytes() == before
+
+
+def test_saved_default_plan_keeps_its_old_catalogue_and_research_opt_in_drift_refuses_before_dispatch(monkeypatch, tmp_path):
+    factory, calls, _ = _fixture_catalog(monkeypatch)
+    plan, _ = _plan_file(tmp_path, factory)
+    code, payload, errors = _invoke("workflow-execute", "--plan", str(plan), "--research-sources", "--approve-source-dispatch")
+    assert code == 2 and payload is None and calls == []
+    code, payload, errors = _invoke("workflow-execute", "--plan", str(plan), "--approve-source-dispatch")
+    assert code == 0 and errors == "" and payload["status"] == "completed" and len(calls) == 1
+
+
+@pytest.mark.parametrize("case", ["count", "duplicate_integration", "existing_operation"])
+def test_mcp_config_count_and_namespace_conflicts_refuse_before_any_process(monkeypatch, tmp_path, case):
+    _fixture_catalog(monkeypatch)
+    config = _mcp_file(tmp_path)
+    options = ["workflow-catalogue", "--approve-mcp-discovery"]
+    if case == "count":
+        for _ in range(9):
+            options.extend(["--mcp-config", str(config)])
+    elif case == "duplicate_integration":
+        second = _mcp_file(tmp_path, file_name="duplicate.json")
+        options.extend(["--mcp-config", str(config), "--mcp-config", str(second)])
+    else:
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value.update({"integration_id": "fixture", "reviewed_read_only_tools": ["retrieve"]})
+        config.write_text(json.dumps(value), encoding="utf-8")
+        options.extend(["--mcp-config", str(config)])
+    constructor = Mock(side_effect=AssertionError("MCP count/namespace validation must precede startup"))
+    monkeypatch.setattr(workflow_cli, "Client", constructor)
+    code, payload, errors = _invoke(*options)
+    assert code == 2 and payload is None
+    constructor.assert_not_called()
+
+
+def test_cli_requirements_are_bound_into_an_actual_model_plan_and_unsatisfied_arguments_are_refused(monkeypatch, tmp_path):
+    from prism_sdk.workflow_requirements import compile_workflow_requirements
+    _fixture_catalog(monkeypatch)
+    requirements = compile_workflow_requirements("Review public metadata", output_operations=["fixture.retrieve"],
+        argument_rules=[{"operation": "fixture.retrieve", "path": "/payload", "comparison": "equals", "value": PUBLIC_VALUE}])
+    requirements_file = tmp_path / "requirements.json"
+    requirements_file.write_text(json.dumps(requirements.to_dict()), encoding="utf-8")
+    target = tmp_path / "plan.json"
+    requests = _provider(monkeypatch, _proposal())
+    options = ["workflow-build", "--task", "Review public metadata", "--model", "fixture-model", "--out", str(target),
+               "--requirements", str(requirements_file), "--approve-provider-call"]
+    code, payload, errors = _invoke(*options)
+    assert code == 0 and errors == "" and len(requests) == 1
+    assert json.loads(target.read_text(encoding="utf-8"))["requirements"] == requirements.to_dict()
+    target.unlink()
+    wrong = _proposal()
+    wrong["steps"][0]["arguments"]["payload"] = "a different payload"
+    requests = _provider(monkeypatch, wrong)
+    code, payload, errors = _invoke(*options)
+    assert code == 2 and payload is None and len(requests) == 1 and not target.exists()
+
+
+def _grounded_fixture(monkeypatch, *, transform_draft=None):
+    from test_glioma_workflow_synthesis import _draft, _reconciliation
+    from prism_sdk.workflow_integrations import builtin_workflow_operation_catalog
+    _, source_inputs = _reconciliation(return_sources=True)
+    inputs = {source["operation_id"]: source["bundle"] for source in source_inputs}
+    descriptors = {operation.operation_id: operation for operation in builtin_workflow_operation_catalog().operations()}
+    source_calls, provider_calls = [], []
+    def factory():
+        catalog = WorkflowOperationCatalog()
+        for operation_id, bundle in inputs.items():
+            def execute(arguments, *, approve_source_dispatch, retrieved_at, operation_id=operation_id, bundle=bundle):
+                source_calls.append(operation_id)
+                return WorkflowOperationResult(bundle, {"operation_id": operation_id, "transport": "local_fixture"})
+            catalog.register(descriptors[operation_id], execute)
+        return catalog
+    runtime = LLMRuntime()
+    def handler(request):
+        provider_calls.append(request)
+        context = json.loads(request.messages[-1]["content"])
+        draft = _draft(context)
+        if transform_draft is not None:
+            transform_draft(draft)
+        return json.dumps(draft)
+    runtime.register_in_memory_provider("ollama", handler)
+    monkeypatch.setattr(runtime, "register_provider", lambda config: None)
+    monkeypatch.setattr(workflow_cli, "LLMRuntime", lambda: runtime)
+    monkeypatch.setattr(workflow_cli, "builtin_workflow_operation_catalog", factory)
+    return source_calls, provider_calls
+
+
+@pytest.mark.parametrize("without_tcga,expected_steps", [(False, 6), (True, 5)])
+def test_grounded_template_registers_model_bound_operations_without_invoking_any_model(monkeypatch, tmp_path, without_tcga, expected_steps):
+    from prism_sdk.glioma_workflow_synthesis import GLIOMA_AUDIT_OPERATION, GLIOMA_SYNTHESIZE_OPERATION
+    source_calls, provider_calls = _grounded_fixture(monkeypatch)
+    target = tmp_path / "grounded-plan.json"
+    options = ["workflow-template", "--task", "Review public glioma research evidence gaps", "--grounded-glioma", "--model", "fixture-model", "--out", str(target)]
+    if without_tcga:
+        options.append("--no-tcga")
+    code, payload, errors = _invoke(*options)
+    assert code == 0 and errors == "" and payload["step_count"] == expected_steps
+    assert source_calls == provider_calls == []
+    plan = json.loads(target.read_text(encoding="utf-8"))
+    assert [step["operation"] for step in plan["steps"]][-2:] == [GLIOMA_SYNTHESIZE_OPERATION, GLIOMA_AUDIT_OPERATION]
+    assert plan["outputs"] == ["audit"]
+
+
+def test_grounded_template_can_be_reviewed_without_provider_grant_then_executed_with_independent_provider_grant(monkeypatch, tmp_path):
+    from prism_sdk.glioma_workflow_synthesis import GLIOMA_DRAFT_AUDIT_SCHEMA
+    source_calls, provider_calls = _grounded_fixture(monkeypatch)
+    target, outputs = tmp_path / "grounded-plan.json", tmp_path / "grounded-output.json"
+    code, payload, errors = _invoke("workflow-template", "--task", "Review public glioma research evidence gaps", "--grounded-glioma",
+                                   "--model", "fixture-model", "--out", str(target))
+    assert code == 0 and source_calls == provider_calls == []
+    code, payload, errors = _invoke("workflow-execute", "--plan", str(target), "--grounded-glioma", "--model", "fixture-model",
+                                   "--approve-source-dispatch", "--approve-provider-call", "--outputs-file", str(outputs))
+    assert code == 0 and errors == "" and payload["status"] == "completed"
+    assert len(source_calls) == 3 and len(provider_calls) == 1
+    audit = json.loads(outputs.read_text(encoding="utf-8"))["outputs"]["audit"]
+    assert audit["status"] == "held_for_scientific_human_review" and audit["scientific_support_established"] is False
+    assert audit["human_review_required"] is True and audit["clinical_actions_authorized"] is False
+    assert "Unverified text" not in json.dumps(payload)
+    assert audit["unverified_model_answer"] not in json.dumps(payload)
+    assert payload["output_review_statuses"] == {"audit": {
+        "schema": GLIOMA_DRAFT_AUDIT_SCHEMA, "status": "held_for_scientific_human_review",
+        "human_review_required": True, "scientific_support_established": False, "clinical_actions_authorized": False,
+    }}
+
+
+def test_grounded_source_approval_never_enables_a_local_synthesis_provider_call(monkeypatch, tmp_path):
+    source_calls, provider_calls = _grounded_fixture(monkeypatch)
+    target = tmp_path / "grounded-plan.json"
+    assert _invoke("workflow-template", "--task", "Review public glioma research evidence gaps", "--grounded-glioma",
+                   "--model", "fixture-model", "--out", str(target))[0] == 0
+    code, payload, errors = _invoke("workflow-execute", "--plan", str(target), "--grounded-glioma", "--model", "fixture-model", "--approve-source-dispatch")
+    assert code == 1 and errors == "" and payload["status"] == "failed"
+    assert payload["failure"]["step_id"] == "synthesis" and len(source_calls) == 3 and provider_calls == []
+    assert payload["output_review_statuses"] == {}
+
+
+def test_grounded_model_binding_change_refuses_before_any_source_or_provider_call(monkeypatch, tmp_path):
+    source_calls, provider_calls = _grounded_fixture(monkeypatch)
+    target = tmp_path / "grounded-plan.json"
+    assert _invoke("workflow-template", "--task", "Review public glioma research evidence gaps", "--grounded-glioma",
+                   "--model", "fixture-model", "--out", str(target))[0] == 0
+    code, payload, errors = _invoke("workflow-execute", "--plan", str(target), "--grounded-glioma", "--model", "changed-model",
+                                   "--approve-source-dispatch", "--approve-provider-call")
+    assert code == 2 and payload is None and source_calls == provider_calls == []
+
+
+def test_grounded_flag_requires_model_identity_before_runtime_construction(monkeypatch):
+    constructor = Mock(side_effect=AssertionError("missing grounded model must predate runtime setup"))
+    monkeypatch.setattr(workflow_cli, "LLMRuntime", constructor)
+    code, payload, errors = _invoke("workflow-catalogue", "--grounded-glioma")
+    assert code == 2 and payload is None
+    constructor.assert_not_called()
+
+
+def test_completed_grounded_graph_reports_blocked_audit_metadata_without_printing_model_text(monkeypatch, tmp_path):
+    from prism_sdk.glioma_workflow_synthesis import GLIOMA_DRAFT_AUDIT_SCHEMA
+    def unsupported_assertion(draft):
+        draft["answer"] = PUBLIC_VALUE
+        draft["claims"][0]["text"] = PUBLIC_VALUE
+        draft["claims"][0]["assertions"][0]["value"] = "A value absent from the cited metadata"
+    source_calls, provider_calls = _grounded_fixture(monkeypatch, transform_draft=unsupported_assertion)
+    target = tmp_path / "grounded-plan.json"
+    assert _invoke("workflow-template", "--task", "Review public glioma research evidence gaps", "--grounded-glioma",
+                   "--model", "fixture-model", "--out", str(target))[0] == 0
+    code, payload, errors = _invoke("workflow-execute", "--plan", str(target), "--grounded-glioma", "--model", "fixture-model",
+                                   "--approve-source-dispatch", "--approve-provider-call")
+    assert code == 0 and errors == "" and payload["status"] == "completed"
+    assert len(source_calls) == 3 and len(provider_calls) == 1 and PUBLIC_VALUE not in json.dumps(payload)
+    assert payload["output_review_statuses"] == {"audit": {
+        "schema": GLIOMA_DRAFT_AUDIT_SCHEMA, "status": "blocked", "human_review_required": True,
+        "scientific_support_established": False, "clinical_actions_authorized": False,
+    }}
+
+
+def test_source_only_workflow_has_no_invented_review_status_or_stdout_values(monkeypatch, tmp_path):
+    factory, calls, _ = _fixture_catalog(monkeypatch)
+    target, _ = _plan_file(tmp_path, factory)
+    code, payload, errors = _invoke("workflow-execute", "--plan", str(target), "--approve-source-dispatch")
+    assert code == 0 and errors == "" and len(calls) == 1
+    assert payload["output_review_statuses"] == {} and PUBLIC_VALUE not in json.dumps(payload)
+
+
+def test_template_forwards_operator_trial_page_bounds_without_source_or_provider_calls(monkeypatch, tmp_path):
+    source_calls, provider_calls = _grounded_fixture(monkeypatch)
+    target = tmp_path / "bounded-template.json"
+    code, payload, errors = _invoke("workflow-template", "--task", "Review public glioma metadata", "--out", str(target),
+                                   "--trial-page-size", "7", "--trial-max-pages", "1")
+    assert code == 0 and errors == "" and source_calls == provider_calls == []
+    plan = json.loads(target.read_text(encoding="utf-8"))
+    trials = next(step for step in plan["steps"] if step["operation"] == "clinical_trials.search")
+    assert trials["arguments"]["page_size"] == 7 and trials["arguments"]["max_pages"] == 1
+
+
+@pytest.mark.parametrize("option,value", [("--trial-page-size", "0"), ("--trial-page-size", "101"), ("--trial-max-pages", "0"), ("--trial-max-pages", "6")])
+def test_invalid_template_trial_bounds_fail_without_source_or_provider_calls(monkeypatch, tmp_path, option, value):
+    source_calls, provider_calls = _grounded_fixture(monkeypatch)
+    target = tmp_path / "invalid-template.json"
+    code, payload, errors = _invoke("workflow-template", "--task", "Review public glioma metadata", "--out", str(target), option, value)
+    assert code == 2 and payload is None and source_calls == provider_calls == [] and not target.exists()

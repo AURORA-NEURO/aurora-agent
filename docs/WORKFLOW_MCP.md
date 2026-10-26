@@ -193,8 +193,21 @@ aurora-agent workflow-execute --plan grounded-plan.json --grounded-glioma `
   --outputs-file grounded-review.json
 ```
 
+Templates also accept `--trial-page-size` (default 25, range one through 100) and
+`--trial-max-pages` (default two, range one through five). These explicit bounds apply to the
+trial-registry retrieval step and are validated before any source dispatch.
+
 The model, endpoint and synthesis bounds remain part of the catalogue binding and must match
 between template/build and execution. Provider approval is independently supplied at execution;
 source approval cannot enable the synthesis model. A completed workflow can still contain an
 audit held for qualified scientific review. Its model text is unverified, scientific support
 remains unestablished, and no clinical action is authorized.
+
+Execution stdout includes `output_review_statuses` for recognized final glioma audit objects.
+Each projected entry contains only the audit schema, known review status, and boolean
+`human_review_required`, `scientific_support_established`, and `clinical_actions_authorized`
+fields. Answers, claims and source values remain outside stdout. A graph with executor
+`status=completed` can expose audit `status=blocked` or `held_for_scientific_human_review` here:
+the graph finished, while scientific approval remains withheld. Executor exit codes continue
+to describe execution; review disposition is reported separately. Ordinary source-only results
+receive an empty review-status mapping rather than an invented scientific assessment.
