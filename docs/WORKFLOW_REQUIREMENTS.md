@@ -140,6 +140,14 @@ authorize a call. The separate per-run `max_step_calls` and per-step retry limit
 
 ## Local-model planning and bounded repair
 
+`merge_workflow_requirements(task, first, second, ..., catalog=catalog)` conjoins up to sixteen
+contracts bound to the exact same task. Required/output/forbidden operation sets, value-flow links
+and predicates are retained; exact duplicates are removed. Step and dispatch caps take the tighter
+bound. Direct equality/range conflicts and required-versus-forbidden conflicts refuse compilation.
+The helper does not claim general logical satisfiability. Normal plan/dispatch checks still apply.
+This is used when additional caller requirements accompany a typed glioma interpretation; the
+caller file cannot replace the interpretation's source exclusions or exact argument requirements.
+
 For an already configured `LocalWorkflowBuilder`, pass the same contract into `build`:
 
 ```python

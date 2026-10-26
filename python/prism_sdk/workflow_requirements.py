@@ -215,6 +215,50 @@ def validate_workflow_requirements(
     return WorkflowRequirements(json.dumps({**descriptor, "requirements_digest": digest}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
+def merge_workflow_requirements(
+    task: str, *requirements: WorkflowRequirements | Mapping[str, Any],
+    catalog: WorkflowOperationCatalog | None = None,
+) -> WorkflowRequirements:
+    """Conjoin fixed contracts without replacing defaults, predicates or tighter bounds.
+
+    Intent-derived constraints and additional operator requirements have equal standing. A
+    conflict refuses compilation; choosing one contract would silently discard caller intent.
+    General logical satisfiability is not claimed, but direct equality/range conflicts fail here.
+    """
+    if not 1 <= len(requirements) <= 16:
+        raise WorkflowRequirementError("workflow contract merge needs one to sixteen contracts")
+    task_digest = compile_workflow_requirements(task).to_dict()["task_digest"]
+    contracts = [validate_workflow_requirements(value, catalog, task_digest=task_digest).to_dict() for value in requirements]
+    def unique(values: Any) -> list[Any]:
+        result, seen = [], set()
+        for item in values:
+            digest = content_digest(item)
+            if digest not in seen:
+                seen.add(digest)
+                result.append(item)
+        return result
+    fields = {key: unique(item for contract in contracts for item in contract[key])
+              for key in ("required_operations", "forbidden_operations", "output_operations", "argument_rules", "data_links")}
+    caps: dict[str, int] = {}
+    for contract in contracts:
+        for operation, cap in contract["max_calls_by_operation"].items():
+            caps[operation] = min(caps.get(operation, cap), cap)
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for rule in fields["argument_rules"]:
+        grouped.setdefault((rule["operation"], rule["path"]), []).append(rule)
+    for rules in grouped.values():
+        equalities = [rule["value"] for rule in rules if rule["comparison"] == "equals"]
+        if equalities and any(not _matches(equalities[0], rule["comparison"], rule["value"]) for rule in rules):
+            raise WorkflowRequirementError("workflow contracts contain conflicting argument predicates")
+        lower = [rule["value"] for rule in rules if rule["comparison"] == "at_least"]
+        upper = [rule["value"] for rule in rules if rule["comparison"] == "at_most"]
+        if lower and upper and max(lower) > min(upper):
+            raise WorkflowRequirementError("workflow contracts contain conflicting argument bounds")
+    merged = compile_workflow_requirements(task, **fields,
+        max_steps=min(contract["max_steps"] for contract in contracts), max_calls_by_operation=caps)
+    return validate_workflow_requirements(merged, catalog, task_digest=task_digest)
+
+
 def _references(value: Any, depth: int = 0) -> set[str]:
     if depth > 24:
         raise WorkflowRequirementError("workflow argument references exceed their nesting bound")
