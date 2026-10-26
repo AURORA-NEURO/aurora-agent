@@ -128,6 +128,15 @@ repository-defined because this checkout has no detailed P10-F05/F06 blueprints.
 
 ## Autonomous agent process boundary
 
+The Python SDK now exposes an executable local-model workflow builder through
+`workflow-catalogue`, `workflow-build`, `workflow-run`, `workflow-template`, and
+`workflow-execute`. It validates a proposed operation DAG before dispatch, supports public-value
+checkpoint/resume, and composes a glioma literature/trial/TCGA evidence review. Eight reviewed
+public-source adapters are executable; an explicit OpenAPI GET importer supports adding reviewed
+services without treating catalogue capacity as verified integration coverage. See the
+[workflow builder](docs/NLP_WORKFLOW_BUILDER.md) and the remaining
+[development plan](docs/WORKFLOW_DEVELOPMENT_PLAN.md).
+
 The Rust runtime also exposes an opt-in Docker-backed command boundary for callers that need an
 explicit Linux process boundary. It is not connected to agent tool dispatch or the trial provider;
 its limits and integration boundary are documented in [docs/OCI_SANDBOX.md](docs/OCI_SANDBOX.md).
@@ -1067,7 +1076,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,358,874 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,366,668 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 

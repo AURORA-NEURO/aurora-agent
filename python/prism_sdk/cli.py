@@ -4272,6 +4272,8 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         parser_class=_ArgumentParser,
     )
+    from .workflow_cli import register_workflow_commands
+    register_workflow_commands(subparsers)
 
     subparsers.add_parser(
         "catalogue",
@@ -4952,7 +4954,10 @@ def main(
     try:
         args = _parser().parse_args(None if argv is None else list(argv))
         env = os.environ if environ is None else environ
-        if args.command == "catalogue":
+        from .workflow_cli import WORKFLOW_CLI_COMMANDS, execute_workflow_command
+        if args.command in WORKFLOW_CLI_COMMANDS:
+            payload = execute_workflow_command(args)
+        elif args.command == "catalogue":
             payload = _catalogue()
         elif args.command == "evidence-plan":
             payload = _evidence_plan(args)
@@ -5007,6 +5012,8 @@ def main(
         else:  # pragma: no cover - argparse enforces the command set
             raise ValueError("unknown command")
         _write_json(out, payload)
+        if args.command in WORKFLOW_CLI_COMMANDS and payload.get("status") in {"failed", "blocked", "retry_required", "attempt_limit", "approval_required"}:
+            return 1
         return 0
     except (KeyboardInterrupt, EOFError):
         errors.write("aurora-agent: interrupted while collecting input\n")

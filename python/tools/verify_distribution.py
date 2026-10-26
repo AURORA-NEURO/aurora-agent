@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import configparser
+import json
 from email.parser import BytesParser
 from email.policy import default
 import os
@@ -137,7 +138,9 @@ def main() -> int:
                 "assert all(name in prism_sdk.__dict__ for name in prism_sdk.__all__), "
                 "'every declared public export must resolve in the installed package'; "
                 "autonomy_exports = ('AutonomousAgent', 'AutonomousGoalLedger', "
-                "'AutonomousGoalControlLoop', 'AutonomousGoalWorker'); "
+                "'AutonomousGoalControlLoop', 'AutonomousGoalWorker', 'LocalWorkflowBuilder', "
+                "'WorkflowOperationCatalog', 'compile_workflow_plan', 'execute_workflow_plan', "
+                "'import_openapi_operations'); "
                 "assert all(type(getattr(prism_sdk, name)).__name__ != '_UnavailableFeature' "
                 "for name in autonomy_exports), 'core autonomy exports must be implemented'; "
                 "assert all(callable(getattr(prism_sdk, name)) for name in autonomy_exports), "
@@ -159,6 +162,20 @@ def main() -> int:
         help_output = run([str(executable), "--help"], cwd=temporary_root, env=clean_env)
         if "grounded-portfolio" not in help_output.stdout:
             raise RuntimeError("installed aurora-agent CLI help omits the grounded portfolio command")
+        for command in ("workflow-catalogue", "workflow-build", "workflow-run", "workflow-template", "workflow-execute"):
+            if command not in help_output.stdout:
+                raise RuntimeError("installed aurora-agent CLI help omits a workflow command")
+        catalogue_output = run([str(executable), "workflow-catalogue"], cwd=temporary_root, env=clean_env)
+        catalogue = json.loads(catalogue_output.stdout)
+        identities = {operation["operation_id"] for operation in catalogue["operations"]}
+        if not {"pubmed.search", "glioma.evidence.reconcile", "glioma.evidence.review_handoff"}.issubset(identities):
+            raise RuntimeError("installed executable workflow catalogue omits its source or composition adapters")
+        template_path = temporary_root / "glioma-plan.json"
+        run([str(executable), "workflow-template", "--task", "Review public glioma research metadata",
+             "--out", str(template_path)], cwd=temporary_root, env=clean_env)
+        template = json.loads(template_path.read_text(encoding="utf-8"))
+        if len(template["steps"]) != 5 or template["outputs"] != ["review"]:
+            raise RuntimeError("installed workflow template does not compose its five evidence stages")
 
     print(f"verified prism-sdk wheel: {module_count} modules installed; aurora-agent --help succeeded")
     return 0

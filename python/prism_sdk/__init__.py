@@ -15579,3 +15579,28 @@ __all__ = list(dict.fromkeys(__all__))
 _aurora_initializing = False
 if _builtins.__import__ is _aurora_safe_import:
     _builtins.__import__ = _aurora_real_import
+
+# Executable workflow APIs use ordinary imports so a missing implementation remains an error.
+from .workflow_integrations import (
+    WorkflowOperation, WorkflowOperationCatalog, WorkflowOperationResult,
+    builtin_workflow_operation_catalog,
+)
+from .workflow_builder import (
+    LocalWorkflowBuilder, WorkflowPlan, WorkflowRun, WorkflowValidationError,
+    compile_workflow_plan, validate_workflow_plan, execute_workflow_plan,
+    save_workflow_checkpoint, load_workflow_checkpoint,
+)
+from .workflow_openapi import OpenApiImportError, OpenApiHttpResponse, import_openapi_operations
+from .glioma_workflow import (
+    glioma_evidence_workflow_proposal, register_glioma_workflow_operations,
+    reconcile_glioma_evidence, glioma_evidence_review_handoff,
+)
+__all__ += [
+    "WorkflowOperation", "WorkflowOperationCatalog", "WorkflowOperationResult",
+    "builtin_workflow_operation_catalog", "LocalWorkflowBuilder", "WorkflowPlan", "WorkflowRun",
+    "WorkflowValidationError", "compile_workflow_plan", "validate_workflow_plan",
+    "execute_workflow_plan", "save_workflow_checkpoint", "load_workflow_checkpoint",
+    "OpenApiImportError", "OpenApiHttpResponse", "import_openapi_operations",
+    "glioma_evidence_workflow_proposal", "register_glioma_workflow_operations",
+    "reconcile_glioma_evidence", "glioma_evidence_review_handoff",
+]
