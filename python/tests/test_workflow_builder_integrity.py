@@ -284,7 +284,7 @@ def test_planner_refuses_provider_replacement_with_remote_transport_before_reque
 def test_loopback_ollama_provider_metadata_is_accepted_without_discovery_or_invocation():
     catalog, calls = _catalog()
     runtime = LLMRuntime()
-    runtime.register_provider(ollama_provider())
+    runtime.register_provider(ollama_provider(max_attempts=1))
     builder = LocalWorkflowBuilder(catalog, runtime, model="locally-installed-model")
     assert builder.provider == "ollama"
     assert calls == []

@@ -27,9 +27,14 @@ from .errors import ArgumentError
 from .llm_runtime import LLMRuntime, ProviderRequest
 from .tooling import ToolCatalogue, ToolDefinition
 from .workflow_integrations import WorkflowOperationCatalog
+from .workflow_requirements import (
+    WorkflowRequirements, WorkflowRequirementError, audit_workflow_requirements,
+    enforce_workflow_step_requirements, validate_workflow_requirements,
+)
 
 
 WORKFLOW_PLAN_SCHEMA = "aurora-executable-workflow-plan/0.1"
+WORKFLOW_CONTRACT_PLAN_SCHEMA = "aurora-executable-workflow-plan/0.2"
 WORKFLOW_CHECKPOINT_SCHEMA = "aurora-executable-workflow-checkpoint/0.1"
 MAX_WORKFLOW_STEPS = 32
 MAX_WORKFLOW_VALUE_BYTES = 8_000_000
@@ -228,25 +233,43 @@ class WorkflowPlan:
         return self.to_dict()["plan_digest"]
 
 
-def compile_workflow_plan(proposal: Mapping[str, Any], catalog: WorkflowOperationCatalog, *, task: str) -> WorkflowPlan:
+def _check_requirements(proposal: Mapping[str, Any], requirements: WorkflowRequirements | Mapping[str, Any],
+                        catalog: WorkflowOperationCatalog, task_digest: str) -> dict[str, Any]:
+    contract = validate_workflow_requirements(requirements, catalog, task_digest=task_digest).to_dict()
+    if audit_workflow_requirements(proposal, contract, catalog)["blocking_issues"]:
+        raise WorkflowRequirementError("workflow proposal violates the fixed task contract")
+    return contract
+
+
+def compile_workflow_plan(proposal: Mapping[str, Any], catalog: WorkflowOperationCatalog, *, task: str,
+                          requirements: WorkflowRequirements | Mapping[str, Any] | None = None) -> WorkflowPlan:
     if not isinstance(task, str) or not task.strip() or len(task.encode("utf-8")) > 32_000:
         raise WorkflowValidationError("workflow task is outside its text bound")
     checked = _proposal(proposal, catalog)
-    value = _seal({"schema": WORKFLOW_PLAN_SCHEMA, "task_digest": content_digest({"task": task}),
-                   "catalog_digest": catalog.catalog_digest, **checked}, "plan_digest")
+    task_digest = content_digest({"task": task})
+    descriptor = {"schema": WORKFLOW_PLAN_SCHEMA, "task_digest": task_digest,
+                  "catalog_digest": catalog.catalog_digest, **checked}
+    if requirements is not None:
+        descriptor["requirements"] = _check_requirements(checked, requirements, catalog, task_digest)
+        descriptor["schema"] = WORKFLOW_CONTRACT_PLAN_SCHEMA
+    value = _seal(descriptor, "plan_digest")
     return WorkflowPlan(_encode(value))
 
 
 def validate_workflow_plan(value: WorkflowPlan | Mapping[str, Any], catalog: WorkflowOperationCatalog) -> WorkflowPlan:
     raw = value.to_dict() if isinstance(value, WorkflowPlan) else value
     descriptor = _verify(raw, "plan_digest")
-    if set(descriptor) != {"schema", "task_digest", "catalog_digest", "name", "steps", "outputs"}:
+    fields = {"schema", "task_digest", "catalog_digest", "name", "steps", "outputs"}
+    contract_plan = descriptor.get("schema") == WORKFLOW_CONTRACT_PLAN_SCHEMA
+    if set(descriptor) != fields | ({"requirements"} if contract_plan else set()):
         raise WorkflowValidationError("workflow plan fields are invalid")
-    if descriptor["schema"] != WORKFLOW_PLAN_SCHEMA or descriptor["catalog_digest"] != catalog.catalog_digest:
+    if descriptor["schema"] not in {WORKFLOW_PLAN_SCHEMA, WORKFLOW_CONTRACT_PLAN_SCHEMA} or descriptor["catalog_digest"] != catalog.catalog_digest:
         raise WorkflowValidationError("workflow plan schema or catalogue identity has changed")
     if not isinstance(descriptor["task_digest"], str) or not re.fullmatch("[0-9a-f]{64}", descriptor["task_digest"]):
         raise WorkflowValidationError("workflow task digest is invalid")
-    _proposal({key: descriptor[key] for key in ("name", "steps", "outputs")}, catalog)
+    checked = _proposal({key: descriptor[key] for key in ("name", "steps", "outputs")}, catalog)
+    if contract_plan:
+        _check_requirements(checked, descriptor["requirements"], catalog, descriptor["task_digest"])
     return WorkflowPlan(_encode(raw))
 
 
@@ -319,6 +342,11 @@ def _checkpoint(value: Mapping[str, Any], plan: dict[str, Any], catalog: Workflo
     for count in result["attempts"].values():
         if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= MAX_WORKFLOW_ATTEMPTS:
             raise WorkflowValidationError("workflow checkpoint attempt count is invalid")
+    if "requirements" in plan:
+        for operation, cap in plan["requirements"]["max_calls_by_operation"].items():
+            used = sum(result["attempts"].get(step_id, 0) for step_id, step in steps.items() if step["operation"] == operation)
+            if used > cap:
+                raise WorkflowRequirementError("workflow checkpoint exceeds its fixed operation call budget")
     for step_id, row in result["results"].items():
         if not isinstance(row, dict) or set(row) != {"value", "value_digest", "receipt", "receipt_digest", "arguments_digest"}:
             raise WorkflowValidationError("workflow retained result fields are invalid")
@@ -331,6 +359,8 @@ def _checkpoint(value: Mapping[str, Any], plan: dict[str, Any], catalog: Workflo
         if any(dep not in result["results"] for dep in step["depends_on"]) or step_id not in result["attempts"]:
             raise WorkflowValidationError("workflow checkpoint omits completed dependencies or attempts")
         arguments = catalog.validate_arguments(step["operation"], _resolve(step["arguments"], result["results"]))
+        if "requirements" in plan:
+            enforce_workflow_step_requirements(step["operation"], arguments, plan["requirements"])
         if row["arguments_digest"] != content_digest(arguments):
             raise WorkflowValidationError("workflow retained arguments have changed")
     in_flight = result["in_flight"]
@@ -426,12 +456,21 @@ def execute_workflow_plan(
         # Resolve and validate before changing dispatch state. Pointer/schema failures are holds.
         try:
             arguments = catalog.validate_arguments(step["operation"], _resolve(step["arguments"], state["results"]))
+            if "requirements" in checked:
+                enforce_workflow_step_requirements(step["operation"], arguments, checked["requirements"])
+                cap = checked["requirements"]["max_calls_by_operation"].get(step["operation"])
+                used = sum(state["attempts"].get(item["id"], 0) for item in checked["steps"]
+                           if item["operation"] == step["operation"])
+                if cap is not None and used >= cap:
+                    raise WorkflowRequirementError("workflow dispatch would exceed its fixed operation call budget")
         except (ValueError, KeyError, TypeError) as error:
             state["failure"] = {"step_id": step_id, "error_type": type(error).__name__}
             return snapshot("blocked")
         state["attempts"][step_id] = attempt
         state["in_flight"] = step_id
         snapshot("running")  # A failed persistence callback prevents dispatch.
+        if catalog.catalog_digest != checked["catalog_digest"]:
+            raise WorkflowValidationError("workflow catalogue changed during checkpoint persistence")
         try:
             observation = catalog.execute(step["operation"], arguments, approve_source_dispatch=True, retrieved_at=retrieved_at)
             value, receipt = _safe(observation.value), _safe(observation.receipt)
@@ -496,6 +535,8 @@ class LocalWorkflowBuilder:
         metadata = next((item for item in self.runtime.provider_metadata() if item.get("provider") == self.provider), None)
         if metadata is None or metadata.get("requires_credential") is not False:
             raise WorkflowValidationError("workflow planning requires an explicitly credentialless local provider")
+        if type(metadata.get("max_attempts")) is not int or metadata["max_attempts"] != 1:
+            raise WorkflowValidationError("workflow planning requires a provider configured for exactly one transport attempt")
         if metadata.get("transport") == "in_memory":
             return metadata
         endpoint = metadata.get("base_url")
@@ -504,7 +545,9 @@ class LocalWorkflowBuilder:
         return metadata
 
     def build(self, task: str, *, approve_provider_call: bool = False,
-              operation_ids: Sequence[str] | None = None, max_steps: int = 16) -> WorkflowPlan:
+              operation_ids: Sequence[str] | None = None, max_steps: int = 16,
+              requirements: WorkflowRequirements | Mapping[str, Any] | None = None,
+              max_planning_attempts: int = 1) -> WorkflowPlan:
         if approve_provider_call is not True:
             raise WorkflowValidationError("local-model workflow planning requires explicit provider approval")
         if content_digest(self._local_provider_metadata()) != self._provider_digest:
@@ -513,14 +556,30 @@ class LocalWorkflowBuilder:
             raise WorkflowValidationError("workflow task is outside its text bound")
         if type(max_steps) is not int or not 1 <= max_steps <= MAX_WORKFLOW_STEPS:
             raise WorkflowValidationError("workflow proposal step budget is outside its bound")
+        if type(max_planning_attempts) is not int or not 1 <= max_planning_attempts <= 4:
+            raise WorkflowValidationError("workflow planning attempts must be between one and four")
+        contract = validate_workflow_requirements(requirements, self.catalog,
+                    task_digest=content_digest({"task": task})).to_dict() if requirements is not None else None
+        required = set(contract["required_operations"]) if contract else set()
+        forbidden = set(contract["forbidden_operations"]) if contract else set()
+        if contract:
+            max_steps = min(max_steps, contract["max_steps"])
+        if len(required) > min(max_steps, self.max_visible_operations):
+            raise WorkflowValidationError("required operations exceed the planning or visible-operation budget")
         operations = list(self.catalog.operations())
         if operation_ids is not None:
-            if isinstance(operation_ids, (str, bytes)) or not operation_ids or len(set(operation_ids)) != len(operation_ids):
+            if (isinstance(operation_ids, (str, bytes)) or not isinstance(operation_ids, Sequence)
+                    or not 1 <= len(operation_ids) <= 128
+                    or any(not isinstance(item, str) or not item for item in operation_ids)
+                    or len(set(operation_ids)) != len(operation_ids)):
                 raise WorkflowValidationError("workflow operation allowlist is invalid")
             operations = [self.catalog.resolve(item) for item in operation_ids]
+        available = {op.operation_id for op in operations if op.read_only and op.operation_id not in forbidden}
+        if required - available:
+            raise WorkflowValidationError("required operations are outside the reviewed planning allowlist")
         tokens = set(re.findall(r"[a-z0-9]+", task.lower()))
-        operations.sort(key=lambda op: (-len(tokens & set(re.findall(r"[a-z0-9]+", op.operation_id + " " + op.description.lower()))), op.operation_id))
-        operations = [op for op in operations if op.read_only][:self.max_visible_operations]
+        operations.sort(key=lambda op: (op.operation_id not in required, -len(tokens & set(re.findall(r"[a-z0-9]+", op.operation_id + " " + op.description.lower()))), op.operation_id))
+        operations = [op for op in operations if op.operation_id in available][:self.max_visible_operations]
         if not operations:
             raise WorkflowValidationError("no reviewed read-only workflow operation is available")
         visible = {op.operation_id for op in operations}
@@ -530,12 +589,21 @@ class LocalWorkflowBuilder:
             "format": {"name": "Short workflow name", "steps": [{"id": "s1", "operation": "exact reviewed operation_id", "arguments": {}, "depends_on": []}], "outputs": ["s1"]},
             "outputs": "nonempty list of final step IDs", "max_steps": max_steps,
             "references": "Use {\"$ref\":\"dependency_id#/json/pointer\"} only in arguments; dependency must be in depends_on or its ancestry. Root value is dependency_id#.",
+            "reference_example": {"explanation": "For a consumer of a producer's complete output, replace the consumer's object argument with this reference and declare the producer dependency. Never invent an empty bundle or inline source result.",
+                                  "consumer_arguments": {"bundle": {"$ref": "producer#"}}, "consumer_depends_on": ["producer"]},
             "rules": ["Use only listed operations and their exact argument schemas.", "Never invent source results, credentials, endpoints or tools.",
                       "This is public research metadata only. No clinical decisions or patient data.",
                       "A plan grants no execution authority. Omitted operations are unavailable in this planning pass."],
             "operations": [{key: op.to_dict()[key] for key in ("operation_id", "description", "input_schema")} for op in operations],
             "catalog_digest": digest, "omitted_operation_count": len(self.catalog.operations()) - len(operations),
         }
+        if contract:
+            instructions["fixed_caller_requirements"] = contract
+            instructions["rules"].append("Satisfy every fixed caller requirement. Requirements are immutable; return only the proposal, never a replacement contract.")
+            instructions["required_value_flow"] = [
+                {**link, "instruction": "The target must consume a $ref to the source step's output; depends_on alone does not transfer data."}
+                for link in contract["data_links"]
+            ]
         schema = {
             "type": "object", "additionalProperties": False, "required": ["name", "steps", "outputs"],
             "properties": {
@@ -543,25 +611,50 @@ class LocalWorkflowBuilder:
                 "steps": {"type": "array", "minItems": 1, "maxItems": max_steps, "items": {
                     "type": "object", "additionalProperties": False,
                     "required": ["id", "operation", "arguments", "depends_on"],
-                    "properties": {"id": {"type": "string"}, "operation": {"type": "string", "enum": sorted(visible)},
+                    "properties": {"id": {"type": "string", "pattern": _ID.pattern}, "operation": {"type": "string", "enum": sorted(visible)},
                                    "arguments": {"type": "object"},
-                                   "depends_on": {"type": "array", "items": {"type": "string"}}}}},
-                "outputs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                                   "depends_on": {"type": "array", "items": {"type": "string", "pattern": _ID.pattern}}}}},
+                "outputs": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": _ID.pattern}},
             },
         }
-        request = ProviderRequest(model=self.model, messages=(
+        messages = (
             {"role": "system", "content": json.dumps(instructions, ensure_ascii=False)},
             {"role": "user", "content": task},
-        ), require_json=True, response_schema=schema,
-           max_output_tokens=min(4096, max(512, 256 * max_steps)), temperature=0)
-        response = self.runtime.invoke(self.provider, request)
-        if self.catalog.catalog_digest != digest:
-            raise WorkflowValidationError("workflow catalogue changed while planning")
-        try:
-            proposal = json.loads(response.text, object_pairs_hook=_unique_json_object)
-        except (TypeError, ValueError) as error:
-            raise WorkflowValidationError("local model did not return a workflow JSON proposal") from error
-        checked = _proposal(proposal, self.catalog)
-        if len(checked["steps"]) > max_steps or any(step["operation"] not in visible for step in checked["steps"]):
-            raise WorkflowValidationError("local model exceeded its step or visible-operation boundary")
-        return compile_workflow_plan(checked, self.catalog, task=task)
+        )
+        feedback = None
+        previous = None
+        for attempt in range(max_planning_attempts):
+            if self.catalog.catalog_digest != digest or content_digest(self._local_provider_metadata()) != self._provider_digest:
+                raise WorkflowValidationError("workflow catalogue or provider changed while planning")
+            repair_messages = (({"role": "assistant", "content": previous},) if previous else ()) + (({"role": "user", "content": json.dumps(feedback)},) if feedback else ())
+            request = ProviderRequest(model=self.model, messages=messages + repair_messages,
+                require_json=True, response_schema=schema,
+                max_output_tokens=min(4096, max(512, 384 * max_steps)), temperature=0)
+            # Transport failures and runtime structured-output refusals propagate. Only a
+            # returned proposal can be repaired; no source tools execute during this loop.
+            response = self.runtime.invoke(self.provider, request)
+            if self.catalog.catalog_digest != digest or content_digest(self._local_provider_metadata()) != self._provider_digest:
+                raise WorkflowValidationError("workflow catalogue or provider changed while planning")
+            if response.provider != self.provider or response.model != self.model or response.tool_calls:
+                raise WorkflowValidationError("workflow planning response changed its provider, model or tool boundary")
+            proposal = None
+            try:
+                proposal = json.loads(response.text, object_pairs_hook=_unique_json_object)
+                checked = _proposal(proposal, self.catalog)
+                if len(checked["steps"]) > max_steps or any(step["operation"] not in visible for step in checked["steps"]):
+                    raise WorkflowValidationError("local model exceeded its step or visible-operation boundary")
+                return compile_workflow_plan(checked, self.catalog, task=task, requirements=contract)
+            except (ValueError, KeyError, TypeError) as error:
+                if attempt + 1 == max_planning_attempts:
+                    raise WorkflowValidationError("local model failed the workflow proposal or fixed task contract") from error
+                feedback = {"repair_attempt": attempt + 2, "validation_error_type": type(error).__name__,
+                            "instruction": "Generate a complete corrected proposal. Preserve the original task, schemas and every fixed caller requirement. Check dependency references, final outputs and argument limits."}
+                if type(error) is WorkflowValidationError:
+                    feedback["structural_issue"] = str(error)
+                previous = response.text if isinstance(response.text, str) and len(response.text.encode("utf-8")) <= 100_000 else None
+                if contract and isinstance(proposal, dict) and all(key in proposal for key in ("name", "steps", "outputs")):
+                    try:
+                        feedback["requirement_issues"] = audit_workflow_requirements(proposal, contract, self.catalog)["blocking_issues"]
+                    except (ValueError, KeyError, TypeError):
+                        pass
+        raise WorkflowValidationError("workflow planning exhausted its attempt budget")
