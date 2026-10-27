@@ -149,7 +149,7 @@ The optional [CIViC curation review](docs/GLIOMA_CIVIC_CURATION_WORKFLOW.md) com
 local analysis and a research-review handoff. It retains source categories and exact native source-ID
 groups without ranking scientific support or treating those groups as independent publications.
 Cellosaurus preserves source names, accessions, taxonomy, disease assertions and the admitted
-problematic-cell-line comment category; it establishes neither model suitability nor authentication.
+problematic-cell-line comment category; it establishes neither model suitability nor authenticity.
 The [provider registry](docs/WORKFLOW_PROVIDER_REGISTRY.md) inspects exact reader bindings,
 deduplicated API service groups and separate unmeasured live coverage through the CLI and editor.
 Reviewed [capability profiles](docs/WORKFLOW_CAPABILITIES.md) enable fixed groups of concrete
@@ -157,9 +157,11 @@ operations through one repeated operator option, including a native three-source
 review. Browser requests cannot enable another profile; source agreement and ontology relations
 remain separate from validated scientific equivalence and cohort evidence.
 Optional [local NLP intent suggestions](docs/WORKFLOW_INTENT_EXTRACTION.md) retain unreviewed
-mandatory-action candidates before graph authoring. Extraction protocol 0.2 supplies complete native
-input and output contracts and replays older protocol records without upgrading their evidence.
-This context correction has no actual-model quality measurement yet. The editor's explicit caller-declaration
+mandatory-action candidates before graph authoring. Default extraction protocol 0.2 supplies
+complete native input/output contracts; protocols 0.1, 0.2 and 0.3 retain exact historical replay.
+A six-call comparison found no supported-work candidate in either arm and lost one strict
+negative-control recognition under 0.3, so the default returned to 0.2. General NLP quality
+remains unestablished. The editor's explicit caller-declaration
 review binds task spans, literal requirements and acceptance through edits, restart and separate
 evidence exports. Candidate syntax and caller acceptance do not establish complete interpretation
 or scientific validity; unavailable actions and literal conflicts remain blocking.
