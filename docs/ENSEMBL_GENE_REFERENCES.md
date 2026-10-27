@@ -77,8 +77,17 @@ multicast addresses, pins the selected address and verifies TLS against the orig
 does not read proxy settings, discover credentials, follow redirects or send authorization headers.
 Both requests share the configured total deadline. DNS waiting uses at most four outstanding
 daemon resolver jobs; a late DNS result cannot open an HTTP connection. Socket connect, TLS,
-request send, each header/body receive and normalization check the remaining budget. A separate
-65,536-byte header bound applies.
+request send, each header/body/framing receive and normalization check the remaining budget.
+Separate 65,536-byte header and 65,536-byte framing bounds apply to each response, alongside a
+wire-byte bound equal to those two budgets plus the response-body budget. Timed-out DNS jobs
+retain their original resolver slot until completion.
+
+The default reader requires CRLF header lines and rejects duplicate or malformed headers,
+ambiguous Content-Length/Transfer-Encoding, unsupported transfer or content encodings, and
+declared Content-Length values that exceed the budget or differ from the received body. Chunked
+responses require HTTP/1.1, bounded hexadecimal chunk sizes, exact CRLF delimiters and the final
+empty trailer line. Chunk extensions, trailers and redirect headers are refused. Close-delimited
+responses remain supported within the same receive deadline and byte limits.
 
 Each response body is at most 1,000,000 bytes, the pair at most 2,000,000 bytes. JSON permits at
 most depth 32 and 50,000 visited nodes per response. Duplicate keys, nonfinite numbers, unexpected
@@ -123,6 +132,10 @@ each injected-callback registration receives an independent opaque session bindi
 callback registration therefore requires a new plan; a checkpoint cannot silently resume through
 another injected executor. Capacity, fixtures and registered descriptors do not establish live
 service count or availability. No `live_verified` flag is inferred from transport selection.
+The stricter framing contract uses deterministic transport policy
+`pinned_https_total_deadline/0.2` and a new binding digest. Existing default-policy registrations
+and bundles from the previous binding do not silently acquire the new policy. Public bundle
+schema and field names are unchanged.
 
 ## Observed verification
 
@@ -131,6 +144,8 @@ reviewed requests and retained 644 response-body bytes. Ensembl returned TP53 fe
 `ENSG00000141510` and one EntrezGene candidate, `7157`. Validator replay passed without another
 request. This is one observed request pair, not a continuous availability measurement, an
 independent scientific crosswalk validation or evidence of many connected services.
+That observation used the earlier transport policy. The framing-policy update itself makes no
+new live request; its evidence is the offline wire verification below.
 
 Focused local verification uses deterministic fixtures and mocked transport boundaries:
 
@@ -140,6 +155,8 @@ python -W error::ResourceWarning -m pytest python/tests/test_reviewed_ensembl_ge
 ```
 
 The tests cover scope/identity admission, candidate preservation, empty versus failed results,
-response bounds, total-deadline behavior, public DNS/TLS routing, chunked framing, source replay,
-registration identity and checkpoint reuse. They are implementation checks, not independent
+response bounds, total-deadline behavior, public DNS/TLS routing, valid chunked/length/close
+framing, truncated declared bodies, malformed chunks and encodings, aggregate framing bounds,
+source replay, registration identity and checkpoint reuse. Actual fixture TLS bytes pass through
+the HTTP parser; no live request is made. They are implementation checks, not independent
 biological benchmarks or live service observations.

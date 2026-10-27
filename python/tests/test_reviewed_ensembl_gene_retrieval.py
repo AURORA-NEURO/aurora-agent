@@ -271,6 +271,24 @@ def test_registration_is_inert_default_bindings_are_stable_and_injected_sessions
     assert injected.resolve(ENSEMBL_GENE_OPERATION_ID).integration_id == "ensembl"
 
 
+def test_stricter_framing_policy_has_a_new_deterministic_transport_binding():
+    import prism_sdk.reviewed_ensembl_gene_retrieval as module
+    legacy = content_digest({"adapter": module.ENSEMBL_GENE_BUNDLE_SCHEMA, "host": "rest.ensembl.org",
+        "lookup_url": LOOKUP, "xref_database": "EntrezGene", "response_bound": 1_000_000,
+        "transport": "pinned_https_total_deadline/0.1"})
+    assert module._DEFAULT_BINDING != legacy
+    catalogue = register_ensembl_gene_operations(WorkflowOperationCatalog())
+    assert module._DEFAULT_BINDING in catalogue.resolve(ENSEMBL_GENE_OPERATION_ID).description
+    bundle = _read()
+    bundle["transport"] = module._transport("default_pinned_https", legacy)
+    for receipt in bundle["receipts"]:
+        receipt["transport_mode"] = "default_pinned_https"
+        receipt["transport_binding_id"] = legacy
+    _reseal(bundle)
+    with pytest.raises(EnsemblGeneRetrievalError, match="default_transport_binding_mismatch"):
+        validate_ensembl_gene_bundle(bundle)
+
+
 def test_catalogue_rejects_unreviewed_arguments_and_requires_source_approval():
     fixture = Fixture()
     catalog = register_ensembl_gene_operations(WorkflowOperationCatalog(), fetcher=fixture)
@@ -358,7 +376,81 @@ def test_chunked_default_response_is_decoded_with_the_same_response_bound():
     assert response.body == body and tls.closed
 
 
+def _wire_fetch(wire):
+    """Exercise the real HTTP parser over fixture TLS bytes, without a network request."""
+    raw = FakeSocket([])
+    tls = FakeSocket([wire[index:index + 4096] for index in range(0, len(wire), 4096)])
+    address = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+    with patch("prism_sdk.reviewed_ensembl_gene_retrieval.socket.getaddrinfo", return_value=[address]), \
+         patch("prism_sdk.reviewed_ensembl_gene_retrieval.socket.socket", return_value=raw), \
+         patch("prism_sdk.reviewed_ensembl_gene_retrieval.ssl.create_default_context") as context:
+        context.return_value.wrap_socket.return_value = tls
+        try:
+            return _default_fetch(LOOKUP, timeout_seconds=1, max_response_bytes=1_000_000)
+        finally:
+            assert tls.closed
+
+
+@pytest.mark.parametrize("framing", ["content_length", "chunked", "close_delimited"])
+def test_strict_http_framing_retains_exact_valid_annotation_body(framing):
+    body = json.dumps(_gene()).encode()
+    header = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+    if framing == "content_length":
+        wire = header + b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
+    elif framing == "chunked":
+        middle = len(body) // 2
+        chunks = [body[:middle], body[middle:]]
+        wire = header + b"Transfer-Encoding: chunked\r\n\r\n" + b"".join(
+            format(len(chunk), "x").encode() + b"\r\n" + chunk + b"\r\n" for chunk in chunks) + b"0\r\n\r\n"
+    else:
+        wire = header + b"\r\n" + body
+    assert _wire_fetch(wire).body == body
+
+
+@pytest.mark.parametrize("failure", ["truncated_length", "negative_length", "invalid_length", "oversized_length",
+    "unsupported_transfer", "multiple_transfer", "http10_transfer", "bad_chunk_delimiter", "chunk_extension",
+    "trailers", "declared_trailers", "content_encoding", "redirect_header", "folded_header", "lf_headers"])
+def test_malformed_http_framing_cannot_become_a_successful_annotation_response(failure):
+    body = json.dumps(_gene()).encode()
+    prefix = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+    payload = body
+    headers = b""
+    if failure == "truncated_length":
+        headers = b"Content-Length: " + str(len(body) + 1).encode() + b"\r\n"
+    elif failure == "negative_length": headers = b"Content-Length: -1\r\n"
+    elif failure == "invalid_length": headers = b"Content-Length: 1x\r\n"
+    elif failure == "oversized_length": headers = b"Content-Length: 1000001\r\n"
+    elif failure == "unsupported_transfer": headers = b"Transfer-Encoding: gzip\r\n"
+    elif failure == "multiple_transfer": headers = b"Transfer-Encoding: gzip, chunked\r\n"
+    elif failure == "content_encoding": headers = b"Content-Encoding: gzip\r\n"
+    elif failure == "redirect_header": headers = b"Location: https://unreviewed.invalid/\r\n"
+    elif failure == "declared_trailers": headers = b"Trailer: ETag\r\n"
+    elif failure == "folded_header": headers = b"X-Comment: value\r\n continued\r\n"
+    elif failure == "lf_headers": prefix = b"HTTP/1.1 200 OK\nContent-Type: application/json\n"
+    else:
+        headers = b"Transfer-Encoding: chunked\r\n"
+        if failure == "http10_transfer": prefix = prefix.replace(b"HTTP/1.1", b"HTTP/1.0")
+        chunk_size = format(len(body), "x").encode()
+        if failure == "chunk_extension": chunk_size += b";extension=value"
+        delimiter = b"XX" if failure == "bad_chunk_delimiter" else b"\r\n"
+        trailer = b"ETag: annotation\r\n\r\n" if failure == "trailers" else b"\r\n"
+        payload = chunk_size + b"\r\n" + body + delimiter + b"0\r\n" + trailer
+    with pytest.raises(EnsemblGeneRetrievalError):
+        _wire_fetch(prefix + headers + b"\r\n" + payload)
+
+
+def test_chunk_framing_has_an_aggregate_bound_even_when_json_body_is_small():
+    body = b" " * 14_000 + json.dumps(_gene()).encode()
+    wire = (b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + b"".join(b"1\r\n" + bytes([byte]) + b"\r\n" for byte in body) + b"0\r\n\r\n")
+    assert len(body) < 1_000_000
+    with pytest.raises(EnsemblGeneRetrievalError, match="framing_bound"):
+        _wire_fetch(wire)
+
+
 @pytest.mark.parametrize("headers", [b"Content-Type: application/json\r\nContent-Type: application/json\r\n",
+    b"Content-Type: application/json\r\nContent-Length: 2\r\nContent-Length: 2\r\n",
+    b"Content-Type: application/json\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n",
     b"Content-Type: application/json\r\nContent-Length: 2\r\nTransfer-Encoding: chunked\r\n"])
 def test_default_transport_rejects_duplicate_headers_and_ambiguous_framing(headers):
     raw = FakeSocket([])
@@ -435,7 +527,7 @@ def test_default_transport_refuses_unreviewed_routes_before_dns(url):
 
 
 def test_header_bytes_have_a_separate_bound_before_body_parsing():
-    reader = _DeadlineReader(FakeSocket([b"x" * 33000 + b"\n", b"y" * 33000 + b"\n"]), 10.0)
+    reader = _DeadlineReader(FakeSocket([b"x" * 33000 + b"\r\n", b"y" * 33000 + b"\r\n"]), 10.0)
     with patch("prism_sdk.reviewed_ensembl_gene_retrieval.time.monotonic", return_value=0):
         reader.readline(65537)
         with pytest.raises(EnsemblGeneRetrievalError, match="header_bound"):

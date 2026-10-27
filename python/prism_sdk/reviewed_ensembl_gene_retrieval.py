@@ -36,6 +36,8 @@ MAX_ENSEMBL_TOTAL_BYTES = 2_000_000
 MAX_ENSEMBL_TREE_DEPTH = 32
 MAX_ENSEMBL_TREE_NODES = 50_000
 MAX_ENSEMBL_XREFS = 64
+MAX_ENSEMBL_HEADER_BYTES = 65_536
+MAX_ENSEMBL_FRAMING_BYTES = 65_536
 _HOST = "rest.ensembl.org"
 _BASE = f"https://{_HOST}"
 _LOOKUP_URL = _BASE + "/lookup/symbol/homo_sapiens/TP53?expand=0"
@@ -107,7 +109,8 @@ def _remaining(deadline: float) -> float:
 
 def _resolve_public_address(deadline: float) -> tuple[Any, ...]:
     """Bound waiting and outstanding DNS jobs; a late resolver cannot initiate HTTP."""
-    if not _DNS_SLOTS.acquire(timeout=_remaining(deadline)):
+    slots = _DNS_SLOTS
+    if not slots.acquire(timeout=_remaining(deadline)):
         _fail("dns_resolver_capacity_or_deadline")
     result: queue.Queue[Any] = queue.Queue(maxsize=1)
 
@@ -119,12 +122,13 @@ def _resolve_public_address(deadline: float) -> tuple[Any, ...]:
                 addresses = None
             result.put_nowait(addresses)
         finally:
-            _DNS_SLOTS.release()
+            slots.release()
 
     try:
+        _remaining(deadline)
         threading.Thread(target=resolve, name="aurora-ensembl-dns", daemon=True).start()
     except Exception:
-        _DNS_SLOTS.release()
+        slots.release()
         raise EnsemblGeneRetrievalError("dns_resolver_unavailable") from None
     try:
         addresses = result.get(timeout=_remaining(deadline))
@@ -134,7 +138,9 @@ def _resolve_public_address(deadline: float) -> tuple[Any, ...]:
     if not isinstance(addresses, list) or not 1 <= len(addresses) <= 64:
         _fail("dns_resolution_invalid")
     try:
-        if any(not ipaddress.ip_address(address[4][0]).is_global
+        if any(address[0] not in {socket.AF_INET, socket.AF_INET6}
+               or address[1] != socket.SOCK_STREAM or address[4][1] != 443
+               or not ipaddress.ip_address(address[4][0]).is_global
                or ipaddress.ip_address(address[4][0]).is_multicast for address in addresses):
             _fail("dns_address_is_not_public")
         selected = addresses[0]
@@ -148,45 +154,57 @@ def _resolve_public_address(deadline: float) -> tuple[Any, ...]:
 
 
 class _DeadlineReader:
-    """HTTP parsing reads through finite recv calls, including slow header/body trickles."""
+    """Bound every receive and the parser's aggregate header, body and framing work."""
 
     def __init__(self, connection: Any, deadline: float) -> None:
         self.connection, self.deadline = connection, deadline
         self.buffer = bytearray()
         self.closed = False
-        self.header_bytes = 0
+        self.header_bytes = self.framing_bytes = self.wire_bytes = 0
         self.reading_headers = True
 
     def _receive(self) -> bool:
         self.connection.settimeout(_remaining(self.deadline))
         block = self.connection.recv(4096)
         _remaining(self.deadline)
+        self.wire_bytes += len(block)
+        if self.wire_bytes > MAX_ENSEMBL_RESPONSE_BYTES + MAX_ENSEMBL_HEADER_BYTES + MAX_ENSEMBL_FRAMING_BYTES:
+            _fail("response_wire_bound")
         self.buffer.extend(block)
         return bool(block)
 
     def readline(self, limit: int = -1) -> bytes:
         _remaining(self.deadline)
-        if limit < 0:
-            limit = 65_537
+        limit = min(limit if limit >= 0 else 65_537, 65_537)
         while True:
             newline = self.buffer.find(b"\n", 0, limit)
             if newline >= 0 or len(self.buffer) >= limit:
                 end = newline + 1 if newline >= 0 else limit
                 value = bytes(self.buffer[:end])
                 del self.buffer[:end]
-                if self.reading_headers:
-                    self.header_bytes += len(value)
-                    if self.header_bytes > 65_536:
-                        _fail("response_header_bound")
-                return value
+                break
             if not self._receive():
                 value = bytes(self.buffer)
                 self.buffer.clear()
-                return value
+                break
+        if self.reading_headers:
+            self.header_bytes += len(value)
+            if self.header_bytes > MAX_ENSEMBL_HEADER_BYTES:
+                _fail("response_header_bound")
+            if value and (not value.endswith(b"\r\n") or value[:1] in (b" ", b"\t")):
+                _fail("response_header_framing_invalid")
+        else:
+            self.account_framing(len(value))
+        return value
+
+    def account_framing(self, size: int) -> None:
+        self.framing_bytes += size
+        if self.framing_bytes > MAX_ENSEMBL_FRAMING_BYTES:
+            _fail("response_framing_bound")
 
     def read(self, size: int = -1) -> bytes:
         _remaining(self.deadline)
-        if size < 0 or size > MAX_ENSEMBL_RESPONSE_BYTES + 1:
+        if type(size) is not int or not 0 <= size <= MAX_ENSEMBL_RESPONSE_BYTES + 1:
             _fail("transport_read_bound")
         while len(self.buffer) < size and self._receive():
             pass
@@ -210,6 +228,35 @@ class _ResponseSocket:
         return self.reader
 
 
+class _BoundedHttpResponse(http.client.HTTPResponse):
+    """Retain the standard status/header parser with strict, bounded chunk framing."""
+
+    def _read_next_chunk_size(self) -> int:
+        line = self.fp.readline(65_537)
+        if not re.fullmatch(rb"[0-9A-Fa-f]{1,8}\r\n", line):
+            _fail("response_chunk_size_framing_invalid")
+        size = int(line[:-2], 16)
+        if size > MAX_ENSEMBL_RESPONSE_BYTES:
+            _fail("response_chunk_bound")
+        return size
+
+    def _get_chunk_left(self) -> int | None:
+        chunk_left = self.chunk_left
+        if not chunk_left:
+            if chunk_left is not None:
+                self.fp.account_framing(2)
+                if self._safe_read(2) != b"\r\n":
+                    _fail("response_chunk_delimiter_invalid")
+            chunk_left = self._read_next_chunk_size()
+            if chunk_left == 0:
+                if self.fp.readline(65_537) != b"\r\n":
+                    _fail("response_trailers_refused")
+                self._close_conn()
+                chunk_left = None
+            self.chunk_left = chunk_left
+        return chunk_left
+
+
 def _default_fetch(url: str, *, timeout_seconds: float,
                    max_response_bytes: int) -> EnsemblGeneHttpResponse:
     if (url != _LOOKUP_URL and not re.fullmatch(
@@ -229,25 +276,46 @@ def _default_fetch(url: str, *, timeout_seconds: float,
         tls = context.wrap_socket(raw, server_hostname=_HOST)
         target = url[len(_BASE):]
         request = (f"GET {target} HTTP/1.1\r\nHost: {_HOST}\r\nAccept: application/json\r\n"
+                   "Accept-Encoding: identity\r\n"
                    "Content-Type: application/json\r\nUser-Agent: aurora-ensembl-metadata/0.1\r\n"
                    "Connection: close\r\n\r\n").encode("ascii")
         tls.settimeout(_remaining(deadline))
         tls.sendall(request)
         response_socket = _ResponseSocket(tls, deadline)
-        response = http.client.HTTPResponse(response_socket)
+        response = _BoundedHttpResponse(response_socket)
         try:
             response.begin()
             response_socket.reader.reading_headers = False
+            if response.headers.defects:
+                _fail("response_headers_malformed")
             headers = {}
             for name, value in response.getheaders():
                 normalized = name.lower()
-                if normalized in headers:
+                if (normalized in headers
+                        or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name)
+                        or any(ord(char) < 32 and char != "\t" or ord(char) == 127 for char in value)):
                     _fail("ambiguous_response_headers")
-                headers[normalized] = value
+                headers[normalized] = value.strip()
             if "content-length" in headers and "transfer-encoding" in headers:
                 _fail("ambiguous_response_framing")
+            if "transfer-encoding" in headers and headers["transfer-encoding"].casefold() != "chunked":
+                _fail("response_transfer_encoding_unsupported")
+            if "transfer-encoding" in headers and response.version != 11:
+                _fail("response_transfer_framing_requires_http11")
+            if "location" in headers or "trailer" in headers:
+                _fail("response_redirect_or_trailer_refused")
+            if headers.get("content-encoding", "identity").casefold() not in {"identity", ""}:
+                _fail("response_content_encoding_unsupported")
+            length = headers.get("content-length")
+            if length is not None and (not re.fullmatch(r"[0-9]{1,10}", length)
+                                       or int(length) > max_response_bytes):
+                _fail("response_declared_byte_bound")
             body = response.read(max_response_bytes + 1)
             _remaining(deadline)
+            if len(body) > max_response_bytes:
+                _fail("response_byte_bound")
+            if length is not None and len(body) != int(length):
+                _fail("response_declared_length_mismatch")
             return EnsemblGeneHttpResponse(response.status, body, url, headers)
         finally:
             response.close()
@@ -462,7 +530,11 @@ def _bundle(config: EnsemblGeneRetrievalConfig, retrieved_at: str, source_inputs
 
 _DEFAULT_BINDING = content_digest({"adapter": ENSEMBL_GENE_BUNDLE_SCHEMA, "host": _HOST,
                                    "lookup_url": _LOOKUP_URL, "xref_database": "EntrezGene",
-                                   "response_bound": MAX_ENSEMBL_RESPONSE_BYTES, "transport": "pinned_https_total_deadline/0.1"})
+                                   "response_bound": MAX_ENSEMBL_RESPONSE_BYTES,
+                                   "header_bound": MAX_ENSEMBL_HEADER_BYTES,
+                                   "framing_bound": MAX_ENSEMBL_FRAMING_BYTES,
+                                   "framing": "strict_length_transfer_chunks_and_no_trailers",
+                                   "transport": "pinned_https_total_deadline/0.2"})
 
 
 def retrieve_ensembl_gene_references(
