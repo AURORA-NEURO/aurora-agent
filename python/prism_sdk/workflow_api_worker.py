@@ -656,6 +656,12 @@ class WorkflowAPIWorker:
             if admission["status"] != "ready_for_constrained_authoring":
                 return {"status": admission["status"], "intent_review": self._review_data(intent_snapshot),
                         "interpretation": admission, "source_dispatch": False}
+            # Preserve the historical event; current constraints gate only new authoring.
+            from .workflow_literal_policy import assess_workflow_literal_policy
+            current = assess_workflow_literal_policy(task, accepted["accepted_declarations"], self.catalog)
+            if current.has_definite_conflicts:
+                return {"status": "current_policy_conflict", "intent_review": self._review_data(intent_snapshot),
+                        "interpretation": current.to_dict(), "source_dispatch": False}
             contract = admission["requirements"]
         interpretation = None
         if planner == "glioma-intent":

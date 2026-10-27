@@ -101,6 +101,11 @@ obligation reports `definite_conflict`, `no_const_enum_conflict`, or `not_assess
 root equality and schema combinations remain unassessed by this preflight. Their literal
 predicates still lower unchanged and must pass the native compiler and resolved dispatch checks.
 
+That admission0.1 receipt remains unchanged. A separate [current literal policy](WORKFLOW_LITERAL_POLICY.md)
+checks definitely resolved scalar types and numeric bounds before new authoring through the
+wrapper or accepted-review worker. It retains historical admissions and acceptance bytes, and
+exposes a distinct current-policy conflict rather than restamping an earlier event.
+
 Admitted records lower to the existing [workflow requirements](WORKFLOW_REQUIREMENTS.md).
 Conjunction preserves additional caller predicates, output/data-flow obligations, forbidden
 operations and tighter bounds. Direct contradictions refuse instead of choosing a preferred

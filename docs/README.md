@@ -34,6 +34,7 @@ commands.
 - [Local-model glioma drafts and exact citation audit](GLIOMA_WORKFLOW_SYNTHESIS.md)
 - [Caller-bound workflow task requirements](WORKFLOW_REQUIREMENTS.md)
 - [Caller-declared mandatory workflow intent obligations](WORKFLOW_INTENT_OBLIGATIONS.md)
+- [Current scalar literal policy and historical review compatibility](WORKFLOW_LITERAL_POLICY.md)
 - [Unreviewed local NLP intent suggestions](WORKFLOW_INTENT_EXTRACTION.md)
 - [Durable workflow cancellation](WORKFLOW_CANCELLATION.md)
 - [Typed glioma request interpretation](GLIOMA_WORKFLOW_INTENT.md)

@@ -375,4 +375,9 @@ def build_workflow_with_obligations(
         max_steps=planning_options.get("max_steps", 16))
     if admission.status != "ready_for_constrained_authoring":
         raise WorkflowIntentAdmissionError(admission)
+    # Current checks are additive: historical admission0.1 bytes remain replayable.
+    from .workflow_literal_policy import assess_workflow_literal_policy, WorkflowLiteralPolicyError
+    current = assess_workflow_literal_policy(task, obligations, builder.catalog)
+    if current.has_definite_conflicts:
+        raise WorkflowLiteralPolicyError(current)
     return builder.build(task, **{**planning_options, "requirements": admission.requirements})
