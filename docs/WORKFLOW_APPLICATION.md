@@ -91,6 +91,52 @@ finish decision, within its visible total-call and per-decision limits. Clarific
 exhausted budgets contain no executable plan and cannot create a run. The default whole-graph
 planner remains available; protocol checks alone do not establish task fidelity.
 
+## Optional mandatory work review
+
+The **Optional mandatory work declarations** panel is available for `local-model` and
+`local-incremental`. It leaves ordinary planning unchanged when disabled. Select exact text in
+the task, add a declaration, and specify a required operation, a literal argument equality, or an
+unresolved action. The browser converts its UTF-16 selection offsets to the Python Unicode code
+point offsets used by the SDK. The excerpt and start offset remain editable, but preparing a
+review refuses text that does not exactly match the current task. Literal values use the same
+lossless JSON editor codec as proposals, preserving large integers, float tokens and booleans.
+
+**Prepare review** retains the supplied rows as an unreviewed `model_candidate`, even when the
+browser says a caller typed them. **Suggest mandatory work** instead needs its own approval for
+one local model attempt. A returned suggestion remains unreviewed; clarification, refusal or
+rejection supplies no executable plan. The server resolves only exact model-selected excerpts
+and occurrence selectors; the editor does not repair invalid suggested spans. Model extraction
+completeness and the semantic meaning of a span remain unassessed.
+
+Inspect the retained declarations, their exact task spans, context and admission findings. The
+separate acceptance checkbox and **Accept reviewed declarations** action record a caller
+assertion for that exact saved review digest. This does not authenticate who authored the rows,
+establish complete task interpretation, or approve a provider or source call. An accepted review
+can still have blocking findings for unavailable operations, unresolved actions or definite
+literal conflicts. Only `ready_for_constrained_authoring` admission enables the page to reference
+that acceptance while requesting model planning. The SDK still validates the resulting graph
+against the conjoined immutable requirements.
+
+Planning sends the opaque `intent_review_id` and `expected_acceptance_digest` together. The
+worker rechecks the exact task, catalogue, selected planner, operation selection, fixed contract
+and planning budgets before any model call. Task, row or relevant control edits, failed requests,
+disconnects, and stale asynchronous responses clear this page's review acceptance. Building an
+actual saved plan still leaves source approval unchecked. Editing its proposal retains the
+accepted immutable contract and requires another validated revision and source grant.
+
+The saved review ID can be loaded after a restart. Loading displays its original task and
+settings, including any prior fixed contract, and requires fresh explicit acceptance in this
+page. Subsequent requests carry that fixed contract forward. **Start new declaration set**
+explicitly clears the inherited contract and rows from the current draft; it does not change a
+saved review or plan. Export buttons download the saved plan's declaration evidence or the
+selected run's historical native plan snapshot. Legacy plans have no declaration sidecar and
+their evidence export is refused. Saved task text, model text, review records and exports remain
+public research material that the operator must protect.
+
+This is a repository-defined application extension, not a blueprint coverage claim. Declaration
+acceptance is a host-recorded caller assertion; the earlier frozen protocol 0.2/0.3 model probe
+did not evaluate this review flow or establish automatic obligation extraction reliability.
+
 ## Plan and run authority
 
 The server launches only the fixed module `prism_sdk.workflow_api_worker` with operator-owned
@@ -138,8 +184,13 @@ action-specific fields. IDs are 32 lowercase hexadecimal characters; they are ne
 |---|---|---|
 | GET | `/v1/executable-workflows/catalogue` | Installed operation descriptors |
 | POST | `/v1/executable-workflows/interpret` | Pure bounded glioma interpretation |
+| POST | `/v1/executable-workflows/intent-reviews/prepare` | Retain exact declaration rows as an unreviewed candidate |
+| POST | `/v1/executable-workflows/intent-reviews/suggest` | One separately approved local model suggestion attempt |
+| GET | `/v1/executable-workflows/intent-reviews/{id}` | Load retained candidate, context and acceptance findings |
+| POST | `/v1/executable-workflows/intent-reviews/accept` | Explicit caller acceptance of the exact review digest |
 | POST | `/v1/executable-workflows/plans` | Build and retain a validated plan |
 | GET | `/v1/executable-workflows/plans/{id}` | Retained task, contract, and current plan |
+| GET | `/v1/executable-workflows/plans/{id}/intent-evidence` | Explicit native declaration evidence download |
 | POST | `/v1/executable-workflows/plans/validate` | Validate and save an edited revision |
 | POST | `/v1/executable-workflows/runs` | Create a run, then start a background worker |
 | GET | `/v1/executable-workflows/runs/{id}` | Metadata-only inspection |
@@ -147,6 +198,7 @@ action-specific fields. IDs are 32 lowercase hexadecimal characters; they are ne
 | POST | `/v1/executable-workflows/runs/{id}/resume` | Explicit reviewed admission or resume |
 | GET | `/v1/executable-workflows/runs/{id}/outputs` | Explicit JSON output download |
 | GET | `/v1/executable-workflows/runs/{id}/checkpoint` | Explicit full checkpoint download |
+| GET | `/v1/executable-workflows/runs/{id}/intent-evidence` | Declaration evidence with the run's original native plan |
 
 Creation and resume return HTTP 202 after the process thread is admitted. Poll the returned run
 ID to observe the result; 202 does not mean that source calls completed. `worker_process` reports

@@ -299,9 +299,21 @@ impl WorkflowApplication {
             let command = match segments.as_slice() {
                 ["catalogue"] => json!({"action":"catalogue"}),
                 ["providers"] => json!({"action":"providers"}),
+                ["intent-reviews", id] => {
+                    valid_id(id)?;
+                    json!({"action":"get_review","review_id":id})
+                }
                 ["plans", id] => {
                     valid_id(id)?;
                     json!({"action":"get_plan","plan_id":id})
+                }
+                ["plans", id, "intent-evidence"] => {
+                    valid_id(id)?;
+                    json!({"action":"export_evidence","plan_id":id,"format":"json_text"})
+                }
+                ["runs", id, "intent-evidence"] => {
+                    valid_id(id)?;
+                    json!({"action":"export_evidence","run_id":id,"format":"json_text"})
                 }
                 ["runs", id] => {
                     valid_id(id)?;
@@ -314,6 +326,42 @@ impl WorkflowApplication {
                 _ => return Err((404, "route does not exist".into())),
             };
             let mut response = self.call(command, Duration::from_secs(30));
+            if let [owner @ ("plans" | "runs"), id, "intent-evidence"] = segments.as_slice() {
+                if response.status == 200 {
+                    let exported: Value = serde_json::from_slice(&response.body)
+                        .map_err(|_| (503, "worker evidence export was invalid".into()))?;
+                    let data = exported
+                        .get("data")
+                        .ok_or((503, "worker evidence export omitted data".into()))?;
+                    let matches_owner = if *owner == "plans" {
+                        data.get("plan_id").and_then(Value::as_str) == Some(*id)
+                            && data.get("run_id") == Some(&Value::Null)
+                    } else {
+                        data.get("run_id").and_then(Value::as_str) == Some(*id)
+                    };
+                    if data.get("kind").and_then(Value::as_str) != Some("intent_evidence")
+                        || !matches_owner
+                    {
+                        return Err((
+                            503,
+                            "worker evidence export identity was inconsistent".into(),
+                        ));
+                    }
+                    let artifact = data.get("json_text").and_then(Value::as_str).ok_or((
+                        503,
+                        "worker evidence export omitted authoritative JSON text".into(),
+                    ))?;
+                    response = HttpResponse::text(
+                        200,
+                        "application/json; charset=utf-8",
+                        artifact.as_bytes().to_vec(),
+                    )
+                    .with_header(
+                        "content-disposition",
+                        format!("attachment; filename=aurora-{id}-intent-evidence.json"),
+                    );
+                }
+            }
             if let ["runs", id] = segments.as_slice() {
                 if let Ok(runs) = self.runs.lock() {
                     if let Some(observed) = runs.get(*id) {
@@ -375,6 +423,62 @@ impl WorkflowApplication {
             .cloned()
             .ok_or((400, "request body must be a JSON object".into()))?;
         match segments.as_slice() {
+            ["intent-reviews", "prepare"] => {
+                only_keys(
+                    &body,
+                    &[
+                        "task",
+                        "planner",
+                        "obligations",
+                        "requirements",
+                        "max_steps",
+                        "planning_attempts",
+                        "max_model_calls",
+                        "decision_attempts",
+                        "operation_ids",
+                    ],
+                )?;
+                Ok(self.call_object("prepare_review", &request.body, Duration::from_secs(30)))
+            }
+            ["intent-reviews", "suggest"] => {
+                only_keys(
+                    &body,
+                    &[
+                        "task",
+                        "planner",
+                        "requirements",
+                        "max_steps",
+                        "planning_attempts",
+                        "max_model_calls",
+                        "decision_attempts",
+                        "operation_ids",
+                        "approve_provider_call",
+                    ],
+                )?;
+                if body.get("approve_provider_call") != Some(&Value::Bool(true)) {
+                    return Err((
+                        422,
+                        "suggestions require an explicit literal true provider-call grant".into(),
+                    ));
+                }
+                let _planning_permit =
+                    admit(&self.planning_workers, 2).map_err(|error| (429, error.into()))?;
+                Ok(self.call_object("suggest_review", &request.body, Duration::from_secs(300)))
+            }
+            ["intent-reviews", "accept"] => {
+                only_keys(
+                    &body,
+                    &[
+                        "review_id",
+                        "expected_review_digest",
+                        "accept_caller_declarations",
+                    ],
+                )?;
+                if body.get("accept_caller_declarations") != Some(&Value::Bool(true)) {
+                    return Err((422, "review acceptance requires an explicit literal true caller-declaration acceptance".into()));
+                }
+                Ok(self.call_object("accept_review", &request.body, Duration::from_secs(30)))
+            }
             ["interpret"] => {
                 only_keys(&body, &["task"])?;
                 Ok(self.call_object("interpret", &request.body, Duration::from_secs(30)))
@@ -392,6 +496,8 @@ impl WorkflowApplication {
                         "max_model_calls",
                         "decision_attempts",
                         "operation_ids",
+                        "intent_review_id",
+                        "expected_acceptance_digest",
                     ],
                 )?;
                 // Long model requests cannot consume every short control slot needed to cancel

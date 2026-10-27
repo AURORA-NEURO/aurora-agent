@@ -553,6 +553,196 @@ fn incremental_controls_pass_the_http_allowlist_but_never_bypass_worker_approval
 }
 
 #[test]
+fn intent_review_routes_refuse_forged_authority_duplicate_literals_and_foreign_requests_before_worker_start(
+) {
+    let fixture = Fixture::new();
+    let router = fixture.router();
+    for path in [
+        "intent-reviews/prepare",
+        "intent-reviews/suggest",
+        "intent-reviews/accept",
+    ] {
+        let mut unauthenticated = request("POST", &format!("{PREFIX}/{path}"), json!({}));
+        unauthenticated.headers.remove("authorization");
+        assert_eq!(router.handle(unauthenticated).status, 401);
+        let mut foreign = request("POST", &format!("{PREFIX}/{path}"), json!({}));
+        foreign
+            .headers
+            .insert("origin".into(), "https://foreign.invalid".into());
+        assert_eq!(router.handle(foreign).status, 403);
+    }
+    for value in [json!(false), json!(1), json!("true"), Value::Null] {
+        assert_eq!(router.handle(request("POST", &format!("{PREFIX}/intent-reviews/accept"), json!({
+            "review_id":"a".repeat(32), "expected_review_digest":"b".repeat(64), "accept_caller_declarations":value
+        }))).status, 422);
+        assert_eq!(router.handle(request("POST", &format!("{PREFIX}/intent-reviews/suggest"), json!({
+            "task":"Read public metadata", "planner":"local-model", "approve_provider_call":value
+        }))).status, 422);
+    }
+    for field in [
+        "interpretation_basis",
+        "human_reviewed",
+        "approve_source_dispatch",
+        "argv",
+    ] {
+        let mut fields =
+            json!({"task":"Read public metadata", "planner":"local-model", "obligations":[]});
+        fields[field] = json!(true);
+        assert_eq!(
+            router
+                .handle(request(
+                    "POST",
+                    &format!("{PREFIX}/intent-reviews/prepare"),
+                    fields
+                ))
+                .status,
+            422
+        );
+    }
+    let mut duplicate = request(
+        "POST",
+        &format!("{PREFIX}/intent-reviews/prepare"),
+        json!({}),
+    );
+    duplicate.body =
+        br#"{"task":"Read","planner":"local-model","obligations":[{"value":{"n":1,"n":2}}]}"#
+            .to_vec();
+    assert_eq!(router.handle(duplicate).status, 400);
+    for path in [
+        "intent-reviews/not-an-id",
+        "plans/not-an-id/intent-evidence",
+        "runs/not-an-id/intent-evidence",
+    ] {
+        assert_eq!(
+            router
+                .handle(request("GET", &format!("{PREFIX}/{path}"), json!({})))
+                .status,
+            422
+        );
+    }
+    assert_eq!(std::fs::read_dir(&fixture.root).unwrap().count(), 0);
+}
+
+#[test]
+fn actual_http_review_requires_explicit_acceptance_and_keeps_unavailable_mandatory_work_blocking_without_a_model(
+) {
+    let fixture = Fixture::new();
+    let router = fixture.router();
+    let task = "Read PubMed then write Notion";
+    let prepared = data(body(router.handle(request("POST", &format!("{PREFIX}/intent-reviews/prepare"), json!({
+        "task":task, "planner":"local-model", "max_steps":4,
+        "obligations":[{"id":"mandatory-write", "kind":"required_operation", "operation":"notion.write", "output":false,
+            "span":{"start":17,"end":29,"text":"write Notion"}}]
+    })))));
+    assert_eq!(prepared["status"], "review_required");
+    assert_eq!(
+        prepared["candidate"]["interpretation_basis"],
+        "model_candidate"
+    );
+    assert_eq!(prepared["source_dispatch"], false);
+    assert!(prepared["acceptance"].is_null());
+    let id = prepared["review_id"].as_str().unwrap();
+    let loaded = data(body(router.handle(request(
+        "GET",
+        &format!("{PREFIX}/intent-reviews/{id}"),
+        json!({}),
+    ))));
+    assert_eq!(loaded, prepared);
+    let premature = body(router.handle(request(
+        "POST",
+        &format!("{PREFIX}/plans"),
+        json!({
+            "task":task, "planner":"local-model", "max_steps":4, "intent_review_id":id,
+            "expected_acceptance_digest":"b".repeat(64), "approve_provider_call":false
+        }),
+    )));
+    assert_eq!(premature["error"]["code"], "review_required");
+    let accepted = data(body(router.handle(request("POST", &format!("{PREFIX}/intent-reviews/accept"), json!({
+        "review_id":id,"expected_review_digest":prepared["review_digest"],"accept_caller_declarations":true
+    })))));
+    assert_eq!(accepted["status"], "accepted");
+    assert_ne!(
+        accepted["acceptance"]["admission"]["status"],
+        "ready_for_constrained_authoring"
+    );
+    let blocked = data(body(router.handle(request("POST", &format!("{PREFIX}/plans"), json!({
+        "task":task, "planner":"local-model", "max_steps":4, "intent_review_id":id,
+        "expected_acceptance_digest":accepted["acceptance"]["acceptance_digest"], "approve_provider_call":false
+    })))));
+    assert_ne!(blocked["status"], "planned");
+    assert_eq!(blocked["source_dispatch"], false);
+    assert!(blocked.get("plan").is_none());
+    let changed = body(router.handle(request("POST", &format!("{PREFIX}/plans"), json!({
+        "task":task, "planner":"local-model", "max_steps":5, "intent_review_id":id,
+        "expected_acceptance_digest":accepted["acceptance"]["acceptance_digest"], "approve_provider_call":false
+    }))));
+    assert_eq!(changed["error"]["code"], "revision_conflict");
+    assert_eq!(
+        std::fs::read_dir(fixture.root.join("plans"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(
+        std::fs::read_dir(fixture.root.join("runs"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn review_bridge_retains_large_literal_tokens_and_exports_authoritative_evidence_text_with_owner_checks(
+) {
+    let mut fixture = Fixture::new();
+    let sdk = fixture.root.join("fixture-sdk");
+    let package = sdk.join("prism_sdk");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("__init__.py"), "").unwrap();
+    std::fs::write(package.join("workflow_api_worker.py"), r#"import json,sys
+r=json.load(sys.stdin)
+if r['action']=='prepare_review':
+ data={'action':r['action'],'literal':r['obligations'][0]['value']}
+elif r['action']=='export_evidence':
+ owner=r.get('plan_id',r.get('run_id'))
+ data={'kind':'intent_evidence','plan_id':r.get('plan_id','a'*32),'run_id':r.get('run_id'),'plan_digest':'b'*64,'json_text':'{"integer":1208925819614629174706176,"float":1.0}'}
+ if owner=='f'*32:data['run_id']='e'*32;data['plan_id']='e'*32
+else:raise AssertionError(r)
+print(json.dumps({'schema':'aurora-workflow-api-response/0.1','ok':True,'data':data}))
+"#).unwrap();
+    fixture.config.python_path = sdk;
+    let application = fixture.application();
+    let mut exact = request(
+        "POST",
+        &format!("{PREFIX}/intent-reviews/prepare"),
+        json!({}),
+    );
+    exact.body = br#"{"task":"Read","planner":"local-model","obligations":[{"value":[1208925819614629174706176,1,1.0,true]}]}"#.to_vec();
+    let echoed = application.handle(&exact);
+    assert_eq!(echoed.status, 200);
+    let text = String::from_utf8(echoed.body).unwrap();
+    assert!(text.contains("1208925819614629174706176, 1, 1.0, true"));
+    for owner in ["plans", "runs"] {
+        let exported = application.handle(&request(
+            "GET",
+            &format!("{PREFIX}/{owner}/{}/intent-evidence", "a".repeat(32)),
+            json!({}),
+        ));
+        assert_eq!(exported.status, 200);
+        assert_eq!(
+            exported.body.as_slice(),
+            br#"{"integer":1208925819614629174706176,"float":1.0}"#
+        );
+        let wrong = application.handle(&request(
+            "GET",
+            &format!("{PREFIX}/{owner}/{}/intent-evidence", "f".repeat(32)),
+            json!({}),
+        ));
+        assert_eq!(wrong.status, 503);
+    }
+}
+
+#[test]
 fn actual_worker_retains_task_contract_and_changed_revisions_refuse_stale_approval() {
     let fixture = Fixture::new();
     let application = fixture.application();

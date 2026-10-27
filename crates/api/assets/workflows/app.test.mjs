@@ -62,6 +62,194 @@ function planned() {
     interpretation: { status: 'planned', model_calls: 3, source_dispatches: 0, visible_operations: ['pubmed.search'], limits: { max_model_calls: 3, max_decision_attempts: 1 } } };
 }
 
+function declarationReview(overrides = {}) {
+  return { status: 'review_required', review_id: 'c'.repeat(32), review_digest: 'd'.repeat(64), task, planner: 'local-model',
+    context: { task, planner: 'local-model', max_steps: 16, planning_attempts: 1, max_model_calls: null, decision_attempts: null, operation_ids: null,
+      pre_obligation_requirements: { schema: 'offline-contract', retained: 'caller contract' } },
+    candidate: { interpretation_basis: 'model_candidate', obligations: [{ id: 'required-read', kind: 'required_operation', span: { start: 0, end: 7, text: 'Inspect' }, operation: 'pubmed.search', output: false }] },
+    candidate_admission: { status: 'blocked', blocking_issues: [{ code: 'unreviewed_model_candidate' }] }, acceptance: null, source_dispatch: false, ...overrides };
+}
+function acceptedReview(review = declarationReview(), status = 'ready_for_constrained_authoring') {
+  return { ...review, status: 'accepted', acceptance: { acceptance_digest: 'e'.repeat(64), admission: { status } } };
+}
+function children(node) { return [node, ...node.children.flatMap(children)]; }
+function declarationField(p, name) { const node = children(p.$('mandatory-rows')).find(child => child.name === name); assert.ok(node, name); return node; }
+async function manualDeclaration(p) {
+  p.$('planner').value = 'local-model'; await p.$('planner').fire('change');
+  p.$('mandatory-enabled').checked = true; await p.$('mandatory-enabled').fire('change');
+  p.$('task').selectionStart = 0; p.$('task').selectionEnd = 7; await p.$('mandatory-add').fire('click');
+  const operation = declarationField(p, 'Operation ID'); operation.value = 'pubmed.search'; await operation.fire('input');
+}
+async function prepareAndAccept(p, review = declarationReview()) {
+  p.replies.push(review); await p.$('mandatory-prepare').fire('click');
+  p.$('mandatory-accept-grant').checked = true; await p.$('mandatory-accept-grant').fire('change');
+  p.replies.push(acceptedReview(review)); await p.$('mandatory-accept').fire('click');
+}
+
+test('mandatory declarations are opt-in and require separate review acceptance before model planning', async () => {
+  const p = page(); await p.connect(['pubmed.search']); await manualDeclaration(p);
+  await p.$('plan-form').fire('submit');
+  assert.equal(p.calls.length, 1); assert.match(p.$('error').textContent, /explicitly accept/);
+  await prepareAndAccept(p);
+  const preparation = p.calls.find(call => call.url.endsWith('/intent-reviews/prepare'));
+  assert.deepEqual(preparation.body.obligations[0], { id: preparation.body.obligations[0].id, kind: 'required_operation', span: { start: 0, end: 7, text: 'Inspect' }, operation: 'pubmed.search', output: false });
+  assert.equal(preparation.body.interpretation_basis, undefined);
+  assert.match(p.$('mandatory-findings').textContent, /model_candidate/);
+  assert.equal(p.$('source-grant').disabled, true);
+  p.replies.push({ ...planned(), planner: 'local-model', intent_review: { review_id: 'c'.repeat(32) } });
+  p.$('provider-grant').checked = true; await p.$('plan-form').fire('submit');
+  assert.deepEqual(p.calls.at(-1).body, { task, planner: 'local-model', max_steps: 16, approve_provider_call: true, intent_review_id: 'c'.repeat(32), expected_acceptance_digest: 'e'.repeat(64) });
+  assert.equal(p.$('source-grant').checked, false); assert.equal(p.$('run').disabled, true);
+  assert.equal(p.calls.filter(call => call.url.endsWith('/runs')).length, 0);
+});
+
+test('task selection converts browser UTF16 units to Python code point offsets without repairing split characters', async () => {
+  const p = page(); await p.connect(['pubmed.search']);
+  p.$('planner').value = 'local-model'; await p.$('planner').fire('change');
+  p.$('mandatory-enabled').checked = true; await p.$('mandatory-enabled').fire('change');
+  p.$('task').value = '🧠 Read 🧬 then Read'; await p.$('task').fire('input');
+  p.$('task').selectionStart = 3; p.$('task').selectionEnd = 7; await p.$('mandatory-add').fire('click');
+  assert.equal(declarationField(p, 'Start (Unicode code points)').value, '2');
+  assert.equal(declarationField(p, 'Exact task excerpt').value, 'Read');
+  declarationField(p, 'Operation ID').value = 'pubmed.search'; await declarationField(p, 'Operation ID').fire('input');
+  p.replies.push(declarationReview({ task: p.$('task').value })); await p.$('mandatory-prepare').fire('click');
+  assert.deepEqual(p.calls.at(-1).body.obligations[0].span, { start: 2, end: 6, text: 'Read' });
+  p.$('task').selectionStart = 1; p.$('task').selectionEnd = 2; await p.$('mandatory-add').fire('click');
+  assert.match(p.$('error').textContent, /complete Unicode/);
+  assert.equal(p.$('mandatory-rows').children.length, 1);
+});
+
+test('mandatory literal JSON keeps integer float boolean and negative zero number tokens exact', async () => {
+  const p = page(); await p.connect(['pubmed.search']); await manualDeclaration(p);
+  declarationField(p, 'Kind').value = 'argument_equals'; await declarationField(p, 'Kind').fire('change');
+  declarationField(p, 'Argument JSON pointer').value = '/panel'; await declarationField(p, 'Argument JSON pointer').fire('input');
+  declarationField(p, 'Literal JSON value').value = '[9007199254740993,1,1.0,true,-0.0]'; await declarationField(p, 'Literal JSON value').fire('input');
+  p.replies.push(declarationReview()); await p.$('mandatory-prepare').fire('click');
+  assert.ok(p.calls.at(-1).options.body.includes('9007199254740993'));
+  assert.ok(p.calls.at(-1).options.body.includes('1,\n      1.0,\n      true,\n      -0.0') || /1,\s+1\.0,\s+true,\s+-0\.0/.test(p.calls.at(-1).options.body));
+  declarationField(p, 'Literal JSON value').value = '{"a":1,"a":2}'; await declarationField(p, 'Literal JSON value').fire('input');
+  const count = p.calls.length; await p.$('mandatory-prepare').fire('click'); assert.equal(p.calls.length, count);
+  assert.match(p.$('error').textContent, /unique object fields/);
+});
+
+test('accepted declarations with blocking admission cannot authorize planning', async () => {
+  const p = page(); await p.connect(['pubmed.search']); await manualDeclaration(p);
+  p.replies.push(declarationReview()); await p.$('mandatory-prepare').fire('click');
+  p.$('mandatory-accept-grant').checked = true; await p.$('mandatory-accept-grant').fire('change');
+  p.replies.push(acceptedReview(declarationReview(), 'blocked')); await p.$('mandatory-accept').fire('click');
+  assert.match(p.$('mandatory-status').textContent, /still blocks/);
+  const count = p.calls.length; await p.$('plan-form').fire('submit'); assert.equal(p.calls.length, count);
+  assert.equal(p.$('source-grant').disabled, true);
+});
+
+for (const edited of ['task', 'max-steps', 'max-model-calls', 'decision-attempts', 'operation-ids']) {
+  test(`editing ${edited} invalidates caller acceptance before a subsequent plan`, async () => {
+    const p = page(); await p.connect(['pubmed.search']); await manualDeclaration(p); await prepareAndAccept(p);
+    p.$(edited).value += ' '; await p.$(edited).fire('input');
+    assert.equal(p.$('mandatory-accept-grant').checked, false); assert.equal(p.$('mandatory-accept-grant').disabled, true);
+    const count = p.calls.length; await p.$('plan-form').fire('submit'); assert.equal(p.calls.length, count);
+  });
+}
+
+test('editing declaration rows or a failed request clears acceptance and cannot retain an earlier review', async () => {
+  const p = page(); await p.connect(['pubmed.search']); await manualDeclaration(p); await prepareAndAccept(p);
+  const operation = declarationField(p, 'Operation ID'); operation.value = 'unavailable.write'; await operation.fire('input');
+  assert.equal(p.$('mandatory-findings').textContent, ''); assert.equal(p.$('mandatory-accept-grant').disabled, true);
+  operation.value = 'pubmed.search'; await operation.fire('input'); await prepareAndAccept(p);
+  p.replies.push(JSON.stringify({ ok: false, error: { message: 'Inspection failed.' } })); await p.$('inspect-providers').fire('click');
+  const count = p.calls.length; await p.$('plan-form').fire('submit'); assert.equal(p.calls.length, count);
+});
+
+test('a racing prepare response after row edits or disconnect cannot enable acceptance', async () => {
+  for (const change of ['row', 'disconnect']) {
+    let release; const pending = new Promise(resolve => { release = resolve; });
+    const p = page(); await p.connect(['pubmed.search']); await manualDeclaration(p);
+    p.replies.push(() => pending); const preparing = p.$('mandatory-prepare').fire('click');
+    if (change === 'row') { declarationField(p, 'Operation ID').value = 'other.operation'; await declarationField(p, 'Operation ID').fire('input'); }
+    else await p.$('disconnect').fire('click');
+    release(declarationReview()); await preparing;
+    assert.equal(p.$('mandatory-accept-grant').disabled, true); assert.equal(p.$('mandatory-findings').textContent, '');
+    assert.equal(p.$('source-grant').disabled, true); assert.match(p.$('error').textContent, /changed while preparing/);
+  }
+});
+
+test('suggestions require a separate provider grant and stay unreviewed until caller acceptance', async () => {
+  const p = page(); await p.connect(['pubmed.search']); await manualDeclaration(p);
+  await p.$('mandatory-suggest').fire('click'); assert.equal(p.calls.length, 1);
+  p.$('mandatory-suggest-grant').checked = true; p.replies.push(declarationReview()); await p.$('mandatory-suggest').fire('click');
+  assert.equal(p.calls.at(-1).url, '/v1/executable-workflows/intent-reviews/suggest');
+  assert.equal(p.calls.at(-1).body.approve_provider_call, true); assert.equal(p.calls.at(-1).body.obligations, undefined);
+  assert.equal(p.$('mandatory-suggest-grant').checked, false); assert.equal(p.$('mandatory-accept-grant').checked, false);
+  assert.equal(p.$('source-grant').disabled, true); assert.equal(p.$('provider-grant').checked, false);
+  p.replies.push({ status: 'rejected', extraction: { raw_message: '<img src=x>' }, source_dispatch: false });
+  p.$('mandatory-suggest-grant').checked = true; await p.$('mandatory-suggest').fire('click');
+  assert.match(p.$('mandatory-findings').textContent, /<img/); assert.equal(p.$('mandatory-accept-grant').disabled, true);
+});
+
+test('durable review load preserves prior caller requirements and still needs explicit current-session acceptance', async () => {
+  const p = page(); await p.connect(['pubmed.search']);
+  p.$('mandatory-review-id').value = 'c'.repeat(32); p.replies.push(acceptedReview()); await p.$('mandatory-load').fire('click');
+  assert.equal(p.$('mandatory-enabled').checked, true); assert.equal(p.$('planner').value, 'local-model');
+  assert.equal(p.$('mandatory-accept-grant').checked, false);
+  const count = p.calls.length; await p.$('plan-form').fire('submit'); assert.equal(p.calls.length, count);
+  // A refused planning attempt invalidates the page's review, so explicitly load it again.
+  p.replies.push(acceptedReview()); await p.$('mandatory-load').fire('click');
+  p.$('mandatory-accept-grant').checked = true; await p.$('mandatory-accept-grant').fire('change');
+  p.replies.push(acceptedReview()); await p.$('mandatory-accept').fire('click');
+  p.replies.push({ ...planned(), planner: 'local-model', intent_review: {} }); await p.$('plan-form').fire('submit');
+  assert.deepEqual(p.calls.at(-1).body.requirements, declarationReview().context.pre_obligation_requirements);
+  assert.equal(p.calls.at(-1).body.planning_attempts, 1);
+});
+
+test('racing acceptance responses cannot survive changed controls or a different review identity', async () => {
+  for (const variant of ['edited', 'wrong identity']) {
+    let release; const pending = new Promise(resolve => { release = resolve; });
+    const p = page(); await p.connect(['pubmed.search']); await manualDeclaration(p);
+    p.replies.push(declarationReview()); await p.$('mandatory-prepare').fire('click');
+    p.$('mandatory-accept-grant').checked = true; await p.$('mandatory-accept-grant').fire('change');
+    p.replies.push(() => pending); const accepting = p.$('mandatory-accept').fire('click');
+    if (variant === 'edited') { p.$('max-steps').value = '8'; await p.$('max-steps').fire('input'); }
+    const result = acceptedReview(); if (variant === 'wrong identity') result.review_id = 'f'.repeat(32);
+    release(result); await accepting;
+    assert.equal(p.$('mandatory-accept-grant').disabled, true); assert.equal(p.$('source-grant').disabled, true);
+    const count = p.calls.length; await p.$('plan-form').fire('submit'); assert.equal(p.calls.length, count);
+  }
+});
+
+test('disconnect and reconnect prevent an old successful plan response from enabling source approval', async () => {
+  let release; const pending = new Promise(resolve => { release = resolve; });
+  const p = page(); await p.connect(['pubmed.search']); await manualDeclaration(p); await prepareAndAccept(p);
+  p.replies.push(() => pending); p.$('provider-grant').checked = true;
+  const building = p.$('plan-form').fire('submit'); await p.$('disconnect').fire('click'); await p.connect(['pubmed.search']);
+  release({ ...planned(), planner: 'local-model', intent_review: {} }); await building;
+  assert.equal(p.$('plan-workspace').hidden, true); assert.equal(p.$('source-grant').disabled, true);
+  assert.equal(p.$('mandatory-accept-grant').disabled, true);
+  assert.match(p.$('error').textContent, /controls changed/);
+});
+
+test('disconnect during durable run inspection cannot load an old plan into the disconnected editor', async () => {
+  let release; const pending = new Promise(resolve => { release = resolve; });
+  const p = page(); await p.connect(['pubmed.search']);
+  p.$('run-id').value = 'f'.repeat(32); p.replies.push(() => pending);
+  const loading = p.$('load-run').fire('click'); await p.$('disconnect').fire('click');
+  release({ run_id: 'f'.repeat(32), plan_id: 'a'.repeat(32), status: 'completed' }); await loading;
+  assert.equal(p.calls.length, 2); assert.equal(p.$('plan-workspace').hidden, true);
+  assert.equal(p.$('source-grant').disabled, true); assert.equal(p.$('mandatory-export-run').disabled, true);
+});
+
+test('manual excerpt mismatches are refused locally and a new declaration set explicitly clears inherited requirements', async () => {
+  const p = page(); await p.connect(['pubmed.search']); await manualDeclaration(p);
+  declarationField(p, 'Exact task excerpt').value = 'Different wording'; await declarationField(p, 'Exact task excerpt').fire('input');
+  await p.$('mandatory-prepare').fire('click'); assert.equal(p.calls.length, 1);
+  assert.match(p.$('error').textContent, /exact current task text/);
+  p.$('mandatory-review-id').value = 'c'.repeat(32); p.replies.push(declarationReview()); await p.$('mandatory-load').fire('click');
+  await p.$('mandatory-new').fire('click'); assert.equal(p.$('mandatory-rows').children.length, 0);
+  p.$('task').selectionStart = 0; p.$('task').selectionEnd = 7; await p.$('mandatory-add').fire('click');
+  declarationField(p, 'Operation ID').value = 'pubmed.search'; await declarationField(p, 'Operation ID').fire('input');
+  p.replies.push(declarationReview()); await p.$('mandatory-prepare').fire('click');
+  assert.equal(p.calls.at(-1).body.requirements, undefined); assert.equal(p.calls.at(-1).body.planning_attempts, undefined);
+});
+
 test('reviewed capability options require operator selection and every native operation', async () => {
   const profile = { profile_id: 'glioma-ontology', label: '<img src=x> source terminology',
     required_operations: ['nci_thesaurus.glioma_ontology'], operator_enabled: true, descriptor_available: true };
