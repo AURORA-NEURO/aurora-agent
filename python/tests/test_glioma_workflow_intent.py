@@ -201,6 +201,37 @@ def test_failed_dispatch_consumes_the_derived_single_attempt_budget_on_resume():
     assert held.status == "blocked" and calls == ["pubmed.search"]
 
 
+@pytest.mark.parametrize("pointer", ["/json", "/json/pointer", "/sources"])
+def test_native_intent_requires_the_whole_source_bundle_before_any_dispatch(pointer):
+    calls = []
+    catalog = _fixture_catalog(calls)
+    task = "Review glioma evidence using PubMed only."
+    plan = compile_glioma_workflow_request(task, catalog)
+    contract = plan.to_dict()["requirements"]
+    assert contract["schema"] == "aurora-workflow-requirements/0.2"
+    assert contract["data_links"][0] == {
+        "source_operation": "pubmed.search", "target_operation": "glioma.evidence.reconcile",
+        "source_pointer": "", "target_path": "/sources/0/bundle",
+    }
+    changed = _proposal(plan)
+    changed["steps"][1]["arguments"]["sources"][0]["bundle"] = {"$ref": "literature#" + pointer}
+    with pytest.raises((WorkflowRequirementError, WorkflowValidationError)):
+        compile_workflow_plan(changed, catalog, task=task, requirements=contract)
+    assert calls == []
+
+
+def test_native_intent_requires_whole_reconciliation_at_the_review_input():
+    calls = []
+    catalog = _fixture_catalog(calls)
+    task = "Review glioma evidence using PubMed only."
+    plan = compile_glioma_workflow_request(task, catalog)
+    changed = _proposal(plan)
+    changed["steps"][-1]["arguments"]["reconciliation"] = {"$ref": "reconcile#/json"}
+    with pytest.raises((WorkflowRequirementError, WorkflowValidationError)):
+        compile_workflow_plan(changed, catalog, task=task, requirements=plan.to_dict()["requirements"])
+    assert calls == []
+
+
 def test_receipt_is_a_copy_and_forged_metadata_cannot_replace_reinterpretation():
     intent = interpret_glioma_workflow_request(DEFAULT_TASK)
     catalog = _catalog()
@@ -231,8 +262,10 @@ def test_grounded_option_requires_registered_real_operations_without_invoking_a_
     assert plan["outputs"] == ["audit"]
     assert plan["requirements"]["output_operations"] == ["glioma.evidence.audit_draft"]
     assert plan["requirements"]["data_links"][-2:] == [
-        {"source_operation": "glioma.evidence.reconcile", "target_operation": "glioma.evidence.synthesize"},
-        {"source_operation": "glioma.evidence.synthesize", "target_operation": "glioma.evidence.audit_draft"},
+        {"source_operation": "glioma.evidence.reconcile", "target_operation": "glioma.evidence.synthesize",
+         "source_pointer": "", "target_path": "/reconciliation"},
+        {"source_operation": "glioma.evidence.synthesize", "target_operation": "glioma.evidence.audit_draft",
+         "source_pointer": "", "target_path": "/synthesis"},
     ]
     assert "glioma.evidence.review_handoff" not in plan["requirements"]["required_operations"]
     with pytest.raises(ArgumentError):

@@ -9,6 +9,12 @@ Every nonempty clause must match a documented form. Unknown text, unsupported fi
 conflicts produce `needs_clarification`, with spans copied from the original request. Compilation
 refuses that state. It never discards a restrictive clause and executes a broader search.
 
+Newly compiled native graphs use requirements version `0.2` to bind each whole source bundle at
+`/sources/N/bundle`, whole reconciliation at `/reconciliation`, and grounded draft inputs at their
+specific consumer argument paths. Invented child pointers and references placed elsewhere cannot
+satisfy those links. Previously saved `0.1` contracts retain their original semantics and digests;
+recompilation creates the stronger contract rather than silently changing an old plan.
+
 ## SDK use
 
 The CLI exposes the same model-free interpretation and compilation:

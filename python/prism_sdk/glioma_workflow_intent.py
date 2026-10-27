@@ -256,12 +256,17 @@ def compile_glioma_workflow_request(
     normalized = compile_workflow_plan(proposal, catalog, task=task).to_dict()
     proposal = {key: normalized[key] for key in ("name", "steps", "outputs")}
     required = [step["operation"] for step in proposal["steps"]]
-    links = [{"source_operation": source, "target_operation": "glioma.evidence.reconcile"} for source in receipt["source_operations"]]
+    links = [{"source_operation": source, "target_operation": "glioma.evidence.reconcile",
+              "source_pointer": "", "target_path": f"/sources/{index}/bundle"}
+             for index, source in enumerate(receipt["source_operations"])]
     if grounded:
-        links.extend([{"source_operation": "glioma.evidence.reconcile", "target_operation": "glioma.evidence.synthesize"},
-                      {"source_operation": "glioma.evidence.synthesize", "target_operation": "glioma.evidence.audit_draft"}])
+        links.extend([{"source_operation": "glioma.evidence.reconcile", "target_operation": "glioma.evidence.synthesize",
+                       "source_pointer": "", "target_path": "/reconciliation"},
+                      {"source_operation": "glioma.evidence.synthesize", "target_operation": "glioma.evidence.audit_draft",
+                       "source_pointer": "", "target_path": "/synthesis"}])
     else:
-        links.append({"source_operation": "glioma.evidence.reconcile", "target_operation": "glioma.evidence.review_handoff"})
+        links.append({"source_operation": "glioma.evidence.reconcile", "target_operation": "glioma.evidence.review_handoff",
+                      "source_pointer": "", "target_path": "/reconciliation"})
     rules = []
     for step in proposal["steps"]:
         for key, value in step["arguments"].items():
