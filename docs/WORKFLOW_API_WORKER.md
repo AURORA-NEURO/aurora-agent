@@ -68,7 +68,7 @@ Every request has an `action` field:
 | `execute` | `run_id`, `expected_plan_digest`, `approve_source_dispatch`; optional `resume`, `retry_failed`, `resume_cancelled`, `max_step_calls` | Durable execution and metadata-only observation |
 | `inspect` | `run_id` | Metadata-only run state and checkpoint projection |
 | `cancel` | `run_id` | Acknowledged cancellation request |
-| `export` | `run_id`, `kind` = `outputs` or `checkpoint` | Explicit retained public values or full checkpoint |
+| `export` | `run_id`, `kind` = `outputs` or `checkpoint`; optional `format` = `native` or `json_text` | Explicit retained public values or full checkpoint |
 
 IDs are random 32-character lowercase hexadecimal values. Digests are 64-character lowercase
 hexadecimal values. The server passes these opaque IDs; it cannot pass file names.
@@ -149,6 +149,17 @@ recognized scientific review dispositions. They omit result values and source re
 `export` is a separate explicit action that returns retained public evidence. Application
 storage itself contains those public values and requires the operator's retention policy.
 Execution completion does not approve scientific claims or authorize clinical action.
+
+The default `native` export preserves the original protocol's envelope with its `outputs` or
+`checkpoint` field. `format: "json_text"` instead returns `run_id`, `plan_digest`, `status`,
+`kind` and `json_text`, without duplicating the native artifact. `json_text` is the canonical
+JSON string of the actual artifact root: the SDK checkpoint object for `checkpoint`, or the
+outputs object for `outputs`. Write that string directly to the downloaded file. A checkpoint
+download is therefore accepted by `load_workflow_checkpoint` without unwrapping an application
+response. Passing the payload through a JSON string also preserves integers beyond JavaScript's
+safe integer range and float tokens such as `0.0` and `-0.0`; an intermediary must not parse and
+reserialize the artifact's numbers. The Rust HTTP application requests this format, unwraps the
+string into the actual HTTP attachment and lets the browser download its response text unchanged.
 
 ## Limits
 

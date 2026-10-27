@@ -558,18 +558,24 @@ class WorkflowAPIWorker:
         return self._inspect(run_id)
 
     def _action_export(self, request: dict[str, Any]) -> dict[str, Any]:
-        _fields(request, {"action", "run_id", "kind"})
+        _fields(request, {"action", "run_id", "kind"}, {"format"})
         run_id = _identity(request["run_id"])
         kind = request["kind"]
         if not isinstance(kind, str) or kind not in {"outputs", "checkpoint"}:
             _refuse("invalid_request", "The requested explicit export is not supported.")
+        export_format = request.get("format", "native")
+        if not isinstance(export_format, str) or export_format not in {"native", "json_text"}:
+            _refuse("invalid_request", "The requested explicit export format is not supported.")
         record = self._run(run_id)
         checkpoint = self._checkpoint(run_id, record["plan"])
         if checkpoint is None:
             _refuse("not_found", "The run has no retained checkpoint to export.")
         result = {"run_id": run_id, "plan_digest": record["plan"]["plan_digest"],
                   "status": checkpoint["status"]}
-        result[kind] = checkpoint if kind == "checkpoint" else WorkflowRun(_json(checkpoint)).outputs
+        artifact = checkpoint if kind == "checkpoint" else WorkflowRun(_json(checkpoint)).outputs
+        if export_format == "json_text":
+            return result | {"kind": kind, "json_text": _json(artifact)}
+        result[kind] = artifact
         return result
 
 

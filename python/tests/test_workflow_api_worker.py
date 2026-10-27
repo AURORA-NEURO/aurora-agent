@@ -2,6 +2,7 @@
 from copy import deepcopy
 import io
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -22,6 +23,8 @@ from prism_sdk.workflow_api_worker import (
     WorkflowAPIWorker, _diagnostic_rows, _error,
 )
 from prism_sdk.workflow_builder import load_workflow_checkpoint, save_workflow_checkpoint
+from prism_sdk.workflow_builder import execute_workflow_plan
+from prism_sdk.workflow_integrations import WorkflowOperation, WorkflowOperationCatalog, WorkflowOperationResult
 from prism_sdk.workflow_requirements import compile_workflow_requirements
 from test_workflow_cli import ERROR_DETAIL, PUBLIC_VALUE, _fixture_catalog, _proposal
 
@@ -330,6 +333,63 @@ def test_polling_and_execution_metadata_omit_public_values_and_source_receipts_b
     assert exported["outputs"] == {"second": {"public_value": PUBLIC_VALUE}}
     checkpoint = worker.handle({"action": "export", "run_id": run["run_id"], "kind": "checkpoint"})["checkpoint"]
     assert checkpoint["results"]["first"]["receipt"] == {"source": "local_transport_fixture"}
+
+
+def test_json_text_export_preserves_big_integers_float_tokens_and_replayable_checkpoint_root_without_source_replay(monkeypatch, tmp_path):
+    worker = WorkflowAPIWorker(tmp_path / "owned", model="fixture-model")
+    worker.catalog = WorkflowOperationCatalog()
+    schema = {"type": "object", "additionalProperties": False, "properties": {}, "required": []}
+    output = {"type": "object", "additionalProperties": False,
+              "properties": {"integer": {"type": "integer"}, "positive_zero": {"type": "number"},
+                             "negative_zero": {"type": "number"}, "float_one": {"type": "number"},
+                             "integer_zero": {"type": "integer"}, "false": {"type": "boolean"}},
+              "required": ["integer", "positive_zero", "negative_zero", "float_one", "integer_zero", "false"]}
+    value = {"integer": 2 ** 63 + 1, "positive_zero": 0.0, "negative_zero": -0.0,
+             "float_one": 1.0, "integer_zero": 0, "false": False}
+    calls = []
+    def source(arguments, **kwargs):
+        calls.append(dict(arguments))
+        return WorkflowOperationResult(value, {"fixture": "numeric_transport", "observed_integer": 2 ** 63 + 1})
+    worker.catalog.register(WorkflowOperation("fixture.numeric", "Read numeric fixture metadata", schema, output,
+        "fixture", implementation="live_adapter"), source)
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("ollama", lambda request: json.dumps({"name": "Numeric export fixture",
+        "steps": [{"id": "read", "operation": "fixture.numeric", "arguments": {}, "depends_on": []}], "outputs": ["read"]}))
+    monkeypatch.setattr(runtime, "register_provider", lambda config: None)
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", lambda: runtime)
+    plan = worker.handle({"action": "plan", "task": "Read numeric fixture metadata", "planner": "local-model",
+                          "approve_provider_call": True})
+    run = _create(worker, plan)
+    assert _execute(worker, run)["status"] == "completed" and calls == [{}]
+    exported = worker.handle({"action": "export", "run_id": run["run_id"], "kind": "checkpoint", "format": "json_text"})
+    assert set(exported) == {"run_id", "plan_digest", "status", "kind", "json_text"}
+    assert exported["kind"] == "checkpoint" and "checkpoint" not in exported
+    native = worker.handle({"action": "export", "run_id": run["run_id"], "kind": "checkpoint"})["checkpoint"]
+    assert exported["json_text"] == worker_module._json(native)
+    # The enclosing transport can parse/stringify its string without interpreting payload numbers.
+    transported = json.loads(json.dumps(exported))["json_text"]
+    assert str(2 ** 63 + 1) in transported and '"positive_zero":0.0' in transported and '"negative_zero":-0.0' in transported
+    downloaded = tmp_path / "downloaded-checkpoint.json"
+    downloaded.write_text(transported, encoding="utf-8")
+    checkpoint = load_workflow_checkpoint(downloaded)
+    retained = checkpoint["results"]["read"]["value"]
+    assert retained["integer"] == 2 ** 63 + 1 and type(retained["positive_zero"]) is float
+    assert type(retained["integer_zero"]) is int and retained["false"] is False and type(retained["float_one"]) is float
+    assert math.copysign(1, retained["negative_zero"]) == -1
+    assert checkpoint["checkpoint_digest"] == native["checkpoint_digest"]
+    assert execute_workflow_plan(plan["plan"], worker.catalog, approved=False, checkpoint=checkpoint).status == "completed"
+    outputs = worker.handle({"action": "export", "run_id": run["run_id"], "kind": "outputs", "format": "json_text"})
+    assert json.loads(outputs["json_text"]) == {"read": value} and "outputs" not in outputs
+    assert calls == [{}]
+
+
+@pytest.mark.parametrize("export_format", ["unknown", "JSON", "", True, 1, None])
+def test_unknown_export_format_is_refused_before_storage_or_dispatch(tmp_path, export_format):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    with pytest.raises(WorkflowAPIError) as error:
+        worker.handle({"action": "export", "run_id": "0" * 32, "kind": "checkpoint", "format": export_format})
+    assert error.value.code == "invalid_request"
+    assert not list((worker.root / "runs").iterdir())
 
 
 def test_cancel_before_first_dispatch_is_durable_until_separate_explicit_release(monkeypatch, tmp_path):
