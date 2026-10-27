@@ -76,6 +76,17 @@ def test_one_fixed_route_retains_exact_raw_bytes_native_source_qualifiers_and_re
     assert validate_nci_thesaurus_bundle(bundle) == bundle
 
 
+def test_unrequested_parts_have_unknown_omitted_counts_and_unknown_influence_without_sufficiency_claim():
+    bundle = read()
+    coverage = bundle["coverage"]
+    assert {row["source_part"] for row in coverage["omissions"]} == set(coverage["not_requested_concept_parts"])
+    assert all(row["reason"] == "not_requested" and row["omitted_count"] is None
+        and row["influence"] == "unknown" for row in coverage["omissions"])
+    assert coverage["exhaustiveness"] == "not_independently_established"
+    assert "sufficient" not in coverage
+    assert validate_nci_thesaurus_bundle(bundle) == bundle
+
+
 @pytest.mark.parametrize("approval", [False, None, 1, "true"])
 def test_literal_source_approval_is_required_before_any_callback(approval):
     fixture = Fixture()

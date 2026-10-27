@@ -56,7 +56,9 @@ Each requested part reports one of:
 | Admitted native records | `source_records` | observed array length |
 
 Unrequested synonyms, properties, descendants, history, inverse relations, mappings and paths are
-listed as omissions. Counts concern returned ontology records; they are not patient, cohort or
+listed as omissions. Each omitted part carries an unknown omitted count (`null`) and influence
+`unknown`; omission does not establish zero influence or decision sufficiency.
+Counts concern returned ontology records; they are not patient, cohort or
 assay denominators. The current `ncit` endpoint is not release-pinned. Its returned version is
 preserved, and cross-acquisition compatibility remains unestablished.
 

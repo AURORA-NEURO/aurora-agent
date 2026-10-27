@@ -279,6 +279,8 @@ def _bundle(config: NciThesaurusRetrievalConfig, *, retrieved_at: str, body: byt
             "reported_total_count": None, "exhaustiveness": "not_independently_established",
             "source_limit_marker_present": False, "pagination": "not_followed_fixed_concept_lookup",
             "not_requested_concept_parts": list(_OMITTED), "related_concept_detail": "minimal_source_metadata_only",
+            "omissions": [{"source_part": part, "reason": "not_requested", "omitted_count": None,
+                "influence": "unknown"} for part in _OMITTED],
             "scientific_evidence_validation": "unassessed", "clinical_or_cohort_evidence": False},
         "transport": {"mode": mode, "binding_id": binding, "transport_policy_digest": transport.transport_policy_digest,
             "config_digest": transport.config_digest,
