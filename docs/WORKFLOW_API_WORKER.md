@@ -30,6 +30,10 @@ registration switches do not establish live service coverage or authorize any di
 `--glioma-mutations` registers the fixed GDC TP53 aggregate reader and its two local review
 operations. `--gene-references` registers the fixed Ensembl TP53 reader and its two local
 comparison/review operations; NCBI Gene is already in the default catalogue. All switches
+remain opt-in. `--protein-pathways` adds the fixed UniProt P04637 and Reactome human annotation
+readers plus two local protein/pathway review operations. Its `protein-pathways` planner selects
+the exact four-step template without a model. General human annotations do not establish glioma
+pathway activity, enrichment, scientific identifier equivalence or clinical support. All switches
 default to false and preserve the legacy catalogue when omitted. The `glioma-mutations` and
 `gene-references` planners select exact three/four-stage templates without a model call.
 Task text labels those fixed queries and does not change their source selection. Operator
@@ -68,7 +72,7 @@ Every request has an `action` field:
 | --- | --- | --- |
 | `catalogue` | none | Actual registered SDK operation catalogue and digest |
 | `interpret` | `task` | Pure bounded glioma interpretation, including unresolved spans |
-| `plan` | `task`, `planner`; optional `requirements`, `approve_provider_call`, `max_steps`, `planning_attempts` | Retained task, plan ID, exact plan/digest, fixed contract and optional interpretation |
+| `plan` | `task`, `planner`; optional `requirements`, `approve_provider_call`, `max_steps`, `planning_attempts`; incremental only: `max_model_calls`, `decision_attempts`, `operation_ids` | A retained compiler-accepted plan, or a tagged nonplanned result without plan retention |
 | `get_plan` | `plan_id` | Current retained plan and task |
 | `validate` | `plan_id`, `expected_plan_digest`, `proposal` | Checked and persisted replacement revision |
 | `create_run` | `plan_id`, `expected_plan_digest` | New opaque run ID; no dispatch |
@@ -84,10 +88,39 @@ Unknown fields are rejected separately for every action.
 The plan response has `status`, `plan_id`, `task`, `planner`, `plan_digest`, `plan`,
 `source_dispatch: false` and, for typed intent, `interpretation`. The complete SDK plan includes
 its task digest, catalogue digest, steps, outputs and fixed requirements. `planner` accepts
-`glioma-intent` or `local-model`. The latter requires an operator-configured model and separate
+`glioma-intent`, `local-model`, `local-incremental`, `glioma-mutations`, `gene-references` or
+`protein-pathways`. Both local-model choices require an operator-configured model and separate
 literal `approve_provider_call: true`. Model generation is never source approval.
 `max_steps` defaults to 16, accepts 1–32 and remains fixed in the retained task contract.
 `planning_attempts` defaults to 1, accepts 1–4 and remains 1 for the typed planner.
+
+`local-incremental` is an explicit opt-in to model-selected, bounded stepwise planning. Its legacy
+`planning_attempts` must remain 1. `max_model_calls` is an integer from 1–128 (default 64), and
+`decision_attempts` is an integer from 1–4 (default 2). Each accepted step needs at least two model
+calls plus a later finish decision; rejected decisions consume the same total call budget. An
+optional `operation_ids` is a nonempty exact allowlist of registered IDs, without duplicates.
+The planner offers at most 32 visible read-only operations by default and refuses unsupported
+schemas before provider dispatch. Omit the allowlist to offer the installed admissible catalogue.
+Incremental controls on another planner are refused rather than ignored. Provider transport
+retries remain one; the HTTP application's separate 300-second planning deadline still applies.
+
+```json
+{"action":"plan","task":"Inspect public PubMed metadata","planner":"local-incremental","approve_provider_call":true,"max_steps":2,"max_model_calls":5,"decision_attempts":1,"operation_ids":["pubmed.search"]}
+```
+
+The real tagged planning receipt is returned as `interpretation`. `planned` alone contains an
+executable plan, which the worker validates and retains with its original task contract and
+receipt. `clarification_required`, `refused` and `budget_exhausted` contain no `plan` or `plan_id`
+and create no plan/run record, even if the receipt contains accepted partial step syntax. They
+trigger no fallback graph, implicit retry, source dispatch or execution. A provider/configuration
+failure remains an error envelope. Structural acceptance does not measure natural-language task
+fidelity or scientific validity; callers must supply fixed requirements for constrained claims.
+
+The browser exposes the incremental planner, call and decision bounds and optional operation
+allowlist explicitly. It displays nonplanned receipts as inert text and clears executable-plan
+approval state. Protein/pathway template availability requires all four installed operations;
+browser choices cannot enable operator catalogue switches. The Rust server's corresponding
+startup switch is `--workflow-protein-pathways`.
 
 For example, typed planning makes no model or source call:
 

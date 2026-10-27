@@ -47,6 +47,7 @@ impl Fixture {
             molecular_glioma: false,
             glioma_mutations: false,
             gene_references: false,
+            protein_pathways: false,
         };
         Self { root, config }
     }
@@ -183,7 +184,7 @@ fn hostile_origin_host_content_type_and_control_fields_are_refused_before_worker
     no_mime.headers.remove("content-type");
     assert_eq!(router.handle(no_mime).status, 415);
     assert_eq!(router.handle(request("POST", "/v1/executable-workflows/plans", json!({"task":"Review glioma evidence.","planner":"glioma-intent","argv":["forbidden"]}))).status,422);
-    for field in ["glioma_mutations", "gene_references"] {
+    for field in ["glioma_mutations", "gene_references", "protein_pathways"] {
         let mut body = json!({"task":"A fixed public research label","planner":"glioma-mutations"});
         body[field] = json!(true);
         assert_eq!(
@@ -319,6 +320,87 @@ fn optional_public_template_catalogues_are_operator_owned_and_plan_without_a_mod
             assert_eq!(bounded["ok"], false);
         }
     }
+}
+
+#[test]
+fn protein_pathway_flag_reaches_the_actual_worker_without_granting_source_or_model_calls() {
+    for enabled in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture.config.protein_pathways = enabled;
+        let application = fixture.application();
+        let catalogue = data(
+            application
+                .invoke(&json!({"action":"catalogue"}), Duration::from_secs(30))
+                .unwrap(),
+        );
+        assert_eq!(catalogue["operation_count"], if enabled { 14 } else { 10 });
+        let response = application.invoke(&json!({"action":"plan", "task":"Inspect fixed TP53 protein/pathway annotations", "planner":"protein-pathways"}), Duration::from_secs(30)).unwrap();
+        if !enabled {
+            assert_eq!(response["ok"], false);
+            continue;
+        }
+        let planned = data(response);
+        assert_eq!(planned["source_dispatch"], false);
+        assert_eq!(planned["interpretation"]["provider_calls"], 0);
+        assert_eq!(planned["plan"]["steps"].as_array().unwrap().len(), 4);
+        assert_eq!(
+            planned["plan"]["steps"][0]["operation"],
+            "uniprot.protein_annotation"
+        );
+        assert_eq!(
+            planned["plan"]["steps"][1]["operation"],
+            "reactome.pathway_annotations"
+        );
+        assert_eq!(
+            planned["plan"]["requirements"]["schema"],
+            "aurora-workflow-requirements/0.2"
+        );
+        assert_eq!(planned["plan"]["requirements"]["max_steps"], 4);
+        assert_eq!(
+            planned["plan"]["requirements"]["data_links"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            planned["plan"]["requirements"]["data_links"][0]["source_pointer"],
+            ""
+        );
+    }
+}
+
+#[test]
+fn incremental_controls_pass_the_http_allowlist_but_never_bypass_worker_approval_or_integer_checks()
+{
+    let fixture = Fixture::new();
+    let router = fixture.router();
+    for (model_calls, expected) in [
+        (json!(3), "approval_required"),
+        (json!(1.0), "invalid_request"),
+        (json!(true), "invalid_request"),
+    ] {
+        let response = router.handle(request("POST", "/v1/executable-workflows/plans", json!({
+            "task":"Inspect public metadata", "planner":"local-incremental", "max_model_calls":model_calls,
+            "decision_attempts":1, "planning_attempts":1, "operation_ids":["pubmed.search"],
+            "approve_provider_call":false
+        })));
+        let envelope: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(envelope["ok"], false);
+        assert_eq!(envelope["error"]["code"], expected);
+    }
+    assert_eq!(
+        std::fs::read_dir(fixture.root.join("plans"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(
+        std::fs::read_dir(fixture.root.join("runs"))
+            .unwrap()
+            .count(),
+        0
+    );
 }
 
 #[test]

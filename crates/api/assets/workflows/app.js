@@ -7,7 +7,8 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
   const endpoint = '/v1/executable-workflows';
   const templateOperations = {
     'glioma-mutations': ['gdc.gene_mutation_counts', 'glioma.mutation.analyze', 'glioma.mutation.review_handoff'],
-    'gene-references': ['ensembl.gene_references', 'glioma.gene_references.analyze', 'glioma.gene_references.review_handoff']
+    'gene-references': ['ensembl.gene_references', 'ncbi_gene.summary', 'glioma.gene_references.analyze', 'glioma.gene_references.review_handoff'],
+    'protein-pathways': ['uniprot.protein_annotation', 'reactome.pathway_annotations', 'glioma.protein_pathways.analyze', 'glioma.protein_pathways.review_handoff']
   };
   function error(message) { $('error').textContent = String(message); $('error').hidden = false; }
   function clearError() { $('error').hidden = true; $('error').textContent = ''; $('diagnostics-panel').hidden = true; }
@@ -29,6 +30,30 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
       $('planner').value = 'glioma-intent';
       if (state.plan) { state.planningSettingsDirty = true; dirty(); }
     }
+    updatePlanningControls();
+  }
+  function updatePlanningControls() {
+    const incremental = $('planner').value === 'local-incremental';
+    $('incremental-controls').hidden = !incremental;
+    for (const id of ['max-model-calls', 'decision-attempts', 'operation-ids']) $(id).disabled = !incremental;
+    $('provider-label').textContent = incremental ? 'Approve these bounded local model planning calls' : 'Approve this local model planning call';
+  }
+  function planningSnapshot() {
+    return ['task', 'planner', 'max-steps', 'max-model-calls', 'decision-attempts', 'operation-ids'].map(id => $(id).value).join('\u0000');
+  }
+  function planRequest() {
+    const body = { task: $('task').value, planner: $('planner').value, max_steps: Number($('max-steps').value), approve_provider_call: $('provider-grant').checked };
+    if (body.planner === 'local-incremental') {
+      body.max_model_calls = Number($('max-model-calls').value);
+      body.decision_attempts = Number($('decision-attempts').value);
+      if ($('operation-ids').value.trim()) body.operation_ids = parseJson($('operation-ids').value);
+    }
+    return body;
+  }
+  function clearPlan() {
+    state.plan = null; state.proposal = null; state.dirty = true; state.planningSettingsDirty = false;
+    $('plan-workspace').hidden = true; $('source-grant').checked = false; $('source-grant').disabled = true; $('run').disabled = true;
+    $('approval-identity').textContent = 'Build and validate a plan to enable execution.';
   }
   function renderCatalogue() {
     const filter = $('catalog-filter').value.toLowerCase(); const list = $('catalog-list'); list.replaceChildren();
@@ -56,7 +81,7 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
     });
   }
   function acceptPlan(data) {
-    if (data.status === 'needs_clarification') { showInterpretation(data.interpretation); throw new Error('The bounded interpreter needs clarification. Review the unresolved task spans and revise the task.'); }
+    if (data.status !== 'planned') { clearPlan(); showInterpretation(data.interpretation); error('Planning stopped: ' + String(data.status) + '. No executable plan was saved. Review the planning result before another attempt.'); return; }
     state.planningSettingsDirty = false; state.plan = data; state.proposal = proposalFromPlan(data.plan); state.dirty = false; $('plan-workspace').hidden = false;
     $('plan-identity').textContent = 'Revision ' + data.plan_id + '\nDigest ' + data.plan_digest;
     $('retained-task').textContent = data.task; $('contract').textContent = stringify(data.plan.requirements ?? { state: 'No additional fixed contract was supplied.' });
@@ -64,6 +89,12 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
     $('validation-status').textContent = 'Saved and validated by the Python engine.'; $('approval-identity').textContent = 'Approve exact digest: ' + data.plan_digest;
     $('source-grant').checked = false; $('source-grant').disabled = false; $('run').disabled = true;
     if (data.interpretation) showInterpretation(data.interpretation); diagnostics(data.validation);
+    if (data.planner === 'local-incremental' && data.interpretation?.limits) {
+      $('max-model-calls').value = String(data.interpretation.limits.max_model_calls);
+      $('decision-attempts').value = String(data.interpretation.limits.max_decision_attempts);
+      $('operation-ids').value = stringify(data.interpretation.visible_operations);
+    }
+    updatePlanningControls();
   }
   function showInterpretation(data) { $('interpretation-panel').hidden = false; $('interpretation-panel').open = true; $('interpretation').textContent = stringify(data); }
   async function pollRun() {
@@ -87,9 +118,10 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
   $('connect-form').addEventListener('submit', action(async () => { state.token = $('token').value; $('token').value = ''; $('connection-status').textContent = 'Connecting…'; try { const catalogue = await request('/catalogue'); state.catalogue = catalogue.operations; updatePlannerAvailability(); $('catalog-count').textContent = catalogue.operation_count + ' operations · ' + catalogue.integration_count + ' integration IDs'; $('connection-status').textContent = 'Connected to this local API'; renderCatalogue(); } catch (failure) { state.token = ''; state.catalogue = []; updatePlannerAvailability(); $('connection-status').textContent = 'Disconnected'; throw failure; } }));
   $('disconnect').addEventListener('click', () => { state.token = ''; state.catalogue = []; updatePlannerAvailability(); clearTimeout(state.timer); $('token').value = ''; $('connection-status').textContent = 'Disconnected'; $('source-grant').checked = false; $('run').disabled = true; });
   $('catalog-filter').addEventListener('input', renderCatalogue);
-  $('plan-form').addEventListener('submit', action(async () => { $('build').disabled = true; try { const requestedTask = $('task').value; const requestedPlanner = $('planner').value; const requestedMaximum = Number($('max-steps').value); const data = await request('/plans', { task: requestedTask, planner: requestedPlanner, max_steps: requestedMaximum, approve_provider_call: $('provider-grant').checked }); if ($('task').value !== requestedTask || $('planner').value !== requestedPlanner || Number($('max-steps').value) !== requestedMaximum) throw new Error('The task changed while planning. Build a new plan for the current task.'); acceptPlan(data); } finally { $('build').disabled = false; $('provider-grant').checked = false; } }));
+  $('plan-form').addEventListener('submit', action(async () => { $('build').disabled = true; try { const snapshot = planningSnapshot(); const body = planRequest(); clearPlan(); const data = await request('/plans', body); if (planningSnapshot() !== snapshot) throw new Error('The task or planning controls changed while planning. Build a new plan for the current settings.'); acceptPlan(data); } finally { $('build').disabled = false; $('provider-grant').checked = false; } }));
   $('interpret').addEventListener('click', action(async () => showInterpretation(await request('/interpret', { task: $('task').value }))));
-  for (const id of ['planner', 'max-steps']) $(id).addEventListener('change', () => { if (state.plan) { state.planningSettingsDirty = true; dirty(); } });
+  for (const id of ['planner', 'max-steps', 'max-model-calls', 'decision-attempts', 'operation-ids']) $(id).addEventListener('change', () => { updatePlanningControls(); if (state.plan) { state.planningSettingsDirty = true; dirty(); } });
+  for (const id of ['max-model-calls', 'decision-attempts', 'operation-ids']) $(id).addEventListener('input', () => { if (state.plan) { state.planningSettingsDirty = true; dirty(); } });
   $('task').addEventListener('input', () => { if (state.plan) { dirty(); $('validation-status').textContent = 'Task changed — build a new plan to retain a new task contract.'; } });
   $('plan-name').addEventListener('input', () => { state.proposal.name = $('plan-name').value; dirty(); updateProposalJson(); });
   $('outputs').addEventListener('input', () => { dirty(); try { const outputs = parseJson($('outputs').value); if (!Array.isArray(outputs)) throw new Error(); state.proposal.outputs = outputs; $('outputs').setCustomValidity(''); updateProposalJson(); } catch { $('outputs').setCustomValidity('Outputs require a JSON array.'); $('validation-status').textContent = 'Outputs require a JSON array.'; } });
@@ -104,4 +136,5 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
   $('cancel').addEventListener('click', action(async () => { await request('/runs/' + state.run.run_id + '/cancel', {}); await pollRun(); }));
   $('resume').addEventListener('click', action(async () => { if (!$('source-grant').checked || state.dirty || !state.plan || state.plan.plan_digest !== state.run.plan_digest) throw new Error('Load the unchanged saved plan and approve its exact digest before resuming.'); await request('/runs/' + state.run.run_id + '/resume', { expected_plan_digest: state.run.plan_digest, approve_source_dispatch: true, retry_failed: $('retry-failed').checked, resume_cancelled: $('release-cancel').checked, max_step_calls: Number($('call-budget').value) }); $('source-grant').checked = false; $('retry-failed').checked = false; $('release-cancel').checked = false; $('run').disabled = true; await pollRun(); }));
   $('export-outputs').addEventListener('click', action(() => exportRun('outputs'))); $('export-checkpoint').addEventListener('click', action(() => exportRun('checkpoint')));
+  updatePlanningControls();
 })();

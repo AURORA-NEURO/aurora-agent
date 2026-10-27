@@ -123,8 +123,9 @@ class WorkflowAPIWorker:
     def __init__(self, root: str | Path, *, base_url: str = "http://127.0.0.1:11434/v1",
                  model: str | None = None, research_sources: bool = False,
                  molecular_glioma: bool = False, glioma_mutations: bool = False,
-                 gene_references: bool = False, timeout_seconds: int = 120) -> None:
-        if any(type(value) is not bool for value in (research_sources, molecular_glioma, glioma_mutations, gene_references)):
+                 gene_references: bool = False, protein_pathways: bool = False,
+                 timeout_seconds: int = 120) -> None:
+        if any(type(value) is not bool for value in (research_sources, molecular_glioma, glioma_mutations, gene_references, protein_pathways)):
             _refuse("invalid_configuration", "Catalogue switches must be literal booleans.")
         if not isinstance(base_url, str):
             _refuse("invalid_configuration", "The local model endpoint is invalid.")
@@ -163,6 +164,13 @@ class WorkflowAPIWorker:
             from .glioma_gene_reference_workflow import register_glioma_gene_reference_workflow_operations
             register_ensembl_gene_operations(self.catalog)
             register_glioma_gene_reference_workflow_operations(self.catalog)
+        if protein_pathways:
+            from .reviewed_uniprot_retrieval import register_uniprot_operations
+            from .reviewed_reactome_retrieval import register_reactome_operations
+            from .glioma_protein_pathway_workflow import register_glioma_protein_pathway_workflow_operations
+            register_uniprot_operations(self.catalog)
+            register_reactome_operations(self.catalog)
+            register_glioma_protein_pathway_workflow_operations(self.catalog)
 
     @staticmethod
     def _directory_identity(path: Path) -> tuple[int, int]:
@@ -375,14 +383,31 @@ class WorkflowAPIWorker:
 
     def _action_plan(self, request: dict[str, Any]) -> dict[str, Any]:
         _fields(request, {"action", "task", "planner"},
-                {"requirements", "approve_provider_call", "max_steps", "planning_attempts"})
+                {"requirements", "approve_provider_call", "max_steps", "planning_attempts",
+                 "max_model_calls", "decision_attempts", "operation_ids"})
         task = _task(request["task"])
         approve = _boolean(request.get("approve_provider_call", False))
         max_steps = _integer(request.get("max_steps", 16), 1, 32)
         attempts = _integer(request.get("planning_attempts", 1), 1, 4)
         planner = request["planner"]
-        if planner not in {"glioma-intent", "local-model", "glioma-mutations", "gene-references"}:
+        if planner not in {"glioma-intent", "local-model", "local-incremental", "glioma-mutations", "gene-references", "protein-pathways"}:
             _refuse("invalid_request", "The selected planner is not supported.")
+        incremental_fields = {"max_model_calls", "decision_attempts", "operation_ids"}
+        if planner != "local-incremental" and incremental_fields & set(request):
+            _refuse("invalid_request", "Incremental controls require the local-incremental planner.")
+        if planner == "local-incremental":
+            if attempts != 1:
+                _refuse("invalid_request", "Incremental planning requires planning_attempts to remain one.")
+            model_calls = _integer(request.get("max_model_calls", 64), 1, 128)
+            decision_attempts = _integer(request.get("decision_attempts", 2), 1, 4)
+            operation_ids = request.get("operation_ids")
+            if "operation_ids" in request:
+                if (type(operation_ids) is not list or not 1 <= len(operation_ids) <= 128
+                        or any(type(item) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}", item) for item in operation_ids)
+                        or len(set(operation_ids)) != len(operation_ids)):
+                    _refuse("invalid_request", "Incremental operations require a nonempty exact allowlist.")
+                for operation_id in operation_ids:
+                    self.catalog.resolve(operation_id)
         contract = request.get("requirements")
         if contract is not None:
             contract = validate_workflow_requirements(contract, self.catalog,
@@ -405,15 +430,18 @@ class WorkflowAPIWorker:
                     self.catalog, task=task, requirements=merged)
             if len(plan.to_dict()["steps"]) > max_steps:
                 _refuse("invalid_request", "The typed plan exceeds the requested step bound.")
-        elif planner in {"glioma-mutations", "gene-references"}:
+        elif planner in {"glioma-mutations", "gene-references", "protein-pathways"}:
             if attempts != 1:
                 _refuse("invalid_request", "Fixed source templates have no model repair attempts.")
             if planner == "glioma-mutations":
                 from .glioma_mutation_workflow import compile_glioma_mutation_workflow
                 plan = compile_glioma_mutation_workflow(task, self.catalog, requirements=contract)
-            else:
+            elif planner == "gene-references":
                 from .glioma_gene_reference_workflow import compile_glioma_gene_reference_workflow
                 plan = compile_glioma_gene_reference_workflow(task, self.catalog, requirements=contract)
+            else:
+                from .glioma_protein_pathway_workflow import compile_glioma_protein_pathway_workflow
+                plan = compile_glioma_protein_pathway_workflow(task, self.catalog, requirements=contract)
             if len(plan.to_dict()["steps"]) > max_steps:
                 _refuse("invalid_request", "The fixed source template exceeds the requested step bound.")
             interpretation = {"schema": "aurora-fixed-research-template-selection/0.1", "template": planner,
@@ -428,8 +456,24 @@ class WorkflowAPIWorker:
             runtime = LLMRuntime()
             runtime.register_provider(ollama_provider(base_url=self.base_url, timeout_seconds=self.timeout_seconds,
                 max_attempts=1, structured_output_mode="json_schema"))
-            plan = LocalWorkflowBuilder(self.catalog, runtime, model=self.model).build(task,
-                approve_provider_call=True, max_steps=max_steps, requirements=contract, max_planning_attempts=attempts)
+            if planner == "local-incremental":
+                from .workflow_incremental_planner import IncrementalLocalWorkflowPlanner
+                result = IncrementalLocalWorkflowPlanner(self.catalog, runtime, model=self.model).build(task,
+                    approve_provider_call=True, max_steps=max_steps, requirements=contract,
+                    max_model_calls=model_calls, max_decision_attempts=decision_attempts,
+                    operation_ids=operation_ids)
+                interpretation = result.to_dict()
+                if result.status != "planned":
+                    if "plan" in interpretation or result.plan is not None:
+                        _refuse("validation_failed", "A nonplanned incremental result cannot contain an executable plan.")
+                    return {"status": result.status, "planner": planner, "interpretation": interpretation,
+                            "source_dispatch": False}
+                if result.plan is None:
+                    _refuse("validation_failed", "A planned incremental result lacks its compiler-accepted plan.")
+                plan = validate_workflow_plan(result.plan, self.catalog)
+            else:
+                plan = LocalWorkflowBuilder(self.catalog, runtime, model=self.model).build(task,
+                    approve_provider_call=True, max_steps=max_steps, requirements=contract, max_planning_attempts=attempts)
         plan_id = uuid4().hex
         record = {"schema": _PLAN_SCHEMA, "plan_id": plan_id, "task": task, "planner": planner,
                   "plan": plan.to_dict(), "requirements": plan.to_dict().get("requirements"),
@@ -665,6 +709,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--molecular-glioma", action="store_true")
     parser.add_argument("--glioma-mutations", action="store_true")
     parser.add_argument("--gene-references", action="store_true")
+    parser.add_argument("--protein-pathways", action="store_true")
     parser.add_argument("--timeout-seconds", type=int, default=120)
     args = parser.parse_args(argv)
     try:
@@ -676,6 +721,7 @@ def main(argv: list[str] | None = None) -> int:
         worker = WorkflowAPIWorker(args.root, base_url=args.base_url, model=args.model,
             research_sources=args.research_sources, molecular_glioma=args.molecular_glioma,
             glioma_mutations=args.glioma_mutations, gene_references=args.gene_references,
+            protein_pathways=args.protein_pathways,
             timeout_seconds=args.timeout_seconds)
         response = {"schema": WORKFLOW_API_RESPONSE_SCHEMA, "ok": True, "data": worker.handle(request)}
         encoded = _json(response)

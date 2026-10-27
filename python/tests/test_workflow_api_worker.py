@@ -806,3 +806,153 @@ def test_fixed_tp53_worker_scientific_review_status_survives_actual_local_execut
     _execute(worker, run, resume=True)
     assert calls() == expected_calls
     runtime.assert_not_called()
+
+
+def test_protein_pathway_worker_opt_in_is_inert_default_stable_and_actual_process_keeps_exact_contract(monkeypatch, tmp_path):
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", Mock(side_effect=AssertionError("fixed template must not construct a model")))
+    base = WorkflowAPIWorker(tmp_path / "base").handle({"action": "catalogue"})
+    selected = WorkflowAPIWorker(tmp_path / "protein", protein_pathways=True).handle({"action": "catalogue"})
+    assert {row["operation_id"] for row in selected["operations"]} - {row["operation_id"] for row in base["operations"]} == {
+        "uniprot.protein_annotation", "reactome.pathway_annotations", "glioma.protein_pathways.analyze", "glioma.protein_pathways.review_handoff"}
+    assert base["catalog_digest"] == WorkflowAPIWorker(tmp_path / "again").catalog.catalog_digest
+    request = {"action": "plan", "task": "Review fixed public TP53 protein/pathway annotations", "planner": "protein-pathways"}
+    root = tmp_path / "actual"
+    denied_process, denied = _invoke(root, request)
+    assert denied_process.returncode == 2 and denied["ok"] is False
+    assert not list((root / "plans").iterdir())
+    process, result = _invoke(root, request, flags=["--protein-pathways"])
+    assert process.returncode == 0 and process.stderr == "" and result["ok"] is True
+    data, plan = result["data"], result["data"]["plan"]
+    assert data["interpretation"]["provider_calls"] == 0 and data["source_dispatch"] is False
+    assert [row["operation"] for row in plan["steps"]] == ["uniprot.protein_annotation", "reactome.pathway_annotations",
+        "glioma.protein_pathways.analyze", "glioma.protein_pathways.review_handoff"]
+    contract = plan["requirements"]
+    assert contract["schema"] == "aurora-workflow-requirements/0.2" and contract["max_steps"] == 4
+    assert set(contract["max_calls_by_operation"].values()) == {1}
+    assert [(row["source_pointer"], row["target_path"]) for row in contract["data_links"]] == [
+        ("", "/uniprot_bundle"), ("", "/reactome_bundle"), ("", "/analysis")]
+    process, loaded = _invoke(root, {"action": "get_plan", "plan_id": data["plan_id"]}, flags=["--protein-pathways"])
+    assert process.returncode == 0 and loaded["data"] == data
+
+
+@pytest.mark.parametrize("options", [{"max_steps": 3}, {"planning_attempts": 2}, {"max_model_calls": 4}, {"operation_ids": []}])
+def test_fixed_protein_controls_refuse_before_persistence_or_model_construction(monkeypatch, tmp_path, options):
+    runtime = Mock(side_effect=AssertionError("model must not be constructed"))
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", runtime)
+    worker = WorkflowAPIWorker(tmp_path / "owned", protein_pathways=True)
+    with pytest.raises(ValueError):
+        worker.handle({"action": "plan", "task": "Fixed TP53 annotations", "planner": "protein-pathways", **options})
+    assert not list((worker.root / "plans").iterdir()) and not list((worker.root / "runs").iterdir())
+    runtime.assert_not_called()
+
+
+def test_protein_worker_fixture_execution_and_resume_preserve_scientific_hold_without_repeating_sources(tmp_path):
+    from prism_sdk.reviewed_uniprot_retrieval import register_uniprot_operations
+    from prism_sdk.reviewed_reactome_retrieval import register_reactome_operations
+    from prism_sdk.glioma_protein_pathway_workflow import register_glioma_protein_pathway_workflow_operations
+    from test_reviewed_uniprot_retrieval import Fixture as UniProtFixture
+    from test_reviewed_reactome_retrieval import Fixture as ReactomeFixture
+    uniprot, reactome = UniProtFixture(), ReactomeFixture()
+    worker = WorkflowAPIWorker(tmp_path / "owned", protein_pathways=True)
+    worker.catalog = register_uniprot_operations(WorkflowOperationCatalog(), fetcher=uniprot)
+    register_reactome_operations(worker.catalog, fetcher=reactome)
+    register_glioma_protein_pathway_workflow_operations(worker.catalog)
+    plan = worker.handle({"action": "plan", "task": "Fixed TP53 annotation review", "planner": "protein-pathways"})
+    run = _create(worker, plan)
+    assert _execute(worker, run, max_step_calls=1)["status"] == "paused"
+    assert len(uniprot.calls) == 1 and not reactome.calls
+    assert _execute(worker, run, resume=True)["status"] == "completed"
+    observed = worker.handle({"action": "inspect", "run_id": run["run_id"]})
+    hold = observed["output_review_statuses"]["review"]
+    assert hold["status"] == "awaiting_scientific_human_review"
+    assert hold["human_review_required"] is True and hold["scientific_support_established"] is False
+    assert _execute(worker, run, resume=True)["status"] == "completed"
+    assert len(uniprot.calls) == len(reactome.calls) == 1
+
+
+def _incremental_fixture(monkeypatch, tmp_path, decisions):
+    from test_workflow_incremental_planner import _catalog
+    worker = WorkflowAPIWorker(tmp_path / "owned", model="fixture-model")
+    worker.catalog = _catalog()
+    runtime, calls, choices = LLMRuntime(), [], iter(decisions)
+    def provider(request):
+        calls.append(request)
+        return json.dumps(next(choices))
+    runtime.register_in_memory_provider("ollama", provider, max_attempts=1)
+    monkeypatch.setattr(runtime, "register_provider", lambda config: None)
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", lambda: runtime)
+    return worker, calls
+
+
+@pytest.mark.parametrize("decisions,options,status,count", [
+    ([{"action": "clarify", "message": "Choose an operation"}], {}, "clarification_required", 1),
+    ([{"action": "refuse", "message": "Unsupported task"}], {}, "refused", 1),
+    ([{"action": "append", "operation": "fixture.alpha"}], {"max_model_calls": 1}, "budget_exhausted", 1),
+    ([{"action": "append", "operation": "fixture.alpha"}, {"action": "arguments", "arguments": {"text": "literal"}, "additional_dependencies": []}],
+        {"max_model_calls": 2}, "budget_exhausted", 2),
+])
+def test_incremental_nonplanned_results_retain_no_plan_or_run_even_with_accepted_partial_steps(monkeypatch, tmp_path, decisions, options, status, count):
+    worker, calls = _incremental_fixture(monkeypatch, tmp_path, decisions)
+    result = worker.handle({"action": "plan", "task": "Transform synthetic metadata", "planner": "local-incremental",
+        "approve_provider_call": True, **options})
+    assert result["status"] == status and result["planner"] == "local-incremental"
+    assert "plan" not in result and "plan_id" not in result and "plan" not in result["interpretation"]
+    assert len(calls) == count and result["interpretation"]["source_dispatches"] == 0
+    assert result["interpretation"]["limits"] == {"max_steps": 16, "max_model_calls": options.get("max_model_calls", 64), "max_decision_attempts": 2}
+    assert not list((worker.root / "plans").iterdir()) and not list((worker.root / "runs").iterdir())
+
+
+def test_incremental_planned_result_persists_compiler_contract_and_inspectable_receipt_without_execution(monkeypatch, tmp_path):
+    worker, calls = _incremental_fixture(monkeypatch, tmp_path, [
+        {"action": "append", "operation": "fixture.alpha"},
+        {"action": "arguments", "arguments": {"text": "literal"}, "additional_dependencies": []},
+        {"action": "finish", "name": "Synthetic metadata plan", "outputs": ["s1"]}])
+    task = "Transform synthetic metadata"
+    contract = compile_workflow_requirements(task, required_operations=["fixture.alpha"], max_steps=1)
+    result = worker.handle({"action": "plan", "task": task, "planner": "local-incremental", "approve_provider_call": True,
+        "max_steps": 1, "max_model_calls": 3, "decision_attempts": 1, "operation_ids": ["fixture.alpha"], "requirements": contract.to_dict()})
+    assert result["status"] == "planned" and result["source_dispatch"] is False and len(calls) == 3
+    assert result["plan"]["steps"][0]["operation"] == "fixture.alpha"
+    assert result["plan"]["requirements"]["required_operations"] == ["fixture.alpha"]
+    receipt = result["interpretation"]
+    assert receipt["status"] == "planned" and receipt["model_calls"] == 3 and receipt["source_dispatches"] == 0
+    assert receipt["visible_operations"] == ["fixture.alpha"]
+    assert receipt["limits"] == {"max_steps": 1, "max_model_calls": 3, "max_decision_attempts": 1}
+    assert worker.handle({"action": "get_plan", "plan_id": result["plan_id"]}) == result
+    assert len(list((worker.root / "plans").iterdir())) == 1 and not list((worker.root / "runs").iterdir())
+
+
+@pytest.mark.parametrize("options", [
+    {"max_model_calls": True}, {"max_model_calls": 1.0}, {"max_model_calls": 0}, {"max_model_calls": 129},
+    {"decision_attempts": True}, {"decision_attempts": 0}, {"decision_attempts": 5}, {"planning_attempts": 2},
+    {"operation_ids": None}, {"operation_ids": "fixture.alpha"}, {"operation_ids": []},
+    {"operation_ids": ["fixture.alpha", "fixture.alpha"]}, {"operation_ids": [1]}, {"operation_ids": ["not.registered"]},
+    {"approve_provider_call": False}, {"approve_provider_call": 1},
+])
+def test_incremental_controls_and_allowlist_refuse_before_provider_construction_or_retention(monkeypatch, tmp_path, options):
+    runtime = Mock(side_effect=AssertionError("invalid control must precede provider construction"))
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", runtime)
+    worker = WorkflowAPIWorker(tmp_path / "owned", model="fixture-model")
+    with pytest.raises(ValueError):
+        worker.handle({"action": "plan", "task": "Public metadata", "planner": "local-incremental", "approve_provider_call": True, **options})
+    runtime.assert_not_called()
+    assert not list((worker.root / "plans").iterdir()) and not list((worker.root / "runs").iterdir())
+
+
+@pytest.mark.parametrize("planner", ["glioma-intent", "local-model", "glioma-mutations", "gene-references", "protein-pathways"])
+@pytest.mark.parametrize("field,value", [("max_model_calls", 3), ("decision_attempts", 1), ("operation_ids", ["pubmed.search"])])
+def test_incremental_options_cannot_silently_change_another_planner(monkeypatch, tmp_path, planner, field, value):
+    runtime = Mock(side_effect=AssertionError("irrelevant controls must precede provider construction"))
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", runtime)
+    worker = WorkflowAPIWorker(tmp_path / "owned", model="fixture-model")
+    with pytest.raises(WorkflowAPIError):
+        worker.handle({"action": "plan", "task": TASK, "planner": planner, "approve_provider_call": True, field: value})
+    runtime.assert_not_called()
+
+
+def test_actual_incremental_worker_protocol_refuses_float_limits_and_missing_provider_approval(tmp_path):
+    root = tmp_path / "actual"
+    for options in ({"max_model_calls": 1.0, "approve_provider_call": True}, {"max_model_calls": 3}):
+        process, response = _invoke(root, {"action": "plan", "task": "Public metadata", "planner": "local-incremental", **options})
+        assert process.returncode == 2 and process.stderr == "" and response["ok"] is False
+        assert not list((root / "plans").iterdir()) and not list((root / "runs").iterdir())

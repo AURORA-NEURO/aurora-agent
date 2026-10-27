@@ -41,6 +41,7 @@ pub struct WorkflowApplicationConfig {
     pub molecular_glioma: bool,
     pub glioma_mutations: bool,
     pub gene_references: bool,
+    pub protein_pathways: bool,
 }
 
 impl WorkflowApplicationConfig {
@@ -371,6 +372,9 @@ impl WorkflowApplication {
                         "approve_provider_call",
                         "max_steps",
                         "planning_attempts",
+                        "max_model_calls",
+                        "decision_attempts",
+                        "operation_ids",
                     ],
                 )?;
                 // Long model requests cannot consume every short control slot needed to cancel
@@ -651,6 +655,9 @@ impl WorkflowApplication {
         }
         if self.config.gene_references {
             command.arg("--gene-references");
+        }
+        if self.config.protein_pathways {
+            command.arg("--protein-pathways");
         }
         #[cfg(windows)]
         {
