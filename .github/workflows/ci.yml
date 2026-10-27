@@ -284,3 +284,7 @@ jobs:
       - name: enforce autonomous selection promotion gate
         working-directory: typescript
         run: node --test test/autonomous-selection-promotion.test.mjs test/autonomous-selection-lifecycle.test.mjs
+      - name: verify workflow editor JSON fidelity
+        run: |
+          node --check --input-type=module < crates/api/assets/workflows/app.js
+          node --test crates/api/assets/workflows/json.test.mjs

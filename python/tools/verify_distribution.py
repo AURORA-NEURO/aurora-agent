@@ -22,7 +22,8 @@ PACKAGE_ROOT = PYTHON_ROOT / "prism_sdk"
 PROJECT = tomllib.loads((PYTHON_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
 
 
-def run(arguments: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run(arguments: list[str], *, cwd: Path, env: dict[str, str] | None = None,
+        input_text: str | None = None) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         arguments,
         cwd=cwd,
@@ -30,6 +31,7 @@ def run(arguments: list[str], *, cwd: Path, env: dict[str, str] | None = None) -
         check=False,
         capture_output=True,
         text=True,
+        input=input_text,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -177,7 +179,7 @@ def main() -> int:
                 "'glioma_molecular_workflow_proposal', 'WorkflowConnectionContext', "
                 "'WorkflowConnectionResource', 'WorkflowConnectionSession', 'WorkflowConnectionError', "
                 "'WorkflowArtifactSink', 'PreparedWorkflowArtifact', 'SQLiteWorkflowArtifactAuthorizationStore', "
-                "'WorkflowArtifactError', 'WorkflowArtifactCancelled'); "
+                "'WorkflowArtifactError', 'WorkflowArtifactCancelled', 'audit_workflow_reference_paths'); "
                 "assert all(name in prism_sdk.__all__ and callable(getattr(prism_sdk, name)) "
                 "and type(getattr(prism_sdk, name)).__name__ != '_UnavailableFeature' "
                 "for name in workflow_exports), 'new workflow exports must be real installed APIs'; "
@@ -264,6 +266,33 @@ def main() -> int:
                 "cbioportal.studies", "ncbi_gene.summary", "open_targets.associations", "gwas_catalog.associations",
                 "glioma.molecular.coverage", "glioma.molecular.review_handoff"}:
             raise RuntimeError("installed molecular workflow does not compose its real reviewed source operations")
+
+        application_root = temporary_root / "application"
+        application_root.mkdir()
+        def worker_call(request: dict) -> dict:
+            result = run([str(interpreter), "-m", "prism_sdk.workflow_api_worker", "--root", str(application_root)],
+                         cwd=temporary_root, env=clean_env, input_text=json.dumps(request))
+            envelope = json.loads(result.stdout)
+            if envelope.get("schema") != "aurora-workflow-api-response/0.1" or envelope.get("ok") is not True:
+                raise RuntimeError("installed application worker did not emit its successful protocol envelope")
+            return envelope["data"]
+        application_plan = worker_call({"action": "plan", "planner": "glioma-intent",
+            "task": "Review glioma evidence using PubMed only; exclude trials and TCGA."})
+        if application_plan["source_dispatch"] is not False or application_plan["plan"]["requirements"]["schema"] != "aurora-workflow-requirements/0.2":
+            raise RuntimeError("installed worker failed to bind exact native value flow without source dispatch")
+        application_run = worker_call({"action": "create_run", "plan_id": application_plan["plan_id"],
+            "expected_plan_digest": application_plan["plan_digest"]})
+        held_run = worker_call({"action": "execute", "run_id": application_run["run_id"],
+            "expected_plan_digest": application_plan["plan_digest"], "approve_source_dispatch": False})
+        if held_run["status"] != "approval_required" or held_run["metadata_only"] is not True or "outputs" in held_run:
+            raise RuntimeError("installed worker crossed source approval or default output retention boundary")
+        exported = worker_call({"action": "export", "run_id": application_run["run_id"],
+                                "kind": "checkpoint", "format": "json_text"})
+        if "checkpoint" in exported or "outputs" in exported or not isinstance(exported.get("json_text"), str):
+            raise RuntimeError("installed worker must export one authoritative artifact string without a native duplicate")
+        exported_checkpoint = json.loads(exported["json_text"])
+        if exported_checkpoint.get("schema") != "aurora-executable-workflow-checkpoint/0.2" or exported_checkpoint.get("status") != "approval_required":
+            raise RuntimeError("installed worker exported a wrapper or changed the retained checkpoint status")
 
     print(f"verified prism-sdk wheel: {module_count} modules installed; aurora-agent --help succeeded")
     return 0

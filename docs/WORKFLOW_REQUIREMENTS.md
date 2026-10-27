@@ -10,6 +10,20 @@ translated correctly, that retrieved records are relevant or complete, or that a
 is supported. The caller remains responsible for reviewing the contract against the intended task.
 See [the development plan](WORKFLOW_DEVELOPMENT_PLAN.md) for the remaining task-fidelity work.
 
+Legacy `aurora-workflow-requirements/0.1` links retain their original transitive value-flow
+semantics and canonical digests. A link may now add `source_pointer` and/or `target_path`; such
+contracts use version `0.2`. `source_pointer` is an RFC 6901 path inside the producing output;
+the empty string requires the whole output value. `target_path` identifies the exact argument
+leaf on the consuming operation. A reference at a different argument or to a different child
+cannot satisfy that link. The contract still does not authenticate a source or certify science.
+
+`audit_workflow_reference_paths(proposal, catalog)` separately reports known impossible paths
+and paths requiring runtime resolution. Closed object properties, scalar traversal and bounded
+array limits can prove impossibility. Open properties, optional fields and unbounded indices
+remain unresolved until an actual source value is available. Compilation refuses proven
+impossibility; a deferred check does not prove that its value exists. Model proposal context now
+includes operation output schemas as well as input schemas within the existing byte bound.
+
 ## Compile and check without calling a source
 
 The following example registers three implemented public readers and compiles a one-step plan.

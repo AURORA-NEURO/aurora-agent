@@ -15588,7 +15588,7 @@ from .workflow_integrations import (
 from .workflow_builder import (
     LocalWorkflowBuilder, WorkflowPlan, WorkflowRun, WorkflowValidationError,
     WorkflowCancellationToken, WORKFLOW_CHECKPOINT_SCHEMA, WORKFLOW_CHECKPOINT_SCHEMA_V01,
-    compile_workflow_plan, validate_workflow_plan, execute_workflow_plan,
+    compile_workflow_plan, validate_workflow_plan, execute_workflow_plan, audit_workflow_reference_paths,
     save_workflow_checkpoint, load_workflow_checkpoint,
 )
 from .workflow_openapi import OpenApiImportError, OpenApiHttpResponse, import_openapi_operations
@@ -15615,7 +15615,7 @@ from .glioma_workflow_synthesis import (
     register_glioma_synthesis_operations, glioma_grounded_workflow_proposal,
 )
 from .workflow_requirements import (
-    WORKFLOW_REQUIREMENTS_SCHEMA, WorkflowRequirementError, WorkflowRequirements,
+    WORKFLOW_REQUIREMENTS_SCHEMA, WORKFLOW_REQUIREMENTS_SCHEMA_V02, WorkflowRequirementError, WorkflowRequirements,
     compile_workflow_requirements, validate_workflow_requirements, merge_workflow_requirements,
     audit_workflow_requirements, enforce_workflow_step_requirements,
 )
@@ -15641,7 +15641,7 @@ from .workflow_artifact import (
 __all__ += [
     "WorkflowOperation", "WorkflowOperationCatalog", "WorkflowOperationResult",
     "builtin_workflow_operation_catalog", "LocalWorkflowBuilder", "WorkflowPlan", "WorkflowRun",
-    "WorkflowValidationError", "compile_workflow_plan", "validate_workflow_plan",
+    "WorkflowValidationError", "compile_workflow_plan", "validate_workflow_plan", "audit_workflow_reference_paths",
     "WorkflowCancellationToken", "WORKFLOW_CHECKPOINT_SCHEMA", "WORKFLOW_CHECKPOINT_SCHEMA_V01",
     "execute_workflow_plan", "save_workflow_checkpoint", "load_workflow_checkpoint",
     "OpenApiImportError", "OpenApiHttpResponse", "import_openapi_operations",
@@ -15659,7 +15659,7 @@ __all__ += [
     "MAX_RETAINED_RECONCILIATION_BYTES", "LocalGliomaWorkflowSynthesizer",
     "prepare_glioma_synthesis_context", "audit_glioma_synthesis_draft",
     "register_glioma_synthesis_operations", "glioma_grounded_workflow_proposal",
-    "WORKFLOW_REQUIREMENTS_SCHEMA", "WorkflowRequirementError", "WorkflowRequirements",
+    "WORKFLOW_REQUIREMENTS_SCHEMA", "WORKFLOW_REQUIREMENTS_SCHEMA_V02", "WorkflowRequirementError", "WorkflowRequirements",
     "compile_workflow_requirements", "validate_workflow_requirements", "merge_workflow_requirements",
     "audit_workflow_requirements", "enforce_workflow_step_requirements",
     "GLIOMA_MOLECULAR_SCOPE", "GLIOMA_MOLECULAR_COVERAGE_SCHEMA", "GLIOMA_MOLECULAR_REVIEW_SCHEMA",

@@ -83,6 +83,19 @@ and does not implement distributed locking or effectful exactly-once guarantees.
 
 ## Integration coverage
 
+The opt-in [local workflow application](WORKFLOW_APPLICATION.md) adds an editor and authenticated
+HTTP routes to the existing Rust server. A fixed [Python worker](WORKFLOW_API_WORKER.md) retains
+the task and its contract, validates edited proposals through this SDK, binds execution approval
+to the current plan digest, and exposes run/cancel/resume controls. Operator startup configuration
+owns executable paths, storage and the local model endpoint. The browser cannot select those
+resources. Default polling retains metadata; outputs and checkpoints require explicit export.
+
+Reference checks distinguish known impossible output paths from paths that require runtime
+resolution. Native typed glioma contracts additionally bind the complete source bundle at its
+specific consumer argument path; an invented child pointer cannot satisfy that value-flow rule.
+The operation context supplied to the model includes actual input and output schemas. None of
+these structural checks establishes that arbitrary natural-language intent was understood.
+
 Eight concrete adapters are registered: PubMed, Europe PMC, ClinicalTrials.gov, GDC projects,
 cBioPortal studies, NCBI Gene, Open Targets, and GWAS Catalog. Their source selectors and result
 scope remain bounded by each reviewed adapter. Two local glioma operations do metadata

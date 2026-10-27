@@ -13,7 +13,7 @@ platform descriptors nor fixture registration counts establish integration cover
 | Authentication | Credentialless public readers; typed application-attested connection sessions bind subject/resource scope and revocable credential handles into imported HTTP catalogue identity; caller-owned MCP sessions | Provider-authenticated account onboarding, protected OAuth/token refresh, persistent account connections and tenant-bound private-response retention |
 | Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular-profile catalogues, Entrez identities and Open Targets/GWAS association metadata with native replay and review holds | Actual molecular measurements and validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and independent replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
 | Evidence quality | Metadata provenance/omissions, explicit unknown states, preserved source partitions | Independent relevance/quality evaluation, contradiction and negative-result handling, cohort-overlap checks, freshness policies, source-specific quality failures |
-| Product interfaces | Dependency-free SDK and local CLI commands | An editable workflow UI, authenticated service API, operator views for runs/holds/recovery, accessible errors and installation/onboarding flows |
+| Product interfaces | Dependency-free SDK/CLI; opt-in authenticated local editor and HTTP routes through the existing Rust server and fixed Python worker, with retained task contracts, exact approval, run controls and explicit exports | Broader usability/accessibility evaluation, provider onboarding, release installation and production service operation |
 | Reliability | Focused invariants, installed-wheel/API smoke, Python regressions, separate live source checks, contract checks on normalized dispatch and resume | Provider/source outage campaigns, process-termination recovery, task-quality and cost/latency measurements, cross-SDK contract support and release/deployment validation |
 
 The eleven-adapter count names implemented reviewed readers, not eleven independent providers or
@@ -58,6 +58,18 @@ clinical requests and conflicting clauses retain their original spans and preven
 This addresses graph wiring for that documented grammar; it is not unrestricted NLP or a held-out
 task benchmark. Additional caller contracts are conjoined, with tighter bounds and conflicting
 requirements refused instead of replaced.
+
+A later prospective four-class caller-contract comparison accepted two classes each with
+`qwen2.5:1.5b` and `qwen2.5:7b`, using six and four provider calls respectively and zero source
+dispatches. Both passed bounded single-source and independent two-output plans. The larger model
+invented child output pointers for review graphs; an independent graph audit rejected them despite
+legacy generic flow checks accepting their source identities. The comparison does not justify a
+default-model change or establish general NLP comprehension. The frozen failures remain failures.
+
+Reference-path checks now reject paths proven impossible by a producer's closed schema. Open or
+optional output paths remain runtime checks, not successful existence proofs. Requirements `0.2`
+can constrain the exact producer pointer and consumer argument path; newly compiled typed glioma
+graphs use complete native bundles at those paths. Legacy contracts and plan digests stay stable.
 
 The [molecular metadata workflow](GLIOMA_MOLECULAR_WORKFLOW.md) completed six stages in a bounded
 live run with nine source requests and 46 citations. Its native source planes remain separate;
