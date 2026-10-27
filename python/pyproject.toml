@@ -17,6 +17,7 @@ aurora-agent = "prism_sdk.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["prism_sdk*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

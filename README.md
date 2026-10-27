@@ -128,6 +128,57 @@ repository-defined because this checkout has no detailed P10-F05/F06 blueprints.
 
 ## Autonomous agent process boundary
 
+The Python SDK now exposes an executable local-model workflow builder through
+`workflow-catalogue`, `workflow-build`, `workflow-run`, `workflow-template`, and
+`workflow-execute`. It validates a proposed operation DAG before dispatch, supports public-value
+checkpoint/resume, and composes a glioma literature/trial/TCGA evidence review. Eight reviewed
+public-source adapters are registered by default; twelve opt-in paths add OpenAlex, Crossref,
+Zenodo, fixed GDC TP53 mutation-affected case aggregates, Ensembl TP53 references, and fixed
+UniProt/Reactome protein/pathway annotations, GDC project SSM-data coverage, HGNC gene references,
+NCI Thesaurus glioma terminology, [CIViC evidence metadata](docs/CIVIC_GLIOMA_EVIDENCE.md), and
+[Cellosaurus glioblastoma cell-line metadata](docs/CELLOSAURUS_CELL_LINE_METADATA.md), and fixed
+[DataCite TCGA-GBM DOI metadata](docs/DATACITE_TCGA_GBM_COLLECTION_METADATA.md).
+These twenty-one paths span eighteen declared API service groups; those declarations do not establish independent
+providers or hundreds of connected services.
+Separate [aggregate review](docs/GLIOMA_MUTATION_WORKFLOW.md) and
+[gene-reference comparison](docs/GLIOMA_GENE_REFERENCES.md) templates preserve native citations,
+missingness and scientific review holds. The [protein/pathway context](docs/GLIOMA_PROTEIN_PATHWAY_WORKFLOW.md)
+adds exact native citations and unknown omission states without asserting glioma activity.
+The [denominator evidence review](docs/GLIOMA_DENOMINATOR_WORKFLOW.md) compares native TP53
+counts with project SSM-data availability while keeping gene-specific assay denominators unknown.
+The optional [CIViC curation review](docs/GLIOMA_CIVIC_CURATION_WORKFLOW.md) composes source retrieval,
+local analysis and a research-review handoff. It retains source categories and exact native source-ID
+groups without ranking scientific support or treating those groups as independent publications.
+Cellosaurus preserves source names, accessions, taxonomy, disease assertions and the admitted
+problematic-cell-line comment category; it establishes neither model suitability nor authenticity.
+DataCite retains the dataset version, metadata revision and metadata schema identifier as separate
+observations, with raw-response replay; it does not retrieve TCIA images or establish cohort counts.
+The [provider registry](docs/WORKFLOW_PROVIDER_REGISTRY.md) inspects exact reader bindings,
+deduplicated API service groups and separate unmeasured live coverage through the CLI and editor.
+Reviewed [capability profiles](docs/WORKFLOW_CAPABILITIES.md) enable fixed groups of concrete
+operations through one repeated operator option, including a native three-source TP53 identifier
+review. Browser requests cannot enable another profile; source agreement and ontology relations
+remain separate from validated scientific equivalence and cohort evidence.
+Optional [local NLP intent suggestions](docs/WORKFLOW_INTENT_EXTRACTION.md) retain unreviewed
+mandatory-action candidates before graph authoring. Default extraction protocol 0.2 supplies
+complete native input/output contracts; protocols 0.1, 0.2 and 0.3 retain exact historical replay.
+A six-call comparison found no supported-work candidate in either arm and lost one strict
+negative-control recognition under 0.3, so the default returned to 0.2. General NLP quality
+remains unestablished. The editor's explicit caller-declaration
+review binds task spans, literal requirements and acceptance through edits, restart and separate
+evidence exports. Candidate syntax and caller acceptance do not establish complete interpretation
+or scientific validity; unavailable actions and literal conflicts remain blocking.
+A separate [current literal policy](docs/WORKFLOW_LITERAL_POLICY.md) checks applicable declared
+scalar types and numeric bounds before new authoring. Historical admissions and caller approvals
+keep their original bytes; an old approval does not bypass the current check.
+An opt-in [incremental Ollama planner](docs/INCREMENTAL_WORKFLOW_PLANNING.md) makes bounded
+model-selected decisions and sends final graphs through the same caller-contract compiler;
+protocol validation does not establish unrestricted NLP fidelity. The [local workflow editor](docs/WORKFLOW_APPLICATION.md)
+uses the same retained contracts and explicit source grants. An OpenAPI GET importer supports
+adding reviewed services without treating catalogue capacity as verified integration coverage. See the
+[workflow builder](docs/NLP_WORKFLOW_BUILDER.md) and the remaining
+[development plan](docs/WORKFLOW_DEVELOPMENT_PLAN.md).
+
 The Rust runtime also exposes an opt-in Docker-backed command boundary for callers that need an
 explicit Linux process boundary. It is not connected to agent tool dispatch or the trial provider;
 its limits and integration boundary are documented in [docs/OCI_SANDBOX.md](docs/OCI_SANDBOX.md).
@@ -1067,7 +1118,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,358,874 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,368,883 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 

@@ -2,7 +2,7 @@
 //!
 //! Usage: `bioprism-api [--bind <host:port>] [--root <dir>] [--token <bearer-token>] [--allow-http-origin <host[:port]>]... [--mission-state <file>] [--mission-queue-state <file>] [--event-state <file>] [--evidence-state <file>] [--reconciliation-state <file>] [--artifact-state <file>] [--workflow-execution-evidence-state <file>] [--workbench-state <file>] [--ci-provider-evidence-state <file>]`
 
-use bioprism_api::{serve, validate_bind_auth, ApiConfig, ApiRouter};
+use bioprism_api::{serve, validate_bind_auth, ApiConfig, ApiRouter, WorkflowApplicationConfig};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,6 +12,20 @@ fn main() {
     let mut bind = "127.0.0.1:8787".to_string();
     let mut root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut token = None;
+    let mut token_env = "AURORA_API_TOKEN".to_string();
+    let mut workflow_state = None;
+    let mut workflow_python = None;
+    let mut workflow_python_path = None;
+    let mut workflow_model = None;
+    let mut workflow_base_url = "http://127.0.0.1:11434/v1".to_string();
+    let mut workflow_research_sources = false;
+    let mut workflow_molecular_glioma = false;
+    let mut workflow_glioma_mutations = false;
+    let mut workflow_gene_references = false;
+    let mut workflow_protein_pathways = false;
+    let mut workflow_denominator_coverage = false;
+    let mut workflow_capabilities = Vec::new();
+    let mut workflow_options_supplied = false;
     let mut allowed_http_origins = Vec::new();
     let mut mission_state_path = None;
     let mut mission_queue_state_path = None;
@@ -38,6 +52,57 @@ fn main() {
             "--bind" => bind = value("--bind", &mut arguments),
             "--root" => root = PathBuf::from(value("--root", &mut arguments)),
             "--token" => token = Some(value("--token", &mut arguments)),
+            "--token-env" => token_env = value("--token-env", &mut arguments),
+            "--workflow-state" => {
+                workflow_state = Some(PathBuf::from(value("--workflow-state", &mut arguments)))
+            }
+            "--workflow-python" => {
+                workflow_options_supplied = true;
+                workflow_python = Some(PathBuf::from(value("--workflow-python", &mut arguments)));
+            }
+            "--workflow-python-path" => {
+                workflow_options_supplied = true;
+                workflow_python_path = Some(PathBuf::from(value(
+                    "--workflow-python-path",
+                    &mut arguments,
+                )));
+            }
+            "--workflow-model" => {
+                workflow_options_supplied = true;
+                workflow_model = Some(value("--workflow-model", &mut arguments));
+            }
+            "--workflow-base-url" => {
+                workflow_options_supplied = true;
+                workflow_base_url = value("--workflow-base-url", &mut arguments);
+            }
+            "--workflow-research-sources" => {
+                workflow_options_supplied = true;
+                workflow_research_sources = true;
+            }
+            "--workflow-molecular-glioma" => {
+                workflow_options_supplied = true;
+                workflow_molecular_glioma = true;
+            }
+            "--workflow-glioma-mutations" => {
+                workflow_options_supplied = true;
+                workflow_glioma_mutations = true;
+            }
+            "--workflow-gene-references" => {
+                workflow_options_supplied = true;
+                workflow_gene_references = true;
+            }
+            "--workflow-protein-pathways" => {
+                workflow_options_supplied = true;
+                workflow_protein_pathways = true;
+            }
+            "--workflow-denominator-coverage" => {
+                workflow_options_supplied = true;
+                workflow_denominator_coverage = true;
+            }
+            "--workflow-capability" => {
+                workflow_options_supplied = true;
+                workflow_capabilities.push(value("--workflow-capability", &mut arguments));
+            }
             "--allow-http-origin" => {
                 allowed_http_origins.push(value("--allow-http-origin", &mut arguments))
             }
@@ -134,6 +199,7 @@ fn main() {
                      Webhooks: register, poll signed deliveries, retry, and acknowledge.\n\
                      Domain source retrieval makes no outbound HTTP requests by default. Repeat --allow-http-origin <host[:port]> to approve exact plain-HTTP origins; a retained source plan must also opt in and allow the requested host. HTTPS and redirects are refused. The gateway does not terminate inbound TLS or speak gRPC."
                 );
+                println!("\nLocal executable-workflow application (opt-in):\n  --workflow-state <existing absolute directory> --workflow-python <absolute python executable> --workflow-python-path <absolute SDK directory>\n  [--workflow-model <local model>] [--workflow-base-url <loopback Ollama /v1 URL>] [--workflow-research-sources] [--workflow-molecular-glioma] [--workflow-glioma-mutations] [--workflow-gene-references] [--workflow-protein-pathways] [--workflow-denominator-coverage] [--workflow-capability <reviewed-profile>]\n  Requires a fixed numeric loopback --bind and >=32-byte bearer token, even on loopback. Prefer --token-env <environment variable> (default AURORA_API_TOKEN) to keep the token out of process arguments.\n  Open /workflows/ and enter the token for this page session. Plans, edits, run controls, and explicit exports use /v1/executable-workflows; the Python SDK owns their validation and execution.");
                 return;
             }
             other => {
@@ -149,16 +215,46 @@ fn main() {
     }
     let token = match token {
         Some(token) => Some(token),
-        None => match std::env::var_os("AURORA_API_TOKEN") {
+        None => match std::env::var_os(&token_env) {
             Some(token) => match token.into_string() {
                 Ok(token) => Some(token),
                 Err(_) => {
-                    eprintln!("AURORA_API_TOKEN must be valid Unicode");
+                    eprintln!("the API token environment variable must be valid Unicode");
                     std::process::exit(2);
                 }
             },
             None => None,
         },
+    };
+    let workflow_application = match workflow_state {
+        Some(state_root) => {
+            let (Some(python_executable), Some(python_path)) =
+                (workflow_python, workflow_python_path)
+            else {
+                eprintln!("--workflow-state requires --workflow-python and --workflow-python-path");
+                std::process::exit(2);
+            };
+            Some(WorkflowApplicationConfig {
+                python_executable,
+                python_path,
+                state_root,
+                authority: bind.clone(),
+                model: workflow_model,
+                base_url: workflow_base_url,
+                research_sources: workflow_research_sources,
+                molecular_glioma: workflow_molecular_glioma,
+                glioma_mutations: workflow_glioma_mutations,
+                gene_references: workflow_gene_references,
+                protein_pathways: workflow_protein_pathways,
+                denominator_coverage: workflow_denominator_coverage,
+                capabilities: workflow_capabilities,
+            })
+        }
+        None if workflow_options_supplied => {
+            eprintln!("workflow application options require --workflow-state");
+            std::process::exit(2);
+        }
+        None => None,
     };
     if let Err(error) = validate_bind_auth(&bind, token.is_some()) {
         eprintln!("invalid API configuration: {error}; set --token or AURORA_API_TOKEN");
@@ -168,6 +264,7 @@ fn main() {
         max_body_bytes,
         event_capacity,
         bearer_token: token,
+        workflow_application,
         mission_state_path,
         mission_queue_state_path,
         mission_queue_max_jobs,

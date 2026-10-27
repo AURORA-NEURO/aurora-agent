@@ -14,6 +14,19 @@ The wheel requires Python 3.11 or newer and declares no runtime dependencies. CI
 checks that every SDK module and the CLI entry point are packaged, installs it into a clean virtual
 environment, and runs the installed command without importing from the checkout.
 
+For local natural-language workflow construction and execution without an API key or MCP server,
+use `aurora-agent workflow-run` with an installed Ollama model. `workflow-build` writes a checked
+plan for separate execution, `workflow-template` builds the glioma evidence workflow, and
+`workflow-execute` runs/resumes it. See the [workflow builder](../docs/NLP_WORKFLOW_BUILDER.md),
+[glioma workflow](../docs/GLIOMA_WORKFLOW_BUILDER.md), and
+[reviewed OpenAPI integration](../docs/WORKFLOW_OPENAPI.md) contracts.
+
+SDK applications can bind imported readers to a revocable, scoped
+[application connection session](../docs/WORKFLOW_CONNECTIONS.md). A separate
+[local JSON artifact sink](../docs/WORKFLOW_ARTIFACT.md) uses durable scoped authorization and
+effect reconciliation for exact approved bytes. Account attestation is application-owned;
+OAuth onboarding and effectful operations inside executable workflow plans remain unfinished.
+
 ```python
 from prism_sdk import Client, Workspace
 
