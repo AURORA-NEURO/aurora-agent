@@ -767,7 +767,12 @@ class LocalWorkflowBuilder:
             "contract": "Return one JSON object with exactly name, steps, outputs. No markdown.",
             "format": {"name": "Short workflow name", "steps": [{"id": "s1", "operation": "exact reviewed operation_id", "arguments": {}, "depends_on": []}], "outputs": ["s1"]},
             "outputs": "nonempty list of final step IDs", "max_steps": max_steps,
-            "references": "Use {\"$ref\":\"dependency_id#/json/pointer\"} only in arguments; dependency must be in depends_on or its ancestry. Root value is dependency_id#.",
+            "references": {
+                "whole_output": {"$ref": "producer#"},
+                "whole_output_meaning": "The trailing # selects the producer's complete output object; do not append a child path when the consumer needs that native object.",
+                "child_output": "Append an RFC 6901 JSON pointer after # only when selecting an actual child allowed by the producer's output_schema. There is no implicit wrapper around an operation output.",
+                "placement": "A reference is an argument value containing exactly one $ref field. The producer step must be in depends_on or its ancestry.",
+            },
             "reference_example": {"explanation": "For a consumer of a producer's complete output, replace the consumer's object argument with this reference and declare the producer dependency. Never invent an empty bundle or inline source result.",
                                   "consumer_arguments": {"bundle": {"$ref": "producer#"}}, "consumer_depends_on": ["producer"]},
             "rules": ["Use only listed operations and their exact argument schemas.", "Never invent source results, credentials, endpoints or tools.",
@@ -779,10 +784,17 @@ class LocalWorkflowBuilder:
         if contract:
             instructions["fixed_caller_requirements"] = contract
             instructions["rules"].append("Satisfy every fixed caller requirement. Requirements are immutable; return only the proposal, never a replacement contract.")
-            instructions["required_value_flow"] = [
-                {**link, "instruction": "The target must consume a $ref to the source step's output; depends_on alone does not transfer data."}
-                for link in contract["data_links"]
-            ]
+            instructions["required_value_flow"] = []
+            for link in contract["data_links"]:
+                guidance = {**link, "instruction": "The target must consume a $ref to the source step's output; depends_on alone does not transfer data."}
+                if "source_pointer" in link:
+                    guidance["reference_suffix"] = "#" + link["source_pointer"]
+                    guidance["source_selection"] = ("Use the complete native source output; the reference ends at #."
+                        if link["source_pointer"] == "" else "Use exactly this source JSON pointer after the producer step ID and #.")
+                if "target_path" in link:
+                    guidance["target_placement"] = ("The entire arguments object must be the direct reference leaf."
+                        if link["target_path"] == "" else "Place that direct reference leaf at exactly target_path in the target arguments; an indirect or differently placed reference does not satisfy this link.")
+                instructions["required_value_flow"].append(guidance)
         schema = {
             "type": "object", "additionalProperties": False, "required": ["name", "steps", "outputs"],
             "properties": {
