@@ -31,7 +31,7 @@ def _invoke(*arguments):
     return code, json.loads(output.getvalue()) if output.getvalue() else None, errors.getvalue()
 
 
-def _fixture_catalog(monkeypatch):
+def _fixture_catalog(monkeypatch, *, open_output=False):
     calls = []
     state = {"fail": False, "before_execute": None}
     def factory():
@@ -46,7 +46,7 @@ def _fixture_catalog(monkeypatch):
         schema = {"type": "object", "properties": {"payload": {"type": "string"}},
                   "required": ["payload"], "additionalProperties": False}
         output = {"type": "object", "properties": {"public_value": {"type": "string"}},
-                  "required": ["public_value"], "additionalProperties": False}
+                  "required": ["public_value"], "additionalProperties": open_output}
         catalog.register(WorkflowOperation("fixture.retrieve", "Retrieve public test metadata", schema, output,
                                            "fixture", implementation="live_adapter"), execute)
         return catalog
@@ -204,12 +204,19 @@ def test_source_failure_requires_explicit_retry_and_error_detail_never_reaches_c
     assert load_workflow_checkpoint(checkpoint)["attempts"] == {"first": 2}
 
 
-def test_unresolvable_dependency_blocks_before_the_dependent_source_is_called(monkeypatch, tmp_path):
-    factory, calls, _ = _fixture_catalog(monkeypatch)
+def test_unresolved_open_output_dependency_blocks_before_the_dependent_source_is_called(monkeypatch, tmp_path):
+    factory, calls, _ = _fixture_catalog(monkeypatch, open_output=True)
     plan, _ = _plan_file(tmp_path, factory, second=True, invalid_reference=True)
     code, payload, errors = _invoke("workflow-execute", "--plan", str(plan), "--approve-source-dispatch")
     assert code == 1 and errors == "" and payload["status"] == "blocked" and len(calls) == 1
     assert PUBLIC_VALUE not in json.dumps(payload)
+
+
+def test_impossible_closed_output_reference_is_refused_before_any_source_call(monkeypatch):
+    factory, calls, _ = _fixture_catalog(monkeypatch)
+    with pytest.raises(ValueError, match="impossible under the source output schema"):
+        compile_workflow_plan(_proposal(second=True, invalid_reference=True), factory(), task="Review public metadata")
+    assert calls == []
 
 
 def test_attempt_limit_is_nonzero_and_never_silently_dispatches_a_fourth_retry(monkeypatch, tmp_path):
