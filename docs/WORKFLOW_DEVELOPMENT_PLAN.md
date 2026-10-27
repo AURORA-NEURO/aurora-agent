@@ -150,6 +150,12 @@ effects, compensation, effect retries and power-loss durability remain unproven 
    Verify requested output stages, exact limits and source boundaries rather than only JSON shape.
    Keep planning failures and semantic omissions visible; do not turn a valid graph into a success
    claim for an unfulfilled task.
+   A fresh paired 0.2/0.3 protocol probe accepted 1/5 versus 4/5 constrained positive cases,
+   including a synthetic schema fixture, but full intent controls regressed from 2/3 to 1/3.
+   Both protocols could compile an available reader while omitting an essential unavailable
+   writer; 0.3 also silently substituted a permitted mode for an essential incompatible request.
+   Next work must represent and check task obligations beyond available-operation contracts.
+   Native graph validity and positive-case gains do not establish general NLP autonomy.
 2. Extend the [implemented local glioma synthesis and audit](GLIOMA_WORKFLOW_SYNTHESIS.md) to richer
    reviewed evidence planes. Preserve exact citation closure, source identity, missingness,
    context omissions and explicit unassessed scientific support. Public human cohort summaries

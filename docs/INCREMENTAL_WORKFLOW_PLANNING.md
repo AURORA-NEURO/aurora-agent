@@ -288,12 +288,52 @@ The retained task artifacts are `aurora-authoring-semantics-evaluation.json` (re
 are retained evidence for this developer-authored comparison, not independently collected
 benchmarks, automatic NLP requirement extraction, scientific validation or human review.
 
-Those observations concern version 0.2. Version 0.3's combined schema/finish clarification
-is **unmeasured** for live local-model fidelity until a fresh prospective comparison is
-reviewed and frozen. Fixture tests reach legal subset/default handling, a genuine scalar
-constant/full-set obligation, premature finish with an operation-shaped workflow name,
-actual final-output coverage and the prompt byte boundary. They establish these SDK
-invariants only. A new paired probe must include genuine full-set and intent controls,
-preserve rejected/nonplanned outcomes, and disclose matched budgets and actual provider
-conditions. It must not rerun the earlier frozen cases or attribute a combined-protocol
-result separately to either clarification component.
+Those observations concern version 0.2. A separate fresh frozen comparison measured the
+combined version 0.3 schema/finish clarification against historical 0.2. Five positive
+developer-authored instances used two previously seen graph families; one of the five
+used a synthetic scalar-constant operation, not a real integration. Three additional
+controls tested genuinely unspecified project selection, an essential mode conflicting
+with a registered constant, and an unavailable Notion page writer. Manually authored
+contracts and separate task oracles do not measure automatic requirement extraction.
+
+Both arms saw the same tasks, catalogue, contracts, per-case call caps, two decision
+attempts, temperature zero and 2,048 output-token bound. All **48 inference invocations**
+(22 baseline, 26 candidate) retained HTTP/text responses under matching actual Qwen 2.5
+7B digest and 16,384-token allocated context. No arm was unjudged, no source ran, earlier
+reports remained unchanged and the model was unloaded. Local inventory/version/unload
+HTTP controls are additional requests, separate from the 66-inference-attempt cap.
+Prompt truncation remained unreported; desktop timing is not isolated performance data.
+
+| Fresh obligation | Version 0.2 | Version 0.3 |
+| --- | --- | --- |
+| Explicit ATRX/NF1 subset | Unnecessary clarification | Exact task accepted |
+| Intentionally omitted default selector | Refused | Native graph compiled, but the model explicitly supplied the selector: task failed |
+| Explicit complete 12-gene panel | Refused | Exact task accepted |
+| Synthetic scalar constant plus one selected label | Refused | Exact task accepted; fixture only |
+| Actual three-stage review with an operation-shaped workflow name | Exact task accepted | Exact task accepted |
+| Genuinely unspecified TCGA project | Correct clarification | Correct clarification |
+| Essential requested mode conflicts with registered constant | Correct clarification | Planned after silently substituting the permitted mode: control failed |
+| Required Notion page creation unavailable | Planned only a PubMed read: control failed | Planned only a PubMed read: control failed |
+
+Full positive task acceptance was **1/5 versus 4/5**, while combined terminal/lexical/
+independent coding-agent semantic control acceptance regressed from **2/3 to 1/3**.
+There were two versus seven native compiler-accepted plans across all eight cases,
+including one versus two intent-control failures. Native schema/contract acceptance
+therefore does not establish that an unrepresented natural-language obligation was met.
+The explicit-versus-default result was checked against retained raw accepted model
+arguments; a compiler-filled default cannot masquerade as an explicit model choice.
+
+The candidate never reached rejected-finish diagnostic feedback in this run. That
+feature's live benefit remains **unmeasured**; fixtures exercise its native diagnostic
+and byte-bound invariants. The combined protocol comparison does not isolate a causal
+benefit for either component. No graph repair, forced append, terminal retry, old-case
+rerun, model tuning or source dispatch followed these observations. Whole-graph mode
+remains the default and incremental planning remains experimental. Reliable intent
+closure, general NLP, scientific quality and broader promotion remain unsupported.
+
+Retained evidence: `aurora-schema-finish-evaluation.json`, report digest
+`712044b03b56d39b59c60df88000d0d42e150098630eaedbb9e3d2ccbc7ee010`, and
+`aurora-schema-finish-independent-verification.json`, verification digest
+`d16f6f03e16e6599230a5f4034af3345e797b3cb3a5f0d96921f39e73673ed00`.
+Independent reconstruction imported no campaign oracles and judged all full control
+messages. Its reviewer is a coding-agent subagent, not a human or external benchmark.
