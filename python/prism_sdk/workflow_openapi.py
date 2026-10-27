@@ -7,18 +7,20 @@ never fetches a specification, discovers credentials, or authorizes a source req
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import http.client
 import ipaddress
 import json
 import math
 import re
+import secrets
 import socket
 import ssl
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import quote, urlencode, urlsplit
 
 from .authoring import content_digest
+from .workflow_connections import WorkflowConnectionContext, WorkflowConnectionSession
 from .tooling import ToolCatalogue, ToolDefinition
 from .workflow_integrations import (
     MAX_WORKFLOW_INTEGRATIONS, MAX_WORKFLOW_OPERATIONS,
@@ -38,6 +40,17 @@ class OpenApiHttpResponse:
     headers: Mapping[str, str]
     body: bytes
     final_url: str | None = None
+
+
+@dataclass(frozen=True)
+class _ConnectionWorkflowOperation(WorkflowOperation):
+    # Catalogue serialization is also the builder's checkpoint-replay admission boundary.
+    _connection: WorkflowConnectionSession | None = field(default=None, repr=False, compare=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        if self._connection is not None:
+            self._connection.check_available()
+        return super().to_dict()
 
 
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
@@ -208,7 +221,8 @@ class _PinnedHttpsConnection(http.client.HTTPSConnection):
 
 
 def _http_get(url: str, *, headers: Mapping[str, str], timeout_seconds: float,
-              max_response_bytes: int, allow_private_hosts: bool) -> OpenApiHttpResponse:
+              max_response_bytes: int, allow_private_hosts: bool,
+              resolve_auth_headers: Callable[[], Mapping[str, str]] | None = None) -> OpenApiHttpResponse:
     parts = urlsplit(url)
     host, port = parts.hostname, parts.port or 443
     try:
@@ -222,7 +236,10 @@ def _http_get(url: str, *, headers: Mapping[str, str], timeout_seconds: float,
             target = parts.path or "/"
             if parts.query:
                 target += "?" + parts.query
-            connection.request("GET", target, headers=dict(headers))
+            final_headers = dict(headers)
+            if resolve_auth_headers is not None:
+                final_headers.update(resolve_auth_headers())
+            connection.request("GET", target, headers=final_headers)
             response = connection.getresponse()
             body = response.read(max_response_bytes + 1)
             return OpenApiHttpResponse(response.status, dict(response.getheaders()), body, url)
@@ -328,7 +345,7 @@ def _security(document: Mapping[str, Any], operation: Mapping[str, Any], auth_he
             elif scheme.get("type") != "http" or scheme.get("scheme") not in {"basic", "bearer"}:
                 raise OpenApiImportError("security scheme is unsupported")
             if auth_headers is None:
-                raise OpenApiImportError("secured operation requires an application-owned header resolver")
+                raise OpenApiImportError("secured operation requires an application-owned header mapping or typed connection")
 
 
 def import_openapi_operations(
@@ -340,7 +357,10 @@ def import_openapi_operations(
     allowed_hosts: Sequence[str],
     reviewed_operation_ids: Sequence[str],
     approve_spec_import: bool = False,
-    auth_headers: Callable[[], Mapping[str, str]] | None = None,
+    auth_headers: Mapping[str, str] | None = None,
+    connection: WorkflowConnectionSession | None = None,
+    connection_context: WorkflowConnectionContext | None = None,
+    approve_public_metadata_response: bool = False,
     transport: Callable[..., OpenApiHttpResponse] | None = None,
     timeout_seconds: float = 15.0,
     max_response_bytes: int = 1_048_576,
@@ -348,7 +368,7 @@ def import_openapi_operations(
 ) -> tuple[WorkflowOperation, ...]:
     """Register only operator-reviewed GET operations; import approval never authorizes dispatch.
 
-    ``transport`` and ``auth_headers`` are trusted application code, never model arguments. An
+    ``transport`` and connection configuration are trusted application code, never model arguments. An
     injected transport owns network admission itself; response bounds and redirect checks still
     apply. The default transport validates DNS addresses and pins the chosen TLS connection.
     """
@@ -367,8 +387,39 @@ def import_openapi_operations(
         raise OpenApiImportError("timeout_seconds must be finite and between 0.1 and 120")
     if type(max_response_bytes) is not int or not 1 <= max_response_bytes <= 4_000_000:
         raise OpenApiImportError("max_response_bytes must be between 1 and 4000000")
-    if auth_headers is not None and not callable(auth_headers):
-        raise OpenApiImportError("auth_headers must be an application-owned callable")
+    if auth_headers is not None:
+        # Callable account rotation cannot be bound without retaining credential fingerprints.
+        # Legacy mappings are copied once; revocable/lazy credentials use the typed connection.
+        if callable(auth_headers) or not isinstance(auth_headers, Mapping):
+            raise OpenApiImportError("auth_headers must be an application-owned mapping; callable resolvers are refused")
+        try:
+            if not auth_headers or len(auth_headers) > 32:
+                raise ValueError()
+            copied_headers = {}
+            for key, value in auth_headers.items():
+                if (not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,128}", key)
+                        or key.lower() in {"host", "connection", "content-length", "transfer-encoding", "accept"}
+                        or key.lower() in {name.lower() for name in copied_headers}
+                        or not isinstance(value, str) or not value or len(value) > 8192
+                        or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)):
+                    raise ValueError()
+                copied_headers[key] = value
+            auth_headers = copied_headers
+        except Exception:
+            raise OpenApiImportError("application header mapping is invalid; credentials withheld") from None
+    if connection is not None and not isinstance(connection, WorkflowConnectionSession):
+        raise OpenApiImportError("connection must be an application-owned WorkflowConnectionSession")
+    if type(approve_public_metadata_response) is not bool:
+        raise OpenApiImportError("public metadata response approval must be boolean")
+    if connection is not None:
+        if auth_headers is not None:
+            raise OpenApiImportError("connection and legacy auth_headers are mutually exclusive")
+        if approve_public_metadata_response is not True:
+            raise OpenApiImportError("connection responses require explicit application review as public metadata")
+        if not isinstance(connection_context, WorkflowConnectionContext):
+            raise OpenApiImportError("connection requires an explicit typed application context")
+    elif connection_context is not None or approve_public_metadata_response:
+        raise OpenApiImportError("connection context and response approval require a typed connection")
     if transport is not None and not callable(transport):
         raise OpenApiImportError("transport must be an application-owned callable")
     selected_server = _server(server_url, allowed_hosts, allow_private_hosts)
@@ -408,6 +459,9 @@ def import_openapi_operations(
     if integration_id not in existing_integrations and len(existing_integrations) >= MAX_WORKFLOW_INTEGRATIONS:
         raise OpenApiImportError("import would exceed integration catalogue capacity")
     document_digest = content_digest(document)
+    # A legacy callable cannot establish account identity. Bind each registration independently
+    # rather than hashing credential bytes or accidentally approving a replacement account.
+    legacy_header_binding = secrets.token_hex(32) if auth_headers is not None else None
     for path, raw_item in paths.items():
         item = _mapping(raw_item, "path item")
         for method, raw_operation in item.items():
@@ -430,7 +484,7 @@ def import_openapi_operations(
                 raise OpenApiImportError("operation path must be fixed absolute path without encoded or relative segments")
             if operation.get("requestBody") is not None or operation.get("callbacks"):
                 raise OpenApiImportError("request bodies and callbacks are unsupported")
-            _security(document, operation, auth_headers)
+            _security(document, operation, connection if connection is not None else auth_headers)
             input_schema, parameters = _parameters(path, item, operation)
             responses = _response_schemas(operation)
             registered_id = f"{integration_id}.{operation_id}"
@@ -440,10 +494,37 @@ def import_openapi_operations(
             if not isinstance(description, str):
                 raise OpenApiImportError("operation description must be text")
             description += f"\nReviewed OpenAPI document: {document_digest}; fixed server: {selected_server}"
-            descriptor = WorkflowOperation(registered_id, description, input_schema,
+            if connection is not None:
+                binding = connection.validate_import(
+                    service_id=integration_id, context=connection_context,
+                    server_url=selected_server, operation_id=registered_id,
+                    path_parameters=[parameter["name"] for parameter in parameters if parameter["in"] == "path"],
+                    argument_names=list(input_schema.get("properties", {})),
+                )
+                resource = next(item for item in binding["resources"] if item["operation_id"] == registered_id)
+                for name, values in resource["argument_values"].items():
+                    for value in values:
+                        _validate(input_schema["properties"][name], value, "connection resource scope")
+                requirements = operation.get("security", document.get("security", []))
+                schemes = document.get("components", {}).get("securitySchemes", {})
+                for requirement in requirements:
+                    for name in requirement:
+                        scheme = schemes[name]
+                        if (scheme.get("type") == "apiKey"
+                                and (binding["auth_policy"] != "api_key_header"
+                                     or scheme["name"].lower() != binding["header_name"].lower())
+                                or scheme.get("type") == "http"
+                                and (scheme.get("scheme") != "bearer" or binding["auth_policy"] != "bearer_header")):
+                            raise OpenApiImportError("declared authentication differs from the fixed connection policy")
+                description += f"\nApplication connection binding: {content_digest(binding)}; account identity is application-attested."
+            elif legacy_header_binding is not None:
+                description += f"\nLegacy header registration binding: {legacy_header_binding}; account identity unknown."
+            descriptor_type = _ConnectionWorkflowOperation if connection is not None else WorkflowOperation
+            extra = {"_connection": connection} if connection is not None else {}
+            descriptor = descriptor_type(registered_id, description, input_schema,
                                            next(iter(responses.values())), integration_id,
-                                           auth_mode="application_header" if auth_headers else "none",
-                                           read_only=True, implementation="live_adapter")
+                                           auth_mode="application_connection" if connection is not None else "application_header" if auth_headers else "none",
+                                           read_only=True, implementation="live_adapter", **extra)
             prepared.append((descriptor, path, parameters, responses))
     if found != wanted:
         raise OpenApiImportError("one or more reviewed operation IDs are missing from the document")
@@ -474,24 +555,22 @@ def import_openapi_operations(
             if len(url.encode("utf-8")) > 8192:
                 raise OpenApiImportError("request URL exceeds its byte bound")
             headers = {"Accept": "application/json"}
-            if auth_headers:
-                try:
-                    resolved = auth_headers()
-                    if not isinstance(resolved, Mapping) or not resolved or len(resolved) > 32:
-                        raise ValueError()
-                    for key, value in resolved.items():
-                        if (not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,128}", key)
-                                or key.lower() in {"host", "connection", "content-length", "transfer-encoding", "accept"}
-                                or not isinstance(value, str) or not value or len(value) > 8192
-                                or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)):
-                            raise ValueError()
-                        headers[key] = value
-                except Exception:
-                    raise OpenApiImportError("application header resolution failed; credentials withheld") from None
+            resolve_connection_headers = None
+            if connection is not None:
+                connection.authorize_arguments(operation_id=descriptor.operation_id, arguments=arguments,
+                                               context=connection_context, server_url=selected_server)
+                def resolve_connection_headers():
+                    return connection.resolve_headers(operation_id=descriptor.operation_id, arguments=arguments,
+                                                      context=connection_context, server_url=selected_server)
+            elif auth_headers:
+                headers.update(auth_headers)
             if transport is None:
                 response = _http_get(url, headers=headers, timeout_seconds=timeout_seconds,
-                                     max_response_bytes=max_response_bytes, allow_private_hosts=allow_private_hosts)
+                                     max_response_bytes=max_response_bytes, allow_private_hosts=allow_private_hosts,
+                                     resolve_auth_headers=resolve_connection_headers)
             else:
+                if resolve_connection_headers is not None:
+                    headers.update(resolve_connection_headers())
                 try:
                     response = transport(url, headers=headers, timeout_seconds=timeout_seconds,
                                          max_response_bytes=max_response_bytes)
@@ -522,7 +601,15 @@ def import_openapi_operations(
                 "request_digest": content_digest({"url": url, "arguments": dict(arguments)}),
                 "response_digest": content_digest(value), "http_status": response.status,
                 "response_bytes": len(response.body), "retrieved_at": retrieved_at,
-                "verification": "schema_checked_response", "live_verified": transport is None,
+                "verification": "schema_checked_response",
+                "transport_mode": "pinned_https" if transport is None else "application_injected",
+                "live_verification": "unassessed",
+                **({"connection_binding_digest": content_digest(connection.binding_metadata()),
+                    "account_identity": "application_attested;not_provider_verified",
+                    "response_policy": "application_reviewed_public_metadata_only"}
+                   if connection is not None else
+                   {"legacy_header_binding": legacy_header_binding, "account_identity": "unknown"}
+                   if legacy_header_binding is not None else {}),
             })
         return execute
 

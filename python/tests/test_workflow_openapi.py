@@ -65,7 +65,8 @@ def test_import_is_inert_and_dispatch_maps_only_declared_path_and_query_argument
     assert fixture.calls == [{"url": SERVER + "/records/a%2Fb%20%26%3F?limit=4&reviewed=false",
                               "headers": {"Accept": "application/json"}, "timeout": 3, "maximum": 256}]
     assert result.value == {"records": ["research"], "count": 1}
-    assert result.receipt["live_verified"] is False
+    assert result.receipt["transport_mode"] == "application_injected"
+    assert result.receipt["live_verification"] == "unassessed"
     assert result.receipt["verification"] == "schema_checked_response"
     assert result.receipt["retrieved_at"] == "2026-10-26T12:00:00Z"
     assert "a/b" not in json.dumps(result.receipt)
@@ -96,7 +97,8 @@ def test_hundreds_of_independent_operator_registrations_do_not_generate_service_
     assert len({item.integration_id for item in catalog.operations()}) == 210
     assert fixture.calls == []
     result = catalog.execute("fixture_209.lookup", {"record_id": "last"}, approve_source_dispatch=True)
-    assert result.receipt["live_verified"] is False
+    assert result.receipt["transport_mode"] == "application_injected"
+    assert result.receipt["live_verification"] == "unassessed"
     assert len(fixture.calls) == 1
 
 
@@ -123,21 +125,18 @@ def test_import_approval_and_execution_approval_are_independent_literal_grants()
     assert fixture.calls == []
 
 
-def test_credentials_are_resolved_only_after_validation_and_never_serialized():
+def test_legacy_header_mapping_is_copied_and_never_serialized():
     document = _document()
     document["components"] = {"securitySchemes": {"researchAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"}}}
     document["security"] = [{"researchAuth": []}]
     fixture = _FixtureTransport()
-    resolved = []
-    def auth():
-        resolved.append(True)
-        return {"X-API-Key": "fixture-credential-do-not-persist"}
-    with pytest.raises(OpenApiImportError, match="header resolver"):
+    with pytest.raises(OpenApiImportError, match="header mapping or typed connection"):
         _import(document)
-    catalog, descriptors = _import(document, auth_headers=auth, transport=fixture)
-    assert not resolved and descriptors[0].auth_mode == "application_header"
+    headers = {"X-API-Key": "fixture-credential-do-not-persist"}
+    catalog, descriptors = _import(document, auth_headers=headers, transport=fixture)
+    headers["X-API-Key"] = "replacement-account-fixture"
+    assert not fixture.calls and descriptors[0].auth_mode == "application_header"
     result = catalog.execute("research.lookup", {"record_id": "a"}, approve_source_dispatch=True)
-    assert resolved == [True]
     assert fixture.calls[0]["headers"]["X-API-Key"] == "fixture-credential-do-not-persist"
     assert "fixture-credential" not in json.dumps([descriptors[0].to_dict(), result.receipt])
 
@@ -258,7 +257,9 @@ def test_default_http_transport_uses_get_exact_target_checked_address_and_bounde
         connection.request.assert_called_once_with("GET", "/v1/records/item?limit=3", headers={"Accept": "application/json"})
         response.read.assert_called_once_with(1_048_577)
         connection.close.assert_called_once()
-    assert result.receipt["live_verified"] is True
+    assert result.receipt["transport_mode"] == "pinned_https"
+    assert result.receipt["live_verification"] == "unassessed"
+    assert "live_verified" not in result.receipt
 
 
 def test_path_scope_parameters_can_be_overridden_but_never_make_missing_fields_optional():
@@ -290,17 +291,14 @@ def test_duplicate_keys_and_nonfinite_json_never_become_successful_responses():
 
 def test_application_exception_details_and_unsafe_headers_cannot_escape_into_receipts():
     sentinel = "fixture-secret-value"
-    for source in ("header", "transport"):
-        def fail(*args, **kwargs):
-            raise OpenApiImportError(sentinel)
-        options = {"auth_headers": fail} if source == "header" else {"transport": fail}
-        catalog, _ = _import(**options)
-        with pytest.raises(OpenApiImportError) as error:
-            catalog.execute("research.lookup", {"record_id": "a"}, approve_source_dispatch=True)
-        assert sentinel not in str(error.value)
+    def fail(*args, **kwargs):
+        raise OpenApiImportError(sentinel)
+    catalog, _ = _import(transport=fail)
+    with pytest.raises(OpenApiImportError) as error:
+        catalog.execute("research.lookup", {"record_id": "a"}, approve_source_dispatch=True)
+    assert sentinel not in str(error.value)
     fixture = _FixtureTransport()
     for headers in ({"Host": "evil.example"}, {"Authorization": "Bearer token\r\nHost: evil.example"}):
-        catalog, _ = _import(auth_headers=lambda: headers, transport=fixture)
-        with pytest.raises(OpenApiImportError, match="header resolution"):
-            catalog.execute("research.lookup", {"record_id": "a"}, approve_source_dispatch=True)
+        with pytest.raises(OpenApiImportError, match="header mapping"):
+            _import(auth_headers=headers, transport=fixture)
     assert fixture.calls == []
