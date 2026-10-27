@@ -139,12 +139,21 @@ impl Drop for WorkerPermit {
 }
 
 fn admit(counter: &Arc<AtomicUsize>, maximum: usize) -> Result<WorkerPermit, &'static str> {
-    counter
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-            (current < maximum).then_some(current + 1)
-        })
-        .map(|_| WorkerPermit(Arc::clone(counter)))
-        .map_err(|_| "workflow worker capacity is currently occupied")
+    let mut current = counter.load(Ordering::Acquire);
+    loop {
+        if current >= maximum {
+            return Err("workflow worker capacity is currently occupied");
+        }
+        match counter.compare_exchange_weak(
+            current,
+            current + 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return Ok(WorkerPermit(Arc::clone(counter))),
+            Err(observed) => current = observed,
+        }
+    }
 }
 
 impl WorkflowApplication {
