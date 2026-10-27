@@ -306,10 +306,10 @@ def test_default_transport_refuses_private_dns_before_resolving_credentials_or_c
     session, store, _, _ = _session()
     catalog, _ = _import(session, transport=None)
     private = (2, 1, 6, "", ("127.0.0.1", 443))
-    with patch("prism_sdk.workflow_openapi.socket.getaddrinfo", return_value=[private]), \
-         patch("prism_sdk.workflow_openapi._PinnedHttpsConnection") as connection, \
+    with patch("prism_sdk.workflow_openapi_http.socket.getaddrinfo", return_value=[private]), \
+         patch("prism_sdk.workflow_openapi_http.socket.socket") as connection, \
          patch.object(store, "_resolve", wraps=store._resolve) as resolve:
-        with pytest.raises(OpenApiImportError, match="private or loopback"):
+        with pytest.raises(OpenApiImportError, match="dns_address_is_not_public_or_allowed"):
             catalog.execute("research.lookup", {"record_id": "public-record"}, approve_source_dispatch=True)
         assert resolve.call_count == connection.call_count == 0
 
@@ -322,16 +322,27 @@ def test_default_transport_pins_destination_before_secret_resolution_and_closes_
     def resolve(handle):
         order.append("resolve")
         raise RuntimeError(SENTINEL)
-    with patch("prism_sdk.workflow_openapi.socket.getaddrinfo", return_value=[address]), \
-         patch("prism_sdk.workflow_openapi._PinnedHttpsConnection") as connection_type, \
+    with patch("prism_sdk.workflow_openapi_http.socket.getaddrinfo", return_value=[address]), \
+         patch("prism_sdk.workflow_openapi_http.socket.socket") as connection_type, \
+         patch("prism_sdk.workflow_openapi_http.ssl.create_default_context") as context, \
          patch.object(store, "_resolve", side_effect=resolve):
         connection_type.side_effect = lambda *args: order.append("pin") or connection_type.return_value
+        context.return_value.wrap_socket.side_effect = lambda *args, **kwargs: order.append("tls") or context.return_value.wrap_socket.return_value
         with pytest.raises(OpenApiImportError) as error:
             catalog.execute("research.lookup", {"record_id": "public-record"}, approve_source_dispatch=True)
-        assert order == ["pin", "resolve"]
+        assert order == ["pin", "tls", "resolve"]
         assert SENTINEL not in "".join(traceback.format_exception(error.value))
-        connection_type.return_value.request.assert_not_called()
-        connection_type.return_value.close.assert_called_once()
+        context.return_value.wrap_socket.return_value.send.assert_not_called()
+        context.return_value.wrap_socket.return_value.close.assert_called_once()
+
+
+def test_slow_credential_callback_exhausts_total_injected_deadline_before_transport_admission():
+    session, _, _, _ = _session()
+    catalog, transport = _import(session, timeout_seconds=1)
+    with patch("prism_sdk.workflow_openapi.time.monotonic", side_effect=[0.0, 1.0]):
+        with pytest.raises(OpenApiImportError, match="total_deadline_exceeded"):
+            catalog.execute("research.lookup", {"record_id": "public-record"}, approve_source_dispatch=True)
+    assert transport.calls == []
 
 
 @pytest.mark.parametrize("invalidation", ["revoke", "close", "configuration"])

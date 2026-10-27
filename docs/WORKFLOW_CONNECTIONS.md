@@ -108,7 +108,7 @@ checks do not erase copies of public results already delivered to the applicatio
 
 The default HTTPS transport validates arguments, source approval, resource scope and destination
 policy before resolving the credential at header construction. It checks public DNS and prepares
-the pinned connection first. Secret resolution does not run during catalogue inspection, planning,
+the pinned, certificate-verified TLS connection first. Secret resolution does not run during catalogue inspection, planning,
 checkpoint validation or refused private-DNS requests. An injected application transport owns its
 network admission; the SDK still checks scope before resolving headers. Authentication is limited
 to fixed bearer or API-key headers. Headers and application exception details never enter receipts.

@@ -8,19 +8,19 @@ never fetches a specification, discovers credentials, or authorizes a source req
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import http.client
 import ipaddress
 import json
 import math
 import re
 import secrets
-import socket
-import ssl
+import time
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import quote, urlencode, urlsplit
 
 from .authoring import content_digest
 from .workflow_connections import WorkflowConnectionContext, WorkflowConnectionSession
+from .reviewed_public_http import ReviewedPublicHttpError
+from .workflow_openapi_http import OPENAPI_HTTPS_POLICY_DIGEST, bounded_openapi_get
 from .tooling import ToolCatalogue, ToolDefinition
 from .workflow_integrations import (
     MAX_WORKFLOW_INTEGRATIONS, MAX_WORKFLOW_OPERATIONS,
@@ -30,6 +30,36 @@ from .workflow_integrations import (
 
 class OpenApiImportError(ValueError):
     """A document or response falls outside the explicitly checked import contract."""
+
+
+class OpenApiTransportError(OpenApiImportError):
+    """Sanitized HTTP failure with missing retry metadata kept distinct from zero."""
+
+    def __init__(self, failure: ReviewedPublicHttpError) -> None:
+        object.__setattr__(self, "_metadata", (failure.failure_class, failure.status_code,
+                                             failure.retry_after_seconds))
+        super().__init__("OpenAPI HTTPS refused: " + failure.failure_class)
+
+    def __setattr__(self, name, value):
+        if name in {"_metadata", "failure_class", "status_code", "retry_after_seconds", "automatic_retry"}:
+            raise AttributeError("OpenAPI HTTP failure metadata is immutable")
+        super().__setattr__(name, value)
+
+    @property
+    def failure_class(self): return self._metadata[0]
+
+    @property
+    def status_code(self): return self._metadata[1]
+
+    @property
+    def retry_after_seconds(self): return self._metadata[2]
+
+    @property
+    def automatic_retry(self): return False
+
+    def to_dict(self):
+        return {"failure_class": self.failure_class, "status_code": self.status_code,
+                "retry_after_seconds": self.retry_after_seconds, "automatic_retry": False}
 
 
 @dataclass(frozen=True)
@@ -201,54 +231,16 @@ def _server(value: Any, allowed_hosts: Sequence[str], allow_private_hosts: bool)
     return value.rstrip("/")
 
 
-class _PinnedHttpsConnection(http.client.HTTPSConnection):
-    """Pin a checked DNS result while retaining TLS certificate and hostname verification."""
-
-    def __init__(self, host: str, port: int, address: tuple[Any, ...], timeout: float):
-        super().__init__(host, port=port, timeout=timeout, context=ssl.create_default_context())
-        self._checked_address = address
-
-    def connect(self) -> None:
-        family, socktype, protocol, _, sockaddr = self._checked_address
-        raw = socket.socket(family, socktype, protocol)
-        try:
-            raw.settimeout(self.timeout)
-            raw.connect(sockaddr)
-            self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
-        except BaseException:
-            raw.close()
-            raise
-
-
 def _http_get(url: str, *, headers: Mapping[str, str], timeout_seconds: float,
               max_response_bytes: int, allow_private_hosts: bool,
               resolve_auth_headers: Callable[[], Mapping[str, str]] | None = None) -> OpenApiHttpResponse:
-    parts = urlsplit(url)
-    host, port = parts.hostname, parts.port or 443
     try:
-        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        if not addresses or len(addresses) > 64:
-            raise OpenApiImportError("server DNS resolution is empty or exceeds its bound")
-        if not allow_private_hosts and any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
-            raise OpenApiImportError("server DNS resolved to a private or loopback address")
-        connection = _PinnedHttpsConnection(host, port, addresses[0], timeout_seconds)
-        try:
-            target = parts.path or "/"
-            if parts.query:
-                target += "?" + parts.query
-            final_headers = dict(headers)
-            if resolve_auth_headers is not None:
-                final_headers.update(resolve_auth_headers())
-            connection.request("GET", target, headers=final_headers)
-            response = connection.getresponse()
-            body = response.read(max_response_bytes + 1)
-            return OpenApiHttpResponse(response.status, dict(response.getheaders()), body, url)
-        finally:
-            connection.close()
-    except OpenApiImportError:
-        raise
-    except (OSError, http.client.HTTPException, ValueError):
-        raise OpenApiImportError("OpenAPI transport failed; credentials and endpoint details withheld") from None
+        status, response_headers, body = bounded_openapi_get(url, headers=headers,
+            timeout_seconds=timeout_seconds, max_response_bytes=max_response_bytes,
+            allow_private_hosts=allow_private_hosts, resolve_auth_headers=resolve_auth_headers)
+        return OpenApiHttpResponse(status, response_headers, body, url)
+    except ReviewedPublicHttpError as failure:
+        raise OpenApiTransportError(failure) from None
 
 
 def _parameters(path: str, item: Mapping[str, Any], operation: Mapping[str, Any]) -> tuple[dict, tuple[dict, ...]]:
@@ -387,6 +379,7 @@ def import_openapi_operations(
         raise OpenApiImportError("timeout_seconds must be finite and between 0.1 and 120")
     if type(max_response_bytes) is not int or not 1 <= max_response_bytes <= 4_000_000:
         raise OpenApiImportError("max_response_bytes must be between 1 and 4000000")
+    timeout_seconds = float(timeout_seconds)
     if auth_headers is not None:
         # Callable account rotation cannot be bound without retaining credential fingerprints.
         # Legacy mappings are copied once; revocable/lazy credentials use the typed connection.
@@ -398,10 +391,11 @@ def import_openapi_operations(
             copied_headers = {}
             for key, value in auth_headers.items():
                 if (not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,128}", key)
-                        or key.lower() in {"host", "connection", "content-length", "transfer-encoding", "accept"}
+                        or key.lower() in {"host", "connection", "content-length", "transfer-encoding", "accept",
+                            "accept-encoding", "proxy-authorization", "proxy-connection", "te", "trailer", "upgrade"}
                         or key.lower() in {name.lower() for name in copied_headers}
                         or not isinstance(value, str) or not value or len(value) > 8192
-                        or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)):
+                        or any(ord(ch) < 32 or ord(ch) > 255 or ord(ch) == 127 for ch in value)):
                     raise ValueError()
                 copied_headers[key] = value
             auth_headers = copied_headers
@@ -459,6 +453,13 @@ def import_openapi_operations(
     if integration_id not in existing_integrations and len(existing_integrations) >= MAX_WORKFLOW_INTEGRATIONS:
         raise OpenApiImportError("import would exceed integration catalogue capacity")
     document_digest = content_digest(document)
+    transport_configuration = {"schema": "aurora-openapi-http-binding/0.1",
+        "timeout_seconds": timeout_seconds, "max_response_bytes": max_response_bytes,
+        "allow_private_hosts": allow_private_hosts,
+        "transport_mode": "pinned_https" if transport is None else "application_injected",
+        "policy_digest": OPENAPI_HTTPS_POLICY_DIGEST if transport is None else None,
+        "application_transport_binding": secrets.token_hex(32) if transport is not None else None}
+    transport_config_digest = content_digest(transport_configuration)
     # A legacy callable cannot establish account identity. Bind each registration independently
     # rather than hashing credential bytes or accidentally approving a replacement account.
     legacy_header_binding = secrets.token_hex(32) if auth_headers is not None else None
@@ -494,6 +495,7 @@ def import_openapi_operations(
             if not isinstance(description, str):
                 raise OpenApiImportError("operation description must be text")
             description += f"\nReviewed OpenAPI document: {document_digest}; fixed server: {selected_server}"
+            description += f"\nReviewed HTTP configuration: {transport_config_digest}"
             if connection is not None:
                 binding = connection.validate_import(
                     service_id=integration_id, context=connection_context,
@@ -569,13 +571,18 @@ def import_openapi_operations(
                                      max_response_bytes=max_response_bytes, allow_private_hosts=allow_private_hosts,
                                      resolve_auth_headers=resolve_connection_headers)
             else:
+                started = time.monotonic()
                 if resolve_connection_headers is not None:
                     headers.update(resolve_connection_headers())
+                if time.monotonic() - started >= timeout_seconds:
+                    raise OpenApiTransportError(ReviewedPublicHttpError("total_deadline_exceeded"))
                 try:
                     response = transport(url, headers=headers, timeout_seconds=timeout_seconds,
                                          max_response_bytes=max_response_bytes)
                 except Exception:
                     raise OpenApiImportError("application transport failed; credentials and endpoint details withheld") from None
+                if time.monotonic() - started >= timeout_seconds:
+                    raise OpenApiTransportError(ReviewedPublicHttpError("total_deadline_exceeded"))
             if not isinstance(response, OpenApiHttpResponse) or type(response.status) is not int:
                 raise OpenApiImportError("transport returned an invalid response")
             if 300 <= response.status < 400 or (response.final_url is not None and response.final_url != url):
@@ -603,6 +610,8 @@ def import_openapi_operations(
                 "response_bytes": len(response.body), "retrieved_at": retrieved_at,
                 "verification": "schema_checked_response",
                 "transport_mode": "pinned_https" if transport is None else "application_injected",
+                "transport_config_digest": transport_config_digest,
+                "transport_policy_digest": OPENAPI_HTTPS_POLICY_DIGEST if transport is None else None,
                 "live_verification": "unassessed",
                 **({"connection_binding_digest": content_digest(connection.binding_metadata()),
                     "account_identity": "application_attested;not_provider_verified",

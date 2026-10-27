@@ -185,9 +185,9 @@ def test_fixed_https_server_host_policy_rejects_unsafe_destinations(server, host
 def test_default_transport_checks_private_dns_without_opening_a_socket():
     catalog, _ = _import()
     address = (2, 1, 6, "", ("127.0.0.1", 443))
-    with patch("prism_sdk.workflow_openapi.socket.getaddrinfo", return_value=[address]), \
-         patch("prism_sdk.workflow_openapi.socket.socket") as socket_constructor:
-        with pytest.raises(OpenApiImportError, match="DNS resolved"):
+    with patch("prism_sdk.workflow_openapi_http.socket.getaddrinfo", return_value=[address]), \
+         patch("prism_sdk.workflow_openapi_http.socket.socket") as socket_constructor:
+        with pytest.raises(OpenApiImportError, match="dns_address_is_not_public_or_allowed"):
             catalog.execute("research.lookup", {"record_id": "a"}, approve_source_dispatch=True)
         socket_constructor.assert_not_called()
 
@@ -244,22 +244,29 @@ def test_server_and_document_identity_change_the_catalogue_digest():
 
 def test_default_http_transport_uses_get_exact_target_checked_address_and_bounded_read():
     catalog, _ = _import()
-    address = (2, 1, 6, "", ("93.184.216.34", 443))
-    with patch("prism_sdk.workflow_openapi.socket.getaddrinfo", return_value=[address]), \
-         patch("prism_sdk.workflow_openapi._PinnedHttpsConnection") as connection_type:
-        connection = connection_type.return_value
-        response = connection.getresponse.return_value
-        response.status = 200
-        response.getheaders.return_value = [("Content-Type", "application/json")]
-        response.read.return_value = b'{"records":[],"count":0}'
+    # The transport's actual wire parsing/deadlines have their own fixture-peer tests.
+    # This assertion pins the importer-to-transport boundary and exact declared URL.
+    with patch("prism_sdk.workflow_openapi.bounded_openapi_get",
+            return_value=(200, {"content-type": "application/json"}, b'{"records":[],"count":0}')) as get:
         result = catalog.execute("research.lookup", {"record_id": "item", "limit": 3}, approve_source_dispatch=True)
-        connection_type.assert_called_once_with("api.example.org", 443, address, 15.0)
-        connection.request.assert_called_once_with("GET", "/v1/records/item?limit=3", headers={"Accept": "application/json"})
-        response.read.assert_called_once_with(1_048_577)
-        connection.close.assert_called_once()
+        get.assert_called_once_with(SERVER + "/records/item?limit=3", headers={"Accept": "application/json"},
+            timeout_seconds=15.0, max_response_bytes=1_048_576, allow_private_hosts=False,
+            resolve_auth_headers=None)
     assert result.receipt["transport_mode"] == "pinned_https"
     assert result.receipt["live_verification"] == "unassessed"
     assert "live_verified" not in result.receipt
+
+
+def test_all_http_controls_bind_catalogue_and_injected_registrations_are_independent():
+    default, _ = _import()
+    identical, _ = _import(timeout_seconds=15)
+    assert default.catalog_digest == identical.catalog_digest
+    catalogues = [default]
+    for changes in ({"timeout_seconds": 1}, {"max_response_bytes": 1024},
+                    {"allow_private_hosts": True}, {"transport": _FixtureTransport()},
+                    {"transport": _FixtureTransport()}):
+        catalogues.append(_import(**changes)[0])
+    assert len({catalog.catalog_digest for catalog in catalogues}) == len(catalogues)
 
 
 def test_path_scope_parameters_can_be_overridden_but_never_make_missing_fields_optional():

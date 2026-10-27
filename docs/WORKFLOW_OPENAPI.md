@@ -96,12 +96,13 @@ The default transport permits fixed HTTPS destinations on exact lowercase allowl
 rejects userinfo, queries in the base URL, variable servers, redirect statuses, changed final URLs,
 path traversal, nonstandard ports, private addresses and loopback addresses. DNS results must all
 be public; the chosen checked address is used directly while TLS verifies the original hostname.
-The connection uses a finite socket timeout (default 15 seconds, maximum 120) and reads at most
+The connection uses an absolute request deadline (default 15 seconds, maximum 120) and reads at most
 the configured response limit plus one byte (default 1,048,576, maximum 4,000,000). HTTP redirects
-are never followed. It performs no retries. A socket timeout bounds each blocking transport
-operation; it is not a total wall-clock or DNS-resolution deadline.
+are never followed. It performs no retries. The deadline includes bounded DNS admission and each
+blocking I/O operation; synchronous application callbacks are checked for elapsed time but cannot
+be forcibly interrupted by this SDK.
 For typed connections, argument, scope and dispatch-approval checks run first; public-DNS
-admission and pinned connection preparation precede resolving secret bytes. The connection closes
+admission and verified pinned TLS precede resolving secret bytes. The connection closes
 on credential-resolution failure before a request is sent. An admitted synchronous request cannot
 be recalled by a later revocation. If the session is invalid by receipt construction, the adapter
 refuses the result instead of issuing a successful connection-bound receipt.
@@ -150,3 +151,31 @@ Focused verification from the repository root:
 $env:PYTHONPATH = 'python'
 python -m pytest python/tests/test_workflow_openapi.py -q
 ```
+
+The default transport now uses `workflow_openapi_http.py`, with one absolute deadline across
+bounded DNS admission, TCP, verified TLS, header admission, every send/read and strict HTTP
+framing. At most four outstanding platform DNS jobs can remain live; a timed-out resolver keeps
+its slot until it actually exits. It pins a checked numeric address while retaining certificate
+and original-hostname verification. Routing, proxy, compression and framing headers cannot be
+supplied as authentication headers. The response parser is shared with
+[reviewed public HTTP](REVIEWED_PUBLIC_HTTP.md), whose credentialless policy is unchanged.
+
+Typed connection credentials are resolved **after verified TLS** and checked before the first
+send. Application credential resolvers and injected transports are synchronous trusted code;
+the SDK cannot forcibly interrupt a blocked callback. It checks elapsed time before dispatch
+and after an injected response, so an over-budget result is refused. Injected transports receive
+the original configured timeout and own their actual I/O bounds. Revocation after header
+admission cannot retract bytes already sent. No automatic retry or rate-limit sleep is performed.
+
+`OpenApiTransportError` retains sanitized failure class, optional HTTP status and optional
+bounded numeric Retry-After seconds. Missing/unsupported Retry-After is `None`, distinct from an
+observed zero. No source error body, credential or foreign exception text is published.
+Transport configuration and policy digests enter the descriptor/catalogue identity and receipt;
+changing timeout, response bound or private-network policy requires a newly compiled plan.
+Injected transports have independent random registration bindings, never secret fingerprints.
+
+The focused wire tests use fixture TLS streams and establish framing, deadline and admission
+behavior. They do not demonstrate connectivity to a protected provider. Python's
+[HTTP client](https://docs.python.org/3.12/library/http.client.html) and
+[socket](https://docs.python.org/3.12/library/socket.html) documentation describe the underlying
+platform interfaces; the total-deadline and stricter framing policies are repository extensions.
