@@ -381,12 +381,12 @@ def test_registration_retains_caller_nonce_and_refuses_endpoint_query_or_authori
     fetcher.assert_not_called()
 
 
-def test_core_does_not_onboard_datacite_or_change_existing_manifest_default_catalogue_or_get_policy():
+def test_onboarded_datacite_reader_does_not_change_default_catalogue_or_get_policy():
     from prism_sdk.workflow_integrations import builtin_workflow_operation_catalog
     from prism_sdk.workflow_provider_registry import reviewed_workflow_provider_registry
     base = builtin_workflow_operation_catalog()
     assert base.catalog_digest == "53e11ef585fa6d65736ecc77d5042962a9276fac8fbe7b39bde1efccfec5e5b2"
     registry = reviewed_workflow_provider_registry(base).to_dict()
-    assert registry["counts"]["implemented_reader_paths"] == 20 and registry["counts"]["declared_reviewed_service_groups"] == 17
+    assert registry["counts"]["implemented_reader_paths"] == 21 and registry["counts"]["declared_reviewed_service_groups"] == 18
     assert dc.DATACITE_COLLECTION_METADATA_OPERATION_ID not in {row.operation_id for row in base.operations()}
     assert wire.REVIEWED_PUBLIC_HTTP_POLICY_DIGEST == "07c73dc8fcba4fcdfa2cb08a941062f6a736cbcff38c02cdf457a09593a3f46e"

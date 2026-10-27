@@ -16,7 +16,7 @@ from .workflow_integrations import WorkflowOperationCatalog, builtin_workflow_op
 
 WORKFLOW_CAPABILITIES_SCHEMA = "aurora-workflow-capabilities/0.1"
 MAX_WORKFLOW_CAPABILITY_SELECTIONS = 32
-WORKFLOW_CAPABILITY_IDS = ("gene-identity", "glioma-ontology", "civic-glioblastoma-evidence", "civic-curation-review", "cellosaurus-glioblastoma-metadata")
+WORKFLOW_CAPABILITY_IDS = ("gene-identity", "glioma-ontology", "civic-glioblastoma-evidence", "civic-curation-review", "cellosaurus-glioblastoma-metadata", "datacite-tcga-gbm-metadata")
 _PROFILES = {
     "gene-identity": {
         "label": "TP53 gene identifier evidence review",
@@ -43,6 +43,11 @@ _PROFILES = {
         "label": "Cellosaurus glioblastoma-name cell-line metadata",
         "scope": "One fixed public identity/curation window; no authenticity, quality, suitability, clinical or laboratory inference.",
         "required_operations": ["cellosaurus.glioblastoma_cell_line_metadata"],
+    },
+    "datacite-tcga-gbm-metadata": {
+        "label": "DataCite TCGA-GBM collection DOI metadata",
+        "scope": "One fixed public DataCite metadata object; no TCIA images, subject/media traversal, current release, scientific quality or denominator inference.",
+        "required_operations": ["datacite.tcga_gbm_collection_metadata"],
     },
 }
 
@@ -79,6 +84,9 @@ def _extension(profile_id: str) -> WorkflowOperationCatalog:
     elif profile_id == "cellosaurus-glioblastoma-metadata":
         from .reviewed_cellosaurus_cell_line_retrieval import register_cellosaurus_cell_line_operations
         register_cellosaurus_cell_line_operations(catalog)
+    elif profile_id == "datacite-tcga-gbm-metadata":
+        from .reviewed_datacite_collection_metadata_retrieval import register_datacite_collection_metadata_operations
+        register_datacite_collection_metadata_operations(catalog)
     else:
         raise ArgumentError("workflow capability is not reviewed")
     if {item.operation_id for item in catalog.operations()} != set(_PROFILES[profile_id]["required_operations"]):
@@ -145,6 +153,7 @@ def compile_workflow_capability(task: str, catalog: WorkflowOperationCatalog, pr
         "glioma-ontology": ("nci_thesaurus.glioma_ontology", "NCI glioma source terminology inspection", "ontology"),
         "civic-glioblastoma-evidence": ("civic.glioblastoma_evidence_metadata", "CIViC glioblastoma-name source metadata inspection", "evidence"),
         "cellosaurus-glioblastoma-metadata": ("cellosaurus.glioblastoma_cell_line_metadata", "Cellosaurus glioblastoma-name source metadata inspection", "cell_lines"),
+        "datacite-tcga-gbm-metadata": ("datacite.tcga_gbm_collection_metadata", "DataCite TCGA-GBM collection DOI metadata inspection", "collection_metadata"),
     }[profile_id]
     arguments = {"timeout_ms": 30_000}
     native = compile_workflow_requirements(task, required_operations=[operation], output_operations=[operation],

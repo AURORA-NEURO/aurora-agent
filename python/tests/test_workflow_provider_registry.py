@@ -44,7 +44,7 @@ def _reconstruct(registry, **changes):
     return WorkflowProviderRegistry(**fields)
 
 
-def test_twenty_implemented_readers_are_not_twenty_providers_or_default_registration(monkeypatch):
+def test_twenty_one_implemented_readers_are_not_twenty_one_providers_or_default_registration(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: pytest.fail("inspection attempted DNS"))
     monkeypatch.setattr(socket, "create_connection", lambda *_args, **_kwargs: pytest.fail("inspection opened a socket"))
     catalog = builtin_workflow_operation_catalog()
@@ -52,8 +52,8 @@ def test_twenty_implemented_readers_are_not_twenty_providers_or_default_registra
     document = reviewed_workflow_provider_registry(catalog).to_dict()
     assert catalog.to_dict() == before
     assert document["counts"] == {
-        "declared_reviewed_service_groups": 17, "implemented_reader_paths": 20,
-        "registered_reviewed_default_readers": 8, "supported_readers_not_registered": 12,
+        "declared_reviewed_service_groups": 18, "implemented_reader_paths": 21,
+        "registered_reviewed_default_readers": 8, "supported_readers_not_registered": 13,
         "registered_unmatched_readers": 0, "registered_reviewed_service_groups": 7,
         "external_evidence_references": 0,
         "independently_live_verified_providers": {"state": "not_established_by_registry", "value": None},
@@ -68,8 +68,8 @@ def test_twenty_implemented_readers_are_not_twenty_providers_or_default_registra
 def test_all_real_optional_registrations_bind_without_capacity_counts_or_dispatch(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: pytest.fail("registration attempted DNS"))
     document = reviewed_workflow_provider_registry(_all_catalog()).to_dict()
-    assert document["counts"]["registered_reviewed_default_readers"] == 20
-    assert document["counts"]["registered_reviewed_service_groups"] == 17
+    assert document["counts"]["registered_reviewed_default_readers"] == 21
+    assert document["counts"]["registered_reviewed_service_groups"] == 18
     assert document["counts"]["supported_readers_not_registered"] == 0
     assert all(value["registration_state"] == "registered_reviewed_default" for value in document["readers"])
     assert "225" not in json.dumps(document["counts"])
@@ -110,7 +110,7 @@ def test_civic_optional_default_contract_binds_both_transport_components_without
         lambda *_args, **_kwargs: pytest.fail("registry inspection dispatched CIViC"))
     base = builtin_workflow_operation_catalog()
     before = reviewed_workflow_provider_registry(base).to_dict()
-    assert before["manifest_version"] == "reviewed-public-readers/2026-10-27.4"
+    assert before["manifest_version"] == "reviewed-public-readers/2026-10-27.5"
     assert _reader(before, "civic.glioblastoma_evidence_metadata")["registration_state"] == "not_registered"
     expanded = with_workflow_capabilities(base, ["civic-glioblastoma-evidence"])
     registry = reviewed_workflow_provider_registry(expanded)
@@ -147,7 +147,7 @@ def test_cellosaurus_optional_contract_binds_existing_get_policy_without_promoti
         lambda *_args, **_kwargs: pytest.fail("onboarding inspection dispatched Cellosaurus"))
     base = builtin_workflow_operation_catalog()
     before = reviewed_workflow_provider_registry(base).to_dict()
-    assert before["manifest_version"] == "reviewed-public-readers/2026-10-27.4"
+    assert before["manifest_version"] == "reviewed-public-readers/2026-10-27.5"
     operation = "cellosaurus.glioblastoma_cell_line_metadata"
     assert _reader(before, operation)["registration_state"] == "not_registered"
     expanded = with_workflow_capabilities(base, ["cellosaurus-glioblastoma-metadata"])
@@ -176,11 +176,87 @@ def test_cellosaurus_onboarding_preserves_all_nineteen_previous_descriptors_and_
     from prism_sdk.reviewed_public_http import REVIEWED_PUBLIC_HTTP_POLICY_DIGEST
     reviewed = _all_catalog()
     legacy = reviewed.subset([item.operation_id for item in reviewed.operations()
-        if item.operation_id != "cellosaurus.glioblastoma_cell_line_metadata"])
+        if item.operation_id not in {"cellosaurus.glioblastoma_cell_line_metadata", "datacite.tcga_gbm_collection_metadata"}])
     # Frozen offline from clean20bc before this onboarding slice; not regenerated from the new manifest.
     assert len(legacy.operations()) == 19
     assert legacy.catalog_digest == "636b5792f049bb121343980329d25950a066cc2b214cf1f022538710f6c92838"
     assert REVIEWED_PUBLIC_HTTP_POLICY_DIGEST == "07c73dc8fcba4fcdfa2cb08a941062f6a736cbcff38c02cdf457a09593a3f46e"
+
+
+def test_datacite_optional_contract_adds_one_metadata_group_and_keeps_live_state_unmeasured(monkeypatch):
+    from prism_sdk.workflow_capabilities import with_workflow_capabilities
+    from prism_sdk import reviewed_public_http
+    monkeypatch.setattr(reviewed_public_http.ReviewedPublicHttpClient, "get",
+        lambda *_args, **_kwargs: pytest.fail("onboarding inspection dispatched DataCite"))
+    base = builtin_workflow_operation_catalog()
+    before = reviewed_workflow_provider_registry(base).to_dict()
+    operation = "datacite.tcga_gbm_collection_metadata"
+    assert before["manifest_version"] == "reviewed-public-readers/2026-10-27.5"
+    assert _reader(before, operation)["registration_state"] == "not_registered"
+    expanded = with_workflow_capabilities(base, ["datacite-tcga-gbm-metadata"])
+    registry = reviewed_workflow_provider_registry(expanded)
+    document = registry.to_dict()
+    reader = _reader(document, operation)
+    assert reader["provider_id"] == "datacite" and reader["registration_state"] == "registered_reviewed_default"
+    assert document["counts"]["registered_reviewed_default_readers"] == 9
+    assert document["counts"]["registered_reviewed_service_groups"] == 8
+    provider = next(row for row in document["providers"] if row["provider_id"] == "datacite")
+    assert provider["origins"] == ["https://api.datacite.org"]
+    assert "reviewed_public_http" in reader["component_sha256"] and "reviewed_public_graphql" not in reader["component_sha256"]
+    assert "reviewed_datacite_collection_metadata_retrieval" in reader["component_sha256"]
+    assert registry.prepare(operation, {}).to_dict()["arguments"] == {"timeout_ms": 30000}
+    assert reader["live_observation"] == {"state": "unmeasured_by_registry", "value": None}
+    assert document["counts"]["independently_live_verified_providers"]["value"] is None
+
+
+def test_datacite_caller_fixture_binding_cannot_be_prepared_as_a_default_reader():
+    from prism_sdk.reviewed_datacite_collection_metadata_retrieval import register_datacite_collection_metadata_operations
+    catalog = register_datacite_collection_metadata_operations(builtin_workflow_operation_catalog(),
+        fetcher=lambda *_args, **_kwargs: pytest.fail("registration dispatched"))
+    registry = reviewed_workflow_provider_registry(catalog)
+    operation = "datacite.tcga_gbm_collection_metadata"
+    assert _reader(registry.to_dict(), operation)["registration_state"] == "registered_contract_differs"
+    with pytest.raises(ArgumentError, match="exact registered reviewed default"):
+        registry.prepare(operation, {})
+
+
+def test_datacite_onboarding_preserves_all_twenty_previous_descriptors_and_default_get_policy():
+    from prism_sdk.reviewed_public_http import REVIEWED_PUBLIC_HTTP_POLICY_DIGEST
+    reviewed = _all_catalog()
+    legacy = reviewed.subset([row.operation_id for row in reviewed.operations()
+        if row.operation_id != "datacite.tcga_gbm_collection_metadata"])
+    # Frozen offline from clean c5e87 before DataCite onboarding; this is not a newly generated expected value.
+    assert len(legacy.operations()) == 20
+    assert legacy.catalog_digest == "5fbb0cd99709370f51326fa55b259110846bf44f033930495ee595b0433e32d1"
+    assert builtin_workflow_operation_catalog().catalog_digest == "53e11ef585fa6d65736ecc77d5042962a9276fac8fbe7b39bde1efccfec5e5b2"
+    assert REVIEWED_PUBLIC_HTTP_POLICY_DIGEST == "07c73dc8fcba4fcdfa2cb08a941062f6a736cbcff38c02cdf457a09593a3f46e"
+
+
+def test_datacite_default_operation_over_fixture_tls_requires_separate_approval_and_replays_without_live_promotion():
+    from prism_sdk import reviewed_datacite_collection_metadata_retrieval as datacite
+    from prism_sdk.workflow_capabilities import with_workflow_capabilities
+    from test_reviewed_public_http import transport, wire
+    catalog = with_workflow_capabilities(builtin_workflow_operation_catalog(), ["datacite-tcga-gbm-metadata"])
+    registry = reviewed_workflow_provider_registry(catalog)
+    request = registry.prepare(datacite.DATACITE_COLLECTION_METADATA_OPERATION_ID, {})
+    raw = json.dumps({"data": {"id": datacite._DOI.lower(), "type": "dois", "attributes": {
+        "doi": datacite._DOI, "publisher": "Synthetic publisher fixture", "isActive": False}}}).encode()
+    configuration = datacite._http_config(datacite.DataCiteCollectionMetadataRetrievalConfig())
+    with transport([wire(raw, content_type=b"application/vnd.api+json")], configuration=configuration) as (_client, _raw, secured, dns, *_rest):
+        with pytest.raises(ArgumentError, match="literal source approval"):
+            registry.execute(request)
+        assert dns.call_count == 0
+        execution = registry.execute(request, approve_source_dispatch=True, retrieved_at="2026-10-27T22:00:00Z")
+        assert dns.call_count == 1 and bytes(secured.sent).count(b"GET ") == 1
+        value = execution.result.value
+        assert value["transport"]["mode"] == "default_reviewed_public_http" and value["receipts"][0]["source_request_count"] == 1
+        assert value["records"][0]["observations"]["isActive"]["value"] is False
+        assert datacite.validate_datacite_collection_metadata_bundle(value) == value
+        observation = execution.observation()
+        assert observation["actual_http_request_count"] == {"state": "not_independently_observed", "value": None}
+        assert observation["supports_live_provider_coverage"] is False
+        assert registry.verify_observation(observation, request, result=execution.result)["source_calls"] == 0
+        assert dns.call_count == 1
 
 
 def test_inspection_exports_detached_copies_and_record_fields_are_frozen():
@@ -213,7 +289,7 @@ def test_unknown_local_mcp_openapi_and_named_aliases_do_not_inherit_reader_cover
     document = reviewed_workflow_provider_registry(catalog).to_dict()
     assert document["unreviewed_operation_ids"] == ["local.report", "mcp.fixture", "openapi.fixture", "pubmed.alias"]
     assert document["counts"]["registered_reviewed_default_readers"] == 8
-    assert document["counts"]["declared_reviewed_service_groups"] == 17
+    assert document["counts"]["declared_reviewed_service_groups"] == 18
 
 
 def test_reusing_every_reviewed_descriptor_with_fixture_executors_establishes_no_reviewed_runtime_binding():
@@ -225,7 +301,7 @@ def test_reusing_every_reviewed_descriptor_with_fixture_executors_establishes_no
     registry = reviewed_workflow_provider_registry(catalog)
     document = registry.to_dict()
     assert document["counts"]["registered_reviewed_default_readers"] == 0
-    assert document["counts"]["registered_unmatched_readers"] == 20
+    assert document["counts"]["registered_unmatched_readers"] == 21
     assert {value["registration_state"] for value in document["readers"]} == {"registered_executor_not_reviewed_default"}
     with pytest.raises(ArgumentError, match="exact registered"):
         registry.prepare("pubmed.search", {})

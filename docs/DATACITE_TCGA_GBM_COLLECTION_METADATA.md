@@ -3,9 +3,12 @@
 This repository-defined reader has no available blueprint module identifier. Explicit SDK
 registration adds `datacite.tcga_gbm_collection_metadata`, a read-only DataCite metadata
 operation for DOI `10.7937/K9/TCIA.2016.RNYFUYE9`. Its service group is `datacite`. It does not
-execute a TCIA imaging reader. This core slice does not add a capability profile, provider
-manifest entry or default operation. The existing published manifest `.4` still lists twenty
-onboarded reader paths and seventeen declared service groups. Descriptor `live_adapter`
+execute a TCIA imaging reader. The optional `datacite-tcga-gbm-metadata` capability profile
+installs this one reader. Manifest `.5` now names twenty-one implemented reader paths in
+eighteen declared API groups; default registration remains eight readers in seven groups,
+with thirteen optional readers absent by default. Earlier `.4` twenty/seventeen observations
+retain their original source binding. The core-only `c5e87` revision preceded this onboarding.
+Descriptor `live_adapter`
 labels describe implementation paths, not observed execution against a live endpoint.
 
 The design uses official [TCIA API guidance](https://www.cancerimagingarchive.net/tcia-api-guides/),
@@ -115,3 +118,11 @@ from prism_sdk import (
 catalog = register_datacite_collection_metadata_operations(WorkflowOperationCatalog())
 # Registration dispatches nothing. Execution has its separate source approval boundary.
 ```
+
+The optional profile compiles one `collection_metadata` step with exactly
+`{"timeout_ms": 30000}` and its native bundle as output. Its immutable requirements bind the
+one operation, whole argument object, required output, one-step and one-call caps. Editing
+the fixed timeout refuses rather than weakening the contract. CLI `workflow-template
+--template datacite-tcga-gbm-metadata` and worker startup `--capability
+datacite-tcga-gbm-metadata` use the same operator-selected profile; a request cannot enable it.
+Task text labels this fixed source inspection and does not choose another DOI or endpoint.

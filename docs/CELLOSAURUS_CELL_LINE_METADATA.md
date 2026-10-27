@@ -3,8 +3,10 @@
 This repository-defined reader has no available blueprint module identifier. It adds an
 explicitly registered source operation, `cellosaurus.glioblastoma_cell_line_metadata`, for one
 fixed public metadata window. The optional `cellosaurus-glioblastoma-metadata` capability profile
-installs this one reader; the default catalogue stays unchanged. Provider manifest `.4` names
-twenty reader paths and seventeen declared API groups. Earlier `.3`/nineteen-path/sixteen-group
+installs this one reader; the default catalogue stays unchanged. Provider manifest `.4` introduced
+twenty reader paths and seventeen declared API groups. Current `.5` separately adds a fixed
+[DataCite DOI metadata reader](DATACITE_TCGA_GBM_COLLECTION_METADATA.md), for twenty-one paths
+and eighteen declared groups. Earlier `.3`/nineteen-path/sixteen-group
 records remain tied to their earlier source revisions. An operation descriptor's `live_adapter` label describes its implementation path;
 it is not evidence that the committed adapter has executed against the live service.
 
