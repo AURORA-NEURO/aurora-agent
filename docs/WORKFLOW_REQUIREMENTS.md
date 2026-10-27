@@ -10,6 +10,11 @@ translated correctly, that retrieved records are relevant or complete, or that a
 is supported. The caller remains responsible for reviewing the contract against the intended task.
 See [the development plan](WORKFLOW_DEVELOPMENT_PLAN.md) for the remaining task-fidelity work.
 
+The opt-in [caller-declared intent obligations](WORKFLOW_INTENT_OBLIGATIONS.md) sidecar can retain
+unavailable/unresolved mandatory actions before model authoring, then lower admitted exact
+operation/literal declarations conjunctively into this contract. It does not extract freeform
+intent or prove that all task obligations were captured.
+
 Legacy `aurora-workflow-requirements/0.1` links retain their original transitive value-flow
 semantics and canonical digests. A link may now add `source_pointer` and/or `target_path`; such
 contracts use version `0.2`. `source_pointer` is an RFC 6901 path inside the producing output;

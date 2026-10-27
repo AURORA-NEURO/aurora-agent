@@ -33,6 +33,7 @@ commands.
 - [Glioma public evidence workflow](GLIOMA_WORKFLOW_BUILDER.md)
 - [Local-model glioma drafts and exact citation audit](GLIOMA_WORKFLOW_SYNTHESIS.md)
 - [Caller-bound workflow task requirements](WORKFLOW_REQUIREMENTS.md)
+- [Caller-declared mandatory workflow intent obligations](WORKFLOW_INTENT_OBLIGATIONS.md)
 - [Durable workflow cancellation](WORKFLOW_CANCELLATION.md)
 - [Typed glioma request interpretation](GLIOMA_WORKFLOW_INTENT.md)
 - [Glioma molecular metadata composition](GLIOMA_MOLECULAR_WORKFLOW.md)
