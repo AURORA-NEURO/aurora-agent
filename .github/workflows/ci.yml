@@ -17,6 +17,13 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # The API links the full cross-domain catalogue. Bound simultaneous compiler work
+      # and debug-symbol output after two hosted shutdowns during API compilation.
+      # Keep the full workspace tests, debug assertions and warning checks enabled.
+      CARGO_BUILD_JOBS: '1'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,6 +32,10 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: show runner resource availability
+        run: |
+          free -h
+          df -h .
       - name: fetch locked Rust dependencies
         run: cargo fetch --locked --config net.offline=false
       - name: validate glioma folder organization
