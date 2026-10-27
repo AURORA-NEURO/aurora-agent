@@ -225,7 +225,37 @@ Focused fixture tests exercise prior-only bindings, generated IDs, derived/contr
 native root and nested array references, contract/call limits, explicit final output
 coverage, non-plan terminal states, identity drift and unsupported/oversize refusal. They
 provide no evidence that an Ollama model follows the protocol or understands a task.
-The revised authoring context's live model fidelity remains **unmeasured** until a separate
-frozen, prospective comparison is run. Such a comparison must score full task/graph fidelity separately from decoder
-acceptance and caller-contract compilation, preserve every failure, and disclose the
-developer-authored cases, call budgets and provider context conditions.
+A fresh frozen paired probe compared historical version 0.1 with version 0.2 on three
+developer-authored positive cases from known graph families and two intent controls.
+Both conditions used the same exact tasks, immutable contracts, catalogue, per-case call
+budgets, 2,048 output-token bound and Qwen 2.5 7B model digest. All 23 provider invocations
+returned observed HTTP/text responses with a measured allocated context of 16,384 tokens;
+no source ran and no arm was unjudged. Prompt truncation remained unreported/unassessed.
+
+| Fresh case | Version 0.1 | Version 0.2 |
+| --- | --- | --- |
+| MGMT/TERT metadata to molecular review | Refused at initial chooser | Refused at arguments, confusing the admissible 12-gene enum with a mandatory full panel |
+| IDH2/BRAF plus GWAS metadata to molecular review | Refused because source data had not executed | Accepted three draft steps, then twice finished without the required review step; rejected and exhausted |
+| Independent Europe PMC and cBioPortal outputs | Requested an unnecessary extra Europe PMC operation | Complete exact graph accepted |
+| Genuinely unspecified gene selector | Refused, although clarification was required | Correctly requested the missing gene symbol |
+| Unavailable Slack publishing operation | Refused for page-size/execution reasons, without identifying the unavailable writer | Accepted only the read step and exhausted the two-call budget |
+
+Full graph acceptance was **0/3 versus 1/3**, with five versus eighteen provider invocations
+across all five cases. The predeclared lexical control screen passed one control in each
+condition. Separate independent coding-agent review found the baseline Slack message a
+screen false positive: it attributed the problem to absent executed data and small page
+size, rather than the unavailable publishing capability. Combined status, lexical and
+semantic control acceptance was **0/2 versus 1/2**. The candidate's exhausted Slack draft
+is a control failure, not a successful refusal or usable partial plan.
+
+The revised context passed one positive instance and the missing-selector control, but
+the probe does not establish reliable general planning. Defaults remain unchanged and
+the incremental planner stays opt-in. No graph was repaired, terminal response retried,
+case rerun, prompt tuned or source dispatched during this measurement. Timings reflect a
+shared machine with other active processes, not isolated performance measurements.
+The retained task artifacts are `aurora-authoring-semantics-evaluation.json` (report digest
+`8be9ec5d5eb090cccebdf3d4ee7112136d2f1139466e3825d21854b9b69d2ad2`) and
+`aurora-authoring-semantics-independent-verification.json` (digest
+`da4a37ba8b5a7c0944eb61a2c60f1e4235f31b93a0f4fb328c67a6f89744c6a3`). These
+are retained evidence for this developer-authored comparison, not independently collected
+benchmarks, automatic NLP requirement extraction, scientific validation or human review.
