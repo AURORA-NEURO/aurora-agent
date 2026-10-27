@@ -29,7 +29,8 @@ from .workflow_intent_obligations import (
 )
 
 WORKFLOW_INTENT_EXTRACTION_SCHEMA = "aurora-workflow-intent-extraction/0.1"
-WORKFLOW_INTENT_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.1"
+WORKFLOW_INTENT_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.2"
+_LEGACY_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.1"
 MAX_INTENT_EXTRACTION_ROWS = 32
 MAX_INTENT_EXTRACTION_RESPONSE_BYTES = 128_000
 MAX_INTENT_EXTRACTION_RESULT_BYTES = 512_000
@@ -37,6 +38,38 @@ MAX_INTENT_EXTRACTION_RESULT_BYTES = 512_000
 
 class WorkflowIntentExtractionError(WorkflowValidationError):
     """Invalid local extraction configuration or a changed invocation boundary."""
+
+
+def _request_value(task: str, catalog_digest: str, model: str, operations: Sequence[Any],
+                   protocol: str) -> dict[str, Any]:
+    """Reconstruct each version's actual contract exposure without upgrading old records."""
+    if protocol not in (_LEGACY_EXTRACTION_PROTOCOL, WORKFLOW_INTENT_EXTRACTION_PROTOCOL):
+        raise WorkflowIntentExtractionError("intent extraction protocol is unsupported")
+    descriptors = [operation.to_dict() for operation in sorted(operations, key=lambda item: item.operation_id)]
+    visible = ([{key: descriptor[key] for key in ("operation_id", "description", "input_schema", "read_only")}
+                for descriptor in descriptors] if protocol == _LEGACY_EXTRACTION_PROTOCOL else descriptors)
+    rules = [
+        "Propose mandatory task obligations, not a workflow or source observations. Nothing has executed.",
+        "Retain every essential action, including unavailable capabilities. Do not omit a requested write just because only readers are available.",
+        "Use exact operation identities when justified. Preserve unmapped, unavailable or ambiguous work as unresolved_action with a reason; never substitute a supported action for essential unavailable work.",
+        "Preserve essential literal arguments as argument_equals even when they conflict with a native const or enum. Never silently replace a requested literal with a schema default or allowed alternative.",
+        "An output=true required_operation means the user requires a final result from that operation; output=false leaves output selection unconstrained.",
+        "For each span choose exact nonempty task text and its zero-based occurrence among overlapping exact matches. The host calculates character offsets. Do not normalize, paraphrase or trim excerpts.",
+        "Give every row a distinct bounded ID. A repeated operation does not express distinct required invocation instances in this version.",
+        "Use clarify or refuse when needed. Candidate rows are unreviewed model interpretations, never acceptance, authorization, scientific verification or proof of complete task coverage.",
+        "No credentials, clinical actions, patient data, source dispatch, plan steps, replacement requirements or authority labels.",
+    ]
+    if protocol == WORKFLOW_INTENT_EXTRACTION_PROTOCOL:
+        rules[5:5] = [
+            "Each complete native operation descriptor includes input_schema for arguments and output_schema for its possible future returned value. An output contract is not a source result or proof that a value exists.",
+            "An output=true required_operation requests the operation's whole future returned value as a final plan output. A requested returned artifact does not require an input flag unless the native input contract defines one. Do not invent arguments from output fields or assume an implicit result wrapper.",
+            "Descriptor implementation and auth_mode are catalogue declarations, not execution grants, measured source availability or scientific validity. Requested output details not established by the contract remain unresolved; do not invent observed values or repair the task.",
+        ]
+    instructions = {"protocol": protocol, "task": task, "catalog_digest": catalog_digest,
+                    "operations": visible, "rules": rules}
+    return {"model": model, "messages": [{"role": "system", "content": canonical_json(instructions)}],
+            "response_schema": _response_schema(len(task)), "require_json": True,
+            "max_output_tokens": 4096, "temperature": 0}
 
 
 def _object(properties: dict[str, Any]) -> dict[str, Any]:
@@ -132,7 +165,8 @@ def validate_workflow_intent_extraction(
     """Recompute retained-text interpretation, not model authorship or task completeness.
 
     A restamped result cannot pair different model text with native declarations/offsets.
-    Request/provider digests remain declared observations, not independent attestations.
+    With a catalogue, request bindings use the exact retained protocol's context rules.
+    Without one, request digests remain declarations. Neither proves model authorship.
     Omitted oversized text cannot be replayed; its omission is retained, never upgraded.
     """
     try:
@@ -153,7 +187,9 @@ def validate_workflow_intent_extraction(
         expected_fields = base | ({"reason"} if status == "rejected" else {"message"} if status in {"needs_clarification", "refused"} else set())
         if set(data) != expected_fields or status not in {"candidate", "needs_clarification", "refused", "rejected"}:
             raise ValueError("result fields")
-        if (data["schema"] != WORKFLOW_INTENT_EXTRACTION_SCHEMA or data["protocol"] != WORKFLOW_INTENT_EXTRACTION_PROTOCOL
+        protocol = data["protocol"]
+        if (data["schema"] != WORKFLOW_INTENT_EXTRACTION_SCHEMA
+                or protocol not in (_LEGACY_EXTRACTION_PROTOCOL, WORKFLOW_INTENT_EXTRACTION_PROTOCOL)
                 or data["task"] != task or data["task_digest"] != content_digest({"task": task})
                 or data["response_schema_digest"] != content_digest(_response_schema(len(task)))
                 or data["extraction_digest"] != content_digest({key: child for key, child in data.items() if key != "extraction_digest"})
@@ -185,6 +221,11 @@ def validate_workflow_intent_extraction(
                 raise ValueError("visibility binding")
             for identity in visible:
                 catalog.resolve(identity)
+            request = _request_value(task, catalog.catalog_digest, data["model"],
+                                     [catalog.resolve(identity) for identity in visible], protocol)
+            if (data["request_digest"] != content_digest(request)
+                    or data["context_bytes_including_schema"] != len(canonical_json(request).encode("utf-8"))):
+                raise ValueError("versioned request binding")
         raw = data["raw_response"]
         if (type(raw) is not dict or set(raw) != {"text", "text_digest", "utf8_bytes", "retention"}
                 or type(raw["utf8_bytes"]) is not int or raw["utf8_bytes"] < 0
@@ -278,31 +319,13 @@ class LocalWorkflowIntentExtractor:
         if not operations or len(operations) > maximum:
             raise WorkflowIntentExtractionError("intent extraction refuses an empty or oversized visible catalogue")
         operations.sort(key=lambda operation: operation.operation_id)
-        visible = [{key: operation.to_dict()[key] for key in
-                    ("operation_id", "description", "input_schema", "read_only")} for operation in operations]
-        schema = _response_schema(len(task))
-        instructions = {
-            "protocol": WORKFLOW_INTENT_EXTRACTION_PROTOCOL,
-            "task": task, "catalog_digest": digest, "operations": visible,
-            "rules": [
-                "Propose mandatory task obligations, not a workflow or source observations. Nothing has executed.",
-                "Retain every essential action, including unavailable capabilities. Do not omit a requested write just because only readers are available.",
-                "Use exact operation identities when justified. Preserve unmapped, unavailable or ambiguous work as unresolved_action with a reason; never substitute a supported action for essential unavailable work.",
-                "Preserve essential literal arguments as argument_equals even when they conflict with a native const or enum. Never silently replace a requested literal with a schema default or allowed alternative.",
-                "An output=true required_operation means the user requires a final result from that operation; output=false leaves output selection unconstrained.",
-                "For each span choose exact nonempty task text and its zero-based occurrence among overlapping exact matches. The host calculates character offsets. Do not normalize, paraphrase or trim excerpts.",
-                "Give every row a distinct bounded ID. A repeated operation does not express distinct required invocation instances in this version.",
-                "Use clarify or refuse when needed. Candidate rows are unreviewed model interpretations, never acceptance, authorization, scientific verification or proof of complete task coverage.",
-                "No credentials, clinical actions, patient data, source dispatch, plan steps, replacement requirements or authority labels.",
-            ],
-        }
-        messages = ({"role": "system", "content": canonical_json(instructions)},)
-        request_value = {"model": model, "messages": list(messages), "response_schema": schema,
-                         "require_json": True, "max_output_tokens": 4096, "temperature": 0}
+        protocol = WORKFLOW_INTENT_EXTRACTION_PROTOCOL
+        request_value = _request_value(task, digest, model, operations, protocol)
         context_bytes = len(canonical_json(request_value).encode("utf-8"))
         if context_bytes > MAX_WORKFLOW_PLANNING_CONTEXT_BYTES:
             raise WorkflowIntentExtractionError("intent extraction context exceeds its byte bound")
-        request = ProviderRequest(model=model, messages=messages, require_json=True, response_schema=schema,
+        schema = request_value["response_schema"]
+        request = ProviderRequest(model=model, messages=tuple(request_value["messages"]), require_json=True, response_schema=schema,
                                   max_output_tokens=4096, temperature=0)
         class InvocationGuard(_WorkflowProviderInvocationGuard):
             # Runtime quota/effect callbacks occur after extract() preflight. Recheck the
@@ -331,7 +354,7 @@ class LocalWorkflowIntentExtractor:
             "task_digest": content_digest({"task": task}), "catalog_digest": digest,
             "provider": provider, "model": model, "provider_config_digest": binding.config_digest,
             "request_digest": content_digest(request_value), "response_schema_digest": content_digest(schema),
-            "protocol": WORKFLOW_INTENT_EXTRACTION_PROTOCOL, "visible_operations": [row["operation_id"] for row in visible],
+            "protocol": protocol, "visible_operations": [operation.operation_id for operation in operations],
             "context_bytes_including_schema": context_bytes, "provider_invocations": 1,
             "transport_attempt_policy": 1, "actual_transport_attempts": "not_independently_observed",
             "source_dispatches": 0, "plan_created": False, "accepted": False,

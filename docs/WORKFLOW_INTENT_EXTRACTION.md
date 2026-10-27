@@ -27,11 +27,33 @@ invoke a catalogue executor, compile a plan, authorize source dispatch or accept
 
 ## Protocol and retained provenance
 
-Protocol `aurora-workflow-intent-extraction-protocol/0.1` supplies exact task text, the actual
-catalogue digest and each selected operation's identity, description, read-only flag and native
-input schema. It does not silently rank or truncate the selection. One to 128 visible operations
-and the existing two-million-byte context bound are enforced before invocation; a caller must
-explicitly select a smaller catalogue when the full catalogue exceeds those bounds.
+New suggestions use `aurora-workflow-intent-extraction-protocol/0.2`. It supplies exact task text,
+the actual catalogue digest and every selected operation's complete native `to_dict()` descriptor:
+descriptor schema, operation identity, description, input schema, output schema, integration
+identity, authentication mode, read-only flag and implementation label. Nested schemas, optional
+fields, constants and literal JSON types are retained without summaries. Descriptor labels are
+catalogue declarations; they establish neither execution authority nor live source availability.
+
+An input schema describes arguments. An output schema describes a possible future returned
+value, not acquired evidence or proof that any optional field will exist. A required operation
+with `output=true` requests its whole future return as a final plan output. A returned artifact
+does not require an extra input flag unless the native input contract defines one. There is no
+implicit result wrapper, new output-field predicate or permission to invent source values.
+Requested details that the contract cannot establish remain unresolved. These are instructions
+to the model, not guarantees that it will interpret them correctly.
+
+The extractor does not silently rank or truncate the selection. One to 128 visible operations
+and the existing two-million-byte context bound, including complete output schemas, are enforced
+before invocation; a caller must explicitly select a smaller catalogue when the full catalogue
+exceeds those bounds. This byte bound does not verify a particular model's token capacity or
+establish that a server processed every token. Token allocation and model observations require
+separate prospective checks.
+
+Retained protocol `aurora-workflow-intent-extraction-protocol/0.1` results remain replayable with
+their original protocol and bytes. That version exposed only identity, description, input schema
+and read-only flag. Validation never upgrades an old record into evidence that output contracts
+were shown. The result schema and model response grammar stay at version 0.1; protocol 0.2 changes
+the request context and instructions, not the obligation kinds or caller acceptance boundary.
 
 The model can propose up to 32 mandatory rows using the existing `required_operation`,
 `argument_equals` and `unresolved_action` kinds. It is instructed to retain essential unavailable
@@ -84,11 +106,37 @@ native-row parser without calling a provider or executor. It checks strict resul
 digests, nonauthority flags, task/schema bindings and optional current catalogue/selection
 bindings. Supplying a selection without its catalogue refuses instead of ignoring that binding.
 Restamping a result cannot pair different raw text with native rows or offset mappings.
-Request/provider digests remain declared observations, not independently reconstructed requests
-or authenticated model authorship. Explicitly omitted oversized text remains unreplayable.
+With a supplied catalogue, validation reconstructs the exact selected request context for the
+recorded protocol and checks its request digest and context byte count. Protocol 0.1 uses its
+original four descriptor fields and instructions; protocol 0.2 uses complete contracts and its
+future-output instructions. Relabelling a record and restamping its result digest cannot make a
+different version's request binding agree. Without a catalogue, request digests remain declared
+observations. Provider configuration digests remain declarations in either case. Consistent
+requests and self-computed hashes authenticate neither model authorship nor the truth of the
+catalogue. Explicitly omitted oversized text remains unreplayable.
 
 Fixtures exercise exact Unicode/overlapping selectors, invalid-row retention, literal types,
 unavailable actions, provider approval, bounded visibility/context, terminal responses, runtime
 refusal and callback drift. They are boundary tests, not an actual-model benchmark. The earlier
-frozen protocol 0.2/0.3 measurement predates this extractor and does not evaluate it. General NLP
-fidelity, scientific validity and independent live integration availability remain unassessed.
+frozen incremental-planner protocol 0.2/0.3 measurement predates this extractor and does not
+evaluate it. A separate protocol 0.1 functional refusal of available work stays failed; omitted
+output contracts were a known context gap, but their causal contribution is only a hypothesis.
+No rerun of that task or actual-model evaluation of extraction protocol 0.2 is established here.
+General NLP fidelity, scientific validity and independent live integration availability remain
+unassessed.
+
+## Prospective evaluation limits
+
+A future evaluation should freeze the producer source, prompts, full selected contracts, task
+families, semantic obligations and call budgets before any model observations. It should use
+fresh tasks across available whole-return requests, output fields unsupported by a contract,
+essential unavailable actions, conflicting input literals, and mixed literal/Unicode provenance.
+The failed functional task and earlier frozen cases must not become a new held-out set through
+paraphrasing. Related variants belong to one family, with separate robustness accounting.
+
+Report semantic coverage and surplus work separately from native syntax, admission, planning and
+durability. Retain clarification, refusal, malformed responses and runtime errors distinctly; do
+not drop them from denominators or repair candidates to pass. Every candidate still needs an
+explicit caller review before acceptance or planning. Pre-invocation output-only context overflow
+and exact legacy replay can be verified with offline fixtures, but those checks do not measure
+model comprehension. No future evaluation or new inference is authorized by this design text.
