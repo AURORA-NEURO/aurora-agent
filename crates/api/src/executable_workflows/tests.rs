@@ -329,6 +329,41 @@ fn optional_public_template_catalogues_are_operator_owned_and_plan_without_a_mod
 }
 
 #[test]
+fn provider_inspection_http_route_requires_authentication_and_matching_origin_without_source_authority(
+) {
+    let fixture = Fixture::new();
+    let router = fixture.router();
+    let path = "/v1/executable-workflows/providers";
+    let mut unauthenticated = request("GET", path, json!({}));
+    unauthenticated.headers.remove("authorization");
+    assert_eq!(router.handle(unauthenticated).status, 401);
+    let mut foreign_origin = request("GET", path, json!({}));
+    foreign_origin
+        .headers
+        .insert("origin".into(), "https://unrelated.invalid".into());
+    assert_eq!(router.handle(foreign_origin).status, 403);
+    assert_eq!(std::fs::read_dir(&fixture.root).unwrap().count(), 0);
+    let response = router.handle(request("GET", path, json!({})));
+    assert_eq!(response.status, 200);
+    let inspected = data(body(response));
+    assert_eq!(inspected["counts"]["implemented_reader_paths"], 16);
+    assert_eq!(
+        inspected["counts"]["registered_reviewed_default_readers"],
+        8
+    );
+    assert!(inspected["counts"]["independently_live_verified_providers"]["value"].is_null());
+    assert_eq!(inspected["network_requests_on_inspection"], 0);
+    for directory in ["plans", "runs"] {
+        assert_eq!(
+            std::fs::read_dir(fixture.root.join(directory))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+}
+
+#[test]
 fn denominator_flag_and_provider_route_use_actual_worker_without_source_or_model_authority() {
     for enabled in [false, true] {
         let mut fixture = Fixture::new();
