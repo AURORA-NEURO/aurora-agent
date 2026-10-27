@@ -173,6 +173,73 @@ def test_idle_inspection_holds_execution_lock_while_reading_run_and_checkpoint(m
     assert observations == ["resource_busy"]
 
 
+def test_execution_waits_for_actual_brief_idle_observer_lock_contention_without_duplicate_admission(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    entered, release, collision = Event(), Event(), Event()
+    def observer():
+        with worker._lock(worker._path("runs", run["run_id"], "execute.lock")):
+            entered.set()
+            release.wait(5)
+    thread = Thread(target=observer)
+    thread.start()
+    try:
+        assert entered.wait(5)
+        if os.name == "nt":
+            import msvcrt
+            owner, function = msvcrt, "locking"
+        else:
+            import fcntl
+            owner, function = fcntl, "flock"
+        actual_lock = getattr(owner, function)
+        def observe_collision(*args):
+            try:
+                return actual_lock(*args)
+            except OSError:
+                # Release only after the admission path really collided with the OS lock.
+                # The old immediate-refusal implementation fails this test deterministically.
+                collision.set()
+                release.set()
+                raise
+        monkeypatch.setattr(owner, function, observe_collision)
+        result = _execute(worker, run, max_step_calls=1)
+    finally:
+        release.set()
+        thread.join(5)
+    assert not thread.is_alive() and collision.is_set()
+    assert result["status"] == "paused" and len(calls) == 1
+    assert result["checkpoint"]["attempts"] == {"first": 1}
+    assert worker._run(run["run_id"])["execution_count"] == 1
+
+
+def test_idle_observer_held_past_admission_bound_refuses_without_run_state_or_source_changes(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    entered, release = Event(), Event()
+    path = worker.root / "runs" / run["run_id"] / "run.json"
+    original = path.read_bytes()
+    def observer():
+        with worker._lock(worker._path("runs", run["run_id"], "execute.lock")):
+            entered.set()
+            release.wait(5)
+    thread = Thread(target=observer)
+    thread.start()
+    try:
+        assert entered.wait(5)
+        started = time.monotonic()
+        with pytest.raises(WorkflowAPIError) as error:
+            _execute(worker, run, max_step_calls=1)
+        elapsed = time.monotonic() - started
+        assert error.value.code == "resource_busy" and 0.9 <= elapsed < 3
+        assert not release.is_set()
+        assert path.read_bytes() == original and worker._run(run["run_id"])["execution_count"] == 0
+        assert not (path.parent / "checkpoint.json").exists() and calls == []
+    finally:
+        release.set()
+        thread.join(5)
+    assert not thread.is_alive()
+
+
 @pytest.mark.parametrize("change", ["source_limit", "source_query", "source_operation", "drop_handoff", "replace_contract"])
 def test_edit_cannot_weaken_retained_source_scope_arguments_flow_or_task_contract(tmp_path, change):
     worker = WorkflowAPIWorker(tmp_path / "owned")

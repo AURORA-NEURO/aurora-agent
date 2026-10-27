@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import stat
 import sys
+import time
 from typing import Any, Iterator, Mapping
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -221,7 +222,9 @@ class WorkflowAPIWorker:
         self._anchor()
 
     @contextmanager
-    def _lock(self, path: Path) -> Iterator[None]:
+    def _lock(self, path: Path, *, wait_seconds: float = 0.0) -> Iterator[None]:
+        if type(wait_seconds) not in {int, float} or not 0 <= wait_seconds <= 1:
+            _refuse("invalid_configuration", "The internal lock wait is outside its bound.")
         self._anchor()
         self._regular(path, missing=True)
         with path.open("a+b") as stream:
@@ -230,15 +233,23 @@ class WorkflowAPIWorker:
                 stream.write(b"0")
                 stream.flush()
             stream.seek(0)
-            try:
-                if os.name == "nt":
-                    import msvcrt
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                _refuse("resource_busy", "The selected workflow is owned by an active operation.")
+            deadline = time.monotonic() + wait_seconds
+            while True:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        _refuse("resource_busy", "The selected workflow is owned by an active operation.")
+                    time.sleep(min(0.02, remaining))
+                    if time.monotonic() >= deadline:
+                        _refuse("resource_busy", "The selected workflow is owned by an active operation.")
             try:
                 yield
             finally:
@@ -512,7 +523,7 @@ class WorkflowAPIWorker:
             _refuse("invalid_request", "Retry and cancellation release require explicit resume.")
         record = self._run(run_id)
         with self._lock(self._path("plans", record["plan_id"], "plan.lock")):
-            with self._lock(self._path("runs", run_id, "execute.lock")):
+            with self._lock(self._path("runs", run_id, "execute.lock"), wait_seconds=1.0):
                 record = self._run(run_id)
                 current = self._plan(record["plan_id"])
                 if expected != record["plan"]["plan_digest"] or expected != current["plan"]["plan_digest"]:

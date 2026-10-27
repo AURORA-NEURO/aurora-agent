@@ -115,8 +115,12 @@ approval. An edit that changes a plan's digest invalidates execution/resume auth
 created against the earlier revision. Existing observations remain available for inspection
 and explicit export. A name-only edit changes the digest and therefore requires fresh review.
 
-Each execute admission holds an OS file lock for its run and plan. A competing execution or
-edit receives `resource_busy`. The HTTP server can run `execute` in a background child after
+Each execute admission holds an OS file lock for its run and plan. Run admission alone may
+wait up to one second in bounded 20 ms intervals for a brief idle observation lock to clear;
+polling and cancellation keep their nonblocking lock behavior. Admission counters, grants,
+checkpoints and source calls remain untouched until the run lock is acquired and the retained
+plan and run are rechecked. A competing execution or edit receives `resource_busy`.
+The HTTP server can run `execute` in a background child after
 `create_run` returns its run ID, then poll `inspect`. It must not turn a timeout into a restart.
 
 ## Durable execution, cancellation and recovery
