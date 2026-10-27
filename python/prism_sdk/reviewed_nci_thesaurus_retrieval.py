@@ -26,8 +26,8 @@ from .reviewed_public_http import (
     ReviewedPublicHttpError, ReviewedPublicHttpResponse,
 )
 
-NCI_THESAURUS_BUNDLE_SCHEMA = "aurora-reviewed-nci-thesaurus/0.1"
-NCI_THESAURUS_RECEIPT_SCHEMA = "aurora-reviewed-nci-thesaurus-receipt/0.1"
+NCI_THESAURUS_BUNDLE_SCHEMA = "aurora-reviewed-nci-thesaurus/0.2"
+NCI_THESAURUS_RECEIPT_SCHEMA = "aurora-reviewed-nci-thesaurus-receipt/0.2"
 NCI_THESAURUS_OPERATION = "nci_thesaurus.glioma_ontology"
 NCI_THESAURUS_CONCEPT = "C3059"
 MAX_NCI_THESAURUS_RESPONSE_BYTES = 1_000_000
@@ -51,6 +51,7 @@ _LIMITATIONS = [
     "Direct child and parent links retain their API field labels; no unstated relation type, transitive closure, cross-ontology equivalence or descendant coverage is inferred.",
     "Roles and associations retain native type, code, source, group and qualifiers; ontology relations are not measured biological or causal effects.",
     "Only the root concept's requested parts are read. Related concepts carry minimal source metadata, without fetching their definitions or descendants.",
+    "Compact related concepts may omit terminology/version; these remain explicitly unreported and never inherit the root concept's metadata.",
     "Missing or null parts remain not_reported with an unknown count; an explicit empty array is observed empty_success. Neither establishes absence of a biological phenomenon.",
     "Known ct limit markers, unknown fields and malformed lists refuse the response; absence of a limit marker is not independent proof of taxonomy completeness.",
     "The source version is retained as returned by a current ncit lookup; no version-pinned release, cross-acquisition compatibility or WHO classification equivalence is asserted.",
@@ -183,15 +184,21 @@ def _qualifiers(row: dict[str, Any]) -> None:
 
 
 def _concept(row: Any, *, root: bool, version: str | None = None) -> None:
-    _fields(row, _BASE_FIELDS | (set(_PARTS) if root else {"qualifiers"}), {"code", "name", "terminology", "version"})
-    if _CODE.fullmatch(_text(row["code"], 64)) is None or row["terminology"] != "ncit":
+    required = {"code", "name", "terminology", "version"} if root else {"code", "name"}
+    _fields(row, _BASE_FIELDS | (set(_PARTS) if root else {"qualifiers"}), required)
+    if _CODE.fullmatch(_text(row["code"], 64)) is None:
         _fail("native_concept_identity")
     _text(row["name"])
-    if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", _text(row["version"], 64)) is None:
-        _fail("native_version")
+    if root or row.get("terminology") is not None:
+        if row["terminology"] != "ncit":
+            _fail("native_concept_identity")
+    if root or row.get("version") is not None:
+        if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", _text(row["version"], 64)) is None:
+            _fail("native_version")
     if root and (row["code"] != NCI_THESAURUS_CONCEPT or row["name"] != "Glioma"):
         _fail("root_identity_mismatch")
-    if not root and (row["code"] == NCI_THESAURUS_CONCEPT or row["version"] != version):
+    if not root and (row["code"] == NCI_THESAURUS_CONCEPT
+            or row.get("version") is not None and row["version"] != version):
         _fail("related_concept_identity_or_version")
     for key in ("leaf", "active", "defining"):
         if key in row and row[key] is not None and type(row[key]) is not bool:
@@ -199,6 +206,12 @@ def _concept(row: Any, *, root: bool, version: str | None = None) -> None:
     _scalars(row, excluded=set(_PARTS) | {"leaf", "active", "defining", "qualifiers"})
     if not root:
         _qualifiers(row)
+
+
+def _related_metadata(row: dict[str, Any], field: str) -> dict[str, Any]:
+    value = row.get(field)
+    return {"state": "not_reported" if value is None else "source_reported", "value": value,
+        "field_presence": "absent" if field not in row else "null" if value is None else "value"}
 
 
 def _native(payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
@@ -244,11 +257,14 @@ def _native(payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any
                 relationships.append({"source_part": part, "source_relationship_label": row["type"] if part in {"roles", "associations"} else part,
                     "root_code": NCI_THESAURUS_CONCEPT, "related_code": row["code"] if part in {"children", "parents"} else row["relatedCode"],
                     "related_preferred_name": row["name"] if part in {"children", "parents"} else row["relatedName"],
+                    "related_metadata": {"terminology": _related_metadata(row, "terminology"),
+                        "source_version": _related_metadata(row, "version")},
                     "source_pointer": f"/{part}/{index}", "native_record": row})
     return payload, relationships, coverage
 
 
 _DEFAULT_BINDING = content_digest({"source": NCI_THESAURUS_BUNDLE_SCHEMA, "route": _URL,
+    "related_identity_policy": "compact_code_name_required_terminology_version_optional_no_root_inheritance",
     "transport_policy_digest": REVIEWED_PUBLIC_HTTP_POLICY_DIGEST})
 
 

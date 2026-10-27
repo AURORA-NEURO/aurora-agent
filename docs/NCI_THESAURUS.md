@@ -20,7 +20,11 @@ source-specific fields and qualifiers. These field descriptions define the reade
 synthetic test fixtures are not captured NCI responses or independent scientific validation.
 
 The root must return exact code `C3059`, preferred name `Glioma`, terminology `ncit` and a
-nonempty source version. Direct children and parents must carry the same source version.
+nonempty source version. The official `Concept` schema does not require every nested metadata
+field: direct children and parents can be compact records containing code, preferred name and
+optional flags. If related terminology/version is explicitly present, it must match `ncit` and
+the root version. Absent and null related metadata remain distinct `not_reported` observations
+with unknown values; they never inherit root metadata. Explicit values are `source_reported`.
 The reader preserves source strings and native type/code/source/group/qualifier records. Child
 and parent edges retain their API field labels; it does not invent an `is_a` label or perform
 transitive expansion. Related concepts are not fetched individually. Definition source and
@@ -79,6 +83,13 @@ callback preemption; the reader also refuses a callback that returns after its d
 typed HTTP failures retain bounded status and Retry-After metadata. Other callback failures are
 sanitized. Neither a callback nor default registration is evidence of live availability.
 
-At this implementation stage validation is fixture-based. No live adapter acquisition or model
-call has been performed for this reader. No patient, sequence, raw variant, controlled-access,
+The initial default GET on 2026-10-27 returned an HTTP200 body (5,650 bytes) with root version
+`26.09d`, but the original reader refused its compact child/parent records because it incorrectly
+required their terminology/version fields. That failed attempt and its original bytes remain
+preserved. Bundle/receipt schema `0.2` admits the documented compact shape, records the missing
+related metadata explicitly, and changes the default transport binding to prevent old plans
+silently adopting the changed admission policy. Its correction is validated offline; it does not
+retroactively turn the original failed acquisition into a success. A subsequent live acquisition
+has not yet been performed for this correction. No model call has been performed for this reader.
+No patient, sequence, raw variant, controlled-access,
 laboratory or clinical action surface is implemented.

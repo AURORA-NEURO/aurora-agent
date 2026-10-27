@@ -129,7 +129,7 @@ def test_documented_ct_limit_placeholders_never_become_complete_or_empty_results
         read(Fixture(payload))
 
 
-@pytest.mark.parametrize("change", ["same_code", "version_drift", "missing_version", "wrong_terminology", "duplicate", "both_directions", "unknown_child_parts"])
+@pytest.mark.parametrize("change", ["same_code", "version_drift", "invalid_version", "wrong_terminology", "duplicate", "both_directions", "unknown_child_parts"])
 def test_ambiguous_or_inconsistent_related_concepts_refuse(change):
     payload = concept()
     child = payload["children"][0]
@@ -137,8 +137,8 @@ def test_ambiguous_or_inconsistent_related_concepts_refuse(change):
         child["code"] = "C3059"
     elif change == "version_drift":
         child["version"] = "26.09d"
-    elif change == "missing_version":
-        del child["version"]
+    elif change == "invalid_version":
+        child["version"] = 1
     elif change == "wrong_terminology":
         child["terminology"] = "ncim"
     elif change == "duplicate":
@@ -149,6 +149,46 @@ def test_ambiguous_or_inconsistent_related_concepts_refuse(change):
         child["children"] = []
     with pytest.raises(NciThesaurusRetrievalError):
         read(Fixture(payload))
+
+
+def test_observed_compact_child_parent_shape_is_admitted_without_inheriting_root_metadata():
+    payload = concept()
+    payload["version"] = "26.09d"
+    # Exact compact field shapes from retained attempt1's native response. Other fixture
+    # parts remain synthetic; this is not a claim that the whole fixture was acquired.
+    payload["children"] = [{"code": "C4324", "name": "Astroblastoma, MN1-Altered", "leaf": False}]
+    payload["parents"] = [{"code": "C3787", "name": "Neuroepithelial Neoplasm", "defining": True}]
+    value = read(Fixture(payload))
+    assert value["schema"] == "aurora-reviewed-nci-thesaurus/0.2"
+    assert value["concept"]["source_version"] == "26.09d"
+    unknown = {"state": "not_reported", "value": None, "field_presence": "absent"}
+    for row in value["relationships"][:2]:
+        assert row["related_metadata"] == {"terminology": unknown, "source_version": unknown}
+        assert "version" not in row["native_record"] and "terminology" not in row["native_record"]
+    assert validate_nci_thesaurus_bundle(value) == value
+
+
+@pytest.mark.parametrize("field", ["terminology", "version"])
+@pytest.mark.parametrize("presence", ["absent", "null", "reported"])
+def test_related_metadata_preserves_absent_null_and_reported_without_root_imputation(field, presence):
+    payload = concept()
+    child = payload["children"][0]
+    if presence == "absent":
+        del child[field]
+    elif presence == "null":
+        child[field] = None
+    bundle = read(Fixture(payload))
+    observation = bundle["relationships"][0]["related_metadata"]["source_version" if field == "version" else field]
+    assert observation == {"state": "source_reported" if presence == "reported" else "not_reported",
+        "value": child.get(field), "field_presence": "value" if presence == "reported" else presence}
+    assert validate_nci_thesaurus_bundle(bundle) == bundle
+
+
+def test_compact_policy_binding_differs_from_initial_strict_nested_metadata_policy():
+    from prism_sdk import reviewed_nci_thesaurus_retrieval as module
+    old = content_digest({"source": "aurora-reviewed-nci-thesaurus/0.1", "route": URL,
+        "transport_policy_digest": module.REVIEWED_PUBLIC_HTTP_POLICY_DIGEST})
+    assert module._DEFAULT_BINDING != old
 
 
 @pytest.mark.parametrize("change", ["definition_missing_text", "invalid_definition", "qualifier_missing_value", "qualifier_ct",
