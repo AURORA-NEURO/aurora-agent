@@ -56,6 +56,7 @@ commands.
 - [Reviewed CIViC glioblastoma evidence metadata](CIVIC_GLIOMA_EVIDENCE.md)
 - [Local CIViC curation metadata research review](GLIOMA_CIVIC_CURATION_WORKFLOW.md)
 - [Cellosaurus cell-line identity and curation metadata](CELLOSAURUS_CELL_LINE_METADATA.md)
+- [Fixed DataCite TCGA-GBM DOI metadata reader](DATACITE_TCGA_GBM_COLLECTION_METADATA.md)
 - [Operator-selected workflow capability profiles](WORKFLOW_CAPABILITIES.md)
 - [Reviewed OpenAlex, Crossref and Zenodo research sources](RESEARCH_SOURCE_INTEGRATIONS.md)
 - [Reviewed OpenAPI workflow integrations](WORKFLOW_OPENAPI.md)
