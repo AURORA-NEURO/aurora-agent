@@ -10,7 +10,7 @@ from prism_sdk.workflow_builder import WorkflowValidationError
 from prism_sdk.workflow_integrations import WorkflowOperation, WorkflowOperationCatalog, WorkflowOperationResult
 from prism_sdk.workflow_intent_extractor import (
     LocalWorkflowIntentExtractor, WorkflowIntentExtractionError,
-    MAX_INTENT_EXTRACTION_RESPONSE_BYTES,
+    MAX_INTENT_EXTRACTION_RESPONSE_BYTES, validate_workflow_intent_extraction,
 )
 from prism_sdk.workflow_intent_obligations import admit_workflow_intent_obligations, compile_workflow_intent_obligations
 
@@ -263,4 +263,67 @@ def test_return_callback_catalogue_drift_cannot_publish_a_candidate():
     extractor, requests, _ = _extractor(catalog=catalog, callback=mutate)
     with pytest.raises(WorkflowIntentExtractionError, match="changed"):
         extractor.extract(TASK, approve_provider_call=True)
+    assert len(requests) == 1 and sources == []
+
+
+def _restamp_extraction(data):
+    data.pop("extraction_digest", None)
+    data["extraction_digest"] = content_digest(data)
+    return data
+
+
+@pytest.mark.parametrize("response", [
+    _candidate(), {"action": "clarify", "message": "Which scope?"},
+    {"action": "refuse", "message": "Unsupported scope."},
+    _candidate(_row(text="absent excerpt")),
+    json.dumps(_candidate()) + " " * MAX_INTENT_EXTRACTION_RESPONSE_BYTES,
+], ids=["candidate", "clarification", "refusal", "invalid-selector", "oversized-text"])
+def test_offline_validation_replays_each_returned_outcome_without_new_provider_or_source_calls(response):
+    catalog, sources = _catalog()
+    extractor, requests, _ = _extractor(response, catalog=catalog)
+    result = extractor.extract(TASK, approve_provider_call=True)
+    checked = validate_workflow_intent_extraction(result.to_dict(), task=TASK, catalog=catalog)
+    assert checked.to_dict() == result.to_dict() and len(requests) == 1 and sources == []
+
+
+@pytest.mark.parametrize("tamper", [
+    "raw_text", "native_rows", "span_resolution", "visible_operations", "response_schema_digest",
+    "source_dispatches", "accepted", "provider_invocations", "unexpected_field", "status",
+])
+def test_restamping_extraction_digest_cannot_replace_raw_native_binding_or_claim_authority(tamper):
+    catalog, sources = _catalog()
+    extractor, requests, _ = _extractor(catalog=catalog)
+    data = extractor.extract(TASK, approve_provider_call=True).to_dict()
+    if tamper == "raw_text":
+        decision = json.loads(data["raw_response"]["text"])
+        decision["obligations"][0]["output"] = False
+        text = json.dumps(decision)
+        data["raw_response"].update(text=text, text_digest=content_digest({"text": text}), utf8_bytes=len(text.encode()))
+    elif tamper == "native_rows":
+        rows = data["obligations"]["obligations"]
+        rows[0]["output"] = False
+        data["obligations"] = compile_workflow_intent_obligations(TASK, rows, interpretation_basis="model_candidate").to_dict()
+    elif tamper == "span_resolution":
+        data["span_resolution"][0]["span"]["start"] += 1
+    else:
+        data[tamper] = {"visible_operations": ["absent.read"], "response_schema_digest": "a" * 64,
+            "source_dispatches": 1, "accepted": True, "provider_invocations": True,
+            "unexpected_field": "approved", "status": "planned"}[tamper]
+    with pytest.raises(WorkflowIntentExtractionError, match="retained extraction"):
+        validate_workflow_intent_extraction(_restamp_extraction(data), task=TASK, catalog=catalog)
+    assert len(requests) == 1 and sources == []
+
+
+def test_offline_validation_binds_exact_task_and_selected_operation_ids():
+    catalog, sources = _catalog(2)
+    extractor, requests, _ = _extractor(catalog=catalog)
+    result = extractor.extract(TASK, approve_provider_call=True, operation_ids=["fixture.read"])
+    assert validate_workflow_intent_extraction(result, task=TASK, catalog=catalog,
+        operation_ids=["fixture.read"]).status == "candidate"
+    with pytest.raises(WorkflowIntentExtractionError):
+        validate_workflow_intent_extraction(result, task=TASK + " ", catalog=catalog, operation_ids=["fixture.read"])
+    with pytest.raises(WorkflowIntentExtractionError):
+        validate_workflow_intent_extraction(result, task=TASK, catalog=catalog)
+    with pytest.raises(WorkflowIntentExtractionError):
+        validate_workflow_intent_extraction(result, task=TASK, operation_ids=["fixture.read"])
     assert len(requests) == 1 and sources == []

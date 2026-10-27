@@ -79,6 +79,14 @@ and record separate explicit caller acceptance before lowering a new caller asse
 event authenticates neither human presence nor semantic correctness. It cannot resolve an
 unavailable action, eliminate a literal conflict or establish that the task has no omitted work.
 
+`validate_workflow_intent_extraction` replays retained text through the same exact selector and
+native-row parser without calling a provider or executor. It checks strict result fields,
+digests, nonauthority flags, task/schema bindings and optional current catalogue/selection
+bindings. Supplying a selection without its catalogue refuses instead of ignoring that binding.
+Restamping a result cannot pair different raw text with native rows or offset mappings.
+Request/provider digests remain declared observations, not independently reconstructed requests
+or authenticated model authorship. Explicitly omitted oversized text remains unreplayable.
+
 Fixtures exercise exact Unicode/overlapping selectors, invalid-row retention, literal types,
 unavailable actions, provider approval, bounded visibility/context, terminal responses, runtime
 refusal and callback drift. They are boundary tests, not an actual-model benchmark. The earlier

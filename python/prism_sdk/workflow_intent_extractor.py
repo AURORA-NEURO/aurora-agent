@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from typing import Any, Sequence
+import re
+from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
 from .authoring import canonical_json, content_digest
@@ -62,6 +63,47 @@ def _response_schema(task_length: int) -> dict[str, Any]:
     return {"anyOf": [candidate, terminal]}
 
 
+def _interpret_response(task: str, text: str) -> dict[str, Any]:
+    result: dict[str, Any] = {"obligations": None, "span_resolution": []}
+    try:
+        decision = json.loads(text, object_pairs_hook=_unique_object)
+        if type(decision) is not dict:
+            raise WorkflowIntentObligationError("intent extraction decision must be an object")
+        if decision.get("action") in {"clarify", "refuse"}:
+            if (set(decision) != {"action", "message"} or type(decision["message"]) is not str
+                    or not decision["message"].strip() or len(decision["message"]) > 2000):
+                raise WorkflowIntentObligationError("intent extraction terminal fields are invalid")
+            result.update(status="needs_clarification" if decision["action"] == "clarify" else "refused",
+                          message=decision["message"])
+        else:
+            if (set(decision) != {"action", "obligations"} or decision["action"] != "candidate"
+                    or type(decision["obligations"]) is not list
+                    or not 1 <= len(decision["obligations"]) <= MAX_INTENT_EXTRACTION_ROWS):
+                raise WorkflowIntentObligationError("intent extraction candidate fields are invalid")
+            rows, resolution = [], []
+            for row in decision["obligations"]:
+                if type(row) is not dict or type(row.get("span")) is not dict:
+                    raise WorkflowIntentObligationError("intent extraction row needs an exact span selector")
+                selector = row["span"]
+                if (set(selector) != {"text", "occurrence"} or type(selector["text"]) is not str
+                        or not selector["text"].strip() or type(selector["occurrence"]) is not int
+                        or not 0 <= selector["occurrence"] < len(task)):
+                    raise WorkflowIntentObligationError("intent extraction span selector is invalid")
+                start = -1
+                for _ in range(selector["occurrence"] + 1):
+                    start = task.find(selector["text"], start + 1)
+                    if start == -1:
+                        raise WorkflowIntentObligationError("intent extraction excerpt occurrence is absent")
+                span = {"start": start, "end": start + len(selector["text"]), "text": selector["text"]}
+                rows.append({**row, "span": span})
+                resolution.append({"obligation_id": row.get("id"), "selector": selector, "span": span})
+            obligations = compile_workflow_intent_obligations(task, rows, interpretation_basis="model_candidate")
+            result.update(status="candidate", obligations=obligations.to_dict(), span_resolution=resolution)
+    except (ValueError, TypeError, KeyError, RecursionError, UnicodeError):
+        result.update(status="rejected", reason="invalid_candidate_or_exact_task_binding")
+    return result
+
+
 @dataclass(frozen=True, slots=True)
 class WorkflowIntentExtraction:
     """Unreviewed candidate or explicit noncandidate outcome; never executable authority."""
@@ -81,6 +123,90 @@ class WorkflowIntentExtraction:
         if data["status"] != "candidate":
             return None
         return validate_workflow_intent_obligations(data["obligations"], task=data["task"])
+
+
+def validate_workflow_intent_extraction(
+    value: WorkflowIntentExtraction | Mapping[str, Any], *, task: str,
+    catalog: WorkflowOperationCatalog | None = None, operation_ids: Sequence[str] | None = None,
+) -> WorkflowIntentExtraction:
+    """Recompute retained-text interpretation, not model authorship or task completeness.
+
+    A restamped result cannot pair different model text with native declarations/offsets.
+    Request/provider digests remain declared observations, not independent attestations.
+    Omitted oversized text cannot be replayed; its omission is retained, never upgraded.
+    """
+    try:
+        task = _task(task)
+        if operation_ids is not None and catalog is None:
+            raise ValueError("selection validation requires its catalogue")
+        data = value.to_dict() if isinstance(value, WorkflowIntentExtraction) else dict(value)
+        encoded = canonical_json(data)
+        if len(encoded.encode("utf-8")) > MAX_INTENT_EXTRACTION_RESULT_BYTES:
+            raise ValueError("result bound")
+        data = json.loads(encoded)
+        base = {"schema", "task", "task_digest", "catalog_digest", "provider", "model", "provider_config_digest",
+                "request_digest", "response_schema_digest", "protocol", "visible_operations", "context_bytes_including_schema",
+                "provider_invocations", "transport_attempt_policy", "actual_transport_attempts", "source_dispatches",
+                "plan_created", "accepted", "task_interpretation_completeness", "scientific_validity", "raw_response",
+                "obligations", "span_resolution", "status", "extraction_digest"}
+        status = data["status"]
+        expected_fields = base | ({"reason"} if status == "rejected" else {"message"} if status in {"needs_clarification", "refused"} else set())
+        if set(data) != expected_fields or status not in {"candidate", "needs_clarification", "refused", "rejected"}:
+            raise ValueError("result fields")
+        if (data["schema"] != WORKFLOW_INTENT_EXTRACTION_SCHEMA or data["protocol"] != WORKFLOW_INTENT_EXTRACTION_PROTOCOL
+                or data["task"] != task or data["task_digest"] != content_digest({"task": task})
+                or data["response_schema_digest"] != content_digest(_response_schema(len(task)))
+                or data["extraction_digest"] != content_digest({key: child for key, child in data.items() if key != "extraction_digest"})
+                or data["accepted"] is not False or data["plan_created"] is not False
+                or type(data["source_dispatches"]) is not int or data["source_dispatches"] != 0
+                or any(type(data[key]) is not int or data[key] != 1 for key in ("provider_invocations", "transport_attempt_policy"))
+                or data["actual_transport_attempts"] != "not_independently_observed"
+                or any(data[key] != "unassessed" for key in ("task_interpretation_completeness", "scientific_validity"))
+                or type(data["context_bytes_including_schema"]) is not int
+                or not 1 <= data["context_bytes_including_schema"] <= MAX_WORKFLOW_PLANNING_CONTEXT_BYTES
+                or any(type(data[key]) is not str or not re.fullmatch(r"[a-f0-9]{64}", data[key])
+                       for key in ("task_digest", "catalog_digest", "provider_config_digest", "request_digest", "response_schema_digest"))
+                or type(data["model"]) is not str or not data["model"].strip() or len(data["model"]) > 200
+                or type(data["provider"]) is not str or not data["provider"].strip() or len(data["provider"]) > 256):
+            raise ValueError("result binding")
+        visible = data["visible_operations"]
+        if (type(visible) is not list or not 1 <= len(visible) <= 128
+                or any(type(identity) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}", identity) for identity in visible)
+                or visible != sorted(set(visible))):
+            raise ValueError("visible operations")
+        if catalog is not None:
+            if not isinstance(catalog, WorkflowOperationCatalog) or catalog.catalog_digest != data["catalog_digest"]:
+                raise ValueError("catalogue binding")
+            if operation_ids is not None and (not isinstance(operation_ids, (list, tuple)) or not 1 <= len(operation_ids) <= 128
+                    or any(type(identity) is not str for identity in operation_ids) or len(set(operation_ids)) != len(operation_ids)):
+                raise ValueError("selection binding")
+            expected = sorted(operation.operation_id for operation in catalog.operations()) if operation_ids is None else sorted(operation_ids)
+            if expected != visible:
+                raise ValueError("visibility binding")
+            for identity in visible:
+                catalog.resolve(identity)
+        raw = data["raw_response"]
+        if (type(raw) is not dict or set(raw) != {"text", "text_digest", "utf8_bytes", "retention"}
+                or type(raw["utf8_bytes"]) is not int or raw["utf8_bytes"] < 0
+                or type(raw["text_digest"]) is not str or not re.fullmatch(r"[a-f0-9]{64}", raw["text_digest"])):
+            raise ValueError("raw response")
+        if raw["retention"] == "complete":
+            if (type(raw["text"]) is not str or len(raw["text"].encode("utf-8")) != raw["utf8_bytes"]
+                    or raw["utf8_bytes"] > MAX_INTENT_EXTRACTION_RESPONSE_BYTES
+                    or raw["text_digest"] != content_digest({"text": raw["text"]})):
+                raise ValueError("raw response binding")
+            interpretation = _interpret_response(task, raw["text"])
+        elif raw["retention"] == "omitted_exceeds_bound" and raw["text"] is None and raw["utf8_bytes"] > MAX_INTENT_EXTRACTION_RESPONSE_BYTES:
+            interpretation = {"status": "rejected", "reason": "response_text_exceeds_retention_bound",
+                              "obligations": None, "span_resolution": []}
+        else:
+            raise ValueError("raw retention")
+        actual = {key: data[key] for key in interpretation}
+        if canonical_json(actual) != canonical_json(interpretation):
+            raise ValueError("raw response and native interpretation differ")
+        return WorkflowIntentExtraction(encoded)
+    except (ValueError, TypeError, KeyError, RecursionError, UnicodeError) as error:
+        raise WorkflowIntentExtractionError("retained extraction does not match its exact task, text and declaration bindings") from error
 
 
 class LocalWorkflowIntentExtractor:
@@ -217,42 +343,7 @@ class LocalWorkflowIntentExtractor:
         if not retained:
             value.update(status="rejected", reason="response_text_exceeds_retention_bound")
         else:
-            try:
-                decision = json.loads(response.text, object_pairs_hook=_unique_object)
-                if type(decision) is not dict:
-                    raise WorkflowIntentObligationError("intent extraction decision must be an object")
-                if decision.get("action") in {"clarify", "refuse"}:
-                    if (set(decision) != {"action", "message"} or type(decision["message"]) is not str
-                            or not decision["message"].strip() or len(decision["message"]) > 2000):
-                        raise WorkflowIntentObligationError("intent extraction terminal fields are invalid")
-                    value.update(status="needs_clarification" if decision["action"] == "clarify" else "refused",
-                                 message=decision["message"])
-                else:
-                    if (set(decision) != {"action", "obligations"} or decision["action"] != "candidate"
-                            or type(decision["obligations"]) is not list
-                            or not 1 <= len(decision["obligations"]) <= MAX_INTENT_EXTRACTION_ROWS):
-                        raise WorkflowIntentObligationError("intent extraction candidate fields are invalid")
-                    rows, resolution = [], []
-                    for row in decision["obligations"]:
-                        if type(row) is not dict or type(row.get("span")) is not dict:
-                            raise WorkflowIntentObligationError("intent extraction row needs an exact span selector")
-                        selector = row["span"]
-                        if (set(selector) != {"text", "occurrence"} or type(selector["text"]) is not str
-                                or not selector["text"].strip() or type(selector["occurrence"]) is not int
-                                or not 0 <= selector["occurrence"] < len(task)):
-                            raise WorkflowIntentObligationError("intent extraction span selector is invalid")
-                        start = -1
-                        for _ in range(selector["occurrence"] + 1):
-                            start = task.find(selector["text"], start + 1)
-                            if start == -1:
-                                raise WorkflowIntentObligationError("intent extraction excerpt occurrence is absent")
-                        span = {"start": start, "end": start + len(selector["text"]), "text": selector["text"]}
-                        rows.append({**row, "span": span})
-                        resolution.append({"obligation_id": row.get("id"), "selector": selector, "span": span})
-                    obligations = compile_workflow_intent_obligations(task, rows, interpretation_basis="model_candidate")
-                    value.update(status="candidate", obligations=obligations.to_dict(), span_resolution=resolution)
-            except (ValueError, TypeError, KeyError, RecursionError, UnicodeError):
-                value.update(status="rejected", reason="invalid_candidate_or_exact_task_binding")
+            value.update(_interpret_response(task, response.text))
         guard()
         value["extraction_digest"] = content_digest(value)
         encoded = canonical_json(value)
