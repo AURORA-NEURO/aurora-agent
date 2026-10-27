@@ -211,7 +211,7 @@ class WorkflowOperationCatalog:
         for operation in extension.operations():
             name = operation.operation_id
             if name in operations:
-                if operations[name].to_dict() != operation.to_dict():
+                if canonical_json(operations[name].to_dict()) != canonical_json(operation.to_dict()):
                     raise ArgumentError("workflow catalogue extension conflicts with an existing descriptor")
             else:
                 operations[name], executors[name] = operation, extension._executors[name]

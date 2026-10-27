@@ -13,7 +13,9 @@ connection, or permission to call a model or source.
 
 The default eight-reader catalogue and saved-plan digest are unchanged. A selected profile adds
 only its listed concrete operations, including dependencies. Overlapping normalized descriptors
-must match exactly; existing executor bindings are preserved rather than replaced. Catalogue
+must match canonical JSON bytes; Python equality cannot collapse `true` with `1`, `false` with
+`0`, or an integer default with its floating representation. Existing executor bindings are
+preserved rather than replaced. Catalogue
 `subset()` retains exact bindings, while `extended()` constructs a new validated catalogue so a
 descriptor conflict or capacity error leaves both inputs unchanged. Matching descriptors alone
 do not validate an executor; the [provider registry](WORKFLOW_PROVIDER_REGISTRY.md) performs its

@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from .authoring import canonical_json
 from .errors import ArgumentError
 from .workflow_integrations import WorkflowOperationCatalog, builtin_workflow_operation_catalog
 
@@ -88,7 +89,7 @@ def workflow_capability_inventory(catalog: WorkflowOperationCatalog, profile_ids
                 current = installed.get(operation.operation_id)
                 if current is None:
                     missing.append(operation.operation_id)
-                elif current != operation.to_dict():
+                elif canonical_json(current) != canonical_json(operation.to_dict()):
                     mismatched.append(operation.operation_id)
         profiles.append({"profile_id": profile_id, **{key: list(value) if type(value) is list else value for key, value in description.items()},
             "operator_enabled": enabled, "descriptor_available": enabled and not missing and not mismatched,

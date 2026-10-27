@@ -90,6 +90,36 @@ def test_descriptor_conflict_refuses_entire_extension_without_mutating_either_ca
     assert (original.to_dict(), extension.to_dict()) == before
 
 
+@pytest.mark.parametrize("left,right", [(True, 1), (False, 0), (1, 1.0)])
+def test_catalogue_extension_does_not_collapse_distinct_json_const_types(left, right):
+    from prism_sdk.authoring import canonical_json
+    first = replace(_operation(), input_schema={"type": "object", "properties": {"mode": {"const": left}}})
+    second = replace(first, input_schema={"type": "object", "properties": {"mode": {"const": right}}})
+    assert first.to_dict() == second.to_dict()  # Python equality alone erases the JSON type distinction.
+    assert canonical_json(first.to_dict()) != canonical_json(second.to_dict())
+    base = WorkflowOperationCatalog([first], {first.operation_id: _executor("original")})
+    extension = WorkflowOperationCatalog([second], {second.operation_id: _executor("replacement")})
+    with pytest.raises(ArgumentError, match="conflict"):
+        base.extended(extension)
+    assert base.resolve(first.operation_id).to_dict() == first.to_dict()
+
+
+def test_profile_presence_requires_canonical_json_identity_instead_of_python_numeric_equality():
+    from copy import deepcopy
+    expanded = with_workflow_capabilities(builtin_workflow_operation_catalog(), ["glioma-ontology"])
+    operation = expanded.resolve("nci_thesaurus.glioma_ontology")
+    schema = deepcopy(operation.to_dict()["input_schema"])
+    schema["properties"]["timeout_ms"]["default"] = 30000.0
+    changed = replace(operation, input_schema=schema)
+    assert changed.to_dict() == operation.to_dict()
+    current = builtin_workflow_operation_catalog().extended(WorkflowOperationCatalog([changed],
+        {changed.operation_id: _executor("not_admitted")}))
+    inventory = workflow_capability_inventory(current, ["glioma-ontology"])["profiles"][1]
+    assert not inventory["descriptor_available"] and inventory["mismatched_operations"] == [operation.operation_id]
+    with pytest.raises(ArgumentError, match="unavailable or changed"):
+        compile_workflow_capability("Inspect", current, "glioma-ontology", enabled_profiles=["glioma-ontology"])
+
+
 def test_explicit_profiles_extend_only_concrete_operations_and_keep_default_catalogue_stable():
     base = builtin_workflow_operation_catalog()
     before = base.to_dict()
