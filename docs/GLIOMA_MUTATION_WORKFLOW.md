@@ -29,6 +29,8 @@ and an exact native count pointer. A missing project or gene bucket has a null c
 invented citation. `unobserved_project_count` counts projects without an observed requested
 gene count; it does not assert that those project buckets were absent. Both partitions retain
 native bucket metadata, source clocks, provenance and the replayable native bundle.
+Citation identities bind the native observation, exact pointer, source bundle and retrieval
+clock, so a changed source observation cannot alias an earlier project-only citation identity.
 
 No gene-specific assay denominator is established: denominator and prevalence remain null.
 Counts are mutation-affected cases, not mutation events, molecular profiles, expression values,

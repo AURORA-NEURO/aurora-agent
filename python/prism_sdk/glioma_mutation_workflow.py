@@ -67,14 +67,16 @@ def analyze_glioma_mutation_counts(*, question: str, bundle: Mapping[str, Any]) 
     citations, projects = [], []
     for row in native["projects"]:
         observed = row["state"] == "observed"
-        citation_id = "gdc_tp53." + row["project_id"] if observed else None
+        citation_id = None
         if observed:
-            citations.append({"citation_id": citation_id, "source_id": row["source_id"],
+            citation = {"source_id": row["source_id"],
                 "project_id": row["project_id"], "gene_id": row["gene_id"],
                 "uri": provenance["uri"], "retrieved_at": provenance["retrieved_at"],
                 "source_json_pointer": row["source_json_pointer"],
                 "case_count_with_mutation": row["case_count_with_mutation"],
-                "native_observation_digest": content_digest(row)})
+                "native_observation_digest": content_digest(row), "source_bundle_digest": native["bundle_digest"]}
+            citation_id = "gdc_tp53:" + content_digest(citation)
+            citations.append({"citation_id": citation_id, **citation})
         projects.append({"project_id": row["project_id"], "lane": row["lane"], "state": row["state"],
             "case_count_with_mutation": row["case_count_with_mutation"], "citation_id": citation_id,
             "denominator": None, "denominator_state": "not_established", "prevalence": None,

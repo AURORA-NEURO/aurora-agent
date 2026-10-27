@@ -15,7 +15,7 @@ from prism_sdk import reviewed_gdc_gene_mutation_retrieval as source
 from prism_sdk.workflow_builder import compile_workflow_plan, execute_workflow_plan
 from prism_sdk.workflow_integrations import WorkflowOperationCatalog, WorkflowOperationResult
 from prism_sdk.workflow_requirements import compile_workflow_requirements
-from test_reviewed_gdc_gene_mutation_retrieval import _execute, _response
+from test_reviewed_gdc_gene_mutation_retrieval import _bucket, _execute, _response
 
 TASK = "Review public TP53 mutation-affected case aggregates for TCGA-GBM and TCGA-LGG."
 
@@ -53,6 +53,18 @@ def test_observed_zero_retains_source_pointer_and_scientific_review_without_rate
     assert analysis["counts_pooled"] is False and analysis["cohort_overlap"] == "unassessed"
     assert len(review["citation_index"]) == 2 and review["analysis"] == analysis
     assert validate_glioma_mutation_handoff(review) == review
+
+
+def test_citation_identity_binds_the_observation_instead_of_aliasing_changed_counts():
+    first = analyze_glioma_mutation_counts(question=TASK, bundle=_bundle())
+    changed = _response()
+    changed["aggregations"]["projects"]["buckets"][0] = _bucket("TCGA-GBM", 11)
+    changed["hits"]["total"]["value"] = 31
+    second = analyze_glioma_mutation_counts(question=TASK, bundle=_bundle(changed))
+    assert first["projects"][0]["case_count_with_mutation"] == 10
+    assert second["projects"][0]["case_count_with_mutation"] == 11
+    assert first["projects"][0]["citation_id"] != second["projects"][0]["citation_id"]
+    assert first == analyze_glioma_mutation_counts(question=TASK, bundle=first["native_bundle"])
 
 
 @pytest.mark.parametrize("change", ["status", "citation", "support", "clinical", "analysis", "extra"])
