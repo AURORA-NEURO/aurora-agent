@@ -522,6 +522,7 @@ class WorkflowAPIWorker:
         if (retry or release) and not resume:
             _refuse("invalid_request", "Retry and cancellation release require explicit resume.")
         record = self._run(run_id)
+        requested_release_generation = self._cancel_generation(run_id) if release else None
         with self._lock(self._path("plans", record["plan_id"], "plan.lock")):
             with self._lock(self._path("runs", run_id, "execute.lock"), wait_seconds=1.0):
                 record = self._run(run_id)
@@ -535,9 +536,12 @@ class WorkflowAPIWorker:
                     _refuse("invalid_request", "A new run cannot be resumed before its first admission.")
                 if resume and checkpoint is None:
                     _refuse("recovery_required", "The interrupted run has no durable checkpoint; automatic replay is refused.")
-                if release:
+                if requested_release_generation is not None:
                     with self._lock(self._path("runs", run_id, "cancel.lock")):
-                        record["cancel_release_generation"] = self._cancel_generation(run_id)
+                        # The grant covers the cancellation observed before admission waiting.
+                        # A later cancellation cannot be consumed by this earlier release.
+                        record["cancel_release_generation"] = max(record["cancel_release_generation"],
+                                                                    requested_release_generation)
                 cancellation = WorkflowCancellationToken()
 
                 def observe() -> None:

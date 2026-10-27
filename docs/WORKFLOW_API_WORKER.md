@@ -138,8 +138,11 @@ Cancellation increments an application-owned sequence under a short separate loc
 executing process observes that sequence at checkpoint boundaries, stops admitting new calls
 and drains an already admitted synchronous source call. The actual source result or failure
 is retained before cancellation. A cancellation request is not evidence that the process has
-stopped. An explicit cancellation release records the current sequence; a later cancellation
-increments it again and is not consumed by that earlier release.
+stopped. An explicit cancellation release captures the observed sequence after run identity
+validation and before waiting for admission. Once admitted, it can advance the release watermark
+only through that captured generation, while preserving an already higher watermark. A later
+cancellation, including one received during the admission wait, increments the sequence and is
+not consumed by that earlier release.
 
 `inspect.active` comes from an OS-held execution lock, rather than a timestamp or a stale lock
 file. A retained `running` manifest with no lock owner is `interrupted`. Its checkpoint may

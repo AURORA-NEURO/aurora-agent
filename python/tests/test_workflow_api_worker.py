@@ -240,6 +240,55 @@ def test_idle_observer_held_past_admission_bound_refuses_without_run_state_or_so
     assert not thread.is_alive()
 
 
+def test_release_queued_behind_observation_cannot_consume_a_later_cancellation(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    worker.handle({"action": "cancel", "run_id": run["run_id"]})
+    assert _execute(worker, run)["status"] == "cancelled" and calls == []
+    assert worker._cancel_generation(run["run_id"]) == 1
+    entered, release, collision = Event(), Event(), Event()
+    def observer():
+        with worker._lock(worker._path("runs", run["run_id"], "execute.lock")):
+            entered.set()
+            release.wait(5)
+    thread = Thread(target=observer)
+    thread.start()
+    try:
+        assert entered.wait(5)
+        if os.name == "nt":
+            import msvcrt
+            owner, function = msvcrt, "locking"
+        else:
+            import fcntl
+            owner, function = fcntl, "flock"
+        actual_lock = getattr(owner, function)
+        def later_cancellation_at_collision(*args):
+            try:
+                return actual_lock(*args)
+            except OSError:
+                if not collision.is_set():
+                    collision.set()
+                    # The release request has already observed generation 1 but cannot own
+                    # the run yet. This is a distinct later stop request, not its old hold.
+                    worker.handle({"action": "cancel", "run_id": run["run_id"]})
+                    assert worker._cancel_generation(run["run_id"]) == 2
+                    release.set()
+                raise
+        monkeypatch.setattr(owner, function, later_cancellation_at_collision)
+        held = _execute(worker, run, resume=True, resume_cancelled=True)
+    finally:
+        release.set()
+        thread.join(5)
+    assert not thread.is_alive() and collision.is_set()
+    assert held["status"] == "cancelled" and held["cancel_requested"] is True and calls == []
+    assert worker._run(run["run_id"])["cancel_release_generation"] == 1
+    assert held["checkpoint"]["attempts"] == {}
+    completed = _execute(worker, run, resume=True, resume_cancelled=True)
+    assert completed["status"] == "completed" and completed["cancel_requested"] is False
+    assert len(calls) == 2 and completed["checkpoint"]["attempts"] == {"first": 1, "second": 1}
+    assert worker._run(run["run_id"])["cancel_release_generation"] == 2
+
+
 @pytest.mark.parametrize("change", ["source_limit", "source_query", "source_operation", "drop_handoff", "replace_contract"])
 def test_edit_cannot_weaken_retained_source_scope_arguments_flow_or_task_contract(tmp_path, change):
     worker = WorkflowAPIWorker(tmp_path / "owned")
