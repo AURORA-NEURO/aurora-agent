@@ -3,6 +3,7 @@ from copy import deepcopy
 from dataclasses import replace
 import json
 import socket
+import threading
 import time
 import unittest
 from unittest.mock import Mock, patch
@@ -38,32 +39,58 @@ def _execute(response=None):
     return adapter.execute(adapter.prepare(), approve_source_dispatch=True, retrieved_at=_AT)
 
 
-class _Socket:
+class _Clock:
+    def __init__(self):
+        self.now = 0.0
+    def monotonic(self):
+        return self.now
+
+
+class _WireSocket:
+    """Socket bytes go through the real HTTPResponse parser, with optional elapsed recv time."""
+    def __init__(self, fragments, clock=None):
+        self.fragments = [(item, 0.0) if isinstance(item, bytes) else item for item in fragments]
+        self.clock, self.closed, self.timeouts, self.recv_calls = clock, False, [], 0
     def settimeout(self, value):
         if not 0 < value <= 30:
             raise AssertionError("socket deadline was not bounded")
-
-
-class _Response:
-    def __init__(self, body, status=200, headers=None):
-        self.status, self.body = status, body
-        self.headers = {"Content-Type": "application/json", **(headers or {})}
-    def getheader(self, name, default=None):
-        return self.headers.get(name, default)
-    def read1(self, maximum):
-        chunk, self.body = self.body[:maximum], self.body[maximum:]
-        return chunk
+        self.timeouts.append(value)
+    def recv(self, maximum):
+        self.recv_calls += 1
+        if not self.fragments:
+            return b""
+        value, delay = self.fragments.pop(0)
+        if self.clock is not None:
+            if delay >= self.timeouts[-1]:
+                self.clock.now += self.timeouts[-1]
+                raise TimeoutError("fixture socket receive timeout")
+            self.clock.now += delay
+        block, remaining = value[:maximum], value[maximum:]
+        if remaining:
+            self.fragments.insert(0, (remaining, 0.0))
+        return block
+    def close(self):
+        self.closed = True
 
 
 class _Connection:
-    def __init__(self, response):
-        self.response, self.sock, self.closed, self.requests = response, _Socket(), False, []
+    def __init__(self, fragments, clock=None):
+        self.sock, self.closed, self.requests = _WireSocket(fragments, clock), False, []
     def request(self, method, target, headers):
         self.requests.append((method, target, headers))
-    def getresponse(self):
-        return self.response
     def close(self):
         self.closed = True
+        self.sock.close()
+
+
+def _wire(body=b"{}", headers=b"", status=200):
+    return b"HTTP/1.1 " + str(status).encode() + b" Fixture\r\nContent-Type: application/json\r\n" + headers + b"\r\n" + body
+
+
+def _fetch_wire(fragments, clock=None):
+    connection = _Connection(fragments, clock)
+    with patch.object(gdc, "_validate_public_dns", return_value=("fixture",)), patch.object(gdc, "_PinnedHttpsConnection", return_value=connection):
+        return gdc._builtin_fetch(gdc._url(), 1000 if clock is not None else 30_000), connection
 
 
 class ReviewedGdcGeneMutationRetrievalTests(unittest.TestCase):
@@ -227,7 +254,8 @@ class ReviewedGdcGeneMutationRetrievalTests(unittest.TestCase):
     def test_dns_rejects_private_mixed_or_empty_answers_before_connect(self):
         public = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
         private = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))
-        for answers in ([], [private], [public, private]):
+        multicast = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("224.0.0.1", 443))
+        for answers in ([], [private], [public, private], [multicast]):
             with self.subTest(answers=answers), patch.object(gdc.socket, "getaddrinfo", return_value=answers), self.assertRaises(gdc.ReviewedGdcGeneMutationRetrievalError):
                 gdc._validate_public_dns(time.monotonic() + 1)
         with patch.object(gdc.socket, "getaddrinfo", return_value=[public]):
@@ -256,8 +284,8 @@ class ReviewedGdcGeneMutationRetrievalTests(unittest.TestCase):
 
     def test_builtin_transport_uses_one_pinned_request_and_rejects_redirect_encoding_and_size_drift(self):
         body = json.dumps(_response()).encode()
-        for status, headers, payload in ((200, {}, body), (302, {"Location": "https://example.com"}, body), (200, {"Content-Type": "text/html"}, body), (200, {"Content-Encoding": "gzip"}, body), (200, {"Content-Length": "1000001"}, body), (200, {"Content-Length": str(len(body) + 1)}, body), (200, {}, b'x' * 1_000_001)):
-            connection = _Connection(_Response(payload, status, headers))
+        for status, headers, payload in ((200, b"", body), (302, b"Location: https://example.com\r\n", body), (200, b"Content-Type: text/html\r\n", body), (200, b"Content-Encoding: gzip\r\n", body), (200, b"Content-Length: 1000001\r\n", body), (200, b"Content-Length: " + str(len(body) + 1).encode() + b"\r\n", body), (200, b"", b'x' * 1_000_001)):
+            connection = _Connection([_wire(payload, headers, status)])
             with self.subTest(status=status, headers=headers), patch.object(gdc, "_validate_public_dns", return_value=("fixture",)), patch.object(gdc, "_PinnedHttpsConnection", return_value=connection):
                 if status == 200 and not headers and payload == body:
                     self.assertEqual(gdc._builtin_fetch(gdc._url(), 30_000), body)
@@ -266,10 +294,94 @@ class ReviewedGdcGeneMutationRetrievalTests(unittest.TestCase):
                         gdc._builtin_fetch(gdc._url(), 30_000)
             self.assertEqual(len(connection.requests), 1)
             self.assertTrue(connection.closed)
+            self.assertTrue(connection.sock.closed)
             self.assertEqual(connection.requests[0][0], "GET")
+            self.assertEqual(connection.requests[0][2]["Connection"], "close")
         with patch.object(gdc, "_validate_public_dns") as dns, self.assertRaises(gdc.ReviewedGdcGeneMutationRetrievalError):
             gdc._builtin_fetch("https://api.gdc.cancer.gov/cases", 30_000)
         dns.assert_not_called()
+
+    def test_real_wire_parser_accepts_exact_length_and_strict_chunked_body(self):
+        body = json.dumps(_response()).encode()
+        received, _ = _fetch_wire([_wire(body, b"Content-Length: " + str(len(body)).encode() + b"\r\n")])
+        self.assertEqual(received, body)
+        chunked = b"1\r\n{\r\n1\r\n}\r\n0\r\n\r\n"
+        received, _ = _fetch_wire([_wire(chunked, b"Transfer-Encoding: chunked\r\n")])
+        self.assertEqual(received, b"{}")
+
+    def test_real_wire_parser_rejects_duplicate_headers_and_ambiguous_or_unsupported_framing(self):
+        headers = (b"Content-Length: 2\r\ncontent-length: 2\r\n", b"Content-Length: 2\r\nContent-Length: 9\r\n", b"Transfer-Encoding: chunked\r\ntransfer-encoding: chunked\r\n", b"Content-Length: 2\r\nTransfer-Encoding: chunked\r\n", b"Content-Length: 2, 2\r\n", b"Transfer-Encoding: gzip, chunked\r\n", b"Transfer-Encoding: identity\r\n", b"X-Header: value\r\n folded\r\n", b"Bad Header: value\r\n", b"Trailer: Digest\r\n")
+        for value in headers:
+            with self.subTest(headers=value), self.assertRaises(gdc.ReviewedGdcGeneMutationRetrievalError):
+                _fetch_wire([_wire(headers=value)])
+        with self.assertRaises(gdc.ReviewedGdcGeneMutationRetrievalError):
+            _fetch_wire([b"HTTP/1.1 200 OK\nContent-Type: application/json\n\n{}"])
+        with self.assertRaises(gdc.ReviewedGdcGeneMutationRetrievalError):
+            _fetch_wire([_wire(b"2\r\n{}\r\n0\r\n\r\n", b"Transfer-Encoding: chunked\r\n").replace(b"HTTP/1.1", b"HTTP/1.0", 1)])
+
+    def test_real_wire_parser_rejects_malformed_chunk_delimiters_extensions_and_trailers(self):
+        bodies = (b"2\r\n{}XX0\r\n\r\n", b"2;name=value\r\n{}\r\n0\r\n\r\n", b"2\n{}\r\n0\r\n\r\n", b"0\r\nX-Changed: value\r\n\r\n", b"0\r\n", b"f4241\r\n")
+        for body in bodies:
+            with self.subTest(body=body), self.assertRaises(gdc.ReviewedGdcGeneMutationRetrievalError):
+                _fetch_wire([_wire(body, b"Transfer-Encoding: chunked\r\n")])
+
+    def test_real_wire_header_and_chunk_framing_work_are_bounded_independently_from_body(self):
+        headers = b"First: " + b"x" * 33_000 + b"\r\nSecond: " + b"y" * 33_000 + b"\r\n"
+        with self.assertRaisesRegex(gdc.ReviewedGdcGeneMutationRetrievalError, "headers exceed"):
+            _fetch_wire([_wire(headers=headers)])
+        chunked = b"1\r\nx\r\n" * 14_000 + b"0\r\n\r\n"
+        with self.assertRaisesRegex(gdc.ReviewedGdcGeneMutationRetrievalError, "framing exceeds"):
+            _fetch_wire([_wire(chunked, b"Transfer-Encoding: chunked\r\n")])
+
+    def test_real_wire_slow_header_and_body_trickles_cannot_extend_the_absolute_deadline(self):
+        for fragments in ([(bytes([item]), 0.3) for item in _wire()], [(_wire(b"", b"Content-Length: 10\r\n"), 0.0)] + [(b"x", 0.3)] * 10):
+            clock = _Clock()
+            connection = _Connection(fragments, clock)
+            with self.subTest(header=fragments[0][1] > 0), patch.object(gdc.time, "monotonic", side_effect=clock.monotonic), patch.object(gdc, "_validate_public_dns", return_value=("fixture",)), patch.object(gdc, "_PinnedHttpsConnection", return_value=connection), self.assertRaises(gdc.ReviewedGdcGeneMutationRetrievalError):
+                gdc._builtin_fetch(gdc._url(), 1000)
+            self.assertLessEqual(clock.now, 1.0)
+            self.assertLessEqual(connection.sock.recv_calls, 5)
+            self.assertLess(connection.sock.timeouts[-1], connection.sock.timeouts[0])
+            self.assertTrue(connection.closed)
+
+    def test_timed_out_dns_jobs_retain_four_slots_and_late_completion_cannot_dispatch(self):
+        slots, release = threading.BoundedSemaphore(4), threading.Event()
+        workers, entered = [], []
+        thread_type = threading.Thread
+        public = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
+        def blocked_lookup(*_args, **_kwargs):
+            entered.append(True)
+            release.wait(1)
+            return [public]
+        def worker(*args, **kwargs):
+            thread = thread_type(*args, **kwargs)
+            workers.append(thread)
+            return thread
+        with patch.object(gdc, "_DNS_SLOTS", slots), patch.object(gdc.socket, "getaddrinfo", side_effect=blocked_lookup), patch.object(gdc.threading, "Thread", side_effect=worker), patch.object(gdc, "_PinnedHttpsConnection") as connection:
+            try:
+                for _ in range(5):
+                    with self.assertRaises(gdc.ReviewedGdcGeneMutationRetrievalError):
+                        gdc._builtin_fetch(gdc._url(), 10)
+                self.assertEqual(len(workers), 4)
+                self.assertEqual(len(entered), 4)
+                self.assertFalse(slots.acquire(blocking=False))
+            finally:
+                release.set()
+                for thread in workers:
+                    thread.join(timeout=1)
+            connection.assert_not_called()
+            self.assertTrue(all(not thread.is_alive() for thread in workers))
+            for _ in range(4):
+                self.assertTrue(slots.acquire(blocking=False))
+            for _ in range(4):
+                slots.release()
+
+    def test_dns_worker_start_failure_releases_reserved_capacity(self):
+        slots = threading.BoundedSemaphore(1)
+        with patch.object(gdc, "_DNS_SLOTS", slots), patch.object(gdc.threading.Thread, "start", side_effect=RuntimeError("fixture start failure")), self.assertRaises(gdc.ReviewedGdcGeneMutationRetrievalError):
+            gdc._validate_public_dns(time.monotonic() + 1)
+        self.assertTrue(slots.acquire(blocking=False))
+        slots.release()
 
     def test_optional_catalog_registration_enforces_real_dispatch_schema_and_preserves_provider_count(self):
         from prism_sdk.workflow_integrations import builtin_workflow_operation_catalog

@@ -42,8 +42,12 @@ MAX_REVIEWED_GDC_GENE_MUTATION_RESPONSE_BYTES = 1_000_000
 MAX_REVIEWED_GDC_GENE_MUTATION_TREE_DEPTH = 32
 MAX_REVIEWED_GDC_GENE_MUTATION_TREE_NODES = 50_000
 MAX_REVIEWED_GDC_GENE_MUTATION_PROJECT_BUCKETS = 128
+MAX_REVIEWED_GDC_GENE_MUTATION_HEADER_BYTES = 65_536
+MAX_REVIEWED_GDC_GENE_MUTATION_FRAMING_BYTES = 65_536
+MAX_REVIEWED_GDC_GENE_MUTATION_DNS_JOBS = 4
 BUILTIN_GDC_GENE_MUTATION_TRANSPORT_ID = "builtin.nci-gdc-gene-mutation.https"
-BUILTIN_GDC_GENE_MUTATION_TRANSPORT_VERSION = "1"
+BUILTIN_GDC_GENE_MUTATION_TRANSPORT_VERSION = "2"
+_DNS_SLOTS = threading.BoundedSemaphore(MAX_REVIEWED_GDC_GENE_MUTATION_DNS_JOBS)
 _SOURCE_ID = "gdc_tp53_gene_mutation_counts"
 _SCOPE = "fixed_public_glioma_tp53_mutation_case_aggregates"
 _RETENTION = "aggregate_counts_only;no_individual_case_sample_patient_or_mutation_records"
@@ -176,6 +180,9 @@ BUILTIN_GDC_GENE_MUTATION_TRANSPORT_CONFIG_DIGEST = content_digest({
     "implementation": "http.client.HTTPSConnection", "method": "GET", "url": _url(),
     "credentials": "not_accepted", "redirects": "refused", "dns": "all_public_answers_and_pinned_socket",
     "request_limit": 1, "timeout_ms_max": 30_000, "response_bytes_max": MAX_REVIEWED_GDC_GENE_MUTATION_RESPONSE_BYTES,
+    "dns_jobs_max": MAX_REVIEWED_GDC_GENE_MUTATION_DNS_JOBS, "absolute_deadline": "per_recv_headers_body_and_framing",
+    "header_bytes_max": MAX_REVIEWED_GDC_GENE_MUTATION_HEADER_BYTES, "framing_bytes_max": MAX_REVIEWED_GDC_GENE_MUTATION_FRAMING_BYTES,
+    "framing": "reject_duplicate_headers_length_transfer_ambiguity_and_invalid_chunks",
 })
 
 
@@ -187,22 +194,35 @@ def _remaining(deadline: float) -> float:
 
 
 def _validate_public_dns(deadline: float) -> tuple[Any, ...]:
-    # DNS can block outside socket timeouts. A bounded daemon lookup cannot dispatch a request.
+    # Resolver cancellation is unavailable; timed-out jobs retain one of four slots until exit.
+    slots = _DNS_SLOTS
+    if not slots.acquire(timeout=_remaining(deadline)):
+        _fail("GDC gene mutation DNS resolver capacity or deadline exceeded")
     result: queue.Queue[Any] = queue.Queue(maxsize=1)
     def resolve() -> None:
         try:
-            result.put(socket.getaddrinfo(REVIEWED_GDC_GENE_MUTATION_HOST, 443, type=socket.SOCK_STREAM))
-        except Exception as error:
-            result.put(error)
-    threading.Thread(target=resolve, daemon=True).start()
+            try:
+                addresses = socket.getaddrinfo(REVIEWED_GDC_GENE_MUTATION_HOST, 443, type=socket.SOCK_STREAM)
+            except Exception:
+                addresses = None
+            result.put_nowait(addresses)
+        finally:
+            slots.release()
+    try:
+        _remaining(deadline)
+        threading.Thread(target=resolve, name="aurora-gdc-gene-mutation-dns", daemon=True).start()
+    except Exception as error:
+        slots.release()
+        raise ReviewedGdcGeneMutationRetrievalError("GDC gene mutation DNS resolver could not start") from error
     try:
         addresses = result.get(timeout=_remaining(deadline))
     except queue.Empty as error:
         raise ReviewedGdcGeneMutationRetrievalError("GDC gene mutation DNS lookup exceeded its deadline") from error
-    if isinstance(addresses, Exception) or not isinstance(addresses, list) or not 1 <= len(addresses) <= 64:
+    _remaining(deadline)
+    if not isinstance(addresses, list) or not 1 <= len(addresses) <= 64:
         _fail("GDC gene mutation DNS lookup failed or exceeded its bound")
     try:
-        if any(item[0] not in (socket.AF_INET, socket.AF_INET6) or item[1] != socket.SOCK_STREAM or not ipaddress.ip_address(item[4][0]).is_global or item[4][1] != 443 for item in addresses):
+        if any(item[0] not in (socket.AF_INET, socket.AF_INET6) or item[1] != socket.SOCK_STREAM or not ipaddress.ip_address(item[4][0]).is_global or ipaddress.ip_address(item[4][0]).is_multicast or item[4][1] != 443 for item in addresses):
             _fail("GDC gene mutation DNS returned a non-public address")
     except (ValueError, TypeError, IndexError) as error:
         raise ReviewedGdcGeneMutationRetrievalError("GDC gene mutation DNS returned a malformed address") from error
@@ -228,40 +248,157 @@ class _PinnedHttpsConnection(http.client.HTTPSConnection):
             raise
 
 
+class _DeadlineReader:
+    """Bound every socket receive and the HTTP parser's aggregate header/framing work."""
+
+    def __init__(self, connection: Any, deadline: float) -> None:
+        self.connection, self.deadline = connection, deadline
+        self.buffer = bytearray()
+        self.closed = False
+        self.reading_headers = True
+        self.header_bytes = self.framing_bytes = self.wire_bytes = 0
+
+    def _receive(self) -> bool:
+        self.connection.settimeout(_remaining(self.deadline))
+        block = self.connection.recv(4096)
+        _remaining(self.deadline)
+        self.wire_bytes += len(block)
+        maximum = MAX_REVIEWED_GDC_GENE_MUTATION_RESPONSE_BYTES + MAX_REVIEWED_GDC_GENE_MUTATION_HEADER_BYTES + MAX_REVIEWED_GDC_GENE_MUTATION_FRAMING_BYTES
+        if self.wire_bytes > maximum:
+            _fail("GDC gene mutation HTTP wire exceeds its byte bound")
+        self.buffer.extend(block)
+        return bool(block)
+
+    def readline(self, limit: int = -1) -> bytes:
+        _remaining(self.deadline)
+        limit = min(limit if limit >= 0 else 65_537, 65_537)
+        while True:
+            newline = self.buffer.find(b"\n", 0, limit)
+            if newline >= 0 or len(self.buffer) >= limit:
+                end = newline + 1 if newline >= 0 else limit
+                value = bytes(self.buffer[:end])
+                del self.buffer[:end]
+                break
+            if not self._receive():
+                value = bytes(self.buffer)
+                self.buffer.clear()
+                break
+        if self.reading_headers:
+            self.header_bytes += len(value)
+            if self.header_bytes > MAX_REVIEWED_GDC_GENE_MUTATION_HEADER_BYTES:
+                _fail("GDC gene mutation HTTP headers exceed their byte bound")
+            if value and (not value.endswith(b"\r\n") or value[:1] in (b" ", b"\t")):
+                _fail("GDC gene mutation HTTP headers have invalid line framing")
+        else:
+            self.account_framing(len(value))
+        return value
+
+    def account_framing(self, size: int) -> None:
+        self.framing_bytes += size
+        if self.framing_bytes > MAX_REVIEWED_GDC_GENE_MUTATION_FRAMING_BYTES:
+            _fail("GDC gene mutation HTTP framing exceeds its byte bound")
+
+    def read(self, size: int = -1) -> bytes:
+        _remaining(self.deadline)
+        if type(size) is not int or not 0 <= size <= MAX_REVIEWED_GDC_GENE_MUTATION_RESPONSE_BYTES + 1:
+            _fail("GDC gene mutation transport read exceeds its byte bound")
+        while len(self.buffer) < size and self._receive():
+            pass
+        value = bytes(self.buffer[:size])
+        del self.buffer[:size]
+        return value
+
+    def close(self) -> None:
+        self.closed = True
+
+    def flush(self) -> None:
+        # HTTPResponse flushes its read-only wrapper while closing an early refusal.
+        return None
+
+
+class _ResponseSocket:
+    def __init__(self, connection: Any, deadline: float) -> None:
+        self.reader = _DeadlineReader(connection, deadline)
+
+    def makefile(self, *_args: Any, **_kwargs: Any) -> _DeadlineReader:
+        return self.reader
+
+
+class _BoundedHttpResponse(http.client.HTTPResponse):
+    """Use the standard response parser with strict bounded chunk delimiters/trailers."""
+
+    def _read_next_chunk_size(self) -> int:
+        line = self.fp.readline(65_537)
+        # Extensions are unnecessary for this fixed JSON reader and enlarge the accepted grammar.
+        if not re.fullmatch(rb"[0-9A-Fa-f]{1,8}\r\n", line):
+            _fail("GDC gene mutation HTTP chunk size has invalid framing")
+        size = int(line[:-2], 16)
+        if size > MAX_REVIEWED_GDC_GENE_MUTATION_RESPONSE_BYTES:
+            _fail("GDC gene mutation HTTP chunk exceeds its byte bound")
+        return size
+
+    def _get_chunk_left(self) -> int | None:
+        chunk_left = self.chunk_left
+        if not chunk_left:
+            if chunk_left is not None:
+                self.fp.account_framing(2)
+                if self._safe_read(2) != b"\r\n":
+                    _fail("GDC gene mutation HTTP chunk delimiter is invalid")
+            chunk_left = self._read_next_chunk_size()
+            if chunk_left == 0:
+                # Trailers can change integrity/framing interpretations; this reader accepts none.
+                if self.fp.readline(65_537) != b"\r\n":
+                    _fail("GDC gene mutation HTTP trailers are not accepted")
+                self._close_conn()
+                chunk_left = None
+            self.chunk_left = chunk_left
+        return chunk_left
+
+
 def _builtin_fetch(url: str, timeout_ms: int) -> bytes:
     if url != _url():
         _fail("GDC gene mutation transport refused an unpinned URL")
     deadline = time.monotonic() + timeout_ms / 1000
-    connection = None
+    connection = response = None
     try:
         connection = _PinnedHttpsConnection(_validate_public_dns(deadline), deadline)
         parts = urlsplit(url)
-        connection.request("GET", parts.path + "?" + parts.query, headers={"Accept": "application/json", "Accept-Encoding": "identity", "User-Agent": "aurora-agent-reviewed-gdc-aggregate/0.1"})
+        connection.request("GET", parts.path + "?" + parts.query, headers={"Accept": "application/json", "Accept-Encoding": "identity", "Connection": "close", "User-Agent": "aurora-agent-reviewed-gdc-aggregate/0.1"})
         active_socket = connection.sock
         if active_socket is not None:
             active_socket.settimeout(_remaining(deadline))
-        response = connection.getresponse()
-        if response.status != 200 or response.getheader("Location") is not None:
+        if active_socket is None:
+            _fail("GDC gene mutation transport has no authenticated socket")
+        response_socket = _ResponseSocket(active_socket, deadline)
+        response = _BoundedHttpResponse(response_socket)
+        response.begin()
+        response_socket.reader.reading_headers = False
+        if response.headers.defects:
+            _fail("GDC gene mutation HTTP headers are malformed")
+        headers = {}
+        for name, value in response.getheaders():
+            normalized = name.casefold()
+            if normalized in headers or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) or any(ord(char) < 32 and char != "\t" or ord(char) == 127 for char in value):
+                _fail("GDC gene mutation HTTP headers are duplicate or malformed")
+            headers[normalized] = value.strip()
+        if "content-length" in headers and "transfer-encoding" in headers:
+            _fail("GDC gene mutation HTTP response has ambiguous framing")
+        if "transfer-encoding" in headers and headers["transfer-encoding"].casefold() != "chunked":
+            _fail("GDC gene mutation HTTP transfer encoding is unsupported")
+        if "transfer-encoding" in headers and response.version != 11:
+            _fail("GDC gene mutation HTTP transfer framing requires HTTP/1.1")
+        if response.status != 200 or "location" in headers or "trailer" in headers:
             _fail("GDC gene mutation endpoint returned an unexpected status or redirect")
-        content_type = response.getheader("Content-Type", "").split(";", 1)[0].strip().casefold()
-        if content_type != "application/json" or response.getheader("Content-Encoding", "identity").casefold() not in ("identity", ""):
+        content_type = headers.get("content-type", "").split(";", 1)[0].strip().casefold()
+        if content_type != "application/json" or headers.get("content-encoding", "identity").casefold() not in ("identity", ""):
             _fail("GDC gene mutation endpoint returned an unsupported content type or encoding")
-        length = response.getheader("Content-Length")
+        length = headers.get("content-length")
         if length is not None and (not re.fullmatch(r"[0-9]{1,10}", length) or int(length) > MAX_REVIEWED_GDC_GENE_MUTATION_RESPONSE_BYTES):
             _fail("GDC gene mutation response exceeds its declared byte bound")
-        body = bytearray()
-        while True:
-            if active_socket is not None:
-                active_socket.settimeout(_remaining(deadline))
-            else:
-                _remaining(deadline)
-            chunk = response.read1(min(65_536, MAX_REVIEWED_GDC_GENE_MUTATION_RESPONSE_BYTES + 1 - len(body)))
-            if not chunk:
-                break
-            body.extend(chunk)
-            if len(body) > MAX_REVIEWED_GDC_GENE_MUTATION_RESPONSE_BYTES:
-                _fail("GDC gene mutation response exceeds its byte bound")
+        body = response.read(MAX_REVIEWED_GDC_GENE_MUTATION_RESPONSE_BYTES + 1)
         _remaining(deadline)
+        if len(body) > MAX_REVIEWED_GDC_GENE_MUTATION_RESPONSE_BYTES:
+            _fail("GDC gene mutation response exceeds its byte bound")
         if length is not None and len(body) != int(length):
             _fail("GDC gene mutation response differs from its declared byte length")
         return bytes(body)
@@ -270,6 +407,8 @@ def _builtin_fetch(url: str, timeout_ms: int) -> bytes:
             raise
         raise ReviewedGdcGeneMutationRetrievalError("GDC gene mutation aggregate request failed") from error
     finally:
+        if response is not None:
+            response.close()
         if connection is not None:
             connection.close()
 

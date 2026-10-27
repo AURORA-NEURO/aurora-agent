@@ -46,9 +46,18 @@ https://api.gdc.cancer.gov/analysis/top_cases_counts_by_genes?gene_ids=ENSG00000
 
 It uses a 100–30,000 ms deadline, resolves at most 64 public IP answers, and connects directly to
 the first checked address while authenticating the fixed hostname through TLS. DNS resolution is
-bounded separately within the same deadline, with no connection permitted after expiry. The
+bounded within the same deadline, with no connection permitted after expiry. At most four DNS
+jobs may remain outstanding: a timed-out system resolver retains its slot until it actually exits,
+so repeated timeouts cannot accumulate unbounded daemon threads. Private, loopback, and multicast
+answers fail before connection. The
 transport follows no redirects, reads no proxy credentials, and requests no compressed response.
 Non-200 responses, redirects, content-type/encoding drift, and inconsistent declared lengths fail.
+The absolute deadline is checked before and after every socket receive beneath the actual HTTP
+parser, including status, headers, body, and chunk framing. A server's slow trickle cannot renew
+the original timeout. Headers and chunk framing each have a separate 65,536-byte total bound,
+in addition to the body bound. Duplicate header names, Content-Length plus Transfer-Encoding,
+combined/conflicting lengths, unsupported transfer codings, folded headers, malformed chunk
+delimiters, chunk extensions, and trailers are refused. Plain HTTP/1.1 chunk framing is accepted.
 Bytes are bounded before parsing to 1,000,000; JSON depth is bounded to 32, nodes to 50,000, and
 returned project buckets to 128. Duplicate JSON fields, invalid Unicode, non-finite values,
 unexpected fields, individual hits, incomplete shards, timeouts, approximate totals, and nonzero
@@ -102,6 +111,10 @@ of 14,364 bytes. It retained source TP53 mutation-affected case counts of 156 fo
 for TCGA-LGG, with 58 other project buckets explicitly omitted. Both requested counts were present;
 no denominator, rate, cross-source independence, or scientific conclusion was established. These
 numbers describe that retrieval, are not a prevalence estimate, and may change with source updates.
+That observation used the original transport. Transport version 2 adds bounded outstanding DNS,
+absolute receive deadlines, and strict header/framing checks; its changed transport policy digest
+prevents an old prepared source plan from silently adopting the new policy. This hardening was
+verified offline with parsed fake TLS wire responses and was not followed by another live query.
 
 Focused tests run offline with standard-library fixtures and mocked transport boundaries:
 
