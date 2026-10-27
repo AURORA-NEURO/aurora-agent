@@ -7,7 +7,7 @@ platform descriptors nor fixture registration counts establish integration cover
 
 | Area | Current evidence | Required before claiming the requested end state |
 | --- | --- | --- |
-| Natural-language authoring | Local model -> schema/DAG validation; optional unreviewed NLP obligation suggestions with complete native input/output contracts and explicit durable caller acceptance; exact versioned request replay; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Actual-model evaluation of the complete-contract extraction protocol, held-out complete intent extraction and general multi-step fidelity, broader clarification UX, branching and bounded iteration |
+| Natural-language authoring | Local model -> schema/DAG validation; optional unreviewed NLP obligation suggestions with complete native input/output contracts, explicit future-work role instructions and durable caller acceptance; exact versioned request replay; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Controlled actual-model evaluation, held-out complete intent extraction and general multi-step fidelity, broader clarification UX, branching and bounded iteration |
 | Execution | Sequential read-only DAG, per-call budgets, public-value checkpoints, explicit retry, digest-checked resume; durable cooperative cancellation and separate release grant | Scheduling, concurrent independent branches, shared-worker fencing, effectful execution through the existing effect ledger, compensation/reconciliation policies |
 | Integration breadth | Twenty concrete reviewed research adapter paths across seventeen declared API service groups; fixed operator-selected capability profiles; a versioned API-service/reader registry bound to actual executors; strict public GET, fixed read-only GraphQL POST and reviewed OpenAPI HTTPS transports; caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; protected account onboarding, availability, pagination, rate limits and failure behavior for each operation |
 | Authentication | Credentialless public readers; typed application-attested connection sessions bind subject/resource scope and revocable credential handles into imported HTTP catalogue identity; caller-owned MCP sessions | Provider-authenticated account onboarding, protected OAuth/token refresh, persistent account connections and tenant-bound private-response retention |
@@ -76,9 +76,13 @@ fixed five-row human/glioblastoma-name page. It retains primary accessions, iden
 arrays, source taxonomy/disease assertions, dates and the admitted problematic-cell-line comment
 category. A separately retained format-inspection GET informed the strict reader contract. That
 capture establishes the observed response format, not a live execution of this new adapter.
+A separate caller-supplied callback admitted those exact retained bytes with five records and
+208 native citations; an independent offline check resolved every citation and missing-field
+context. It retained the original format-capture clock and made zero new HTTP/model calls.
+This establishes retained-response admission, not fresh default-reader conformance.
 Unknown comment categories, invalid wrappers and over-bound structures refuse as a whole.
 Missing optional comments remain missing; their absence establishes no absence of cell-line
-identity problems. Metadata does not validate authentication, model suitability or disease
+identity problems. Metadata does not validate authenticity, model suitability or disease
 equivalence. Pagination, total count, release identity and scientific relevance remain unassessed.
 
 The [provider registry](WORKFLOW_PROVIDER_REGISTRY.md) manifest `reviewed-public-readers/2026-10-27.4` binds twenty reviewed reader paths to
@@ -179,11 +183,17 @@ effects, compensation, effect retries and power-loss durability remain unproven 
    writer; 0.3 also silently substituted a permitted mode for an essential incompatible request.
    Next work must represent and check task obligations beyond available-operation contracts.
    Native graph validity and positive-case gains do not establish general NLP autonomy.
-   [Intent extraction protocol 0.2](WORKFLOW_INTENT_EXTRACTION.md) now supplies every selected
-   operation's complete native descriptor, including output schemas, and validates retained
-   requests against their exact protocol version. The prior available-HGNC functional refusal
-   remains failed; omitted output contracts were a context gap, not a proven cause. New context
-   bytes, token fit and actual-model comprehension require separate prospective observations.
+   [Intent extraction](WORKFLOW_INTENT_EXTRACTION.md) supplies every selected operation's complete
+   native descriptor, including output schemas, and validates retained requests against their
+   exact protocol version. The prior available-HGNC refusal under protocol 0.1 remains failed;
+   omitted output contracts were a context gap, not a proven cause. A separate protocol 0.2
+   Cellosaurus task also refused available declared work after seeing the full contract,
+   citing the model's own execution access. Protocol 0.3 adds generic instructions to interpret
+   future workflow work independently of the model's current callable tools. Role confusion is
+   a hypothesis, and this change establishes no remedy or general reliability gain. Both
+   refusals retain their original versions and bytes. Semantic controls and independent
+   evaluation remain required; candidate syntax and a blocked unsupported action are separate
+   from full task coverage, caller acceptance and successful workflow execution.
 2. Extend the [implemented local glioma synthesis and audit](GLIOMA_WORKFLOW_SYNTHESIS.md) to richer
    reviewed evidence planes. Preserve exact citation closure, source identity, missingness,
    context omissions and explicit unassessed scientific support. Public human cohort summaries
