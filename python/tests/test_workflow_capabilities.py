@@ -125,7 +125,7 @@ def test_explicit_profiles_extend_only_concrete_operations_and_keep_default_cata
     before = base.to_dict()
     expanded = with_workflow_capabilities(base, WORKFLOW_CAPABILITY_IDS)
     assert base.to_dict() == before == builtin_workflow_operation_catalog().to_dict()
-    assert len(expanded.operations()) == 14  # eight defaults plus four identity, one ontology and one CIViC operation
+    assert len(expanded.operations()) == 17  # eight defaults, four identity, ontology, CIViC, two curation locals and Cellosaurus
     again = with_workflow_capabilities(expanded, WORKFLOW_CAPABILITY_IDS)
     assert again.catalog_digest == expanded.catalog_digest
     inventory = workflow_capability_inventory(expanded, WORKFLOW_CAPABILITY_IDS)
@@ -136,7 +136,7 @@ def test_explicit_profiles_extend_only_concrete_operations_and_keep_default_cata
     assert inventory["inventory_unit"].endswith("not_a_provider_count")
 
 
-@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1)])
+@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1), ("civic-curation-review", 3), ("cellosaurus-glioblastoma-metadata", 1)])
 def test_profile_compilation_requires_operator_selection_and_binds_fixed_native_contract(profile_id, steps):
     task = "Inspect the documented fixed public metadata"
     catalog = with_workflow_capabilities(builtin_workflow_operation_catalog(), [profile_id])
@@ -195,7 +195,7 @@ def test_civic_profile_has_one_fixed_step_and_does_not_enable_source_authority()
     assert inventory["execution_authority"].startswith("none;")
 
 
-@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1)])
+@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1), ("civic-curation-review", 3), ("cellosaurus-glioblastoma-metadata", 1)])
 def test_worker_offers_only_startup_enabled_profiles_and_saves_native_plan_without_a_grant(tmp_path, monkeypatch, profile_id, steps):
     from prism_sdk import llm_runtime
     from prism_sdk.workflow_api_worker import WorkflowAPIWorker, WorkflowAPIError
@@ -234,7 +234,7 @@ def test_plan_request_cannot_supply_a_capability_configuration_or_weaken_step_bo
     assert not list((worker.root / "plans").iterdir()) and not list((worker.root / "runs").iterdir())
 
 
-@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1)])
+@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1), ("civic-curation-review", 3), ("cellosaurus-glioblastoma-metadata", 1)])
 def test_cli_fixed_template_selects_reviewed_profile_without_provider_or_source_grants(tmp_path, profile_id, steps):
     import json
     from test_workflow_cli import _invoke
@@ -246,6 +246,24 @@ def test_cli_fixed_template_selects_reviewed_profile_without_provider_or_source_
     assert len(plan["steps"]) == steps and plan["requirements"]
     code, catalogue, errors = _invoke("workflow-catalogue", "--capability", profile_id)
     assert code == 0 and not errors and catalogue["capabilities"]["selected_profiles"] == [profile_id]
+
+
+def test_cellosaurus_fixed_profile_binds_one_native_source_output_and_exact_timeout_without_dispatch():
+    from prism_sdk.workflow_builder import compile_workflow_plan
+    profile, operation = "cellosaurus-glioblastoma-metadata", "cellosaurus.glioblastoma_cell_line_metadata"
+    task = "Inspect the documented fixed Cellosaurus metadata window"
+    base = builtin_workflow_operation_catalog()
+    expanded = with_workflow_capabilities(base, [profile])
+    assert len(expanded.operations()) == len(base.operations()) + 1
+    plan = compile_workflow_capability(task, expanded, profile, enabled_profiles=[profile]).to_dict()
+    assert plan["steps"] == [{"id": "cell_lines", "operation": operation, "arguments": {"timeout_ms": 30_000}, "depends_on": []}]
+    assert plan["outputs"] == ["cell_lines"]
+    assert plan["requirements"]["required_operations"] == plan["requirements"]["output_operations"] == [operation]
+    assert plan["requirements"]["max_steps"] == 1 and plan["requirements"]["max_calls_by_operation"] == {operation: 1}
+    proposal = {key: plan[key] for key in ("name", "steps", "outputs")}
+    proposal["steps"][0]["arguments"] = {"timeout_ms": 100}
+    with pytest.raises(ArgumentError):
+        compile_workflow_plan(proposal, expanded, task=task, requirements=plan["requirements"])
 
 
 def test_actual_stdio_worker_passes_repeated_profile_arguments_and_never_accepts_request_configuration(tmp_path):

@@ -132,11 +132,12 @@ The Python SDK now exposes an executable local-model workflow builder through
 `workflow-catalogue`, `workflow-build`, `workflow-run`, `workflow-template`, and
 `workflow-execute`. It validates a proposed operation DAG before dispatch, supports public-value
 checkpoint/resume, and composes a glioma literature/trial/TCGA evidence review. Eight reviewed
-public-source adapters are registered by default; eleven opt-in paths add OpenAlex, Crossref,
+public-source adapters are registered by default; twelve opt-in paths add OpenAlex, Crossref,
 Zenodo, fixed GDC TP53 mutation-affected case aggregates, Ensembl TP53 references, and fixed
 UniProt/Reactome protein/pathway annotations, GDC project SSM-data coverage, HGNC gene references,
-NCI Thesaurus glioma terminology, and [CIViC evidence metadata](docs/CIVIC_GLIOMA_EVIDENCE.md).
-These nineteen paths are not nineteen independent
+NCI Thesaurus glioma terminology, [CIViC evidence metadata](docs/CIVIC_GLIOMA_EVIDENCE.md), and
+[Cellosaurus glioblastoma cell-line metadata](docs/CELLOSAURUS_CELL_LINE_METADATA.md).
+These twenty paths span seventeen declared API service groups; those declarations do not establish independent
 providers or hundreds of connected services.
 Separate [aggregate review](docs/GLIOMA_MUTATION_WORKFLOW.md) and
 [gene-reference comparison](docs/GLIOMA_GENE_REFERENCES.md) templates preserve native citations,
@@ -144,6 +145,11 @@ missingness and scientific review holds. The [protein/pathway context](docs/GLIO
 adds exact native citations and unknown omission states without asserting glioma activity.
 The [denominator evidence review](docs/GLIOMA_DENOMINATOR_WORKFLOW.md) compares native TP53
 counts with project SSM-data availability while keeping gene-specific assay denominators unknown.
+The optional [CIViC curation review](docs/GLIOMA_CIVIC_CURATION_WORKFLOW.md) composes source retrieval,
+local analysis and a research-review handoff. It retains source categories and exact native source-ID
+groups without ranking scientific support or treating those groups as independent publications.
+Cellosaurus preserves source names, accessions, taxonomy, disease assertions and the admitted
+problematic-cell-line comment category; it establishes neither model suitability nor authentication.
 The [provider registry](docs/WORKFLOW_PROVIDER_REGISTRY.md) inspects exact reader bindings,
 deduplicated API service groups and separate unmeasured live coverage through the CLI and editor.
 Reviewed [capability profiles](docs/WORKFLOW_CAPABILITIES.md) enable fixed groups of concrete
@@ -151,7 +157,9 @@ operations through one repeated operator option, including a native three-source
 review. Browser requests cannot enable another profile; source agreement and ontology relations
 remain separate from validated scientific equivalence and cohort evidence.
 Optional [local NLP intent suggestions](docs/WORKFLOW_INTENT_EXTRACTION.md) retain unreviewed
-mandatory-action candidates before graph authoring. The editor's explicit caller-declaration
+mandatory-action candidates before graph authoring. Extraction protocol 0.2 supplies complete native
+input and output contracts and replays older protocol records without upgrading their evidence.
+This context correction has no actual-model quality measurement yet. The editor's explicit caller-declaration
 review binds task spans, literal requirements and acceptance through edits, restart and separate
 evidence exports. Candidate syntax and caller acceptance do not establish complete interpretation
 or scientific validity; unavailable actions and literal conflicts remain blocking.
@@ -1102,7 +1110,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,368,874 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,368,880 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 

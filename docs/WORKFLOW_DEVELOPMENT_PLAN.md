@@ -7,16 +7,16 @@ platform descriptors nor fixture registration counts establish integration cover
 
 | Area | Current evidence | Required before claiming the requested end state |
 | --- | --- | --- |
-| Natural-language authoring | Local model -> schema/DAG validation; optional unreviewed NLP obligation suggestions and explicit durable caller acceptance; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Held-out complete intent extraction and general multi-step fidelity, broader clarification UX, branching and bounded iteration |
+| Natural-language authoring | Local model -> schema/DAG validation; optional unreviewed NLP obligation suggestions with complete native input/output contracts and explicit durable caller acceptance; exact versioned request replay; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Actual-model evaluation of the complete-contract extraction protocol, held-out complete intent extraction and general multi-step fidelity, broader clarification UX, branching and bounded iteration |
 | Execution | Sequential read-only DAG, per-call budgets, public-value checkpoints, explicit retry, digest-checked resume; durable cooperative cancellation and separate release grant | Scheduling, concurrent independent branches, shared-worker fencing, effectful execution through the existing effect ledger, compensation/reconciliation policies |
-| Integration breadth | Nineteen concrete reviewed research adapter paths; fixed operator-selected capability profiles; a versioned API-service/reader registry bound to actual executors; strict public GET, fixed read-only GraphQL POST and reviewed OpenAPI HTTPS transports; caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; protected account onboarding, availability, pagination, rate limits and failure behavior for each operation |
+| Integration breadth | Twenty concrete reviewed research adapter paths across seventeen declared API service groups; fixed operator-selected capability profiles; a versioned API-service/reader registry bound to actual executors; strict public GET, fixed read-only GraphQL POST and reviewed OpenAPI HTTPS transports; caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; protected account onboarding, availability, pagination, rate limits and failure behavior for each operation |
 | Authentication | Credentialless public readers; typed application-attested connection sessions bind subject/resource scope and revocable credential handles into imported HTTP catalogue identity; caller-owned MCP sessions | Provider-authenticated account onboarding, protected OAuth/token refresh, persistent account connections and tenant-bound private-response retention |
-| Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular catalogues and association metadata; fixed TP53 aggregates, Ensembl/NCBI reference comparison and UniProt/Reactome annotation context with native replay and review holds | Broader molecular measurements and independently validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
+| Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular catalogues and association metadata; fixed TP53 aggregates, Ensembl/NCBI reference comparison, UniProt/Reactome annotation context, CIViC curation review and Cellosaurus metadata with native replay and review holds | Broader molecular measurements and independently validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
 | Evidence quality | Metadata provenance/omissions, explicit unknown states, preserved source partitions | Independent relevance/quality evaluation, contradiction and negative-result handling, cohort-overlap checks, freshness policies, source-specific quality failures |
 | Product interfaces | Dependency-free SDK/CLI; opt-in authenticated local editor and HTTP routes through the existing Rust server and fixed Python worker, with retained task contracts, exact approval, run controls and explicit exports | Broader usability/accessibility evaluation, provider onboarding, release installation and production service operation |
 | Reliability | Focused invariants, installed-wheel/API smoke, Python regressions, separate live source checks, contract checks on normalized dispatch and resume | Provider/source outage campaigns, process-termination recovery, task-quality and cost/latency measurements, cross-SDK contract support and release/deployment validation |
 
-The nineteen-path count names implemented reviewed readers, not nineteen independent providers or
+The twenty-path count names implemented reviewed readers, not twenty independent providers or
 an assertion that every source is always available. PubMed and NCBI Gene, for example, share NCBI
 infrastructure. Approved one-record live queries verified OpenAlex, Crossref and Zenodo in the
 [research-source increment](RESEARCH_SOURCE_INTEGRATIONS.md); earlier live checks exercised the
@@ -62,11 +62,28 @@ measurement planes. NCI ontology relations remain source terminology assertions.
 A nineteenth optional [CIViC metadata reader](CIVIC_GLIOMA_EVIDENCE.md) adds accepted
 glioblastoma-name evidence categories and source-publication identifiers through a fixed anonymous
 GraphQL POST. Exact raw bytes, native pointers and missing/null distinctions support offline replay.
-One-page item counts do not establish independent publications or biological denominators;
-implementation and synthetic transport tests establish no live availability.
+One fixed live POST returned 25 items from a source-reported filtered total of 45 with another
+page indicated. Its exact bytes and native pointers replay offline. One-page item counts do not
+establish independent publications or biological denominators, continuous availability or source
+completeness. The separate [curation review composition](GLIOMA_CIVIC_CURATION_WORKFLOW.md) retains
+every admitted item, missing/null state and exact native source-ID group through local analysis
+and a research-review handoff. A retained-response derivative checked 431 value citations across
+those 25 items with zero new source calls. Its 18 observed source IDs are not an independent
+publication count; this derivative was not a new acquisition or a full workflow execution.
 
-The [provider registry](WORKFLOW_PROVIDER_REGISTRY.md) binds nineteen reviewed reader paths to
-sixteen explicitly reviewed API service groups, with NCBI and GDC readers deduplicated. It checks
+A twentieth optional [Cellosaurus metadata reader](CELLOSAURUS_CELL_LINE_METADATA.md) requests one
+fixed five-row human/glioblastoma-name page. It retains primary accessions, identifier/synonym
+arrays, source taxonomy/disease assertions, dates and the admitted problematic-cell-line comment
+category. A separately retained format-inspection GET informed the strict reader contract. That
+capture establishes the observed response format, not a live execution of this new adapter.
+Unknown comment categories, invalid wrappers and over-bound structures refuse as a whole.
+Missing optional comments remain missing; their absence establishes no absence of cell-line
+identity problems. Metadata does not validate authentication, model suitability or disease
+equivalence. Pagination, total count, release identity and scientific relevance remain unassessed.
+
+The [provider registry](WORKFLOW_PROVIDER_REGISTRY.md) version 0.4 binds twenty reviewed reader paths to
+seventeen explicitly reviewed API service groups, with NCBI and GDC readers deduplicated. The eight
+default readers and their seven groups remain unchanged; twelve readers are optional. It checks
 actual operation/default-executor/component identities, supports source-free request conformance
 inspection, and retains admitted adapter attempts separately from actual HTTP counts. Application
 reviewed group declarations and referenced evidence never become independently verified provider
@@ -162,6 +179,11 @@ effects, compensation, effect retries and power-loss durability remain unproven 
    writer; 0.3 also silently substituted a permitted mode for an essential incompatible request.
    Next work must represent and check task obligations beyond available-operation contracts.
    Native graph validity and positive-case gains do not establish general NLP autonomy.
+   [Intent extraction protocol 0.2](WORKFLOW_INTENT_EXTRACTION.md) now supplies every selected
+   operation's complete native descriptor, including output schemas, and validates retained
+   requests against their exact protocol version. The prior available-HGNC functional refusal
+   remains failed; omitted output contracts were a context gap, not a proven cause. New context
+   bytes, token fit and actual-model comprehension require separate prospective observations.
 2. Extend the [implemented local glioma synthesis and audit](GLIOMA_WORKFLOW_SYNTHESIS.md) to richer
    reviewed evidence planes. Preserve exact citation closure, source identity, missingness,
    context omissions and explicit unassessed scientific support. Public human cohort summaries

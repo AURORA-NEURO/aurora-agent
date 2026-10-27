@@ -1,5 +1,7 @@
 """Fixture boundary tests, not evidence of actual-model extraction completeness."""
 import json
+from pathlib import Path
+import socket
 
 import pytest
 
@@ -18,10 +20,18 @@ from prism_sdk.workflow_intent_obligations import admit_workflow_intent_obligati
 TASK = "🔬 Read metadata; preserve raw mode; archive the result."
 
 
-def _operation(identity="fixture.read", *, description="Read public metadata", schema=None):
+@pytest.fixture(autouse=True)
+def _deny_accidental_network(monkeypatch):
+    def denied(*_args, **_kwargs):
+        pytest.fail("intent extraction fixtures must not dispatch network requests")
+    monkeypatch.setattr(socket, "socket", denied)
+    monkeypatch.setattr(socket, "getaddrinfo", denied)
+
+
+def _operation(identity="fixture.read", *, description="Read public metadata", schema=None, output_schema=None):
     return WorkflowOperation(identity, description, schema or {"type": "object", "properties": {
         "mode": {"const": "metadata"}, "payload": {}}, "additionalProperties": False},
-        {"type": "object"}, "local", implementation="local")
+        {"type": "object"} if output_schema is None else output_schema, "local", implementation="local")
 
 
 def _catalog(count=1):
@@ -326,4 +336,138 @@ def test_offline_validation_binds_exact_task_and_selected_operation_ids():
         validate_workflow_intent_extraction(result, task=TASK, catalog=catalog)
     with pytest.raises(WorkflowIntentExtractionError):
         validate_workflow_intent_extraction(result, task=TASK, operation_ids=["fixture.read"])
+    assert len(requests) == 1 and sources == []
+
+
+def test_protocol_0_2_exposes_complete_native_contracts_as_future_outputs_without_source_observations():
+    catalog, sources = _catalog()
+    output = {"type": "object", "required": ["schema", "items"], "additionalProperties": False,
+              "properties": {"schema": {"const": "fixture-source-bundle/0.1"},
+                             "items": {"type": "array", "items": {"type": "object", "properties": {
+                                 "score": {"enum": [1, 1.0, True]}, "native": {"type": ["object", "null"]}}}}}}
+    catalog.register(_operation("fixture.output", output_schema=output),
+                     lambda arguments, **kwargs: sources.append(arguments))
+    extractor, requests, _ = _extractor(catalog=catalog)
+    result = extractor.extract(TASK, approve_provider_call=True)
+    context = json.loads(requests[0].messages[0]["content"])
+    assert context["protocol"] == result.to_dict()["protocol"] == "aurora-workflow-intent-extraction-protocol/0.2"
+    assert context["operations"] == [operation.to_dict() for operation in catalog.operations()]
+    assert all(set(row) == {"schema", "operation_id", "description", "input_schema", "output_schema",
+                           "integration_id", "auth_mode", "read_only", "implementation"}
+               for row in context["operations"])
+    returned_schema = next(row["output_schema"] for row in context["operations"] if row["operation_id"] == "fixture.output")
+    assert returned_schema == output
+    assert [type(value) for value in returned_schema["properties"]["items"]["items"]["properties"]["score"]["enum"]] == [int, float, bool]
+    assert any("possible future returned value" in rule and "not a source result" in rule for rule in context["rules"])
+    assert any("whole future returned value" in rule and "input flag" in rule for rule in context["rules"])
+    assert any("not execution grants" in rule for rule in context["rules"])
+    assert "source_results" not in context and "plan" not in context
+    assert result.to_dict()["accepted"] is False and result.to_dict()["plan_created"] is False
+    assert result.obligations.to_dict()["interpretation_basis"] == "model_candidate"
+    assert sources == [] and len(requests) == 1
+
+
+def test_explicit_selection_exposes_only_selected_complete_descriptors_without_summary_or_renaming():
+    catalog, sources = _catalog(2)
+    extractor, requests, _ = _extractor(catalog=catalog)
+    result = extractor.extract(TASK, approve_provider_call=True, operation_ids=["fixture.read1"])
+    context = json.loads(requests[0].messages[0]["content"])
+    assert context["operations"] == [catalog.resolve("fixture.read1").to_dict()]
+    assert result.to_dict()["visible_operations"] == ["fixture.read1"]
+    assert validate_workflow_intent_extraction(result, task=TASK, catalog=catalog,
+        operation_ids=["fixture.read1"]).to_dict() == result.to_dict()
+    assert sources == [] and len(requests) == 1
+
+
+def test_output_contract_alone_can_exceed_context_bound_and_refuses_before_provider_or_executor():
+    catalog, sources = _catalog()
+    for index in range(3):
+        catalog.register(_operation("large.output" + str(index), output_schema={
+            "type": "object", "description": "x" * 750_000}),
+            lambda arguments, **kwargs: sources.append(arguments))
+    before = catalog.to_dict()
+    extractor, requests, _ = _extractor(catalog=catalog)
+    with pytest.raises(WorkflowIntentExtractionError, match="context"):
+        extractor.extract(TASK, approve_provider_call=True)
+    assert requests == [] and sources == [] and catalog.to_dict() == before
+
+
+def _legacy_fixture():
+    return json.loads((Path(__file__).parent / "fixtures/workflow_intent_extraction_protocol_0_1.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case_index", [0, 1], ids=["candidate", "refusal"])
+def test_actual_legacy_producer_fixture_replays_without_promoting_protocol_or_claiming_output_exposure(tmp_path, monkeypatch, case_index):
+    from prism_sdk.workflow_api_worker import WorkflowAPIWorker
+    fixture = _legacy_fixture()
+    record = fixture["cases"][case_index]
+    assert fixture["captured_source_head"] == "dba24ef86d54d4ac12af8d87dcf92cf7dc32607e"
+    monkeypatch.setattr(LLMRuntime, "invoke", lambda *_args, **_kwargs: pytest.fail("legacy replay invoked a model"))
+    monkeypatch.setattr(WorkflowOperationCatalog, "execute", lambda *_args, **_kwargs: pytest.fail("legacy replay invoked a source"))
+    worker = WorkflowAPIWorker(tmp_path)
+    assert fixture["catalog_digest"] == worker.catalog.catalog_digest
+    assert fixture["operation_descriptors"] == [operation.to_dict() for operation in worker.catalog.operations()]
+    context = json.loads(record["request_value"]["messages"][0]["content"])
+    assert all(set(row) == {"operation_id", "description", "input_schema", "read_only"} for row in context["operations"])
+    assert record["extraction"]["request_digest"] == content_digest(record["request_value"])
+    checked = validate_workflow_intent_extraction(record["extraction"], task=fixture["task"], catalog=worker.catalog)
+    assert checked.to_dict() == record["extraction"]
+    assert checked.to_dict()["protocol"] == "aurora-workflow-intent-extraction-protocol/0.1"
+    assert checked.to_dict()["accepted"] is False
+
+
+def test_persisted_legacy_candidate_review_reloads_and_accepts_separately_without_rewriting_original_bytes(tmp_path, monkeypatch):
+    from prism_sdk.workflow_api_worker import WorkflowAPIWorker, WorkflowAPIError
+    fixture = _legacy_fixture()
+    extraction = fixture["cases"][0]["extraction"]
+    monkeypatch.setattr(LLMRuntime, "invoke", lambda *_args, **_kwargs: pytest.fail("legacy review loading invoked a model"))
+    monkeypatch.setattr(WorkflowOperationCatalog, "execute", lambda *_args, **_kwargs: pytest.fail("legacy review loading invoked a source"))
+    worker = WorkflowAPIWorker(tmp_path)
+    request = {"task": fixture["task"], "planner": "local-model", "max_steps": 1}
+    saved = worker._save_review(worker._review_context(request), extraction["obligations"],
+        {"kind": "local_model_candidate", "extraction": extraction})
+    path = tmp_path / "reviews" / saved["review_id"] / "review.json"
+    original = path.read_bytes()
+    restarted = WorkflowAPIWorker(tmp_path)
+    loaded = restarted.handle({"action": "get_review", "review_id": saved["review_id"]})
+    assert loaded == saved and loaded["acceptance"] is None
+    assert loaded["origin"]["extraction"] == extraction
+    accepted = restarted.handle({"action": "accept_review", "review_id": saved["review_id"],
+        "expected_review_digest": saved["review_digest"], "accept_caller_declarations": True})
+    assert accepted["acceptance"]["admission"]["status"] == "ready_for_constrained_authoring"
+    assert path.read_bytes() == original
+    with pytest.raises(WorkflowAPIError, match="approval"):
+        restarted.handle({**request, "action": "plan", "intent_review_id": saved["review_id"],
+            "expected_acceptance_digest": accepted["acceptance"]["acceptance_digest"]})
+    assert not list((tmp_path / "plans").iterdir()) and not list((tmp_path / "runs").iterdir())
+
+
+@pytest.mark.parametrize("protocol", ["aurora-workflow-intent-extraction-protocol/0.1", "unknown", None])
+def test_new_request_cannot_be_relabelled_as_another_protocol_by_restamping_when_catalogue_is_supplied(protocol):
+    catalog, sources = _catalog()
+    extractor, requests, _ = _extractor(catalog=catalog)
+    data = extractor.extract(TASK, approve_provider_call=True).to_dict()
+    data["protocol"] = protocol
+    with pytest.raises(WorkflowIntentExtractionError, match="retained extraction"):
+        validate_workflow_intent_extraction(_restamp_extraction(data), task=TASK, catalog=catalog)
+    assert len(requests) == 1 and sources == []
+
+
+def test_legacy_request_cannot_be_relabelled_as_full_output_contract_exposure(tmp_path):
+    from prism_sdk.workflow_api_worker import WorkflowAPIWorker
+    fixture = _legacy_fixture()
+    data = json.loads(json.dumps(fixture["cases"][0]["extraction"]))
+    data["protocol"] = "aurora-workflow-intent-extraction-protocol/0.2"
+    with pytest.raises(WorkflowIntentExtractionError, match="retained extraction"):
+        validate_workflow_intent_extraction(_restamp_extraction(data), task=fixture["task"], catalog=WorkflowAPIWorker(tmp_path).catalog)
+
+
+@pytest.mark.parametrize("field,value", [("request_digest", "a" * 64), ("context_bytes_including_schema", 1)])
+def test_versioned_request_binding_rejects_restamped_digest_or_context_length_drift(field, value):
+    catalog, sources = _catalog()
+    extractor, requests, _ = _extractor(catalog=catalog)
+    data = extractor.extract(TASK, approve_provider_call=True).to_dict()
+    data[field] = value
+    with pytest.raises(WorkflowIntentExtractionError, match="retained extraction"):
+        validate_workflow_intent_extraction(_restamp_extraction(data), task=TASK, catalog=catalog)
     assert len(requests) == 1 and sources == []

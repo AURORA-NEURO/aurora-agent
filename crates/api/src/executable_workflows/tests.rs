@@ -347,7 +347,7 @@ fn provider_inspection_http_route_requires_authentication_and_matching_origin_wi
     let response = router.handle(request("GET", path, json!({})));
     assert_eq!(response.status, 200);
     let inspected = data(body(response));
-    assert_eq!(inspected["counts"]["implemented_reader_paths"], 19);
+    assert_eq!(inspected["counts"]["implemented_reader_paths"], 20);
     assert_eq!(
         inspected["counts"]["registered_reviewed_default_readers"],
         8
@@ -375,8 +375,8 @@ fn denominator_flag_and_provider_route_use_actual_worker_without_source_or_model
                 .invoke(&json!({"action":"providers"}), Duration::from_secs(30))
                 .unwrap(),
         );
-        assert_eq!(providers["counts"]["implemented_reader_paths"], 19);
-        assert_eq!(providers["counts"]["declared_reviewed_service_groups"], 16);
+        assert_eq!(providers["counts"]["implemented_reader_paths"], 20);
+        assert_eq!(providers["counts"]["declared_reviewed_service_groups"], 17);
         assert_eq!(providers["network_requests_on_inspection"], 0);
         assert!(providers["counts"]["independently_live_verified_providers"]["value"].is_null());
         let response = application.invoke(&json!({"action":"plan", "task":"Review fixed TP53 denominator evidence", "planner":"denominator-coverage"}), Duration::from_secs(30)).unwrap();
@@ -413,6 +413,8 @@ fn reviewed_capability_profiles_reach_actual_worker_without_browser_configuratio
         "gene-identity".into(),
         "glioma-ontology".into(),
         "civic-glioblastoma-evidence".into(),
+        "civic-curation-review".into(),
+        "cellosaurus-glioblastoma-metadata".into(),
     ];
     let application = fixture.application();
     let catalogue = data(
@@ -423,6 +425,8 @@ fn reviewed_capability_profiles_reach_actual_worker_without_browser_configuratio
     assert_eq!(
         catalogue["capabilities"]["selected_profiles"],
         json!([
+            "cellosaurus-glioblastoma-metadata",
+            "civic-curation-review",
             "civic-glioblastoma-evidence",
             "gene-identity",
             "glioma-ontology"
@@ -432,6 +436,8 @@ fn reviewed_capability_profiles_reach_actual_worker_without_browser_configuratio
         ("gene-identity", 5),
         ("glioma-ontology", 1),
         ("civic-glioblastoma-evidence", 1),
+        ("civic-curation-review", 3),
+        ("cellosaurus-glioblastoma-metadata", 1),
     ] {
         let planned = data(application.invoke(&json!({"action":"plan", "task":"Inspect fixed source metadata", "planner":format!("capability:{profile}")}), Duration::from_secs(30)).unwrap());
         assert_eq!(planned["source_dispatch"], false);
