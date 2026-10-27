@@ -9,6 +9,7 @@ use crate::events::{
     DeliveryRunReport, DeliverySender, EventLog, EventMetrics, EVENT_STATE_SCHEMA_VERSION,
     MAX_EVENT_STATE_FILE_BYTES, MAX_FILTERS,
 };
+use crate::executable_workflows::{WorkflowApplication, WorkflowApplicationConfig};
 use crate::http::{HttpRequest, HttpResponse};
 use bioprism_devplat::{
     build_cross_domain_audit, plan_mission, verify_mission_evidence_bundle, ArtifactRegistry,
@@ -110,12 +111,14 @@ pub fn validate_bind_auth(bind: &str, bearer_token_configured: bool) -> Result<(
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ApiConfig {
     pub max_header_bytes: usize,
     pub max_body_bytes: usize,
     pub event_capacity: usize,
     pub bearer_token: Option<String>,
+    /// Opt-in browser application for the Python executable-workflow engine.
+    pub workflow_application: Option<WorkflowApplicationConfig>,
     /// Optional atomic JSON checkpoint for the bounded asynchronous mission registry.
     ///
     /// Event cursors remain process-local; this path only restores mission status, bounded
@@ -148,6 +151,19 @@ pub struct ApiConfig {
     pub ci_provider_evidence_state_path: Option<PathBuf>,
 }
 
+impl std::fmt::Debug for ApiConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ApiConfig")
+            .field("max_header_bytes", &self.max_header_bytes)
+            .field("max_body_bytes", &self.max_body_bytes)
+            .field("event_capacity", &self.event_capacity)
+            .field("bearer_token_configured", &self.bearer_token.is_some())
+            .field("workflow_application", &self.workflow_application)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
@@ -155,6 +171,7 @@ impl Default for ApiConfig {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             event_capacity: DEFAULT_EVENT_CAPACITY,
             bearer_token: None,
+            workflow_application: None,
             mission_state_path: None,
             mission_queue_state_path: None,
             mission_queue_max_jobs: MAX_MISSION_JOBS,
@@ -184,6 +201,16 @@ impl ApiConfig {
         if let Some(token) = &self.bearer_token {
             if token.len() < 16 || token.len() > 4096 || token.bytes().any(|byte| byte <= 0x20) {
                 return Err("bearer_token must contain 16..=4096 visible bytes".into());
+            }
+        }
+        if let Some(application) = &self.workflow_application {
+            application.validate()?;
+            if !self
+                .bearer_token
+                .as_ref()
+                .is_some_and(|token| token.len() >= 32)
+            {
+                return Err("workflow application mode requires a bearer token of at least 32 visible bytes, including on loopback".into());
             }
         }
         if self
@@ -270,6 +297,7 @@ pub struct ApiRouter {
     server: bioprism_mcp::Server,
     mission_executor: Arc<bioprism_mcp::Server>,
     config: ApiConfig,
+    workflow_application: Option<WorkflowApplication>,
     events: Arc<Mutex<EventLog>>,
     next_request_id: AtomicU64,
     mission_jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
@@ -464,6 +492,11 @@ impl ApiRouter {
         allowed_http_origins: Vec<String>,
     ) -> Result<Self, String> {
         config.validate()?;
+        let workflow_application = config
+            .workflow_application
+            .clone()
+            .map(WorkflowApplication::new)
+            .transpose()?;
         let mission_queue_policy = QueueAdmissionPolicy::new(
             config.mission_queue_max_jobs,
             config.mission_queue_max_active_leases,
@@ -574,6 +607,7 @@ impl ApiRouter {
             server,
             mission_executor,
             config,
+            workflow_application,
             events,
             next_request_id: AtomicU64::new(1),
             mission_jobs,
@@ -710,8 +744,28 @@ impl ApiRouter {
         })
     }
 
+    pub(crate) fn validate_workflow_listener(&self, authority: &str) -> Result<(), String> {
+        if self
+            .config
+            .workflow_application
+            .as_ref()
+            .is_some_and(|config| config.authority != authority)
+        {
+            return Err("workflow listener does not match its configured authority".into());
+        }
+        Ok(())
+    }
+
     fn handle_inner(&self, request: HttpRequest) -> HttpResponse {
         let request_id = self.request_id(&request);
+        if let Some(application) = &self.workflow_application {
+            if let Err(error) = application.guard(&request) {
+                return self.finish(
+                    self.error(403, "workflow_origin_refused", error, &request_id),
+                    &request_id,
+                );
+            }
+        }
         if request.body.len() > self.config.max_body_bytes {
             return self.finish(
                 self.error(
@@ -726,8 +780,15 @@ impl ApiRouter {
         let public = request.path() == "/healthz"
             || request.path() == "/readyz"
             || request.path() == "/openapi.json"
-            || request.path() == "/v1/openapi.json";
+            || request.path() == "/v1/openapi.json"
+            || (self.workflow_application.is_some() && WorkflowApplication::public_asset(&request));
         if request.method == "OPTIONS" {
+            if self.workflow_application.is_some() {
+                return self.finish(
+                    HttpResponse::empty(204).with_header("allow", "GET, POST, OPTIONS"),
+                    &request_id,
+                );
+            }
             return self.finish(
                 HttpResponse::empty(204)
                     .with_header("access-control-allow-origin", "*")
@@ -749,6 +810,11 @@ impl ApiRouter {
                 ),
                 &request_id,
             );
+        }
+        if let Some(application) = &self.workflow_application {
+            if WorkflowApplication::owns_route(request.path()) {
+                return self.finish(application.handle(&request), &request_id);
+            }
         }
 
         let response = match (request.method.as_str(), request.path()) {
@@ -1627,6 +1693,11 @@ impl ApiRouter {
     }
 
     fn finish(&self, response: HttpResponse, request_id: &str) -> HttpResponse {
+        let response = if self.workflow_application.is_some() {
+            WorkflowApplication::secure(response)
+        } else {
+            response
+        };
         response
             .with_header("x-request-id", request_id)
             .with_header("cache-control", "no-store")

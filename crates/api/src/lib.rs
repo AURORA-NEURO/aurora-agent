@@ -23,6 +23,7 @@
 pub mod analysis_assurance;
 pub mod context_compilation_assurance;
 pub mod events;
+pub mod executable_workflows;
 pub mod http;
 pub mod multimodal_interpretation_workflow_fabric;
 pub mod release_assurance;
@@ -62,6 +63,7 @@ pub use events::{
     EventPage, SubscriptionView, WebhookEnvelope, DEFAULT_DELIVERY_WORKER_BATCH,
     EVENT_STATE_SCHEMA_VERSION, MAX_DELIVERY_ERROR_BYTES, MAX_EVENT_STATE_FILE_BYTES,
 };
+pub use executable_workflows::WorkflowApplicationConfig;
 pub use http::{read_request, HttpError, HttpRequest, HttpResponse};
 pub use router::{
     validate_bind_auth, ApiConfig, ApiRouter, API_VERSION, DEFAULT_EVENT_CAPACITY,
@@ -79,6 +81,9 @@ use std::time::Duration;
 /// Serves one bounded request per accepted connection until the listener fails.
 pub fn serve(listener: TcpListener, router: Arc<ApiRouter>) -> std::io::Result<()> {
     let bind = listener.local_addr()?.to_string();
+    router
+        .validate_workflow_listener(&bind)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::PermissionDenied, error))?;
     validate_bind_auth(&bind, router.bearer_token_configured())
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::PermissionDenied, error))?;
 
