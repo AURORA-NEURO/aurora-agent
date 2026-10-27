@@ -29,8 +29,12 @@ from .workflow_intent_obligations import (
 )
 
 WORKFLOW_INTENT_EXTRACTION_SCHEMA = "aurora-workflow-intent-extraction/0.1"
-WORKFLOW_INTENT_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.2"
+WORKFLOW_INTENT_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.3"
 _LEGACY_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.1"
+_FULL_CONTRACT_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.2"
+_SUPPORTED_EXTRACTION_PROTOCOLS = (
+    _LEGACY_EXTRACTION_PROTOCOL, _FULL_CONTRACT_EXTRACTION_PROTOCOL, WORKFLOW_INTENT_EXTRACTION_PROTOCOL,
+)
 MAX_INTENT_EXTRACTION_ROWS = 32
 MAX_INTENT_EXTRACTION_RESPONSE_BYTES = 128_000
 MAX_INTENT_EXTRACTION_RESULT_BYTES = 512_000
@@ -43,7 +47,7 @@ class WorkflowIntentExtractionError(WorkflowValidationError):
 def _request_value(task: str, catalog_digest: str, model: str, operations: Sequence[Any],
                    protocol: str) -> dict[str, Any]:
     """Reconstruct each version's actual contract exposure without upgrading old records."""
-    if protocol not in (_LEGACY_EXTRACTION_PROTOCOL, WORKFLOW_INTENT_EXTRACTION_PROTOCOL):
+    if protocol not in _SUPPORTED_EXTRACTION_PROTOCOLS:
         raise WorkflowIntentExtractionError("intent extraction protocol is unsupported")
     descriptors = [operation.to_dict() for operation in sorted(operations, key=lambda item: item.operation_id)]
     visible = ([{key: descriptor[key] for key in ("operation_id", "description", "input_schema", "read_only")}
@@ -59,11 +63,16 @@ def _request_value(task: str, catalog_digest: str, model: str, operations: Seque
         "Use clarify or refuse when needed. Candidate rows are unreviewed model interpretations, never acceptance, authorization, scientific verification or proof of complete task coverage.",
         "No credentials, clinical actions, patient data, source dispatch, plan steps, replacement requirements or authority labels.",
     ]
-    if protocol == WORKFLOW_INTENT_EXTRACTION_PROTOCOL:
+    if protocol != _LEGACY_EXTRACTION_PROTOCOL:
         rules[5:5] = [
             "Each complete native operation descriptor includes input_schema for arguments and output_schema for its possible future returned value. An output contract is not a source result or proof that a value exists.",
             "An output=true required_operation requests the operation's whole future returned value as a final plan output. A requested returned artifact does not require an input flag unless the native input contract defines one. Do not invent arguments from output fields or assume an implicit result wrapper.",
             "Descriptor implementation and auth_mode are catalogue declarations, not execution grants, measured source availability or scientific validity. Requested output details not established by the contract remain unresolved; do not invent observed values or repair the task.",
+        ]
+    if protocol == WORKFLOW_INTENT_EXTRACTION_PROTOCOL:
+        rules[0:0] = [
+            "Interpret the task as mandatory declarations for a future workflow run by a separate executor. This turn does not execute sources or build a plan.",
+            "Your lack of callable tools, network access or credentials in this turn does not by itself make a catalogue-defined future action unsupported. Match requested work to declared contracts; never infer live reachability, authentication state, execution grants or scientific validity from catalogue labels.",
         ]
     instructions = {"protocol": protocol, "task": task, "catalog_digest": catalog_digest,
                     "operations": visible, "rules": rules}
@@ -189,7 +198,7 @@ def validate_workflow_intent_extraction(
             raise ValueError("result fields")
         protocol = data["protocol"]
         if (data["schema"] != WORKFLOW_INTENT_EXTRACTION_SCHEMA
-                or protocol not in (_LEGACY_EXTRACTION_PROTOCOL, WORKFLOW_INTENT_EXTRACTION_PROTOCOL)
+                or protocol not in _SUPPORTED_EXTRACTION_PROTOCOLS
                 or data["task"] != task or data["task_digest"] != content_digest({"task": task})
                 or data["response_schema_digest"] != content_digest(_response_schema(len(task)))
                 or data["extraction_digest"] != content_digest({key: child for key, child in data.items() if key != "extraction_digest"})
