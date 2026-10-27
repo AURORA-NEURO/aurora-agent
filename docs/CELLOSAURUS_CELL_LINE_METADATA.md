@@ -2,9 +2,10 @@
 
 This repository-defined reader has no available blueprint module identifier. It adds an
 explicitly registered source operation, `cellosaurus.glioblastoma_cell_line_metadata`, for one
-fixed public metadata window. The core does not install a capability profile, change the
-default catalogue, or change the current inventory of nineteen reader paths and sixteen API
-groups. An operation descriptor's `live_adapter` label describes its implementation path;
+fixed public metadata window. The optional `cellosaurus-glioblastoma-metadata` capability profile
+installs this one reader; the default catalogue stays unchanged. Provider manifest `.4` names
+twenty reader paths and seventeen declared API groups. Earlier `.3`/nineteen-path/sixteen-group
+records remain tied to their earlier source revisions. An operation descriptor's `live_adapter` label describes its implementation path;
 it is not evidence that the committed adapter has executed against the live service.
 
 The source contract is grounded in the official [API documentation](https://api.cellosaurus.org/),
@@ -99,3 +100,14 @@ catalog = register_cellosaurus_cell_line_operations(WorkflowOperationCatalog())
 # Registration dispatches nothing. Execution requires its separate explicit source approval.
 # validate_cellosaurus_cell_line_bundle(retained_bundle) is entirely offline.
 ```
+
+The [capability selector](WORKFLOW_CAPABILITIES.md) also offers a model-free one-step template:
+
+```console
+aurora-agent workflow-template --template cellosaurus-glioblastoma-metadata --task "Inspect the fixed Cellosaurus metadata window" --out cell-lines.json
+```
+
+Its native requirements retain the one required source operation/output, exact 30,000 ms
+arguments, one-step/one-call cap and exact task identity. Task text labels the fixed inspection;
+it cannot become an arbitrary cell-line query. Planning/inspection grant no source authority.
+Worker startup must separately enable `--capability cellosaurus-glioblastoma-metadata`.

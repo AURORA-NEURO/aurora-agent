@@ -83,12 +83,16 @@ return `CivicEvidenceHttpResponse`; its nonce binding and `caller_adapter`/`call
 labels prevent it from inheriting default transport conformance. Callback timing is caller-owned,
 and a late return is refused.
 
-Provider manifest `reviewed-public-readers/2026-10-27.3` counts 19 implemented reader paths in
+The original provider manifest `reviewed-public-readers/2026-10-27.3` counted 19 implemented reader paths in
 16 declared API groups after fixture conformance. CIViC remains absent from the default catalogue.
 These are code inventory units, not live availability, independent organizations or scientific
 evidence counts. Earlier manifest `.2` and retained 18-path/15-group observations describe their
 own source revisions; this increment does not rewrite or upgrade them. No live acquisition or
 model inference is established by implementation or synthetic tests.
+
+Manifest `.4` separately onboards the [Cellosaurus reader](CELLOSAURUS_CELL_LINE_METADATA.md)
+and names twenty reader paths in seventeen declared API groups. This leaves the CIViC descriptor,
+default catalogue and original `.3` acquisition/format evidence bound to their original revisions.
 
 The optional [local curation metadata research review](GLIOMA_CIVIC_CURATION_WORKFLOW.md)
 replays this bundle into item-level inspection and an explicit research handoff. It adds two

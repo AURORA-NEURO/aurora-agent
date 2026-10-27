@@ -32,7 +32,7 @@ from .workflow_integrations import (
 )
 
 WORKFLOW_PROVIDER_REGISTRY_SCHEMA = "aurora-workflow-provider-registry/0.1"
-WORKFLOW_PROVIDER_MANIFEST_VERSION = "reviewed-public-readers/2026-10-27.3"
+WORKFLOW_PROVIDER_MANIFEST_VERSION = "reviewed-public-readers/2026-10-27.4"
 WORKFLOW_PROVIDER_REQUEST_SCHEMA = "aurora-workflow-provider-request/0.1"
 WORKFLOW_PROVIDER_OBSERVATION_SCHEMA = "aurora-workflow-provider-observation/0.1"
 MAX_WORKFLOW_PROVIDER_RECORDS = 1_024
@@ -545,10 +545,12 @@ def _reviewed_catalog() -> WorkflowOperationCatalog:
     from .reviewed_hgnc_gene_retrieval import register_hgnc_gene_operations
     from .reviewed_nci_thesaurus_retrieval import register_nci_thesaurus_operations
     from .reviewed_civic_evidence_retrieval import register_civic_evidence_operations
+    from .reviewed_cellosaurus_cell_line_retrieval import register_cellosaurus_cell_line_operations
     catalog = builtin_workflow_operation_catalog()
     for register in (register_research_source_operations, register_gdc_gene_mutation_operations, register_gdc_ssm_coverage_operations,
                      register_ensembl_gene_operations, register_uniprot_operations, register_reactome_operations,
-                     register_hgnc_gene_operations, register_nci_thesaurus_operations, register_civic_evidence_operations):
+                     register_hgnc_gene_operations, register_nci_thesaurus_operations, register_civic_evidence_operations,
+                     register_cellosaurus_cell_line_operations):
         register(catalog)
     return catalog
 
@@ -572,6 +574,7 @@ _SERVICE_RECORDS = (
     ("hgnc", "HGNC REST", ("https://rest.genenames.org",), "Fixed public TP53 native gene identifier/alias metadata; no validated scientific equivalence."),
     ("nci_evs", "NCI EVS Thesaurus", ("https://api-evsrest.nci.nih.gov",), "Fixed NCIt glioma concept API, reviewed separately from GDC; shared NCI affiliation does not establish independence."),
     ("civic", "CIViC", ("https://civicdb.org",), "Fixed anonymous accepted glioblastoma-name evidence metadata GraphQL page; source labels/counts do not establish clinical support or independent denominators."),
+    ("cellosaurus", "Cellosaurus", ("https://api.cellosaurus.org",), "Fixed public human-query glioblastoma-name identity/curation metadata window; source names/comments do not establish authenticity, quality, suitability or independent denominators."),
 )
 _READER_RECORDS = (
     ("pubmed.search", "ncbi_eutils", "reviewed_pubmed_retrieval", "GLIOMA_WORKFLOW_BUILDER"),
@@ -593,12 +596,13 @@ _READER_RECORDS = (
     ("hgnc.gene_references", "hgnc", "reviewed_hgnc_gene_retrieval", "HGNC_GENE_REFERENCES"),
     ("nci_thesaurus.glioma_ontology", "nci_evs", "reviewed_nci_thesaurus_retrieval", "NCI_THESAURUS"),
     ("civic.glioblastoma_evidence_metadata", "civic", "reviewed_civic_evidence_retrieval", "CIVIC_GLIOMA_EVIDENCE"),
+    ("cellosaurus.glioblastoma_cell_line_metadata", "cellosaurus", "reviewed_cellosaurus_cell_line_retrieval", "CELLOSAURUS_CELL_LINE_METADATA"),
 )
 
 
 def reviewed_workflow_provider_registry(catalog: WorkflowOperationCatalog, *,
         evidence_references: Sequence[WorkflowProviderEvidenceReference] = ()) -> WorkflowProviderRegistry:
-    """Bind nineteen implemented reviewed public readers without enabling or dispatching any.
+    """Bind twenty implemented reviewed public readers without enabling or dispatching any.
 
     Optional readers stay unregistered in the caller's catalogue. Unknown OpenAPI/MCP/local
     operations remain explicitly unreviewed rather than inheriting provider identity from an ID.
@@ -610,7 +614,7 @@ def reviewed_workflow_provider_registry(catalog: WorkflowOperationCatalog, *,
     readers = []
     for operation_id, provider_id, module_name, document in _READER_RECORDS:
         components = shared | {module_name: _component_digest(module_name)}
-        if provider_id in {"uniprot", "reactome", "hgnc", "nci_evs", "civic"} or operation_id == "gdc.ssm_project_coverage":
+        if provider_id in {"uniprot", "reactome", "hgnc", "nci_evs", "civic", "cellosaurus"} or operation_id == "gdc.ssm_project_coverage":
             components["reviewed_public_http"] = _component_digest("reviewed_public_http")
         if provider_id == "civic":
             components["reviewed_public_graphql"] = _component_digest("reviewed_public_graphql")

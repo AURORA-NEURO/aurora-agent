@@ -7,7 +7,7 @@ schemas or catalogue capacity. This is an application contract without a bluepri
 
 ```powershell
 aurora-agent workflow-catalogue --provider-registry
-aurora-agent workflow-catalogue --provider-registry --research-sources --glioma-mutations --gene-references --protein-pathways --denominator-coverage --capability gene-identity --capability glioma-ontology --capability civic-glioblastoma-evidence
+aurora-agent workflow-catalogue --provider-registry --research-sources --glioma-mutations --gene-references --protein-pathways --denominator-coverage --capability gene-identity --capability glioma-ontology --capability civic-glioblastoma-evidence --capability cellosaurus-glioblastoma-metadata
 ```
 
 Inspection performs no source or model request and enables no optional reader. The ordinary
@@ -17,15 +17,17 @@ readers are actually registered.
 
 ## Units and states
 
-Manifest `.3` contains **19 concrete reviewed reader paths in 16 declared API service groups**.
-The unchanged default catalogue registers eight readers in seven groups; eleven optional readers
+Manifest `.4` contains **20 concrete reviewed reader paths in 17 declared API service groups**.
+The unchanged default catalogue registers eight readers in seven groups; twelve optional readers
 remain `not_registered`. PubMed and NCBI Gene share the NCBI E-utilities group. GDC project
 summaries, fixed TP53 mutation counts and project SSM-data coverage share one GDC group.
 HGNC and NCI EVS add native identifier and terminology readers through fixed
 [capability profiles](WORKFLOW_CAPABILITIES.md). NCI EVS and GDC have separate reviewed API
 contracts but a shared NCI affiliation; their organizational independence remains unassessed.
 The [CIViC reader](CIVIC_GLIOMA_EVIDENCE.md) adds a separate fixed read-only GraphQL POST contract.
-Earlier `.2` manifests and 18-path/15-group evidence remain tied to their earlier source revisions.
+The [Cellosaurus reader](CELLOSAURUS_CELL_LINE_METADATA.md) adds one fixed identity/curation GET
+contract; a prior format capture does not become a live adapter proof. Earlier `.3` manifests
+and 19-path/16-group evidence, and `.2`/18-path/15-group records, remain tied to their earlier source revisions.
 
 These are application-reviewed API groupings, not independently operated organizations or
 independently verified live providers. Europe PMC and GWAS Catalog remain separate reviewed API
@@ -135,4 +137,4 @@ live evidence. Schema-only `inspect_request` conformance proves admission of tha
 request, not pagination, rate-limit handling, outage behavior or full provider support. Protected
 accounts still require verified identity/scopes, protected token lifecycle and tenant/retention
 policy. Durable quotas, broad authenticated onboarding and hundreds of verified integrations remain
-required work; neither the registry's capacity nor these nineteen paths establishes that objective.
+required work; neither the registry's capacity nor these twenty paths establishes that objective.

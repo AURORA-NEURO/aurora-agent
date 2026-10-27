@@ -5,8 +5,10 @@ This repository-defined extension adds local inspection of an already validated
 It preserves the fixed accepted glioblastoma-name first page, every returned item, native
 curation categories, flags, revision counts, source identifiers, missingness and omissions.
 It does not interpret curation levels, directions or ratings as scientific quality or clinical
-confidence. These local operations are not additional integrations: the reader inventory stays
-19 implemented paths in 16 declared API groups.
+confidence. These local operations are not additional integrations. Their original manifest `.3`
+checkpoint counted 19 implemented paths in 16 declared API groups; later manifest `.4` separately
+adds the [Cellosaurus reader](CELLOSAURUS_CELL_LINE_METADATA.md) for twenty paths/seventeen groups.
+Neither the local analysis nor its synthetic replay adds another reader.
 
 ```python
 from prism_sdk import (

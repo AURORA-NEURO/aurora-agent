@@ -193,8 +193,8 @@ def test_denominator_cli_template_and_provider_inspection_remain_model_and_sourc
         "glioma.denominator.assess", "glioma.denominator.review_handoff"]
     assert plan["steps"][2]["arguments"]["coverage_bundle"] == {"$ref": "coverage#"}
     code, registry, errors = _invoke("workflow-catalogue", "--provider-registry", "--denominator-coverage")
-    assert code == 0 and errors == "" and registry["counts"]["implemented_reader_paths"] == 19
-    assert registry["counts"]["declared_reviewed_service_groups"] == 16
+    assert code == 0 and errors == "" and registry["counts"]["implemented_reader_paths"] == 20
+    assert registry["counts"]["declared_reviewed_service_groups"] == 17
     assert registry["counts"]["independently_live_verified_providers"]["value"] is None
     assert registry["network_requests_on_inspection"] == 0
     runtime.assert_not_called()

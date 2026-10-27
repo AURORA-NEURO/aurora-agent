@@ -370,10 +370,10 @@ def test_explicit_registration_is_atomic_and_caller_binding_is_not_a_default_liv
     assert a.to_dict() == before
 
 
-def test_core_does_not_change_default_catalogue_or_existing_reader_inventory():
+def test_onboarded_reader_keeps_default_catalogue_and_has_explicit_current_registry_inventory():
     from prism_sdk.workflow_integrations import builtin_workflow_operation_catalog
     from prism_sdk.workflow_provider_registry import reviewed_workflow_provider_registry
     base = builtin_workflow_operation_catalog()
     assert base.catalog_digest == "53e11ef585fa6d65736ecc77d5042962a9276fac8fbe7b39bde1efccfec5e5b2"
     counts = reviewed_workflow_provider_registry(base).to_dict()["counts"]
-    assert counts["implemented_reader_paths"] == 19 and counts["declared_reviewed_service_groups"] == 16
+    assert counts["implemented_reader_paths"] == 20 and counts["declared_reviewed_service_groups"] == 17
