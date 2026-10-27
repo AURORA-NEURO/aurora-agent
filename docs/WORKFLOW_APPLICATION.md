@@ -184,6 +184,17 @@ digests do not authenticate files against another actor who can write the operat
 
 ## Verification
 
+The authenticated `GET /v1/executable-workflows/providers` route and editor's explicit **Provider
+coverage** inspection call the inert registry action. The response lists actual registered reader
+bindings, supported-but-disabled paths and reviewed API service groups; unknown live provider
+coverage remains unknown. It does not probe accounts or services. Inspection text is rendered as
+data and cleared when the page disconnects or loads another catalogue.
+
+Operator flag `--workflow-denominator-coverage` enables the catalogue-gated **TP53 denominator
+evidence review** template. It independently retrieves fixed public TP53 affected-case aggregates
+and project associated-SSM-data coverage, then assesses native evidence and pauses for scientific
+review. It calculates no prevalence. A browser request cannot turn the startup flag on.
+
 Run the actual bridge/HTTP tests, followed by the existing crate suite and warning checks:
 
 ```powershell

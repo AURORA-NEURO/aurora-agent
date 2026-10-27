@@ -95,6 +95,34 @@ test('protein template requires all four installed operations and rechecks on di
   assert.equal(p.$('planner').value, 'glioma-intent');
 });
 
+test('denominator template requires its exact source and analysis operations', async () => {
+  const p = page();
+  const operations = ['gdc.gene_mutation_counts', 'gdc.ssm_project_coverage', 'glioma.denominator.assess', 'glioma.denominator.review_handoff'];
+  await p.connect(operations.slice(0, -1));
+  assert.equal(p.options.get('denominator-coverage').disabled, true);
+  await p.connect(operations);
+  assert.equal(p.options.get('denominator-coverage').disabled, false);
+  p.$('planner').value = 'denominator-coverage';
+  await p.$('disconnect').fire('click');
+  assert.equal(p.options.get('denominator-coverage').disabled, true);
+  assert.equal(p.$('planner').value, 'glioma-intent');
+});
+
+test('provider inspection is explicit inert text and clears on disconnect', async () => {
+  const p = page();
+  await p.$('inspect-providers').fire('click');
+  assert.equal(p.calls.length, 0);
+  await p.connect([]);
+  p.replies.push({ counts: { implemented_reader_paths: 16, independently_live_verified_providers: { value: null } }, note: '<img src=x onerror=alert(1)>' });
+  await p.$('inspect-providers').fire('click');
+  assert.equal(p.calls.at(-1).url, '/v1/executable-workflows/providers');
+  assert.equal(p.calls.at(-1).body, undefined);
+  assert.match(p.$('provider-coverage').textContent, /independently_live_verified_providers/);
+  assert.match(p.$('provider-coverage').textContent, /<img/);
+  await p.$('disconnect').fire('click');
+  assert.equal(p.$('provider-coverage').textContent, '');
+});
+
 test('another planner never inherits hidden incremental controls or operation allowlists', async () => {
   const p = page([{ status: 'needs_clarification', interpretation: { status: 'needs_clarification' } }]);
   await p.connect([]);

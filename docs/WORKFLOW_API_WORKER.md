@@ -210,6 +210,13 @@ string into the actual HTTP attachment and lets the browser download its respons
 
 ## Limits
 
+The inert `providers` action inspects the [reviewed provider registry](WORKFLOW_PROVIDER_REGISTRY.md)
+bound to this exact configured catalogue. It accepts no source grants, URLs or credentials and
+performs no provider/model calls. Reader registration, service grouping and live verification stay
+separate. Operator startup `--denominator-coverage` enables the additional GDC SSM-data coverage
+reader plus TP53 count and denominator-assessment operations. Planner `denominator-coverage`
+builds the fixed four-step native-input review contract without a model or source dispatch.
+
 This is a serial, bounded public research workflow application. It does not provide scheduling,
 distributed leases, account authentication, OAuth, protected patient data, arbitrary writes,
 MCP session recovery, model-grounded synthesis, automatic retries, a general natural-language

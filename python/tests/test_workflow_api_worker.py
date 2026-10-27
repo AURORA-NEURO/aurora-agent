@@ -808,6 +808,39 @@ def test_fixed_tp53_worker_scientific_review_status_survives_actual_local_execut
     runtime.assert_not_called()
 
 
+def test_denominator_worker_opt_in_keeps_native_contract_and_remains_source_and_model_free(monkeypatch, tmp_path):
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", Mock(side_effect=AssertionError("fixed template must not construct a model")))
+    root = tmp_path / "denominator"
+    request = {"action": "plan", "task": "Inspect fixed TP53 denominator evidence", "planner": "denominator-coverage"}
+    denied_process, denied = _invoke(root, request)
+    assert denied_process.returncode == 2 and denied["ok"] is False
+    assert not list((root / "plans").iterdir())
+    process, result = _invoke(root, request, flags=["--denominator-coverage"])
+    assert process.returncode == 0 and result["ok"] is True and process.stderr == ""
+    data, plan = result["data"], result["data"]["plan"]
+    assert data["source_dispatch"] is False and data["interpretation"]["provider_calls"] == 0
+    assert [step["operation"] for step in plan["steps"]] == ["gdc.gene_mutation_counts", "gdc.ssm_project_coverage",
+        "glioma.denominator.assess", "glioma.denominator.review_handoff"]
+    assert plan["requirements"]["max_steps"] == 4
+    assert [(link["source_pointer"], link["target_path"]) for link in plan["requirements"]["data_links"]] == [
+        ("", "/mutation_bundle"), ("", "/coverage_bundle"), ("", "/analysis")]
+    process, loaded = _invoke(root, {"action": "get_plan", "plan_id": data["plan_id"]}, flags=["--denominator-coverage"])
+    assert process.returncode == 0 and loaded["data"] == data
+
+
+def test_provider_inspection_is_inert_deduplicates_service_groups_and_refuses_request_selected_fields(monkeypatch, tmp_path):
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", Mock(side_effect=AssertionError("inspection constructs no model")))
+    worker = WorkflowAPIWorker(tmp_path / "inspect", denominator_coverage=True)
+    value = worker.handle({"action": "providers"})
+    assert value["counts"]["implemented_reader_paths"] == 16
+    assert value["counts"]["declared_reviewed_service_groups"] == 13
+    assert value["counts"]["independently_live_verified_providers"]["value"] is None
+    assert value["network_requests_on_inspection"] == 0
+    assert not list((worker.root / "plans").iterdir()) and not list((worker.root / "runs").iterdir())
+    with pytest.raises(ValueError):
+        worker.handle({"action": "providers", "approve_source_dispatch": True})
+
+
 def test_protein_pathway_worker_opt_in_is_inert_default_stable_and_actual_process_keeps_exact_contract(monkeypatch, tmp_path):
     monkeypatch.setattr(llm_runtime, "LLMRuntime", Mock(side_effect=AssertionError("fixed template must not construct a model")))
     base = WorkflowAPIWorker(tmp_path / "base").handle({"action": "catalogue"})

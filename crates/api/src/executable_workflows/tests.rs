@@ -48,6 +48,7 @@ impl Fixture {
             glioma_mutations: false,
             gene_references: false,
             protein_pathways: false,
+            denominator_coverage: false,
         };
         Self { root, config }
     }
@@ -184,7 +185,12 @@ fn hostile_origin_host_content_type_and_control_fields_are_refused_before_worker
     no_mime.headers.remove("content-type");
     assert_eq!(router.handle(no_mime).status, 415);
     assert_eq!(router.handle(request("POST", "/v1/executable-workflows/plans", json!({"task":"Review glioma evidence.","planner":"glioma-intent","argv":["forbidden"]}))).status,422);
-    for field in ["glioma_mutations", "gene_references", "protein_pathways"] {
+    for field in [
+        "glioma_mutations",
+        "gene_references",
+        "protein_pathways",
+        "denominator_coverage",
+    ] {
         let mut body = json!({"task":"A fixed public research label","planner":"glioma-mutations"});
         body[field] = json!(true);
         assert_eq!(
@@ -319,6 +325,48 @@ fn optional_public_template_catalogues_are_operator_owned_and_plan_without_a_mod
                 .unwrap();
             assert_eq!(bounded["ok"], false);
         }
+    }
+}
+
+#[test]
+fn denominator_flag_and_provider_route_use_actual_worker_without_source_or_model_authority() {
+    for enabled in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture.config.denominator_coverage = enabled;
+        let application = fixture.application();
+        let providers = data(
+            application
+                .invoke(&json!({"action":"providers"}), Duration::from_secs(30))
+                .unwrap(),
+        );
+        assert_eq!(providers["counts"]["implemented_reader_paths"], 16);
+        assert_eq!(providers["counts"]["declared_reviewed_service_groups"], 13);
+        assert_eq!(providers["network_requests_on_inspection"], 0);
+        assert!(providers["counts"]["independently_live_verified_providers"]["value"].is_null());
+        let response = application.invoke(&json!({"action":"plan", "task":"Review fixed TP53 denominator evidence", "planner":"denominator-coverage"}), Duration::from_secs(30)).unwrap();
+        if !enabled {
+            assert_eq!(response["ok"], false);
+            continue;
+        }
+        let planned = data(response);
+        assert_eq!(planned["source_dispatch"], false);
+        assert_eq!(planned["interpretation"]["provider_calls"], 0);
+        assert_eq!(planned["plan"]["steps"].as_array().unwrap().len(), 4);
+        assert_eq!(
+            planned["plan"]["steps"][1]["operation"],
+            "gdc.ssm_project_coverage"
+        );
+        assert_eq!(
+            planned["plan"]["steps"][2]["arguments"]["coverage_bundle"]["$ref"],
+            "coverage#"
+        );
+        assert_eq!(
+            planned["plan"]["requirements"]["data_links"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
     }
 }
 

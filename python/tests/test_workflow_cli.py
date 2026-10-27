@@ -181,6 +181,25 @@ def test_incremental_receipt_path_alias_is_refused_before_provider_dispatch(monk
     assert code == 2 and payload is None and errors and requests == calls == [] and not path.exists()
 
 
+def test_denominator_cli_template_and_provider_inspection_remain_model_and_source_free(monkeypatch, tmp_path):
+    runtime = Mock(side_effect=AssertionError("fixed planning and inspection need no model"))
+    monkeypatch.setattr(workflow_cli, "LLMRuntime", runtime)
+    target = tmp_path / "denominator.json"
+    code, result, errors = _invoke("workflow-template", "--template", "denominator-coverage",
+        "--task", "Inspect fixed TP53 denominator evidence", "--out", str(target))
+    assert code == 0 and errors == "" and target.exists()
+    plan = json.loads(target.read_text(encoding="utf-8"))
+    assert [step["operation"] for step in plan["steps"]] == ["gdc.gene_mutation_counts", "gdc.ssm_project_coverage",
+        "glioma.denominator.assess", "glioma.denominator.review_handoff"]
+    assert plan["steps"][2]["arguments"]["coverage_bundle"] == {"$ref": "coverage#"}
+    code, registry, errors = _invoke("workflow-catalogue", "--provider-registry", "--denominator-coverage")
+    assert code == 0 and errors == "" and registry["counts"]["implemented_reader_paths"] == 16
+    assert registry["counts"]["declared_reviewed_service_groups"] == 13
+    assert registry["counts"]["independently_live_verified_providers"]["value"] is None
+    assert registry["network_requests_on_inspection"] == 0
+    runtime.assert_not_called()
+
+
 def test_fixed_protein_pathway_template_auto_enables_only_its_opt_in_readers_without_model_or_source(monkeypatch, tmp_path):
     monkeypatch.setattr(workflow_cli, "_local_runtime", Mock(side_effect=AssertionError("no model")))
     path = tmp_path / "protein.json"

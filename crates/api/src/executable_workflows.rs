@@ -42,6 +42,7 @@ pub struct WorkflowApplicationConfig {
     pub glioma_mutations: bool,
     pub gene_references: bool,
     pub protein_pathways: bool,
+    pub denominator_coverage: bool,
 }
 
 impl WorkflowApplicationConfig {
@@ -282,6 +283,7 @@ impl WorkflowApplication {
         if request.method == "GET" {
             let command = match segments.as_slice() {
                 ["catalogue"] => json!({"action":"catalogue"}),
+                ["providers"] => json!({"action":"providers"}),
                 ["plans", id] => {
                     valid_id(id)?;
                     json!({"action":"get_plan","plan_id":id})
@@ -658,6 +660,9 @@ impl WorkflowApplication {
         }
         if self.config.protein_pathways {
             command.arg("--protein-pathways");
+        }
+        if self.config.denominator_coverage {
+            command.arg("--denominator-coverage");
         }
         #[cfg(windows)]
         {

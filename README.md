@@ -132,14 +132,18 @@ The Python SDK now exposes an executable local-model workflow builder through
 `workflow-catalogue`, `workflow-build`, `workflow-run`, `workflow-template`, and
 `workflow-execute`. It validates a proposed operation DAG before dispatch, supports public-value
 checkpoint/resume, and composes a glioma literature/trial/TCGA evidence review. Eight reviewed
-public-source adapters are registered by default; seven opt-in paths add OpenAlex, Crossref,
+public-source adapters are registered by default; eight opt-in paths add OpenAlex, Crossref,
 Zenodo, fixed GDC TP53 mutation-affected case aggregates, Ensembl TP53 references, and fixed
-UniProt/Reactome protein/pathway annotations. These fifteen paths are not fifteen independent
+UniProt/Reactome protein/pathway annotations, and GDC project SSM-data coverage. These sixteen paths are not sixteen independent
 providers or hundreds of connected services.
 Separate [aggregate review](docs/GLIOMA_MUTATION_WORKFLOW.md) and
 [gene-reference comparison](docs/GLIOMA_GENE_REFERENCES.md) templates preserve native citations,
 missingness and scientific review holds. The [protein/pathway context](docs/GLIOMA_PROTEIN_PATHWAY_WORKFLOW.md)
 adds exact native citations and unknown omission states without asserting glioma activity.
+The [denominator evidence review](docs/GLIOMA_DENOMINATOR_WORKFLOW.md) compares native TP53
+counts with project SSM-data availability while keeping gene-specific assay denominators unknown.
+The [provider registry](docs/WORKFLOW_PROVIDER_REGISTRY.md) inspects exact reader bindings,
+deduplicated API service groups and separate unmeasured live coverage through the CLI and editor.
 An opt-in [incremental Ollama planner](docs/INCREMENTAL_WORKFLOW_PLANNING.md) makes bounded
 model-selected decisions and sends final graphs through the same caller-contract compiler;
 protocol validation does not establish unrestricted NLP fidelity. The [local workflow editor](docs/WORKFLOW_APPLICATION.md)
@@ -1087,7 +1091,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,368,382 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,368,441 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 

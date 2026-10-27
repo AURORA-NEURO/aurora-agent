@@ -8,7 +8,8 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
   const templateOperations = {
     'glioma-mutations': ['gdc.gene_mutation_counts', 'glioma.mutation.analyze', 'glioma.mutation.review_handoff'],
     'gene-references': ['ensembl.gene_references', 'ncbi_gene.summary', 'glioma.gene_references.analyze', 'glioma.gene_references.review_handoff'],
-    'protein-pathways': ['uniprot.protein_annotation', 'reactome.pathway_annotations', 'glioma.protein_pathways.analyze', 'glioma.protein_pathways.review_handoff']
+    'protein-pathways': ['uniprot.protein_annotation', 'reactome.pathway_annotations', 'glioma.protein_pathways.analyze', 'glioma.protein_pathways.review_handoff'],
+    'denominator-coverage': ['gdc.gene_mutation_counts', 'gdc.ssm_project_coverage', 'glioma.denominator.assess', 'glioma.denominator.review_handoff']
   };
   function error(message) { $('error').textContent = String(message); $('error').hidden = false; }
   function clearError() { $('error').hidden = true; $('error').textContent = ''; $('diagnostics-panel').hidden = true; }
@@ -115,9 +116,16 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
     if (!response.ok) { let message = 'The export was refused.'; try { message = parseJson(text).error?.message || message; } catch {} throw new Error(message); }
     const blob = new Blob([text], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = element('a'); link.href = url; link.download = 'aurora-' + id + '-' + kind + '.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  $('connect-form').addEventListener('submit', action(async () => { state.token = $('token').value; $('token').value = ''; $('connection-status').textContent = 'Connecting…'; try { const catalogue = await request('/catalogue'); state.catalogue = catalogue.operations; updatePlannerAvailability(); $('catalog-count').textContent = catalogue.operation_count + ' operations · ' + catalogue.integration_count + ' integration IDs'; $('connection-status').textContent = 'Connected to this local API'; renderCatalogue(); } catch (failure) { state.token = ''; state.catalogue = []; updatePlannerAvailability(); $('connection-status').textContent = 'Disconnected'; throw failure; } }));
-  $('disconnect').addEventListener('click', () => { state.token = ''; state.catalogue = []; updatePlannerAvailability(); clearTimeout(state.timer); $('token').value = ''; $('connection-status').textContent = 'Disconnected'; $('source-grant').checked = false; $('run').disabled = true; });
+  $('connect-form').addEventListener('submit', action(async () => { state.token = $('token').value; $('token').value = ''; $('connection-status').textContent = 'Connecting…'; try { const catalogue = await request('/catalogue'); state.catalogue = catalogue.operations; $('provider-coverage').textContent = '';  updatePlannerAvailability(); $('catalog-count').textContent = catalogue.operation_count + ' operations · ' + catalogue.integration_count + ' integration IDs'; $('connection-status').textContent = 'Connected to this local API'; renderCatalogue(); } catch (failure) { state.token = ''; state.catalogue = []; $('provider-coverage').textContent = '';  updatePlannerAvailability(); $('connection-status').textContent = 'Disconnected'; throw failure; } }));
+  $('disconnect').addEventListener('click', () => { state.token = ''; state.catalogue = []; $('provider-coverage').textContent = '';  updatePlannerAvailability(); clearTimeout(state.timer); $('token').value = ''; $('connection-status').textContent = 'Disconnected'; $('source-grant').checked = false; $('run').disabled = true; });
   $('catalog-filter').addEventListener('input', renderCatalogue);
+  $('inspect-providers').addEventListener('click', action(async () => {
+    if (!state.token) throw new Error('Connect this page before inspecting provider coverage.');
+    const token = state.token; const catalogue = state.catalogue;
+    const data = await request('/providers');
+    if (state.token !== token || state.catalogue !== catalogue) return;
+    $('provider-coverage').textContent = stringify(data);
+  }));
   $('plan-form').addEventListener('submit', action(async () => { $('build').disabled = true; try { const snapshot = planningSnapshot(); const body = planRequest(); clearPlan(); const data = await request('/plans', body); if (planningSnapshot() !== snapshot) throw new Error('The task or planning controls changed while planning. Build a new plan for the current settings.'); acceptPlan(data); } finally { $('build').disabled = false; $('provider-grant').checked = false; } }));
   $('interpret').addEventListener('click', action(async () => showInterpretation(await request('/interpret', { task: $('task').value }))));
   for (const id of ['planner', 'max-steps', 'max-model-calls', 'decision-attempts', 'operation-ids']) $(id).addEventListener('change', () => { updatePlanningControls(); if (state.plan) { state.planningSettingsDirty = true; dirty(); } });
