@@ -19,6 +19,7 @@ from .errors import ArgumentError
 from .workflow_integrations import WorkflowOperationCatalog
 
 WORKFLOW_REQUIREMENTS_SCHEMA = "aurora-workflow-requirements/0.1"
+WORKFLOW_REQUIREMENTS_SCHEMA_V02 = "aurora-workflow-requirements/0.2"
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _STEP_ID = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 _REF = re.compile(r"^([a-zA-Z][a-zA-Z0-9_-]{0,63})#((?:/.*)?)$")
@@ -70,7 +71,7 @@ def _descriptor(value: Mapping[str, Any], catalog: WorkflowOperationCatalog | No
     if not isinstance(value, Mapping) or (catalog is not None and not isinstance(catalog, WorkflowOperationCatalog)):
         raise WorkflowRequirementError("workflow requirements need an object and an optional operation catalogue")
     value = _safe(value)
-    if set(value) != _FIELDS or value["schema"] != WORKFLOW_REQUIREMENTS_SCHEMA:
+    if set(value) != _FIELDS or not isinstance(value["schema"], str) or value["schema"] not in {WORKFLOW_REQUIREMENTS_SCHEMA, WORKFLOW_REQUIREMENTS_SCHEMA_V02}:
         raise WorkflowRequirementError("workflow requirement fields or schema are invalid")
     if not isinstance(value["task_digest"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["task_digest"]):
         raise WorkflowRequirementError("workflow requirements require an exact task digest")
@@ -109,11 +110,16 @@ def _descriptor(value: Mapping[str, Any], catalog: WorkflowOperationCatalog | No
     if not isinstance(links, list) or len(links) > 128:
         raise WorkflowRequirementError("workflow value-flow link count is invalid")
     for link in links:
-        if not isinstance(link, dict) or set(link) != {"source_operation", "target_operation"}:
+        required_fields = {"source_operation", "target_operation"}
+        optional_fields = {"source_pointer", "target_path"} if value["schema"] == WORKFLOW_REQUIREMENTS_SCHEMA_V02 else set()
+        if not isinstance(link, dict) or not required_fields.issubset(link) or set(link) - required_fields - optional_fields:
             raise WorkflowRequirementError("workflow value-flow link fields are invalid")
         source, target = _id(link["source_operation"]), _id(link["target_operation"])
         if source not in required or target not in required or source == target:
             raise WorkflowRequirementError("workflow value-flow links require distinct required operations")
+        for field in ("source_pointer", "target_path"):
+            if field in link:
+                _pointer(link[field])
     if len({content_digest(rule) for rule in rules}) != len(rules) or len({content_digest(link) for link in links}) != len(links):
         raise WorkflowRequirementError("workflow contract contains duplicated rules")
     if catalog is not None:
@@ -165,6 +171,13 @@ def compile_workflow_requirements(
     data_links: Sequence[Mapping[str, str]] = (), max_steps: int = 32,
     max_calls_by_operation: Mapping[str, int] | None = None,
 ) -> WorkflowRequirements:
+    """Bind caller constraints without granting execution authority.
+
+    A data link with ``source_pointer`` or ``target_path`` uses schema 0.2 and must name an
+    actual direct reference leaf. ``source_pointer`` selects the producer's output value;
+    ``target_path`` selects its exact consumer argument location. Empty pointers select the
+    root. Unconstrained schema-0.1 links retain their transitive value-flow semantics and bytes.
+    """
     try:
         valid_task = isinstance(task, str) and bool(task.strip()) and len(task.encode("utf-8")) <= 32_000 and "\x00" not in task
     except UnicodeError:
@@ -187,7 +200,8 @@ def compile_workflow_requirements(
             raise WorkflowRequirementError("workflow value-flow links must be objects")
         implied.extend([_id(link.get("source_operation")), _id(link.get("target_operation"))])
     required = list(dict.fromkeys(implied))
-    descriptor = _descriptor({"schema": WORKFLOW_REQUIREMENTS_SCHEMA, "task_digest": content_digest({"task": task}),
+    schema = WORKFLOW_REQUIREMENTS_SCHEMA_V02 if any("source_pointer" in link or "target_path" in link for link in data_links) else WORKFLOW_REQUIREMENTS_SCHEMA
+    descriptor = _descriptor({"schema": schema, "task_digest": content_digest({"task": task}),
         "required_operations": required, "forbidden_operations": list(forbidden_operations),
         "output_operations": list(output_operations), "argument_rules": [dict(item) for item in argument_rules],
         "data_links": [dict(item) for item in data_links], "max_steps": max_steps,
@@ -259,7 +273,7 @@ def merge_workflow_requirements(
     return validate_workflow_requirements(merged, catalog, task_digest=task_digest)
 
 
-def _references(value: Any, depth: int = 0) -> set[str]:
+def _reference_leaves(value: Any, depth: int = 0, path: str = "") -> list[tuple[str, str, str]]:
     if depth > 24:
         raise WorkflowRequirementError("workflow argument references exceed their nesting bound")
     if isinstance(value, dict):
@@ -269,11 +283,16 @@ def _references(value: Any, depth: int = 0) -> set[str]:
             match = _REF.fullmatch(value["$ref"])
             if match is None or re.search(r"~(?![01])", match[2]):
                 raise WorkflowRequirementError("workflow reference is not a valid step JSON pointer")
-            return {match[1]}
-        return set().union(*(_references(child, depth + 1) for child in value.values())) if value else set()
+            return [(path, match[1], match[2])]
+        return [leaf for key, child in value.items()
+                for leaf in _reference_leaves(child, depth + 1, path + "/" + key.replace("~", "~0").replace("/", "~1"))]
     if isinstance(value, list):
-        return set().union(*(_references(child, depth + 1) for child in value)) if value else set()
-    return set()
+        return [leaf for index, child in enumerate(value) for leaf in _reference_leaves(child, depth + 1, path + "/" + str(index))]
+    return []
+
+
+def _references(value: Any, depth: int = 0) -> set[str]:
+    return {source for _, source, _ in _reference_leaves(value, depth)}
 
 
 def _value_at(arguments: Any, pointer: str) -> tuple[str, Any]:
@@ -422,8 +441,17 @@ def audit_workflow_requirements(proposal: Mapping[str, Any], requirements: Workf
     for index, link in enumerate(contract["data_links"]):
         for step in steps:
             if step["operation"] == link["target_operation"]:
-                ancestors = flow_ancestors(step["id"], set())
-                if not any(source in indexed and indexed[source]["operation"] == link["source_operation"] for source in ancestors):
+                if "source_pointer" in link or "target_path" in link:
+                    # A constrained link names the actual direct reference leaf. An unrelated
+                    # reference, or a transformed ancestor, cannot stand in for that value.
+                    matched = any(indexed[source]["operation"] == link["source_operation"]
+                        and ("source_pointer" not in link or pointer == link["source_pointer"])
+                        and ("target_path" not in link or path == link["target_path"])
+                        for path, source, pointer in _reference_leaves(step["arguments"]))
+                else:
+                    flow = flow_ancestors(step["id"], set())
+                    matched = any(indexed[source]["operation"] == link["source_operation"] for source in flow)
+                if not matched:
                     issues.append({"code": "required_value_flow_missing", "link_index": index, "step_id": step["id"]})
     result = {"schema": "aurora-workflow-requirement-audit/0.1", "requirements_digest": contract["requirements_digest"],
               "proposal_digest": content_digest(proposal), "blocking_issues": issues, "deferred_arguments": deferred,

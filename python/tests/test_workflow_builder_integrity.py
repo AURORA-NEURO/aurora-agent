@@ -96,15 +96,13 @@ def test_nested_reference_objects_retain_validation_of_literal_fields():
     assert calls == ["source", "consumer"]
 
 
-def test_referenced_array_root_resolves_as_array_and_pointer_failures_hold_without_dispatch():
+def test_referenced_array_root_resolves_and_closed_schema_pointer_failure_prevents_further_dispatch():
     catalog, calls = _catalog()
     plan = compile_workflow_plan(_proposal({"$ref": "source#/numbers"}), catalog, task="Read the source array")
     assert execute_workflow_plan(plan, catalog, approved=True).outputs == {"consumer": {"count": 3}}
-    plan = compile_workflow_plan(_proposal({"$ref": "source#/missing"}), catalog, task="Read a missing source array")
-    held = execute_workflow_plan(plan, catalog, approved=True)
-    assert held.status == "blocked"
-    assert calls == ["source", "consumer", "source"]
-    assert held.checkpoint["failure"]["step_id"] == "consumer"
+    with pytest.raises(WorkflowValidationError, match="impossible"):
+        compile_workflow_plan(_proposal({"$ref": "source#/missing"}), catalog, task="Read a missing source array")
+    assert calls == ["source", "consumer"]
 
 
 def test_reference_in_unknown_property_cannot_bypass_closed_argument_schema():

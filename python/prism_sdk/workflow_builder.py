@@ -4,6 +4,8 @@ This repository-defined application contract composes the reviewed source adapte
 existing LLMRuntime. It does not claim an unavailable blueprint module. Model output is an
 untrusted proposal: exact operation identities, JSON schemas, dependency closure, budgets and
 catalogue identity are checked before dispatch. Only read-only operations are admitted here.
+Output schemas refute impossible reference paths; they do not prove that optional or open
+fields exist. Every admitted reference is resolved against the actual completed value.
 
 Not implemented: effectful writes, distributed scheduling, exactly-once external effects,
 clinical inference, or scientific validation of retrieved records. Checkpoints may explicitly
@@ -111,7 +113,7 @@ def _references(value: Any, depth: int = 0) -> list[tuple[str, str]]:
         raise WorkflowValidationError("workflow argument nesting exceeds its bound")
     if isinstance(value, dict):
         if "$ref" in value:
-            if set(value) != {"$ref"} or not isinstance(value["$ref"], str):
+            if set(value) != {"$ref"} or not isinstance(value["$ref"], str) or len(value["$ref"]) > 4096:
                 raise WorkflowValidationError("workflow reference must contain only a string $ref")
             match = _REFERENCE.fullmatch(value["$ref"])
             if match is None or re.search(r"~(?![01])", match[2]):
@@ -121,6 +123,67 @@ def _references(value: Any, depth: int = 0) -> list[tuple[str, str]]:
     if isinstance(value, list):
         return [ref for child in value for ref in _references(child, depth + 1)]
     return []
+
+
+def _value_has_pointer(value: Any, tokens: Sequence[str], budget: list[int]) -> bool:
+    budget[0] -= 1
+    if budget[0] < 0:
+        raise WorkflowValidationError("workflow reference schema analysis exceeds its traversal bound")
+    for token in tokens:
+        budget[0] -= 1
+        if budget[0] < 0:
+            raise WorkflowValidationError("workflow reference schema analysis exceeds its traversal bound")
+        if isinstance(value, dict) and token in value:
+            value = value[token]
+        elif isinstance(value, list) and re.fullmatch(r"0|[1-9][0-9]*", token) and int(token) < len(value):
+            value = value[int(token)]
+        else:
+            return False
+    return True
+
+
+def _schema_may_have_pointer(schema: Any, tokens: Sequence[str], budget: list[int]) -> bool:
+    """Refute only impossible paths, retaining unknown and value-dependent possibilities.
+
+    A required property can still have an optional descendant, and an admitted array can be
+    empty. Thus True means runtime resolution is required, never that a pointer will exist.
+    Alternatives are conservative unions; conjunctions can only remove possibilities.
+    Negation and joint satisfiability are deliberately not used as existence proofs.
+    """
+    budget[0] -= 1
+    if budget[0] < 0:
+        raise WorkflowValidationError("workflow reference schema analysis exceeds its traversal bound")
+    if schema is False:
+        return False
+    if schema is True:
+        return True
+    if "const" in schema and not _value_has_pointer(schema["const"], tokens, budget):
+        return False
+    if "enum" in schema and not any(_value_has_pointer(value, tokens, budget) for value in schema["enum"]):
+        return False
+    if any(not _schema_may_have_pointer(branch, tokens, budget) for branch in schema.get("allOf", ())):
+        return False
+    for keyword in ("anyOf", "oneOf"):
+        if keyword in schema and not any(_schema_may_have_pointer(branch, tokens, budget) for branch in schema[keyword]):
+            return False
+    if not tokens:
+        return True
+    token, rest = tokens[0], tokens[1:]
+    kind = schema.get("type")
+    types = {kind} if isinstance(kind, str) else set(kind) if isinstance(kind, list) else {"object", "array"}
+    possible = False
+    if "object" in types:
+        properties = schema.get("properties", {})
+        child = properties[token] if token in properties else schema.get("additionalProperties", True)
+        possible = _schema_may_have_pointer(child, rest, budget)
+    if not possible and "array" in types and re.fullmatch(r"0|[1-9][0-9]*", token):
+        index = int(token)
+        maximum = schema.get("maxItems")
+        if type(maximum) is not int or index < maximum:
+            possible = _schema_may_have_pointer(schema.get("items", True), rest, budget)
+    if not possible:
+        return False
+    return True
 
 
 def _validate_schema_value(schema: Any, value: Any) -> None:
@@ -186,7 +249,28 @@ def _check_arguments(catalog: WorkflowOperationCatalog, operation: str, argument
     return arguments
 
 
-def _proposal(value: Mapping[str, Any], catalog: WorkflowOperationCatalog) -> dict[str, Any]:
+def _reference_path_rows(proposal: Mapping[str, Any], catalog: WorkflowOperationCatalog) -> list[dict[str, Any]]:
+    indexed = {step["id"]: step for step in proposal["steps"]}
+    rows = []
+    schemas, possibilities = {}, {}
+    budget = [100_000]
+    for step in proposal["steps"]:
+        for source, pointer in _references(step["arguments"]):
+            operation = indexed[source]["operation"]
+            if operation not in schemas:
+                schemas[operation] = catalog.resolve(operation).to_dict()["output_schema"]
+            if (operation, pointer) not in possibilities:
+                tokens = [token.replace("~1", "/").replace("~0", "~") for token in pointer.split("/")[1:]] if pointer else []
+                possibilities[(operation, pointer)] = _schema_may_have_pointer(schemas[operation], tokens, budget)
+            possible = possibilities[(operation, pointer)]
+            rows.append({"step_id": step["id"], "source_step_id": source, "source_operation": operation,
+                         "source_pointer": pointer,
+                         "status": "runtime_resolution_required" if possible else "statically_impossible",
+                         "reason": "actual_completed_value_required;schema_admission_is_not_existence_proof" if possible else "output_schema_excludes_pointer"})
+    return rows
+
+
+def _proposal(value: Mapping[str, Any], catalog: WorkflowOperationCatalog, *, check_reference_paths: bool = True) -> dict[str, Any]:
     result = _safe(value, maximum=500_000)
     if not isinstance(result, dict) or set(result) != {"name", "steps", "outputs"}:
         raise WorkflowValidationError("workflow proposal requires exactly name, steps, outputs")
@@ -239,7 +323,31 @@ def _proposal(value: Mapping[str, Any], catalog: WorkflowOperationCatalog) -> di
         consumed.update(ancestors[output])
     if consumed != set(indexed):
         raise WorkflowValidationError("every workflow step must contribute to a declared output")
+    if check_reference_paths:
+        for row in _reference_path_rows(result, catalog):
+            if row["status"] == "statically_impossible":
+                raise WorkflowValidationError(f"workflow reference {row['source_step_id']}#{row['source_pointer']} in step {row['step_id']} is impossible under the source output schema")
     return result
+
+
+def audit_workflow_reference_paths(proposal: Mapping[str, Any], catalog: WorkflowOperationCatalog) -> dict[str, Any]:
+    """Diagnose proposal pointers without dispatch, value inspection or existence claims.
+
+    This is a separate, recomputable diagnostic; it does not change a plan's canonical bytes
+    or replace plan/catalogue/task-contract validation. Open and optional paths explicitly
+    remain runtime work even when the static schema cannot refute them.
+    """
+    if not isinstance(catalog, WorkflowOperationCatalog):
+        raise WorkflowValidationError("workflow reference audit requires an operation catalogue")
+    checked = _proposal(proposal, catalog, check_reference_paths=False)
+    rows = _reference_path_rows(checked, catalog)
+    descriptor = {"schema": "aurora-workflow-reference-path-audit/0.1", "catalog_digest": catalog.catalog_digest,
+                  "proposal_digest": content_digest(checked), "references": rows,
+                  "blocking_issue_count": sum(row["status"] == "statically_impossible" for row in rows),
+                  "runtime_resolution_count": sum(row["status"] == "runtime_resolution_required" for row in rows),
+                  "source_dispatch": False, "provider_calls": 0,
+                  "scope": "static_output_schema_reachability_only;no_value_existence_or_scientific_validity_proof"}
+    return _seal(descriptor, "audit_digest")
 
 
 @dataclass(frozen=True, slots=True)
@@ -665,7 +773,7 @@ class LocalWorkflowBuilder:
             "rules": ["Use only listed operations and their exact argument schemas.", "Never invent source results, credentials, endpoints or tools.",
                       "This is public research metadata only. No clinical decisions or patient data.",
                       "A plan grants no execution authority. Omitted operations are unavailable in this planning pass."],
-            "operations": [{key: op.to_dict()[key] for key in ("operation_id", "description", "input_schema")} for op in operations],
+            "operations": [{key: op.to_dict()[key] for key in ("operation_id", "description", "input_schema", "output_schema")} for op in operations],
             "catalog_digest": digest, "omitted_operation_count": len(self.catalog.operations()) - len(operations),
         }
         if contract:

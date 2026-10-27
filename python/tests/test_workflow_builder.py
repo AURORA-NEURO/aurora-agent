@@ -89,14 +89,12 @@ def test_invalid_proposals_fail_before_any_executor_is_called(harness, mutation)
     assert calls == []
 
 
-def test_pointer_failure_holds_dependents_and_never_fabricates_a_result(harness):
+def test_closed_schema_pointer_failure_refuses_before_any_source_dispatch(harness):
     catalog, calls, proposal = harness
     proposal["steps"][1]["arguments"]["text"] = {"$ref": "first#/missing"}
-    run = execute_workflow_plan(compile_workflow_plan(proposal, catalog, task="Transform"), catalog, approved=True)
-    assert run.status == "blocked"
-    assert run.outputs == {}
-    assert calls == ["glioma"]
-    assert run.checkpoint["failure"]["step_id"] == "second"
+    with pytest.raises(WorkflowValidationError, match="impossible"):
+        compile_workflow_plan(proposal, catalog, task="Transform")
+    assert calls == []
 
 
 def test_persistence_failure_before_dispatch_prevents_the_call(harness):
