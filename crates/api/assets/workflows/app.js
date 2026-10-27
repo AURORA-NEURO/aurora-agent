@@ -13,7 +13,7 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
   };
   function error(message) { $('error').textContent = String(message); $('error').hidden = false; }
   function clearError() { $('error').hidden = true; $('error').textContent = ''; $('diagnostics-panel').hidden = true; }
-  function diagnostics(value) { if (value) { $('diagnostics-panel').hidden = false; $('diagnostics-panel').open = true; $('diagnostics').textContent = stringify(value); } }
+  function diagnostics(value, expand = false) { if (value) { $('diagnostics-panel').hidden = false; $('diagnostics-panel').open = expand; $('diagnostics').textContent = stringify(value); } }
   async function request(path, body) {
     if (!state.token) throw new Error('Connect this page with the operator-provided token.');
     const response = await fetch(endpoint + path, { method: body === undefined ? 'GET' : 'POST', headers: { Authorization: 'Bearer ' + state.token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: stringify(body) }), cache: 'no-store', credentials: 'omit', redirect: 'error' });
@@ -21,7 +21,7 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
     if (!response.ok || envelope.ok !== true) { const failure = new Error(envelope.error?.message || 'The API refused this request.'); failure.diagnostics = envelope.error?.diagnostics; throw failure; }
     return envelope.data;
   }
-  function action(fn) { return async event => { event?.preventDefault(); clearError(); try { await fn(); } catch (failure) { error(failure.message || failure); diagnostics(failure.diagnostics); } }; }
+  function action(fn) { return async event => { event?.preventDefault(); clearError(); try { await fn(); } catch (failure) { error(failure.message || failure); diagnostics(failure.diagnostics, true); } }; }
   function dirty() { state.editRevision += 1; state.dirty = true; $('source-grant').checked = false; $('source-grant').disabled = true; $('run').disabled = true; $('validation-status').textContent = 'Unsaved edits — validate before approval.'; }
   function element(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
   function updatePlannerAvailability() {

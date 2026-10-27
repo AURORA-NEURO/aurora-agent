@@ -123,6 +123,27 @@ test('provider inspection is explicit inert text and clears on disconnect', asyn
   assert.equal(p.$('provider-coverage').textContent, '');
 });
 
+test('successful validation keeps diagnostics available without obscuring the workflow', async () => {
+  const value = planned();
+  value.validation = { reference_paths: { blocking_issue_count: 0, runtime_resolution_required: true } };
+  const p = page([value]);
+  await p.connect(['pubmed.search']);
+  p.$('planner').value = 'local-incremental'; p.$('provider-grant').checked = true;
+  await p.$('plan-form').fire('submit');
+  assert.equal(p.$('plan-workspace').hidden, false);
+  assert.equal(p.$('diagnostics-panel').hidden, false);
+  assert.equal(p.$('diagnostics-panel').open, false);
+  assert.match(p.$('diagnostics').textContent, /runtime_resolution_required/);
+  p.replies.push(JSON.stringify({ ok: false, error: { message: 'The proposal violates its retained task.',
+    diagnostics: { requirements_audit: { contract_satisfied: false, blocking_issues: [{ code: 'required_output_missing' }] } } } }));
+  p.$('provider-grant').checked = true;
+  await p.$('plan-form').fire('submit');
+  assert.equal(p.$('plan-workspace').hidden, true);
+  assert.equal(p.$('diagnostics-panel').open, true);
+  assert.match(p.$('diagnostics').textContent, /required_output_missing/);
+  assert.equal(p.$('source-grant').disabled, true);
+});
+
 test('another planner never inherits hidden incremental controls or operation allowlists', async () => {
   const p = page([{ status: 'needs_clarification', interpretation: { status: 'needs_clarification' } }]);
   await p.connect([]);
