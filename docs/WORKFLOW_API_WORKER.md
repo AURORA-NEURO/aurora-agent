@@ -99,6 +99,16 @@ derived/caller contract. Browser-supplied task digests, catalogue digests, plan 
 replacement requirements are not accepted as editing authority. Invalid edits do not replace
 the current revision. A concurrent or stale edit returns `revision_conflict`.
 
+The validation action projects the authoritative SDK reference-path and requirement audits into
+`data.validation` on success or `error.diagnostics` on refusal. The browser may render these
+diagnostics as inert text. They include issue codes, step/operation identities, paths, rule/link
+indices and audit digests, with no actual argument values or source receipts. Each row collection
+retains at most 64 rows, reports its actual omitted count and limits displayed text fields to
+256 UTF-8 bytes without controls. A diagnostic audit that cannot complete is `not_assessed`,
+without a fabricated zero-issue count. Structural validation still uses the existing compiler.
+An admitted output pointer remains `runtime_resolution_required` until the actual source value
+is available; schema admission is not evidence that a field exists or a claim is supported.
+
 `create_run` freezes the exact current plan after the caller supplies its digest. Creating a
 run grants no source access. `execute` requires that same digest and a separate literal source
 approval. An edit that changes a plan's digest invalidates execution/resume authority for runs

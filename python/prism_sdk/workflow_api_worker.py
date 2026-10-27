@@ -26,16 +26,17 @@ from .glioma_workflow import register_glioma_workflow_operations
 from .glioma_workflow_intent import compile_glioma_workflow_request, interpret_glioma_workflow_request
 from .workflow_builder import (
     LocalWorkflowBuilder, WorkflowCancellationToken, WorkflowRun, WorkflowValidationError,
-    compile_workflow_plan, execute_workflow_plan, load_workflow_checkpoint,
+    audit_workflow_reference_paths, compile_workflow_plan, execute_workflow_plan, load_workflow_checkpoint,
     save_workflow_checkpoint, validate_workflow_plan,
 )
 from .workflow_integrations import builtin_workflow_operation_catalog
-from .workflow_requirements import (compile_workflow_requirements, merge_workflow_requirements,
-                                    validate_workflow_requirements)
+from .workflow_requirements import (audit_workflow_requirements, compile_workflow_requirements,
+                                    merge_workflow_requirements, validate_workflow_requirements)
 
 WORKFLOW_API_RESPONSE_SCHEMA = "aurora-workflow-api-response/0.1"
 MAX_WORKFLOW_API_REQUEST_BYTES = 1_000_000
 MAX_WORKFLOW_API_RESPONSE_BYTES = 16_000_000
+MAX_WORKFLOW_API_DIAGNOSTIC_ROWS = 64
 _PLAN_SCHEMA = "aurora-workflow-api-plan/0.1"
 _RUN_SCHEMA = "aurora-workflow-api-run/0.1"
 _ID = re.compile(r"[0-9a-f]{32}\Z")
@@ -45,9 +46,10 @@ _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 class WorkflowAPIError(ValueError):
     """A stable sanitized application refusal, separate from an execution observation."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, diagnostics: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.diagnostics = diagnostics
 
 
 def _refuse(code: str, message: str) -> None:
@@ -412,11 +414,57 @@ class WorkflowAPIWorker:
             record = self._plan(plan_id)
             if record["plan"]["plan_digest"] != expected:
                 _refuse("revision_conflict", "The retained plan changed; review its current revision.")
-            plan = compile_workflow_plan(request["proposal"], self.catalog, task=record["task"],
-                                         requirements=record["requirements"])
+            try:
+                plan = compile_workflow_plan(request["proposal"], self.catalog, task=record["task"],
+                                             requirements=record["requirements"])
+            except (ValueError, TypeError, KeyError, RecursionError, UnicodeError) as error:
+                raise WorkflowAPIError("validation_failed", "The edited proposal failed the retained task contract or workflow checks.",
+                    diagnostics=self._validation_diagnostics(request["proposal"], record)) from error
             record["plan"] = plan.to_dict()
             self._write(self._path("plans", plan_id, "plan.json"), _stamp(record))
-        return self._plan_data(record)
+        return self._plan_data(record) | {"validation": self._validation_diagnostics(request["proposal"], record)}
+
+    def _validation_diagnostics(self, proposal: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+        """Project SDK audits into bounded metadata; a failed audit remains unassessed."""
+        candidate = proposal
+        try:
+            normalized = compile_workflow_plan(proposal, self.catalog, task=record["task"]).to_dict()
+            candidate = {key: normalized[key] for key in ("name", "steps", "outputs")}
+        except (ValueError, TypeError, KeyError, RecursionError, UnicodeError):
+            # The reference audit can still explain a path excluded by a closed output schema.
+            pass
+        result: dict[str, Any] = {"schema": "aurora-workflow-api-validation/0.1", "source_dispatch": False,
+                                  "provider_calls": 0, "scope": "proposal_structure_and_retained_contract_only;scientific_validity_unverified"}
+        try:
+            audit = audit_workflow_reference_paths(candidate, self.catalog)
+            result["reference_paths"] = {
+                "status": "assessed", "audit_digest": audit["audit_digest"],
+                "blocking_issue_count": audit["blocking_issue_count"],
+                "runtime_resolution_count": audit["runtime_resolution_count"],
+                "references": _diagnostic_rows(audit["references"],
+                    {"step_id", "source_step_id", "source_operation", "source_pointer", "status", "reason"}),
+                "omitted_reference_count": max(0, len(audit["references"]) - MAX_WORKFLOW_API_DIAGNOSTIC_ROWS),
+            }
+        except Exception as error:
+            result["reference_paths"] = {"status": "not_assessed", "reason": "audit_did_not_complete", "error_type": _safe_error_type(error)}
+        if record["requirements"] is None:
+            result["requirements"] = {"status": "not_applicable", "reason": "no_retained_additional_contract"}
+        else:
+            try:
+                audit = audit_workflow_requirements(candidate, record["requirements"], self.catalog)
+                issues, deferred = audit["blocking_issues"], audit["deferred_arguments"]
+                result["requirements"] = {
+                    "status": "assessed", "audit_digest": audit["audit_digest"],
+                    "contract_satisfied": audit["contract_satisfied"], "blocking_issue_count": len(issues),
+                    "deferred_argument_count": len(deferred),
+                    "blocking_issues": _diagnostic_rows(issues, {"code", "operation", "rule_index", "link_index", "step_id", "path"}),
+                    "deferred_arguments": _diagnostic_rows(deferred, {"operation", "rule_index", "step_id", "path"}),
+                    "omitted_blocking_issue_count": max(0, len(issues) - MAX_WORKFLOW_API_DIAGNOSTIC_ROWS),
+                    "omitted_deferred_argument_count": max(0, len(deferred) - MAX_WORKFLOW_API_DIAGNOSTIC_ROWS),
+                }
+            except Exception as error:
+                result["requirements"] = {"status": "not_assessed", "reason": "audit_did_not_complete", "error_type": _safe_error_type(error)}
+        return result
 
     def _action_create_run(self, request: dict[str, Any]) -> dict[str, Any]:
         _fields(request, {"action", "plan_id", "expected_plan_digest"})
@@ -530,6 +578,22 @@ def _safe_error_type(error: BaseException) -> str:
     return name if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", name) else "ExecutionError"
 
 
+def _diagnostic_rows(rows: list[dict[str, Any]], fields: set[str]) -> list[dict[str, Any]]:
+    projected = []
+    for row in rows[:MAX_WORKFLOW_API_DIAGNOSTIC_ROWS]:
+        clean = {}
+        for key in fields:
+            value = row.get(key)
+            if type(value) is int and 0 <= value <= 1_000_000:
+                clean[key] = value
+            elif isinstance(value, str):
+                clean[key] = (value if len(value.encode("utf-8")) <= 256
+                    and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+                    else "[metadata_field_omitted]")
+        projected.append(clean)
+    return projected
+
+
 def _error(error: BaseException) -> dict[str, Any]:
     if isinstance(error, WorkflowAPIError):
         code, message = error.code, str(error)
@@ -539,7 +603,10 @@ def _error(error: BaseException) -> dict[str, Any]:
         code, message = "storage_error", "The application could not access its owned workflow storage."
     else:
         code, message = "execution_error", "The requested operation failed; inspect retained run metadata before retrying."
-    return {"schema": WORKFLOW_API_RESPONSE_SCHEMA, "ok": False, "error": {"code": code, "message": message}}
+    detail = {"code": code, "message": message}
+    if isinstance(error, WorkflowAPIError) and error.diagnostics is not None:
+        detail["diagnostics"] = error.diagnostics
+    return {"schema": WORKFLOW_API_RESPONSE_SCHEMA, "ok": False, "error": detail}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -563,7 +630,7 @@ def main(argv: list[str] | None = None) -> int:
             timeout_seconds=args.timeout_seconds)
         response = {"schema": WORKFLOW_API_RESPONSE_SCHEMA, "ok": True, "data": worker.handle(request)}
         encoded = _json(response)
-        if len(encoded.encode("utf-8")) > MAX_WORKFLOW_API_RESPONSE_BYTES:
+        if len(encoded.encode("utf-8")) + 1 > MAX_WORKFLOW_API_RESPONSE_BYTES:
             _refuse("response_too_large", "The response exceeds its explicit export byte bound.")
         exit_code = 0
     except Exception as error:

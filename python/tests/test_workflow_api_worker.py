@@ -1,5 +1,6 @@
 """The fixed application worker retains contracts and never confuses metadata with evidence."""
 from copy import deepcopy
+import io
 import json
 import os
 from pathlib import Path
@@ -7,15 +8,18 @@ import subprocess
 import sys
 from threading import Event, Thread
 import time
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 from prism_sdk import llm_runtime
+from prism_sdk import workflow_api_worker as worker_module
 from prism_sdk.authoring import content_digest
 from prism_sdk.llm_runtime import LLMRuntime
 from prism_sdk.workflow_api_worker import (
-    MAX_WORKFLOW_API_REQUEST_BYTES, WorkflowAPIError, WorkflowAPIWorker, _error,
+    MAX_WORKFLOW_API_DIAGNOSTIC_ROWS, MAX_WORKFLOW_API_REQUEST_BYTES, WorkflowAPIError,
+    WorkflowAPIWorker, _diagnostic_rows, _error,
 )
 from prism_sdk.workflow_builder import load_workflow_checkpoint, save_workflow_checkpoint
 from prism_sdk.workflow_requirements import compile_workflow_requirements
@@ -213,6 +217,89 @@ def test_model_plan_retains_caller_contract_and_step_budget_through_edits(monkey
         worker.handle({"action": "validate", "plan_id": plan["plan_id"],
             "expected_plan_digest": plan["plan_digest"], "proposal": proposal})
     assert calls == []
+
+
+def test_invalid_edit_returns_actionable_contract_metadata_without_actual_argument_values(tmp_path):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    plan = _typed(worker)
+    proposal = {key: deepcopy(plan["plan"][key]) for key in ("name", "steps", "outputs")}
+    proposal["steps"][0]["arguments"]["per_specialty_limit"] = 1
+    with pytest.raises(WorkflowAPIError) as error:
+        worker.handle({"action": "validate", "plan_id": plan["plan_id"],
+            "expected_plan_digest": plan["plan_digest"], "proposal": proposal})
+    detail = _error(error.value)["error"]["diagnostics"]
+    requirement = detail["requirements"]
+    assert requirement["status"] == "assessed" and requirement["contract_satisfied"] is False
+    assert any(row["code"] == "argument_requirement_unsatisfied" and row["path"] == "/per_specialty_limit"
+               for row in requirement["blocking_issues"])
+    assert all("value" not in row and "arguments" not in row for row in requirement["blocking_issues"])
+    assert detail["source_dispatch"] is False and detail["provider_calls"] == 0
+    assert worker.handle({"action": "get_plan", "plan_id": plan["plan_id"]}) == plan
+
+
+def test_impossible_output_pointer_diagnostic_is_authoritative_and_never_calls_fixture_source(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    proposal = {key: deepcopy(plan["plan"][key]) for key in ("name", "steps", "outputs")}
+    proposal["steps"][1]["arguments"]["payload"] = {"$ref": "first#/missing"}
+    with pytest.raises(WorkflowAPIError) as error:
+        worker.handle({"action": "validate", "plan_id": plan["plan_id"],
+            "expected_plan_digest": plan["plan_digest"], "proposal": proposal})
+    detail = _error(error.value)["error"]["diagnostics"]["reference_paths"]
+    assert detail["status"] == "assessed" and detail["blocking_issue_count"] == 1
+    assert detail["references"][0]["source_pointer"] == "/missing"
+    assert detail["references"][0]["status"] == "statically_impossible"
+    assert calls == [] and PUBLIC_VALUE not in json.dumps(detail)
+
+
+def test_successful_edit_reports_runtime_reference_work_without_existence_or_science_claims(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    proposal = {key: deepcopy(plan["plan"][key]) for key in ("name", "steps", "outputs")}
+    proposal["name"] = "Metadata-only editor diagnostic"
+    changed = worker.handle({"action": "validate", "plan_id": plan["plan_id"],
+        "expected_plan_digest": plan["plan_digest"], "proposal": proposal})
+    detail = changed["validation"]
+    assert detail["reference_paths"]["blocking_issue_count"] == 0
+    assert detail["reference_paths"]["runtime_resolution_count"] == 1
+    assert detail["reference_paths"]["references"][0]["status"] == "runtime_resolution_required"
+    assert detail["requirements"]["contract_satisfied"] is True
+    assert calls == [] and PUBLIC_VALUE not in json.dumps(detail)
+
+
+def test_diagnostic_helper_failure_is_unassessed_and_does_not_fabricate_zero_issues(monkeypatch, tmp_path):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    plan = _typed(worker)
+    proposal = {key: deepcopy(plan["plan"][key]) for key in ("name", "steps", "outputs")}
+    monkeypatch.setattr(worker_module, "audit_workflow_reference_paths", Mock(side_effect=RuntimeError(ERROR_DETAIL)))
+    monkeypatch.setattr(worker_module, "audit_workflow_requirements", Mock(side_effect=RuntimeError(ERROR_DETAIL)))
+    changed = worker.handle({"action": "validate", "plan_id": plan["plan_id"],
+        "expected_plan_digest": plan["plan_digest"], "proposal": proposal})
+    for item in (changed["validation"]["reference_paths"], changed["validation"]["requirements"]):
+        assert item["status"] == "not_assessed" and "blocking_issue_count" not in item
+    assert ERROR_DETAIL not in json.dumps(changed["validation"])
+
+
+def test_diagnostic_projection_bounds_rows_and_text_and_never_copies_nonwhitelisted_values():
+    rows = [{"code": "required_value_flow_missing", "step_id": "a", "path": "/" + "x" * 300,
+             "actual_value": PUBLIC_VALUE, "receipt": {"secret": ERROR_DETAIL}, "value": ERROR_DETAIL}
+            for _ in range(MAX_WORKFLOW_API_DIAGNOSTIC_ROWS + 20)]
+    projected = _diagnostic_rows(rows, {"code", "step_id", "path"})
+    assert len(projected) == MAX_WORKFLOW_API_DIAGNOSTIC_ROWS
+    assert projected[0]["path"] == "[metadata_field_omitted]"
+    assert PUBLIC_VALUE not in json.dumps(projected) and ERROR_DETAIL not in json.dumps(projected)
+
+
+def test_stdio_response_byte_bound_includes_the_protocol_newline(monkeypatch, tmp_path):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    envelope = {"schema": worker_module.WORKFLOW_API_RESPONSE_SCHEMA, "ok": True,
+                "data": worker.catalog.to_dict()}
+    bound = len(worker_module._json(envelope).encode("utf-8"))
+    output = io.BytesIO()
+    monkeypatch.setattr(worker_module, "MAX_WORKFLOW_API_RESPONSE_BYTES", bound)
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(b'{"action":"catalogue"}')))
+    monkeypatch.setattr(sys, "stdout", SimpleNamespace(buffer=output))
+    code = worker_module.main(["--root", str(worker.root)])
+    assert code == 2 and len(output.getvalue()) <= bound
+    assert json.loads(output.getvalue())["error"]["code"] == "response_too_large"
 
 
 def test_exact_approval_and_new_run_admission_cannot_implicitly_replay_a_previous_run(monkeypatch, tmp_path):
