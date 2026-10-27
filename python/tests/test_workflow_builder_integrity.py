@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
+import http.client
 import json
 
 import pytest
@@ -297,3 +299,97 @@ def test_planner_rejects_duplicate_model_json_fields_before_compilation():
     with pytest.raises(WorkflowValidationError):
         builder.build("Inspect source integers", approve_provider_call=True)
     assert calls == []
+
+
+@pytest.mark.parametrize("changes", [
+    {"timeout_seconds": 1800}, {"max_response_bytes": 99_999_999},
+    {"allow_insecure_http": True}, {"api_key_header": "X-Changed-Key"},
+])
+@pytest.mark.parametrize("stage", ["before_request", "during_response"])
+def test_full_provider_controls_cannot_change_under_the_same_presentation_metadata(changes, stage):
+    catalog, source_calls = _catalog()
+    runtime, provider_calls = LLMRuntime(), []
+    def handler(request):
+        provider_calls.append(request)
+        if stage == "during_response":
+            runtime.register_provider(replace(config, **changes))
+        return json.dumps(_proposal())
+    config = runtime.register_in_memory_provider("local", handler)
+    builder = LocalWorkflowBuilder(catalog, runtime, provider="local", model="fixture-local")
+    changed = replace(config, **changes)
+    assert changed.to_metadata() == config.to_metadata()
+    if stage == "before_request":
+        runtime.register_provider(changed)
+    with pytest.raises(WorkflowValidationError, match="provider configuration changed"):
+        builder.build("Inspect source integers", approve_provider_call=True, max_planning_attempts=4)
+    assert len(provider_calls) == (0 if stage == "before_request" else 1)
+    assert source_calls == []
+
+
+def test_an_equal_registered_config_replacement_and_equal_numeric_type_mutation_are_detected():
+    catalog, source_calls = _catalog()
+    for kind in ("equal_registration", "same_object_numeric_type"):
+        runtime, provider_calls = LLMRuntime(), []
+        config = runtime.register_in_memory_provider("local", lambda request: provider_calls.append(request) or json.dumps(_proposal()))
+        builder = LocalWorkflowBuilder(catalog, runtime, provider="local", model="fixture-local")
+        if kind == "equal_registration":
+            runtime.register_provider(replace(config))
+        else:
+            object.__setattr__(config, "max_response_bytes", float(config.max_response_bytes))
+        with pytest.raises(WorkflowValidationError, match="provider configuration changed"):
+            builder.build("Inspect source integers", approve_provider_call=True)
+        assert provider_calls == source_calls == []
+
+
+@pytest.mark.parametrize("field", ["_handler", "_stream_handler", "_model_discovery_handler", "invoke"])
+def test_replacing_a_registered_in_memory_callable_cannot_dispatch_another_implementation(field):
+    catalog, source_calls = _catalog()
+    runtime, provider_calls = LLMRuntime(), []
+    config = runtime.register_in_memory_provider("local", lambda request: provider_calls.append(request) or json.dumps(_proposal()))
+    builder = LocalWorkflowBuilder(catalog, runtime, provider="local", model="fixture-local")
+    setattr(config.transport, field, lambda *_a: pytest.fail("replacement callable dispatched"))
+    with pytest.raises(WorkflowValidationError, match="provider configuration changed"):
+        builder.build("Inspect source integers", approve_provider_call=True)
+    assert provider_calls == source_calls == []
+
+
+def test_replacing_http_constructor_is_detected_without_discovery_or_a_connection(monkeypatch):
+    catalog, source_calls = _catalog()
+    runtime = LLMRuntime()
+    runtime.register_provider(ollama_provider(max_attempts=1))
+    builder = LocalWorkflowBuilder(catalog, runtime, model="fixture-local")
+    monkeypatch.setattr(http.client, "HTTPConnection", lambda *_a, **_k: pytest.fail("changed HTTP factory called"))
+    with pytest.raises(WorkflowValidationError, match="provider configuration changed"):
+        builder.build("Inspect source integers", approve_provider_call=True)
+    assert source_calls == []
+
+
+@pytest.mark.parametrize("stage", ["reserve", "mark_dispatched", "clock", "settle"])
+def test_provider_binding_is_checked_across_runtime_callbacks_before_concrete_dispatch(stage):
+    catalog, source_calls = _catalog()
+    provider_calls, quota_events = [], []
+    def change():
+        object.__setattr__(config, "timeout_seconds", 1800)
+    class Reservation:
+        def mark_dispatched(self):
+            quota_events.append("mark_dispatched")
+            if stage == "mark_dispatched": change()
+        def release(self): quota_events.append("release")
+        def settle(self, *_args):
+            quota_events.append("settle")
+            if stage == "settle": change()
+    class Quota:
+        def reserve(self, _metadata):
+            if stage == "reserve": change()
+            return Reservation()
+    def clock():
+        if stage == "clock": change()
+        return 100.0
+    runtime = LLMRuntime(provider_quota=Quota(), clock=clock)
+    config = runtime.register_in_memory_provider("local", lambda request: provider_calls.append(request) or json.dumps(_proposal()))
+    builder = LocalWorkflowBuilder(catalog, runtime, provider="local", model="fixture-local")
+    with pytest.raises(WorkflowValidationError, match="provider configuration changed"):
+        builder.build("Inspect source integers", approve_provider_call=True, max_planning_attempts=4)
+    assert len(provider_calls) == (1 if stage == "settle" else 0)
+    assert source_calls == []
+    assert ("release" in quota_events) if stage == "reserve" else ("settle" in quota_events or "release" in quota_events)

@@ -14,8 +14,11 @@ retain public source values for dependency replay; metadata projections do not r
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+import http.client
+import inspect
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -27,7 +30,7 @@ from urllib.parse import urlsplit
 from .authoring import content_digest
 from .domain_tools import _json_safe, _reject_secret_fields
 from .errors import ArgumentError
-from .llm_runtime import LLMRuntime, ProviderRequest
+from .llm_runtime import InMemoryProvider, LLMRuntime, ProviderConfig, ProviderRequest
 from .tooling import ToolCatalogue, ToolDefinition
 from .workflow_integrations import WorkflowOperationCatalog
 from .workflow_decoder import prepare_workflow_decoder_schema
@@ -697,6 +700,77 @@ def load_workflow_checkpoint(path: str | Path) -> dict[str, Any]:
     return value
 
 
+@dataclass(frozen=True, slots=True)
+class _WorkflowProviderBinding:
+    """Private process identity plus a value-only digest of complete provider controls."""
+
+    runtime: Any
+    provider: str
+    config: Any
+    scalar_values: tuple[Any, ...]
+    transport: Any
+    transport_class: Any
+    transport_invoke: Any
+    handlers: tuple[Any, ...]
+    connection_factory: Any
+    config_digest: str
+
+
+def _capture_workflow_provider_binding(runtime: LLMRuntime, provider: str) -> _WorkflowProviderBinding:
+    # This SDK-private read is deliberately stricter than provider_metadata(), which is a
+    # presentation projection and omits deadlines, response limits and executable identities.
+    registry = object.__getattribute__(runtime, "_providers")
+    config = registry.get(provider) if type(registry) is dict else None
+    if type(config) is not ProviderConfig:
+        raise WorkflowValidationError("workflow planning requires an exact registered provider configuration")
+    scalars = []
+    for definition in fields(ProviderConfig):
+        if definition.name == "transport":
+            continue
+        value = object.__getattribute__(config, definition.name)
+        if type(value) not in {str, int, float, bool, type(None)} or (type(value) is float and not math.isfinite(value)):
+            raise WorkflowValidationError("workflow planning provider controls must be finite scalar values")
+        scalars.append((definition.name, type(value), value))
+    transport = object.__getattribute__(config, "transport")
+    transport_invoke = inspect.getattr_static(transport, "invoke", None) if transport is not None else None
+    handlers = tuple(object.__getattribute__(transport, name)
+        for name in ("_handler", "_stream_handler", "_model_discovery_handler")) if type(transport) is InMemoryProvider else ()
+    factory = None if transport is not None else (http.client.HTTPSConnection
+        if urlsplit(config.base_url).scheme == "https" else http.client.HTTPConnection)
+    descriptor = {"schema": "aurora-local-workflow-provider-controls/0.1",
+        "controls": [{"name": name, "type": kind.__name__, "value": value} for name, kind, value in scalars],
+        "transport": "in_memory" if transport is not None else "http"}
+    return _WorkflowProviderBinding(runtime, provider, config, tuple(scalars), transport,
+        type(transport), transport_invoke, handlers, factory, content_digest(descriptor))
+
+
+def _assert_workflow_provider_binding(runtime: LLMRuntime, provider: str, expected: _WorkflowProviderBinding) -> None:
+    current = _capture_workflow_provider_binding(runtime, provider)
+    if (runtime is not expected.runtime or provider != expected.provider or current.config is not expected.config
+            or current.scalar_values != expected.scalar_values or current.transport is not expected.transport
+            or current.transport_class is not expected.transport_class or current.transport_invoke is not expected.transport_invoke
+            or len(current.handlers) != len(expected.handlers)
+            or any(actual is not original for actual, original in zip(current.handlers, expected.handlers))
+            or current.connection_factory is not expected.connection_factory):
+        raise WorkflowValidationError("workflow planning provider configuration changed")
+
+
+class _WorkflowProviderInvocationGuard:
+    """Recheck after runtime quota/effect/clock callbacks, before concrete transport lookup."""
+
+    def __init__(self, runtime: LLMRuntime, provider: str, binding: _WorkflowProviderBinding) -> None:
+        self.runtime, self.provider, self.binding = runtime, provider, binding
+
+    def before(self, _metadata: Any) -> None:
+        _assert_workflow_provider_binding(self.runtime, self.provider, self.binding)
+
+    def before_transport(self, _metadata: Any) -> None:
+        _assert_workflow_provider_binding(self.runtime, self.provider, self.binding)
+
+    def after(self, _metadata: Any, _response: Any, _error: Any, _elapsed_ms: float) -> None:
+        _assert_workflow_provider_binding(self.runtime, self.provider, self.binding)
+
+
 class LocalWorkflowBuilder:
     """Turn natural language into a checked DAG through an explicitly registered local model."""
 
@@ -715,6 +789,7 @@ class LocalWorkflowBuilder:
         self.max_visible_operations = max_visible_operations
         self.constrain_decoder, self.decoder_prefix_items = constrain_decoder, decoder_prefix_items
         self._provider_digest = content_digest(self._local_provider_metadata())
+        self._provider_binding = _capture_workflow_provider_binding(runtime, provider)
 
     def _local_provider_metadata(self) -> dict[str, Any]:
         metadata = next((item for item in self.runtime.provider_metadata() if item.get("provider") == self.provider), None)
@@ -737,6 +812,7 @@ class LocalWorkflowBuilder:
             raise WorkflowValidationError("local-model workflow planning requires explicit provider approval")
         if content_digest(self._local_provider_metadata()) != self._provider_digest:
             raise WorkflowValidationError("workflow planning provider configuration changed")
+        _assert_workflow_provider_binding(self.runtime, self.provider, self._provider_binding)
         if not isinstance(task, str) or not task.strip() or len(task.encode("utf-8")) > 32_000:
             raise WorkflowValidationError("workflow task is outside its text bound")
         if type(max_steps) is not int or not 1 <= max_steps <= MAX_WORKFLOW_STEPS:
@@ -827,6 +903,7 @@ class LocalWorkflowBuilder:
         for attempt in range(max_planning_attempts):
             if self.catalog.catalog_digest != digest or content_digest(self._local_provider_metadata()) != self._provider_digest:
                 raise WorkflowValidationError("workflow catalogue or provider changed while planning")
+            _assert_workflow_provider_binding(self.runtime, self.provider, self._provider_binding)
             repair_messages = (({"role": "assistant", "content": previous},) if previous else ()) + (({"role": "user", "content": json.dumps(feedback)},) if feedback else ())
             if self.constrain_decoder and len(json.dumps(messages + repair_messages, ensure_ascii=False).encode("utf-8")) > MAX_WORKFLOW_PLANNING_CONTEXT_BYTES:
                 raise WorkflowValidationError("workflow planning context exceeds its byte bound")
@@ -835,9 +912,11 @@ class LocalWorkflowBuilder:
                 max_output_tokens=min(4096, max(512, 384 * max_steps)), temperature=0)
             # Transport failures and runtime structured-output refusals propagate. Only a
             # returned proposal can be repaired; no source tools execute during this loop.
-            response = self.runtime.invoke(self.provider, request)
+            response = self.runtime.invoke(self.provider, request,
+                invocation_observer=_WorkflowProviderInvocationGuard(self.runtime, self.provider, self._provider_binding))
             if self.catalog.catalog_digest != digest or content_digest(self._local_provider_metadata()) != self._provider_digest:
                 raise WorkflowValidationError("workflow catalogue or provider changed while planning")
+            _assert_workflow_provider_binding(self.runtime, self.provider, self._provider_binding)
             if response.provider != self.provider or response.model != self.model or response.tool_calls:
                 raise WorkflowValidationError("workflow planning response changed its provider, model or tool boundary")
             proposal = None
