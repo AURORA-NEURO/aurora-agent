@@ -111,7 +111,9 @@ requirements semantics; this increment has no role-specific or step-specific sel
 does this for either existing model builder. On success the wrapper returns only that builder's
 existing plan/result; callers must separately call `admit_workflow_intent_obligations` and retain
 its receipt to preserve source-span and lowering mappings. No worker/UI receipt persistence is
-implemented. The wrapper recomputes admission and never accepts a
+provided by that SDK wrapper. The optional [application review flow](WORKFLOW_API_WORKER.md#optional-durable-mandatory-work-review)
+separately retains original candidates, explicit API caller acceptance and exact admission inputs
+in application envelope 0.2. The wrapper recomputes admission and never accepts a
 caller-supplied approved receipt as authority. `validate_workflow_intent_admission` likewise
 recomputes the receipt against the exact task, declarations, catalogue, allowlist, caller
 requirements and step bound; restamping a digest alone cannot remove a blocking obligation.
@@ -126,8 +128,11 @@ request to omit a property specifically at authoring time is not represented by 
 
 Calling `build_workflow_with_obligations` without obligations delegates unchanged to the
 existing builder. Existing schema-0.1/0.2 plan bytes, defaults, whole-graph default mode and
-experimental incremental mode remain unchanged. No worker/API/UI persistence format or
-automatic interpretation flow is added by this SDK increment.
+experimental incremental mode remain unchanged. The SDK sidecar itself adds no persistence.
+The optional application review flow preserves legacy envelope 0.1 and native plan/checkpoint
+bytes when absent. Its separately approved [local-model extractor](WORKFLOW_INTENT_EXTRACTION.md)
+only proposes unreviewed candidates; caller acceptance is not proof of complete NLP extraction,
+human authorship or scientific validity.
 
 Regression tests use local fixtures and in-memory provider responses. They demonstrate
 enforcement of supplied declarations, blocked-before-provider behavior, canonical identity,

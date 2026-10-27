@@ -33,12 +33,21 @@ from .workflow_builder import (
 from .workflow_integrations import builtin_workflow_operation_catalog
 from .workflow_requirements import (audit_workflow_requirements, compile_workflow_requirements,
                                     merge_workflow_requirements, validate_workflow_requirements)
+from .workflow_intent_obligations import (
+    admit_workflow_intent_obligations, compile_workflow_intent_obligations,
+    validate_workflow_intent_obligations,
+)
 
 WORKFLOW_API_RESPONSE_SCHEMA = "aurora-workflow-api-response/0.1"
 MAX_WORKFLOW_API_REQUEST_BYTES = 1_000_000
 MAX_WORKFLOW_API_RESPONSE_BYTES = 16_000_000
 MAX_WORKFLOW_API_DIAGNOSTIC_ROWS = 64
 _PLAN_SCHEMA = "aurora-workflow-api-plan/0.1"
+_INTENT_PLAN_SCHEMA = "aurora-workflow-api-plan/0.2"
+_REVIEW_SCHEMA = "aurora-workflow-api-intent-review/0.1"
+_ACCEPTANCE_SCHEMA = "aurora-workflow-api-intent-acceptance/0.1"
+_EVIDENCE_SCHEMA = "aurora-workflow-intent-evidence/0.1"
+_ACCEPTANCE_SCOPE = "explicit_api_caller_declaration;human_presence_authorship_and_extraction_completeness_unassessed"
 _RUN_SCHEMA = "aurora-workflow-api-run/0.1"
 _ID = re.compile(r"[0-9a-f]{32}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -147,7 +156,7 @@ class WorkflowAPIWorker:
         self.root.mkdir(exist_ok=True)
         self._check_directory(self.root)
         self._root_identity = self._directory_identity(self.root)
-        for name in ("plans", "runs"):
+        for name in ("plans", "runs", "reviews"):
             path = self.root / name
             path.mkdir(exist_ok=True)
             self._check_directory(path)
@@ -291,7 +300,9 @@ class WorkflowAPIWorker:
                     fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
     def _plan(self, plan_id: str) -> dict[str, Any]:
-        record = _verify(self._read(self._path("plans", plan_id, "plan.json")), _PLAN_SCHEMA)
+        raw = self._read(self._path("plans", plan_id, "plan.json"))
+        schema = _INTENT_PLAN_SCHEMA if type(raw) is dict and raw.get("schema") == _INTENT_PLAN_SCHEMA else _PLAN_SCHEMA
+        record = _verify(raw, schema)
         if record.get("plan_id") != plan_id:
             _refuse("storage_invalid", "The retained plan identity is inconsistent.")
         checked = validate_workflow_plan(record["plan"], self.catalog)
@@ -299,6 +310,17 @@ class WorkflowAPIWorker:
             _refuse("storage_invalid", "The retained plan task is inconsistent.")
         if _json(record["requirements"]) != _json(checked.to_dict().get("requirements")):
             _refuse("storage_invalid", "The retained task contract is inconsistent.")
+        if schema == _PLAN_SCHEMA and "intent_review" in record:
+            _refuse("storage_invalid", "A legacy application record cannot carry unvalidated intent review metadata.")
+        if schema == _INTENT_PLAN_SCHEMA:
+            _fields(record, {"schema", "plan_id", "task", "planner", "plan", "requirements", "interpretation", "intent_review"})
+            snapshot = self._validate_review_snapshot(record["intent_review"])
+            context = snapshot["review"]["context"]
+            acceptance = snapshot["acceptance"]
+            if (acceptance is None or context["task"] != record["task"] or context["planner"] != record["planner"]
+                    or acceptance["admission"]["status"] != "ready_for_constrained_authoring"
+                    or _json(acceptance["admission"]["requirements"]) != _json(record["requirements"])):
+                _refuse("storage_invalid", "The retained intent review does not bind the saved task contract.")
         return record
 
     @staticmethod
@@ -306,7 +328,130 @@ class WorkflowAPIWorker:
         return {"status": "planned", "plan_id": record["plan_id"], "task": record["task"],
                 "planner": record["planner"], "plan_digest": record["plan"]["plan_digest"],
                 "plan": record["plan"], "source_dispatch": False,
+                **({"intent_review": WorkflowAPIWorker._review_data(record["intent_review"])} if "intent_review" in record else {}),
                 **({"interpretation": record["interpretation"]} if record["interpretation"] is not None else {})}
+
+    def _review_context(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """Bind declaration review to caller controls, without spending model/source authority."""
+        task = _task(request["task"])
+        planner = request["planner"]
+        if type(planner) is not str or planner not in {"local-model", "local-incremental"}:
+            _refuse("invalid_request", "Intent review currently supports the two local model planners.")
+        max_steps = _integer(request.get("max_steps", 16), 1, 32)
+        attempts = _integer(request.get("planning_attempts", 1), 1, 4)
+        operation_ids = None
+        model_calls = decision_attempts = None
+        if planner == "local-incremental":
+            if attempts != 1:
+                _refuse("invalid_request", "Incremental planning requires planning_attempts to remain one.")
+            model_calls = _integer(request.get("max_model_calls", 64), 1, 128)
+            decision_attempts = _integer(request.get("decision_attempts", 2), 1, 4)
+            operation_ids = request.get("operation_ids")
+            if "operation_ids" in request:
+                if (type(operation_ids) is not list or not 1 <= len(operation_ids) <= 128
+                        or any(type(item) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}", item) for item in operation_ids)
+                        or len(set(operation_ids)) != len(operation_ids)):
+                    _refuse("invalid_request", "Intent review operations require a nonempty exact selection.")
+                for operation in operation_ids:
+                    self.catalog.resolve(operation)
+        elif {"max_model_calls", "decision_attempts", "operation_ids"} & set(request):
+            _refuse("invalid_request", "Incremental controls require the local-incremental planner.")
+        caller = request.get("requirements")
+        budget = compile_workflow_requirements(task, max_steps=max_steps)
+        contract = (merge_workflow_requirements(task, budget, caller, catalog=self.catalog)
+                    if caller is not None else budget)
+        return {"task": task, "planner": planner, "catalog_digest": self.catalog.catalog_digest,
+                "max_steps": max_steps, "planning_attempts": attempts, "max_model_calls": model_calls,
+                "decision_attempts": decision_attempts, "operation_ids": operation_ids,
+                "pre_obligation_requirements": contract.to_dict()}
+
+    @staticmethod
+    def _context_request(context: dict[str, Any]) -> dict[str, Any]:
+        _fields(context, {"task", "planner", "catalog_digest", "max_steps", "planning_attempts",
+                          "max_model_calls", "decision_attempts", "operation_ids", "pre_obligation_requirements"})
+        result = {key: context[key] for key in ("task", "planner", "max_steps", "planning_attempts")}
+        result["requirements"] = context["pre_obligation_requirements"]
+        result.update({key: context[key] for key in ("max_model_calls", "decision_attempts", "operation_ids") if context[key] is not None})
+        return result
+
+    def _admit_review(self, context: dict[str, Any], declarations: Mapping[str, Any]) -> dict[str, Any]:
+        return admit_workflow_intent_obligations(context["task"], declarations, self.catalog,
+            operation_ids=context["operation_ids"], requirements=context["pre_obligation_requirements"],
+            max_steps=context["max_steps"]).to_dict()
+
+    def _validate_review_snapshot(self, snapshot: Any) -> dict[str, Any]:
+        """Recompute lexical/contract bindings; storage digests do not attest a human."""
+        _fields(snapshot, {"review", "acceptance"})
+        draft = _verify(snapshot["review"], _REVIEW_SCHEMA)
+        _fields(draft, {"schema", "review_id", "context", "candidate", "candidate_admission", "origin"})
+        _identity(draft["review_id"])
+        context = draft["context"]
+        expected_context = self._review_context(self._context_request(context))
+        if _json(context) != _json(expected_context):
+            _refuse("storage_invalid", "The intent review planning context has changed.")
+        candidate = validate_workflow_intent_obligations(draft["candidate"], task=context["task"]).to_dict()
+        if candidate["interpretation_basis"] != "model_candidate":
+            _refuse("storage_invalid", "Unreviewed input cannot classify itself as a caller declaration.")
+        if _json(draft["candidate_admission"]) != _json(self._admit_review(context, candidate)):
+            _refuse("storage_invalid", "The unreviewed intent admission is inconsistent.")
+        origin = draft["origin"]
+        if (type(origin) is not dict or type(origin.get("kind")) is not str
+                or origin["kind"] not in {"client_submitted_rows", "local_model_candidate"}
+                or len(_json(origin).encode("utf-8")) > 1_000_000):
+            _refuse("storage_invalid", "The unreviewed input origin is invalid.")
+        if origin["kind"] == "client_submitted_rows":
+            _fields(origin, {"kind", "authorship"})
+            if origin["authorship"] != "unverified":
+                _refuse("storage_invalid", "Client declaration authorship is unverified.")
+        else:
+            _fields(origin, {"kind", "extraction"})
+            from .workflow_intent_extractor import validate_workflow_intent_extraction
+            extraction = validate_workflow_intent_extraction(origin["extraction"], task=context["task"],
+                catalog=self.catalog, operation_ids=context["operation_ids"])
+            if (extraction.status != "candidate" or extraction.obligations is None
+                    or _json(extraction.obligations.to_dict()) != _json(candidate)):
+                _refuse("storage_invalid", "The original extraction does not bind the retained unreviewed candidate.")
+        if snapshot["acceptance"] is not None:
+            accepted = _verify(snapshot["acceptance"], _ACCEPTANCE_SCHEMA)
+            _fields(accepted, {"schema", "review_id", "review_digest", "accepted_at", "scope", "accepted_declarations", "admission"})
+            if (accepted["review_id"] != draft["review_id"] or accepted["review_digest"] != snapshot["review"]["record_digest"]
+                    or accepted["scope"] != _ACCEPTANCE_SCOPE or not isinstance(accepted["accepted_at"], str)
+                    or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", accepted["accepted_at"])):
+                _refuse("storage_invalid", "The caller acceptance does not bind the exact retained review.")
+            declarations = compile_workflow_intent_obligations(context["task"], candidate["obligations"]).to_dict()
+            if (_json(accepted["accepted_declarations"]) != _json(declarations)
+                    or _json(accepted["admission"]) != _json(self._admit_review(context, declarations))):
+                _refuse("storage_invalid", "Accepted declarations or their admission have changed.")
+        return snapshot
+
+    def _review(self, review_id: str) -> dict[str, Any]:
+        raw = self._read(self._path("reviews", review_id, "review.json"))
+        acceptance_path = self._path("reviews", review_id, "acceptance.json")
+        accepted = self._read(acceptance_path) if acceptance_path.exists() else None
+        snapshot = self._validate_review_snapshot({"review": raw, "acceptance": accepted})
+        if raw["review_id"] != review_id:
+            _refuse("storage_invalid", "The intent review identity is inconsistent.")
+        return snapshot
+
+    @staticmethod
+    def _review_data(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+        draft, acceptance = snapshot["review"], snapshot["acceptance"]
+        return {"status": "accepted" if acceptance is not None else "review_required", "review_id": draft["review_id"],
+                "review_digest": draft["record_digest"], "task": draft["context"]["task"], "planner": draft["context"]["planner"],
+                "context": draft["context"], "candidate": draft["candidate"], "candidate_admission": draft["candidate_admission"],
+                "origin": draft["origin"], "acceptance": ({**acceptance, "acceptance_digest": acceptance["record_digest"]}
+                                                          if acceptance is not None else None), "source_dispatch": False}
+
+    def _save_review(self, context: dict[str, Any], candidate: Mapping[str, Any], origin: dict[str, Any]) -> dict[str, Any]:
+        candidate = validate_workflow_intent_obligations(candidate, task=context["task"]).to_dict()
+        if candidate["interpretation_basis"] != "model_candidate":
+            _refuse("invalid_request", "Suggested input must remain an unreviewed model candidate.")
+        review_id = uuid4().hex
+        draft = _stamp({"schema": _REVIEW_SCHEMA, "review_id": review_id, "context": context,
+                        "candidate": candidate, "candidate_admission": self._admit_review(context, candidate), "origin": origin})
+        snapshot = self._validate_review_snapshot({"review": draft, "acceptance": None})
+        self._write(self._path("reviews", review_id, "review.json", create=True), draft)
+        return self._review_data(snapshot)
 
     def _run(self, run_id: str) -> dict[str, Any]:
         record = _verify(self._read(self._path("runs", run_id, "run.json")), _RUN_SCHEMA)
@@ -379,7 +524,8 @@ class WorkflowAPIWorker:
         if not isinstance(action, str):
             _refuse("invalid_request", "A supported action is required.")
         handler = getattr(self, "_action_" + action, None)
-        if action not in {"catalogue", "providers", "interpret", "plan", "get_plan", "validate", "create_run", "execute", "inspect", "cancel", "export"} or handler is None:
+        if action not in {"catalogue", "providers", "interpret", "prepare_review", "suggest_review", "accept_review", "get_review",
+                          "plan", "get_plan", "validate", "create_run", "execute", "inspect", "cancel", "export", "export_evidence"} or handler is None:
             _refuse("invalid_request", "The requested action is not supported.")
         return handler(request)
 
@@ -397,10 +543,70 @@ class WorkflowAPIWorker:
         _fields(request, {"action", "task"})
         return interpret_glioma_workflow_request(_task(request["task"])).to_dict()
 
+    def _action_prepare_review(self, request: dict[str, Any]) -> dict[str, Any]:
+        _fields(request, {"action", "task", "planner", "obligations"},
+                {"requirements", "max_steps", "planning_attempts", "max_model_calls", "decision_attempts", "operation_ids"})
+        context = self._review_context(request)
+        candidate = compile_workflow_intent_obligations(context["task"], request["obligations"],
+            interpretation_basis="model_candidate").to_dict()
+        return self._save_review(context, candidate, {"kind": "client_submitted_rows", "authorship": "unverified"})
+
+    def _action_suggest_review(self, request: dict[str, Any]) -> dict[str, Any]:
+        _fields(request, {"action", "task", "planner", "approve_provider_call"},
+                {"requirements", "max_steps", "planning_attempts", "max_model_calls", "decision_attempts", "operation_ids"})
+        context = self._review_context(request)
+        if not _boolean(request["approve_provider_call"]):
+            _refuse("approval_required", "Suggesting declarations requires a separate local model approval.")
+        if self.model is None:
+            _refuse("invalid_configuration", "No operator model is configured.")
+        from .llm_runtime import LLMRuntime, ollama_provider
+        from .workflow_intent_extractor import LocalWorkflowIntentExtractor
+        runtime = LLMRuntime()
+        runtime.register_provider(ollama_provider(base_url=self.base_url, timeout_seconds=self.timeout_seconds,
+            max_attempts=1, structured_output_mode="json_schema"))
+        extraction = LocalWorkflowIntentExtractor(self.catalog, runtime, model=self.model).extract(context["task"],
+            approve_provider_call=True, operation_ids=context["operation_ids"])
+        data = extraction.to_dict()
+        if extraction.status != "candidate":
+            if extraction.obligations is not None:
+                _refuse("validation_failed", "A noncandidate extraction cannot supply accepted declarations.")
+            return {"status": extraction.status, "extraction": data, "source_dispatch": False}
+        if extraction.obligations is None:
+            _refuse("validation_failed", "The candidate extraction lacks its unreviewed declaration document.")
+        return self._save_review(context, extraction.obligations.to_dict(),
+            {"kind": "local_model_candidate", "extraction": data})
+
+    def _action_get_review(self, request: dict[str, Any]) -> dict[str, Any]:
+        _fields(request, {"action", "review_id"})
+        return self._review_data(self._review(_identity(request["review_id"])))
+
+    def _action_accept_review(self, request: dict[str, Any]) -> dict[str, Any]:
+        _fields(request, {"action", "review_id", "expected_review_digest", "accept_caller_declarations"})
+        review_id = _identity(request["review_id"])
+        expected = _identity(request["expected_review_digest"], digest=True)
+        if not _boolean(request["accept_caller_declarations"]):
+            _refuse("approval_required", "Accept the exact declarations explicitly; acceptance proves no human provenance.")
+        with self._lock(self._path("reviews", review_id, "accept.lock")):
+            snapshot = self._review(review_id)
+            draft = snapshot["review"]
+            if draft["record_digest"] != expected:
+                _refuse("revision_conflict", "The retained declaration review changed; inspect its exact current digest.")
+            # A repeated exact acceptance returns the same durable event. No implicit source
+            # or model approval follows, and unresolved declarations remain blocking.
+            if snapshot["acceptance"] is None:
+                context = draft["context"]
+                declarations = compile_workflow_intent_obligations(context["task"], draft["candidate"]["obligations"]).to_dict()
+                accepted = _stamp({"schema": _ACCEPTANCE_SCHEMA, "review_id": review_id, "review_digest": expected,
+                    "accepted_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "scope": _ACCEPTANCE_SCOPE,
+                    "accepted_declarations": declarations, "admission": self._admit_review(context, declarations)})
+                self._write(self._path("reviews", review_id, "acceptance.json"), accepted)
+                snapshot["acceptance"] = accepted
+            return self._review_data(snapshot)
+
     def _action_plan(self, request: dict[str, Any]) -> dict[str, Any]:
         _fields(request, {"action", "task", "planner"},
                 {"requirements", "approve_provider_call", "max_steps", "planning_attempts",
-                 "max_model_calls", "decision_attempts", "operation_ids"})
+                 "max_model_calls", "decision_attempts", "operation_ids", "intent_review_id", "expected_acceptance_digest"})
         task = _task(request["task"])
         approve = _boolean(request.get("approve_provider_call", False))
         max_steps = _integer(request.get("max_steps", 16), 1, 32)
@@ -432,6 +638,25 @@ class WorkflowAPIWorker:
         budget_contract = compile_workflow_requirements(task, max_steps=max_steps)
         contract = (merge_workflow_requirements(task, budget_contract, contract, catalog=self.catalog).to_dict()
                     if contract is not None else budget_contract.to_dict())
+        intent_snapshot = None
+        review_fields = {"intent_review_id", "expected_acceptance_digest"} & set(request)
+        if review_fields:
+            if review_fields != {"intent_review_id", "expected_acceptance_digest"}:
+                _refuse("invalid_request", "An intent review reference requires its exact acceptance digest.")
+            context = self._review_context(request)
+            intent_snapshot = self._review(_identity(request["intent_review_id"]))
+            accepted = intent_snapshot["acceptance"]
+            if accepted is None:
+                _refuse("review_required", "The retained candidate has not been accepted as caller declarations.")
+            if accepted["record_digest"] != _identity(request["expected_acceptance_digest"], digest=True):
+                _refuse("revision_conflict", "The supplied acceptance digest differs from the retained event.")
+            if _json(context) != _json(intent_snapshot["review"]["context"]):
+                _refuse("revision_conflict", "Task or planning controls changed; prepare and accept a new declaration review.")
+            admission = accepted["admission"]
+            if admission["status"] != "ready_for_constrained_authoring":
+                return {"status": admission["status"], "intent_review": self._review_data(intent_snapshot),
+                        "interpretation": admission, "source_dispatch": False}
+            contract = admission["requirements"]
         interpretation = None
         if planner == "glioma-intent":
             if attempts != 1:
@@ -505,9 +730,9 @@ class WorkflowAPIWorker:
                 plan = LocalWorkflowBuilder(self.catalog, runtime, model=self.model).build(task,
                     approve_provider_call=True, max_steps=max_steps, requirements=contract, max_planning_attempts=attempts)
         plan_id = uuid4().hex
-        record = {"schema": _PLAN_SCHEMA, "plan_id": plan_id, "task": task, "planner": planner,
+        record = {"schema": _INTENT_PLAN_SCHEMA if intent_snapshot is not None else _PLAN_SCHEMA, "plan_id": plan_id, "task": task, "planner": planner,
                   "plan": plan.to_dict(), "requirements": plan.to_dict().get("requirements"),
-                  "interpretation": interpretation}
+                  "interpretation": interpretation, **({"intent_review": intent_snapshot} if intent_snapshot is not None else {})}
         self._write(self._path("plans", plan_id, "plan.json", create=True), _stamp(record))
         return self._plan_data(record)
 
@@ -670,6 +895,39 @@ class WorkflowAPIWorker:
                         pass
                     raise
         return self._inspect(run_id)
+
+    def _action_export_evidence(self, request: dict[str, Any]) -> dict[str, Any]:
+        _fields(request, {"action"}, {"plan_id", "run_id", "format"})
+        if len({"plan_id", "run_id"} & set(request)) != 1:
+            _refuse("invalid_request", "Select exactly one plan or run for explicit intent evidence export.")
+        export_format = request.get("format", "native")
+        if type(export_format) is not str or export_format not in {"native", "json_text"}:
+            _refuse("invalid_request", "The requested explicit evidence format is not supported.")
+        run_id = None
+        if "run_id" in request:
+            run_id = _identity(request["run_id"])
+            run = self._run(run_id)
+            plan_id, snapshot = run["plan_id"], run["plan"]
+            record = self._plan(plan_id)
+            if _json(snapshot.get("requirements")) != _json(record["requirements"]):
+                _refuse("storage_invalid", "Historical run and immutable intent contracts differ.")
+        else:
+            plan_id = _identity(request["plan_id"])
+            record = self._plan(plan_id)
+            snapshot = record["plan"]
+        if "intent_review" not in record:
+            _refuse("not_found", "This legacy plan has no retained intent review evidence.")
+        # Edits preserve intent metadata for a plan ID. A run export selects its original
+        # native plan snapshot even after a later valid proposal edit changes the current one.
+        if snapshot["task_digest"] != content_digest({"task": record["task"]}):
+            _refuse("storage_invalid", "Historical plan and declaration task bindings differ.")
+        bundle = {"schema": _EVIDENCE_SCHEMA, "plan_id": plan_id, "run_id": run_id,
+                  "task": record["task"], "planner": record["planner"], "plan_digest": snapshot["plan_digest"],
+                  "plan_snapshot": snapshot, "intent_review": record["intent_review"],
+                  "scope": _ACCEPTANCE_SCOPE, "source_dispatch": False}
+        bundle["evidence_digest"] = content_digest(bundle)
+        identity = {"kind": "intent_evidence", "plan_id": plan_id, "run_id": run_id, "plan_digest": snapshot["plan_digest"]}
+        return identity | ({"json_text": _json(bundle)} if export_format == "json_text" else {"evidence": bundle})
 
     def _action_export(self, request: dict[str, Any]) -> dict[str, Any]:
         _fields(request, {"action", "run_id", "kind"}, {"format"})

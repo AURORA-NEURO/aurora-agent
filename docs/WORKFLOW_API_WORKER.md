@@ -18,7 +18,7 @@ python -m prism_sdk.workflow_api_worker --root C:\private\aurora-workflows `
   --base-url http://127.0.0.1:11435/v1 --model qwen2.5:1.5b
 ```
 
-The root's parent must already exist. The worker creates the root, `plans/` and `runs/` when
+The root's parent must already exist. The worker creates the root, `plans/`, `runs/` and `reviews/` when
 absent. The operator must restrict this directory to the application account. Root ancestors,
 record directories and existing files must be ordinary filesystem entries without symbolic
 links, Windows reparse points or hard-link aliases. Records contain consistency digests;
@@ -72,7 +72,11 @@ Every request has an `action` field:
 | --- | --- | --- |
 | `catalogue` | none | Actual registered SDK operation catalogue and digest |
 | `interpret` | `task` | Pure bounded glioma interpretation, including unresolved spans |
-| `plan` | `task`, `planner`; optional `requirements`, `approve_provider_call`, `max_steps`, `planning_attempts`; incremental only: `max_model_calls`, `decision_attempts`, `operation_ids` | A retained compiler-accepted plan, or a tagged nonplanned result without plan retention |
+| `prepare_review` | `task`, `planner`, `obligations` rows; optional planning context controls described below | Durable unreviewed candidate and exact review digest; no model/source call |
+| `suggest_review` | `task`, `planner`, literal `approve_provider_call`; optional planning context controls | One local-model extraction, retained as unreviewed only when it yields a candidate |
+| `get_review` | `review_id` | Retained candidate, exact context, original admission and separate acceptance if present |
+| `accept_review` | `review_id`, `expected_review_digest`, literal `accept_caller_declarations` | Idempotent explicit API caller declaration event; no model/source approval |
+| `plan` | `task`, `planner`; optional `requirements`, `approve_provider_call`, `max_steps`, `planning_attempts`, paired `intent_review_id` and `expected_acceptance_digest`; incremental only: `max_model_calls`, `decision_attempts`, `operation_ids` | A retained compiler-accepted plan, or a tagged nonplanned result without plan retention |
 | `get_plan` | `plan_id` | Current retained plan and task |
 | `validate` | `plan_id`, `expected_plan_digest`, `proposal` | Checked and persisted replacement revision |
 | `create_run` | `plan_id`, `expected_plan_digest` | New opaque run ID; no dispatch |
@@ -80,6 +84,7 @@ Every request has an `action` field:
 | `inspect` | `run_id` | Metadata-only run state and checkpoint projection |
 | `cancel` | `run_id` | Acknowledged cancellation request |
 | `export` | `run_id`, `kind` = `outputs` or `checkpoint`; optional `format` = `native` or `json_text` | Explicit retained public values or full checkpoint |
+| `export_evidence` | Exactly one of `plan_id` or `run_id`; optional `format` = `native` or `json_text` | Explicit intent evidence bundle with exact current plan or historical run plan snapshot; no checkpoint/value replay |
 
 IDs are random 32-character lowercase hexadecimal values. Digests are 64-character lowercase
 hexadecimal values. The server passes these opaque IDs; it cannot pass file names.
@@ -130,6 +135,86 @@ For example, typed planning makes no model or source call:
 
 An unresolved typed request returns `status: "needs_clarification"`, the actual interpretation
 and `source_dispatch: false`. It does not persist a broader plan.
+
+## Optional durable mandatory-work review
+
+The two local-model planners can attach [mandatory caller declarations](WORKFLOW_INTENT_OBLIGATIONS.md)
+through a separate prepare/inspect/accept flow. This does not change requests without the feature,
+the default planner, native executable plan schemas, or source approval rules. Fixed/typed planners
+currently refuse review references rather than silently ignoring them.
+
+`prepare_review` accepts native exact-offset obligation rows, not an authority-bearing sidecar.
+The server forces `model_candidate` even for manually submitted rows. Neither this action nor
+`accept_review` accepts caller-provided interpretation basis, human-reviewed flags, approved
+receipts, replacement rows, paths or model configuration. Task spans use exclusive-end Python
+Unicode character offsets, not UTF-16 browser or UTF-8 byte indices, and must match exact task text.
+Lexical provenance does not establish semantic entailment or complete task coverage.
+
+Both preparation actions accept optional `requirements`, `max_steps`, `planning_attempts` and,
+for `local-incremental` only, `max_model_calls`, `decision_attempts`, `operation_ids`. The retained
+context contains normalized defaults (16 steps, one planning attempt; incremental defaults 64
+model calls and two decision attempts), null inactive incremental controls, the exact task/planner,
+catalogue digest and `pre_obligation_requirements`. The latter preserves the original budget/caller
+contract so later admission can be recomputed. All those inputs must still match at planning time.
+
+Preparation returns `status: "review_required"`, `review_id`, `review_digest`, `task`, `planner`,
+`context`, the full `candidate` document, `candidate_admission`, `origin`, `acceptance: null` and
+`source_dispatch: false`. Rows are under `candidate.obligations`. The original document/admission
+remain immutable. A model suggestion additionally retains its exact
+[bounded extraction result](WORKFLOW_INTENT_EXTRACTION.md), including raw model text and its bindings.
+It never interprets model output as a worker action or auto-accepts it.
+
+`suggest_review` requires its own literal model approval and delegates once to the local extractor.
+`needs_clarification`, `refused` and `rejected` return their actual extraction result and create no
+review, plan or run. Provider/runtime failures propagate without retry, repair or fallback.
+
+```json
+{"action":"prepare_review","task":"Read metadata","planner":"local-model","max_steps":2,"obligations":[{"id":"read","kind":"required_operation","operation":"pubmed.search","output":true,"span":{"start":0,"end":13,"text":"Read metadata"}}]}
+```
+
+`accept_review` separately requires `accept_caller_declarations: true` and the exact retained
+`expected_review_digest`. It writes a new acceptance record and new `caller_supplied` declarations;
+it does not relabel or overwrite the original candidate. Repeating the same exact acceptance returns
+the same durable event. Its scope is an explicit API caller assertion: bearer-authenticated callers
+or a private stdio caller can make that assertion, but neither channel attests human presence,
+authorship, semantic correctness, complete extraction or scientific validity.
+
+An accepted response has `status: "accepted"` and a nonnull `acceptance` containing
+`acceptance_digest`, `accepted_declarations`, `admission`, timestamp and explicit provenance limits.
+Acceptance alone does not imply readiness: only
+`acceptance.admission.status == "ready_for_constrained_authoring"` permits an authoring attempt.
+Unresolved/unavailable actions and conflicts remain blocking after caller acceptance.
+
+Planning with the paired review reference checks its digest and exact context before constructing
+a model provider. A blocking admission returns its actual status/receipt and no plan/run. A ready
+review still requires separate planning approval. Successful plans retain the full immutable review
+snapshot in optional application envelope `aurora-workflow-api-plan/0.2` and expose `intent_review`.
+Legacy application envelope 0.1 remains readable and is still written when the feature is absent.
+Native plans and checkpoints retain their existing schema and bytes.
+
+Reads after restart recompute candidate and accepted admission against their original inputs and
+current exact catalogue. Suggested evidence additionally replays the retained raw excerpt selectors
+through the extractor's pure validator and checks their native span/candidate linkage; it performs
+no fresh inference. Request/provider digests remain retained declarations, not independent
+authentication of the runtime. Missing version-0.2 metadata, changed spans/contracts or catalogue drift
+refuse instead of defaulting to an accepted review. Proposal edits preserve the immutable review
+for a plan ID; changing task, declarations or review context requires a new review and plan ID.
+The operating-system storage boundary still applies: consistency digests do not authenticate a
+process that can coherently replace private application files and their digests.
+
+`export_evidence` creates `aurora-workflow-intent-evidence/0.1` with the exact native plan snapshot,
+task/planner, immutable review/acceptance/admission inputs and an evidence digest. A run export uses
+the plan snapshot frozen at that run's creation, even if a later valid proposal edit changes the
+current plan. It does not relabel that historical snapshot as the current executable revision.
+The run and immutable review contracts must still agree. No checkpoint is required or executed;
+existing output/checkpoint exports remain separate and byte-compatible. Legacy plans without an
+intent review return `not_found` for this new export rather than fabricated provenance.
+
+The native export response is `{kind: "intent_evidence", plan_id, run_id, plan_digest, evidence}`;
+`run_id` is null for a plan export. `format: "json_text"` instead returns authoritative `json_text`.
+The HTTP bridge must preserve those JSON bytes and verify the selected plan/run identity, matching
+the existing checkpoint export discipline. Polling remains metadata-only; explicit review reads
+and exports contain full task/declaration text and untrusted model text when a suggestion was used.
 
 ## Editing and approval
 
