@@ -44,7 +44,7 @@ def _reconstruct(registry, **changes):
     return WorkflowProviderRegistry(**fields)
 
 
-def test_eighteen_implemented_readers_are_not_eighteen_providers_or_default_registration(monkeypatch):
+def test_nineteen_implemented_readers_are_not_nineteen_providers_or_default_registration(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: pytest.fail("inspection attempted DNS"))
     monkeypatch.setattr(socket, "create_connection", lambda *_args, **_kwargs: pytest.fail("inspection opened a socket"))
     catalog = builtin_workflow_operation_catalog()
@@ -52,8 +52,8 @@ def test_eighteen_implemented_readers_are_not_eighteen_providers_or_default_regi
     document = reviewed_workflow_provider_registry(catalog).to_dict()
     assert catalog.to_dict() == before
     assert document["counts"] == {
-        "declared_reviewed_service_groups": 15, "implemented_reader_paths": 18,
-        "registered_reviewed_default_readers": 8, "supported_readers_not_registered": 10,
+        "declared_reviewed_service_groups": 16, "implemented_reader_paths": 19,
+        "registered_reviewed_default_readers": 8, "supported_readers_not_registered": 11,
         "registered_unmatched_readers": 0, "registered_reviewed_service_groups": 7,
         "external_evidence_references": 0,
         "independently_live_verified_providers": {"state": "not_established_by_registry", "value": None},
@@ -68,8 +68,8 @@ def test_eighteen_implemented_readers_are_not_eighteen_providers_or_default_regi
 def test_all_real_optional_registrations_bind_without_capacity_counts_or_dispatch(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: pytest.fail("registration attempted DNS"))
     document = reviewed_workflow_provider_registry(_all_catalog()).to_dict()
-    assert document["counts"]["registered_reviewed_default_readers"] == 18
-    assert document["counts"]["registered_reviewed_service_groups"] == 15
+    assert document["counts"]["registered_reviewed_default_readers"] == 19
+    assert document["counts"]["registered_reviewed_service_groups"] == 16
     assert document["counts"]["supported_readers_not_registered"] == 0
     assert all(value["registration_state"] == "registered_reviewed_default" for value in document["readers"])
     assert "225" not in json.dumps(document["counts"])
@@ -101,6 +101,37 @@ def test_component_versions_and_exact_normalized_contracts_are_digest_bound():
     assert "reviewed_public_http" in _reader(document, "uniprot.protein_annotation")["component_sha256"]
     assert "reviewed_public_http" in _reader(document, "reactome.pathway_annotations")["component_sha256"]
     assert "reviewed_public_http" not in _reader(document, "gdc.projects")["component_sha256"]
+
+
+def test_civic_optional_default_contract_binds_both_transport_components_without_claiming_live_coverage(monkeypatch):
+    from prism_sdk.workflow_capabilities import with_workflow_capabilities
+    from prism_sdk import reviewed_public_graphql
+    monkeypatch.setattr(reviewed_public_graphql.ReviewedPublicGraphqlClient, "post",
+        lambda *_args, **_kwargs: pytest.fail("registry inspection dispatched CIViC"))
+    base = builtin_workflow_operation_catalog()
+    before = reviewed_workflow_provider_registry(base).to_dict()
+    assert before["manifest_version"] == "reviewed-public-readers/2026-10-27.3"
+    assert _reader(before, "civic.glioblastoma_evidence_metadata")["registration_state"] == "not_registered"
+    expanded = with_workflow_capabilities(base, ["civic-glioblastoma-evidence"])
+    registry = reviewed_workflow_provider_registry(expanded)
+    reader = _reader(registry.to_dict(), "civic.glioblastoma_evidence_metadata")
+    assert reader["registration_state"] == "registered_reviewed_default"
+    assert {"reviewed_public_http", "reviewed_public_graphql", "reviewed_civic_evidence_retrieval"}.issubset(reader["component_sha256"])
+    assert registry.prepare(reader["operation_id"], {}).to_dict()["arguments"] == {"timeout_ms": 30_000}
+    assert reader["live_observation"] == {"state": "unmeasured_by_registry", "value": None}
+    assert before["counts"]["independently_live_verified_providers"]["value"] is None
+
+
+def test_civic_caller_transport_cannot_inherit_a_reviewed_default_reader_contract():
+    from prism_sdk.reviewed_civic_evidence_retrieval import register_civic_evidence_operations
+    def caller(*_args, **_kwargs):
+        pytest.fail("registration entered caller transport")
+    catalog = register_civic_evidence_operations(builtin_workflow_operation_catalog(), fetcher=caller)
+    registry = reviewed_workflow_provider_registry(catalog)
+    row = _reader(registry.to_dict(), "civic.glioblastoma_evidence_metadata")
+    assert row["registration_state"] != "registered_reviewed_default"
+    with pytest.raises(ArgumentError, match="exact registered reviewed default"):
+        registry.prepare(row["operation_id"], {})
 
 
 def test_every_review_document_exists_in_the_checkout():
@@ -139,7 +170,7 @@ def test_unknown_local_mcp_openapi_and_named_aliases_do_not_inherit_reader_cover
     document = reviewed_workflow_provider_registry(catalog).to_dict()
     assert document["unreviewed_operation_ids"] == ["local.report", "mcp.fixture", "openapi.fixture", "pubmed.alias"]
     assert document["counts"]["registered_reviewed_default_readers"] == 8
-    assert document["counts"]["declared_reviewed_service_groups"] == 15
+    assert document["counts"]["declared_reviewed_service_groups"] == 16
 
 
 def test_reusing_every_reviewed_descriptor_with_fixture_executors_establishes_no_reviewed_runtime_binding():
@@ -151,7 +182,7 @@ def test_reusing_every_reviewed_descriptor_with_fixture_executors_establishes_no
     registry = reviewed_workflow_provider_registry(catalog)
     document = registry.to_dict()
     assert document["counts"]["registered_reviewed_default_readers"] == 0
-    assert document["counts"]["registered_unmatched_readers"] == 18
+    assert document["counts"]["registered_unmatched_readers"] == 19
     assert {value["registration_state"] for value in document["readers"]} == {"registered_executor_not_reviewed_default"}
     with pytest.raises(ArgumentError, match="exact registered"):
         registry.prepare("pubmed.search", {})

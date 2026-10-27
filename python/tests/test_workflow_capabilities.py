@@ -125,7 +125,7 @@ def test_explicit_profiles_extend_only_concrete_operations_and_keep_default_cata
     before = base.to_dict()
     expanded = with_workflow_capabilities(base, WORKFLOW_CAPABILITY_IDS)
     assert base.to_dict() == before == builtin_workflow_operation_catalog().to_dict()
-    assert len(expanded.operations()) == 13  # eight defaults plus four identity and one ontology operation
+    assert len(expanded.operations()) == 14  # eight defaults plus four identity, one ontology and one CIViC operation
     again = with_workflow_capabilities(expanded, WORKFLOW_CAPABILITY_IDS)
     assert again.catalog_digest == expanded.catalog_digest
     inventory = workflow_capability_inventory(expanded, WORKFLOW_CAPABILITY_IDS)
@@ -136,7 +136,7 @@ def test_explicit_profiles_extend_only_concrete_operations_and_keep_default_cata
     assert inventory["inventory_unit"].endswith("not_a_provider_count")
 
 
-@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1)])
+@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1)])
 def test_profile_compilation_requires_operator_selection_and_binds_fixed_native_contract(profile_id, steps):
     task = "Inspect the documented fixed public metadata"
     catalog = with_workflow_capabilities(builtin_workflow_operation_catalog(), [profile_id])
@@ -173,10 +173,29 @@ def test_profile_extension_capacity_failure_is_atomic(monkeypatch):
 
 
 def test_profile_selection_is_canonical_without_erasing_duplicates():
-    assert validate_workflow_capabilities(["glioma-ontology", "gene-identity"]) == WORKFLOW_CAPABILITY_IDS
+    assert validate_workflow_capabilities(["glioma-ontology", "gene-identity"]) == ("gene-identity", "glioma-ontology")
+    assert validate_workflow_capabilities(list(reversed(WORKFLOW_CAPABILITY_IDS))) == tuple(sorted(WORKFLOW_CAPABILITY_IDS))
 
 
-@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1)])
+def test_civic_profile_has_one_fixed_step_and_does_not_enable_source_authority():
+    profile = "civic-glioblastoma-evidence"
+    operation = "civic.glioblastoma_evidence_metadata"
+    base = builtin_workflow_operation_catalog()
+    assert operation not in {item.operation_id for item in base.operations()}
+    expanded = with_workflow_capabilities(base, [profile])
+    plan = compile_workflow_capability("Inspect fixed CIViC metadata", expanded, profile,
+        enabled_profiles=[profile]).to_dict()
+    assert plan["steps"] == [{"id": "evidence", "operation": operation,
+        "arguments": {"timeout_ms": 30_000}, "depends_on": []}]
+    assert plan["requirements"]["max_steps"] == 1
+    assert plan["requirements"]["max_calls_by_operation"] == {operation: 1}
+    inventory = workflow_capability_inventory(expanded, [profile])
+    row = next(item for item in inventory["profiles"] if item["profile_id"] == profile)
+    assert row["source_availability"] == "unmeasured"
+    assert inventory["execution_authority"].startswith("none;")
+
+
+@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1)])
 def test_worker_offers_only_startup_enabled_profiles_and_saves_native_plan_without_a_grant(tmp_path, monkeypatch, profile_id, steps):
     from prism_sdk import llm_runtime
     from prism_sdk.workflow_api_worker import WorkflowAPIWorker, WorkflowAPIError
@@ -215,7 +234,7 @@ def test_plan_request_cannot_supply_a_capability_configuration_or_weaken_step_bo
     assert not list((worker.root / "plans").iterdir()) and not list((worker.root / "runs").iterdir())
 
 
-@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1)])
+@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1)])
 def test_cli_fixed_template_selects_reviewed_profile_without_provider_or_source_grants(tmp_path, profile_id, steps):
     import json
     from test_workflow_cli import _invoke
@@ -234,7 +253,7 @@ def test_actual_stdio_worker_passes_repeated_profile_arguments_and_never_accepts
     root = tmp_path / "stdio-state"
     process, envelope = _invoke(root, {"action": "catalogue"}, flags=("--capability", "gene-identity", "--capability", "glioma-ontology"))
     assert process.returncode == 0 and not process.stderr and envelope["ok"]
-    assert envelope["data"]["capabilities"]["selected_profiles"] == list(WORKFLOW_CAPABILITY_IDS)
+    assert envelope["data"]["capabilities"]["selected_profiles"] == ["gene-identity", "glioma-ontology"]
     process, envelope = _invoke(root, {"action": "plan", "task": "Inspect", "planner": "capability:glioma-ontology"})
     assert process.returncode == 2 and not envelope["ok"]
     assert not list((root / "plans").iterdir()) and not list((root / "runs").iterdir())

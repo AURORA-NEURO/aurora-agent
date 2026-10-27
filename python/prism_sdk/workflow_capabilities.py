@@ -16,7 +16,7 @@ from .workflow_integrations import WorkflowOperationCatalog, builtin_workflow_op
 
 WORKFLOW_CAPABILITIES_SCHEMA = "aurora-workflow-capabilities/0.1"
 MAX_WORKFLOW_CAPABILITY_SELECTIONS = 32
-WORKFLOW_CAPABILITY_IDS = ("gene-identity", "glioma-ontology")
+WORKFLOW_CAPABILITY_IDS = ("gene-identity", "glioma-ontology", "civic-glioblastoma-evidence")
 _PROFILES = {
     "gene-identity": {
         "label": "TP53 gene identifier evidence review",
@@ -28,6 +28,11 @@ _PROFILES = {
         "label": "NCI glioma terminology and relationships",
         "scope": "Fixed NCIt Glioma concept and requested direct relationships; terminology is not cohort or clinical evidence.",
         "required_operations": ["nci_thesaurus.glioma_ontology"],
+    },
+    "civic-glioblastoma-evidence": {
+        "label": "CIViC glioblastoma-name evidence metadata",
+        "scope": "One fixed accepted evidence metadata page; source categories/counts are not scientific support, clinical advice or patient/cohort/assay denominators.",
+        "required_operations": ["civic.glioblastoma_evidence_metadata"],
     },
 }
 
@@ -55,6 +60,9 @@ def _extension(profile_id: str) -> WorkflowOperationCatalog:
     elif profile_id == "glioma-ontology":
         from .reviewed_nci_thesaurus_retrieval import register_nci_thesaurus_operations
         register_nci_thesaurus_operations(catalog)
+    elif profile_id == "civic-glioblastoma-evidence":
+        from .reviewed_civic_evidence_retrieval import register_civic_evidence_operations
+        register_civic_evidence_operations(catalog)
     else:
         raise ArgumentError("workflow capability is not reviewed")
     if {item.operation_id for item in catalog.operations()} != set(_PROFILES[profile_id]["required_operations"]):
@@ -114,16 +122,19 @@ def compile_workflow_capability(task: str, catalog: WorkflowOperationCatalog, pr
         return compile_glioma_gene_identity_workflow(task, catalog, requirements=requirements)
     from .workflow_builder import compile_workflow_plan
     from .workflow_requirements import compile_workflow_requirements, merge_workflow_requirements
-    operation = "nci_thesaurus.glioma_ontology"
+    operation, name, step_id = {
+        "glioma-ontology": ("nci_thesaurus.glioma_ontology", "NCI glioma source terminology inspection", "ontology"),
+        "civic-glioblastoma-evidence": ("civic.glioblastoma_evidence_metadata", "CIViC glioblastoma-name source metadata inspection", "evidence"),
+    }[profile_id]
     arguments = {"timeout_ms": 30_000}
     native = compile_workflow_requirements(task, required_operations=[operation], output_operations=[operation],
         max_steps=1, max_calls_by_operation={operation: 1},
         argument_rules=[{"operation": operation, "path": "", "comparison": "equals", "value": arguments}])
     if requirements is not None:
         native = merge_workflow_requirements(task, native, requirements, catalog=catalog)
-    return compile_workflow_plan({"name": "NCI glioma source terminology inspection", "steps": [
-        {"id": "ontology", "operation": operation, "arguments": arguments, "depends_on": []}],
-        "outputs": ["ontology"]}, catalog, task=task, requirements=native)
+    return compile_workflow_plan({"name": name, "steps": [
+        {"id": step_id, "operation": operation, "arguments": arguments, "depends_on": []}],
+        "outputs": [step_id]}, catalog, task=task, requirements=native)
 
 
 __all__ = ["WORKFLOW_CAPABILITIES_SCHEMA", "MAX_WORKFLOW_CAPABILITY_SELECTIONS", "WORKFLOW_CAPABILITY_IDS",

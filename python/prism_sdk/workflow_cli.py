@@ -26,6 +26,7 @@ from .workflow_builder import (LocalWorkflowBuilder, WorkflowValidationError, co
 from .workflow_integrations import builtin_workflow_operation_catalog
 from .workflow_mcp import register_mcp_workflow_operations
 from .workflow_openapi import import_openapi_operations
+from .workflow_capabilities import WORKFLOW_CAPABILITY_IDS
 
 WORKFLOW_CLI_COMMANDS = frozenset({"workflow-catalogue", "workflow-build", "workflow-template", "workflow-execute", "workflow-run", "workflow-interpret"})
 
@@ -79,7 +80,7 @@ def register_workflow_commands(subparsers: Any) -> None:
         build.add_argument("--planning-receipt", help="optional incremental planning result destination, including bounded failures")
         build.add_argument("--out", required=True, help="reviewable plan destination, saved before source dispatch")
     template = commands["workflow-template"]
-    template.add_argument("--template", choices=("evidence", "molecular", "mutations", "gene-references", "protein-pathways", "denominator-coverage", "gene-identity", "glioma-ontology"), default="evidence")
+    template.add_argument("--template", choices=("evidence", "molecular", "mutations", "gene-references", "protein-pathways", "denominator-coverage", *WORKFLOW_CAPABILITY_IDS), default="evidence")
     template.add_argument("--task", required=True)
     template.add_argument("--no-tcga", action="store_true")
     template.add_argument("--literature-limit", type=int, help="evidence template literature limit, default 10")
@@ -253,7 +254,7 @@ def _local_runtime(args: argparse.Namespace) -> LLMRuntime:
 
 
 def workflow_cli_catalog(args: argparse.Namespace, *, runtime: LLMRuntime | None = None):
-    from .workflow_capabilities import WORKFLOW_CAPABILITY_IDS, validate_workflow_capabilities, with_workflow_capabilities
+    from .workflow_capabilities import validate_workflow_capabilities, with_workflow_capabilities
     selected = list(getattr(args, "capability", []))
     if getattr(args, "template", None) in WORKFLOW_CAPABILITY_IDS and args.template not in selected:
         selected.append(args.template)
@@ -320,7 +321,7 @@ def execute_workflow_command(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "workflow-template" and args.template == "molecular" and args.grounded_glioma:
         raise WorkflowValidationError("molecular catalogue templates do not implement model synthesis")
     if args.command == "workflow-template":
-        if args.template in {"mutations", "gene-references", "protein-pathways", "denominator-coverage", "gene-identity", "glioma-ontology"} and (args.grounded_glioma or args.no_tcga or args.no_gwas
+        if (args.template in {"mutations", "gene-references", "protein-pathways", "denominator-coverage"} or args.template in WORKFLOW_CAPABILITY_IDS) and (args.grounded_glioma or args.no_tcga or args.no_gwas
                 or any(getattr(args, key) is not None for key in ("literature_limit", "trial_page_size", "trial_max_pages", "association_page_size", "gwas_page_size", "gwas_max_pages"))):
             raise WorkflowValidationError("fixed source templates do not accept evidence, molecular or synthesis options")
         if args.template == "molecular" and (args.no_tcga or any(getattr(args, key) is not None for key in ("literature_limit", "trial_page_size", "trial_max_pages"))):
@@ -379,7 +380,7 @@ def _execute_prepared_workflow_command(args, catalog, retrieved_at, requirements
     if args.command in {"workflow-template", "workflow-build", "workflow-run"}:
         if args.command == "workflow-template":
             proposal_builder = glioma_evidence_workflow_proposal
-            if args.template in {"gene-identity", "glioma-ontology"}:
+            if args.template in WORKFLOW_CAPABILITY_IDS:
                 from .workflow_capabilities import compile_workflow_capability
                 selected = list(args.capability)
                 if args.template not in selected:
