@@ -26,16 +26,17 @@ from prism_sdk.workflow_builder import load_workflow_checkpoint, save_workflow_c
 from prism_sdk.workflow_builder import execute_workflow_plan
 from prism_sdk.workflow_integrations import WorkflowOperation, WorkflowOperationCatalog, WorkflowOperationResult
 from prism_sdk.workflow_requirements import compile_workflow_requirements
-from test_workflow_cli import ERROR_DETAIL, PUBLIC_VALUE, _fixture_catalog, _proposal
+from test_workflow_cli import (ERROR_DETAIL, PUBLIC_VALUE, _FIXED_TP53_OPERATIONS,
+                               _assert_fixed_tp53_plan, _fixture_catalog, _proposal)
 
 
 TASK = "Review glioma evidence using PubMed only; exclude trials and TCGA."
 
 
-def _invoke(root, request, *, raw=False):
+def _invoke(root, request, *, raw=False, flags=()):
     environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
-    process = subprocess.run([sys.executable, "-m", "prism_sdk.workflow_api_worker", "--root", str(root)],
+    process = subprocess.run([sys.executable, "-m", "prism_sdk.workflow_api_worker", "--root", str(root), *flags],
         input=request if raw else json.dumps(request), text=True, encoding="utf-8", capture_output=True,
         env=environment, timeout=30, cwd=root.parent)
     return process, json.loads(process.stdout)
@@ -712,3 +713,96 @@ def test_error_envelopes_do_not_expose_exception_text_paths_or_source_payloads()
 def test_model_configuration_is_operator_loopback_only(tmp_path, endpoint):
     with pytest.raises(WorkflowAPIError):
         WorkflowAPIWorker(tmp_path / "owned", base_url=endpoint)
+
+
+def test_fixed_tp53_worker_opt_ins_extend_only_selected_sources_and_local_stages_without_default_drift(monkeypatch, tmp_path):
+    runtime = Mock(side_effect=AssertionError("fixed worker catalogue must not construct a model"))
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", runtime)
+    base = WorkflowAPIWorker(tmp_path / "base").handle({"action": "catalogue"})
+    assert base["operation_count"] == 10
+    base_ids = {row["operation_id"] for row in base["operations"]}
+    for kind, config in (("mutations", {"glioma_mutations": True}), ("gene-references", {"gene_references": True})):
+        selected = WorkflowAPIWorker(tmp_path / kind, **config).handle({"action": "catalogue"})
+        assert {row["operation_id"] for row in selected["operations"]} == base_ids | _FIXED_TP53_OPERATIONS[kind]
+    repeated = WorkflowAPIWorker(tmp_path / "repeated").handle({"action": "catalogue"})
+    assert repeated["catalog_digest"] == base["catalog_digest"] and repeated["operation_count"] == 10
+    runtime.assert_not_called()
+
+
+@pytest.mark.parametrize("kind,planner,flag", [("mutations", "glioma-mutations", "--glioma-mutations"),
+                                              ("gene-references", "gene-references", "--gene-references")])
+def test_fixed_tp53_actual_worker_process_persists_no_model_template_contract_and_refuses_implicit_catalogue_authority(tmp_path, kind, planner, flag):
+    root = tmp_path / "fixed"
+    request = {"action": "plan", "task": "Review public TP53 research source assertions", "planner": planner}
+    denied_process, denied = _invoke(root, request)
+    assert denied_process.returncode == 2 and denied_process.stderr == "" and denied["ok"] is False
+    assert not list((root / "plans").iterdir()) and not list((root / "runs").iterdir())
+    process, response = _invoke(root, request, flags=[flag])
+    assert process.returncode == 0 and process.stderr == "" and response["ok"] is True
+    data = response["data"]
+    assert data["planner"] == planner and data["source_dispatch"] is False
+    assert data["interpretation"]["provider_calls"] == 0
+    _assert_fixed_tp53_plan(data["plan"], kind)
+    process, retained = _invoke(root, {"action": "get_plan", "plan_id": data["plan_id"]}, flags=[flag])
+    assert process.returncode == 0 and retained["data"] == data
+    process, missing_flag = _invoke(root, {"action": "get_plan", "plan_id": data["plan_id"]})
+    assert process.returncode == 2 and missing_flag["ok"] is False
+
+
+@pytest.mark.parametrize("kind,planner,configuration,minimum", [
+    ("mutations", "glioma-mutations", {"glioma_mutations": True}, 3),
+    ("gene-references", "gene-references", {"gene_references": True}, 4)])
+def test_fixed_tp53_worker_step_budget_and_irrelevant_model_attempts_refuse_before_plan_or_run_persistence(monkeypatch, tmp_path, kind, planner, configuration, minimum):
+    runtime = Mock(side_effect=AssertionError("fixed source template has no model"))
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", runtime)
+    worker = WorkflowAPIWorker(tmp_path / kind, **configuration)
+    for options in ({"max_steps": minimum - 1}, {"planning_attempts": 2}, {"operation": "arbitrary.read"}):
+        with pytest.raises(ValueError):
+            worker.handle({"action": "plan", "task": "Review public TP53 source metadata", "planner": planner, **options})
+        assert not list((worker.root / "plans").iterdir()) and not list((worker.root / "runs").iterdir())
+    data = worker.handle({"action": "plan", "task": "Review public TP53 source metadata", "planner": planner, "max_steps": minimum})
+    _assert_fixed_tp53_plan(data["plan"], kind)
+    runtime.assert_not_called()
+
+
+@pytest.mark.parametrize("kind,planner,configuration", [("mutations", "glioma-mutations", {"glioma_mutations": True}),
+                                                      ("gene-references", "gene-references", {"gene_references": True})])
+def test_fixed_tp53_worker_scientific_review_status_survives_actual_local_execution_and_inspection(monkeypatch, tmp_path, kind, planner, configuration):
+    worker = WorkflowAPIWorker(tmp_path / kind, **configuration)
+    if kind == "gene-references":
+        from test_glioma_gene_reference_workflow import _catalog
+        worker.catalog, ensembl, ncbi_calls = _catalog()
+        calls = lambda: (len(ensembl.calls), len(ncbi_calls))
+        expected_calls = (2, 1)
+    else:
+        from prism_sdk.glioma_mutation_workflow import register_glioma_mutation_workflow_operations
+        from prism_sdk.reviewed_gdc_gene_mutation_retrieval import register_gdc_gene_mutation_operations
+        from test_reviewed_gdc_gene_mutation_retrieval import _execute as native_execute
+        original = register_glioma_mutation_workflow_operations(register_gdc_gene_mutation_operations(WorkflowOperationCatalog()))
+        native, observed = native_execute(), []
+        def source(arguments, **kwargs):
+            assert kwargs["approve_source_dispatch"] is True
+            observed.append(dict(arguments))
+            return WorkflowOperationResult(native.bundle, native.receipt)
+        def local(operation):
+            return lambda arguments, **kwargs: original.execute(operation, arguments, **kwargs)
+        worker.catalog = WorkflowOperationCatalog(original.operations(), {operation.operation_id:
+            source if operation.operation_id == "gdc.gene_mutation_counts" else local(operation.operation_id)
+            for operation in original.operations()})
+        calls, expected_calls = lambda: (len(observed),), (1,)
+    runtime = Mock(side_effect=AssertionError("fixed source execution must not create a model"))
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", runtime)
+    plan = worker.handle({"action": "plan", "task": "Review public TP53 metadata", "planner": planner})
+    run = _create(worker, plan)
+    denied = worker.handle({"action": "execute", "run_id": run["run_id"],
+        "expected_plan_digest": run["plan_digest"], "approve_source_dispatch": False})
+    assert denied["status"] == "approval_required" and all(count == 0 for count in calls())
+    completed = _execute(worker, run, resume=True)
+    assert completed["status"] == "completed" and calls() == expected_calls
+    status = worker.handle({"action": "inspect", "run_id": run["run_id"]})
+    review = status["output_review_statuses"]["review"]
+    assert review["status"] == "awaiting_scientific_human_review" and review["human_review_required"] is True
+    assert review["scientific_support_established"] is False and review["clinical_actions_authorized"] is False
+    _execute(worker, run, resume=True)
+    assert calls() == expected_calls
+    runtime.assert_not_called()

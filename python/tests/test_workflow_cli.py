@@ -1020,3 +1020,118 @@ def test_invalid_template_trial_bounds_fail_without_source_or_provider_calls(mon
     target = tmp_path / "invalid-template.json"
     code, payload, errors = _invoke("workflow-template", "--task", "Review public glioma metadata", "--out", str(target), option, value)
     assert code == 2 and payload is None and source_calls == provider_calls == [] and not target.exists()
+
+
+_FIXED_TP53_OPERATIONS = {
+    "mutations": {"gdc.gene_mutation_counts", "glioma.mutation.analyze", "glioma.mutation.review_handoff"},
+    "gene-references": {"ensembl.gene_references", "ncbi_gene.summary", "glioma.gene_references.analyze", "glioma.gene_references.review_handoff"},
+}
+_FIXED_TP53_FLAGS = {"mutations": "--glioma-mutations", "gene-references": "--gene-references"}
+
+
+def _assert_fixed_tp53_plan(plan, kind):
+    """Assert the requested fixed graph's source boundaries and retained recovery contract."""
+    count = 3 if kind == "mutations" else 4
+    assert plan["schema"] == "aurora-executable-workflow-plan/0.2"
+    assert len(plan["steps"]) == count and plan["outputs"] == ["review"]
+    steps = {row["id"]: row for row in plan["steps"]}
+    operations = {row["operation"] for row in plan["steps"]}
+    assert operations == _FIXED_TP53_OPERATIONS[kind]
+    contract = plan["requirements"]
+    assert contract["schema"] == "aurora-workflow-requirements/0.2"
+    assert contract["max_steps"] == count
+    assert set(contract["required_operations"]) == operations
+    assert contract["output_operations"] == [steps["review"]["operation"]]
+    assert contract["max_calls_by_operation"] == {operation: 1 for operation in operations}
+    links = {(row["source_operation"], row["target_operation"], row["source_pointer"], row["target_path"])
+             for row in contract["data_links"]}
+    expected = {(steps["analysis"]["operation"], steps["review"]["operation"], "", "/analysis")}
+    if kind == "mutations":
+        assert steps["counts"]["arguments"] == {"timeout_ms": 30_000}
+        assert steps["analysis"]["arguments"]["bundle"] == {"$ref": "counts#"}
+        expected.add(("gdc.gene_mutation_counts", steps["analysis"]["operation"], "", "/bundle"))
+        assert any(rule["operation"] == "gdc.gene_mutation_counts" and rule["path"] == "/timeout_ms"
+                   and rule["comparison"] == "equals" and rule["value"] == 30000 for rule in contract["argument_rules"])
+    else:
+        assert steps["ensembl"]["arguments"] == {"timeout_ms": 30_000}
+        assert steps["ncbi"]["arguments"] == {"gene_symbols": ["TP53"], "timeout_ms": 30_000}
+        for producer, target in (("ensembl", "/ensembl_bundle"), ("ncbi", "/ncbi_bundle")):
+            assert steps["analysis"]["arguments"][target[1:]] == {"$ref": producer + "#"}
+            expected.add((steps[producer]["operation"], steps["analysis"]["operation"], "", target))
+            assert any(rule["operation"] == steps[producer]["operation"] and rule["path"] == ""
+                       and rule["comparison"] == "equals" and rule["value"] == steps[producer]["arguments"]
+                       for rule in contract["argument_rules"])
+    assert links == expected
+    assert steps["review"]["arguments"] == {"analysis": {"$ref": "analysis#"}}
+
+
+def test_fixed_tp53_cli_opt_ins_extend_only_the_selected_operations_and_leave_default_catalogue_stable(monkeypatch):
+    runtime = Mock(side_effect=AssertionError("catalogue must not construct a model"))
+    monkeypatch.setattr(workflow_cli, "LLMRuntime", runtime)
+    base_code, base, errors = _invoke("workflow-catalogue")
+    assert base_code == 0 and errors == "" and base["operation_count"] == 10
+    default_ids = {row["operation_id"] for row in base["operations"]}
+    assert default_ids == {"pubmed.search", "europe_pmc.search", "clinical_trials.search", "gdc.projects", "cbioportal.studies",
+                           "ncbi_gene.summary", "open_targets.associations", "gwas_catalog.associations", GLIOMA_RECONCILE_OPERATION, GLIOMA_REVIEW_OPERATION}
+    for kind, flag in _FIXED_TP53_FLAGS.items():
+        code, selected, errors = _invoke("workflow-catalogue", flag)
+        assert code == 0 and errors == ""
+        assert {row["operation_id"] for row in selected["operations"]} == default_ids | _FIXED_TP53_OPERATIONS[kind]
+        repeated = _invoke("workflow-catalogue")[1]
+        assert repeated["catalog_digest"] == base["catalog_digest"] and repeated["operation_count"] == 10
+    runtime.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["mutations", "gene-references"])
+def test_fixed_tp53_cli_template_is_a_no_model_exact_contract_and_execution_requires_matching_opt_in(monkeypatch, tmp_path, kind):
+    from prism_sdk import reviewed_ensembl_gene_retrieval as ensembl
+    from prism_sdk import reviewed_gdc_gene_mutation_retrieval as mutation
+    from prism_sdk import reviewed_ncbi_gene_retrieval as ncbi
+    runtime = Mock(side_effect=AssertionError("fixed template must not construct a model"))
+    monkeypatch.setattr(workflow_cli, "LLMRuntime", runtime)
+    sources = [Mock(side_effect=AssertionError("source dispatch is not admitted by this test")) for _ in range(3)]
+    monkeypatch.setattr(ensembl, "_default_fetch", sources[0])
+    monkeypatch.setattr(mutation.ReviewedGdcGeneMutationRetrievalAdapter, "execute", sources[1])
+    monkeypatch.setattr(ncbi.ReviewedNcbiGeneRetrievalAdapter, "execute", sources[2])
+    target, checkpoint = tmp_path / "plan.json", tmp_path / "run.json"
+    code, payload, errors = _invoke("workflow-template", "--template", kind, "--task", "Review fixed public TP53 annotations", "--out", str(target))
+    assert code == 0 and errors == "" and payload["source_dispatch"] is False
+    _assert_fixed_tp53_plan(json.loads(target.read_text(encoding="utf-8")), kind)
+    # Missing catalogue authority is refused before writing a checkpoint or dispatching a source.
+    code, payload, errors = _invoke("workflow-execute", "--plan", str(target), "--checkpoint-store", str(checkpoint), "--approve-source-dispatch")
+    assert code == 2 and payload is None and not checkpoint.exists()
+    code, payload, errors = _invoke("workflow-execute", "--plan", str(target), _FIXED_TP53_FLAGS[kind], "--checkpoint-store", str(checkpoint))
+    assert code == 1 and errors == "" and payload["status"] == "approval_required"
+    assert load_workflow_checkpoint(checkpoint)["attempts"] == {}
+    runtime.assert_not_called()
+    for source in sources:
+        source.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["mutations", "gene-references"])
+@pytest.mark.parametrize("option", [["--no-tcga"], ["--no-gwas"], ["--grounded-glioma"],
+    ["--literature-limit", "2"], ["--trial-page-size", "1"], ["--trial-max-pages", "1"],
+    ["--association-page-size", "1"], ["--gwas-page-size", "1"], ["--gwas-max-pages", "1"], ["--max-steps", "1"]])
+def test_fixed_tp53_cli_template_refuses_irrelevant_evidence_molecular_and_model_options_before_persistence(monkeypatch, tmp_path, kind, option):
+    runtime = Mock(side_effect=AssertionError("irrelevant options must predate model setup"))
+    monkeypatch.setattr(workflow_cli, "LLMRuntime", runtime)
+    target = tmp_path / "must-not-exist.json"
+    code, payload, errors = _invoke("workflow-template", "--template", kind, "--task", "Review public TP53 metadata",
+                                   "--out", str(target), *option)
+    assert code == 2 and payload is None and not target.exists()
+    runtime.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["mutations", "gene-references"])
+@pytest.mark.parametrize("status", ["needs_evidence", "awaiting_scientific_human_review"])
+def test_fixed_tp53_review_schemas_project_scientific_holds_without_source_values(kind, status):
+    from prism_sdk.glioma_mutation_workflow import GLIOMA_MUTATION_REVIEW_SCHEMA
+    from prism_sdk.glioma_gene_reference_workflow import GLIOMA_GENE_REFERENCE_REVIEW_SCHEMA
+    schema = GLIOMA_MUTATION_REVIEW_SCHEMA if kind == "mutations" else GLIOMA_GENE_REFERENCE_REVIEW_SCHEMA
+    value = {"schema": schema, "status": status, "human_review_required": True,
+             "scientific_support_established": False, "clinical_actions_authorized": False,
+             "analysis": {"private_fixture_marker": PUBLIC_VALUE}}
+    statuses = workflow_cli._output_review_statuses({"review": value})
+    assert statuses == {"review": {"schema": schema, "status": status, "human_review_required": True,
+                                  "scientific_support_established": False, "clinical_actions_authorized": False}}
+    assert PUBLIC_VALUE not in json.dumps(statuses)
