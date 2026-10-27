@@ -35,7 +35,13 @@ from .workflow_requirements import (
 )
 
 INCREMENTAL_WORKFLOW_RESULT_SCHEMA = "aurora-incremental-workflow-planning-result/0.1"
-_AUTHORING_PROTOCOL = "aurora-incremental-workflow-decisions/0.2"
+_AUTHORING_PROTOCOL = "aurora-incremental-workflow-decisions/0.3"
+_SCHEMA_SEMANTICS = (
+    "enum constrains the value at its schema location. An items.enum lists admissible individual array elements; it does not require selecting every listed element. Array length/uniqueness constraints and fixed caller requirements still apply.",
+    "required lists object property names, not mandatory choices from an enum. The unchanged native compiler validates required properties after its existing argument normalization.",
+    "default does not require using that value or every enum member. The SDK fills declared top-level argument defaults only when the property is omitted; explicitly supplied values still must satisfy the schema and immutable caller requirements. Do not omit a selector to bypass a caller constraint.",
+    "const requires the exact value at its schema location. An exact full-set caller argument requirement remains mandatory even when items.enum permits smaller subsets. These instructions never relax const, required, bounds or caller predicates.",
+)
 MAX_INCREMENTAL_MODEL_CALLS = 128
 MAX_INCREMENTAL_SCHEMA_BYTES = 256_000
 _RESERVED = frozenset({"$ref", "$symbol"})
@@ -201,6 +207,34 @@ def _authoring_state(steps: Sequence[Mapping[str, Any]], prefix_audit: Mapping[s
     }
 
 
+def _finish_diagnostics(proposal: Mapping[str, Any], catalog: WorkflowOperationCatalog,
+                        contract: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Recompute native diagnostics without repairing or accepting a rejected finish.
+
+    A workflow label cannot stand in for an operation instance. Keep a structural
+    rejection distinct from a requirement audit that could not run; an absent audit
+    must never look like an empty list of obligations. Full diagnostics share the
+    existing context byte gate rather than being silently truncated.
+    """
+    base = {"schema": "aurora-incremental-finish-diagnostics/0.1",
+            "workflow_name_role": "descriptive_label_only;does_not_append_or_invoke_an_operation",
+            "finish_accepted": False, "repairs_applied": False,
+            "interpretation": "recomputed_native_diagnostics_only;original_compiler_and_contract_remain_authoritative"}
+    try:
+        checked = _proposal(proposal, catalog)
+    except WorkflowValidationError:
+        return {**base, "structure_valid": False,
+                "requirements_audit_state": "not_run_due_to_native_structure_rejection",
+                "requirements_audit": None}
+    audit = audit_workflow_requirements(checked, contract, catalog) if contract is not None else None
+    return {**base, "structure_valid": True,
+            "operation_instances": [{"symbol": step["id"], "operation": step["operation"]}
+                                    for step in checked["steps"]],
+            "selected_output_symbols": checked["outputs"],
+            "requirements_audit_state": "native_audit_recomputed" if audit is not None else "not_requested",
+            "requirements_audit": audit}
+
+
 class IncrementalLocalWorkflowPlanner:
     """Choose one operation, then its arguments, within an explicit provider-call budget.
 
@@ -295,6 +329,7 @@ class IncrementalLocalWorkflowPlanner:
             "task": task, "catalog_digest": digest, "operations": summaries,
             "fixed_caller_requirements": contract,
             "max_steps": max_steps,
+            "schema_semantics": _SCHEMA_SEMANTICS,
             "rules": [
                 "Author a future workflow. No operation has executed or can execute during this planning conversation. An empty accepted plan is the normal initial state.",
                 "Choose the next operation, its literal arguments, bindings and control dependencies yourself. Appending records a future invocation; it does not require its source results.",
@@ -304,6 +339,7 @@ class IncrementalLocalWorkflowPlanner:
                 "Control dependencies order steps but do not transfer data. Choose data bindings explicitly.",
                 "Missing operations or outputs in an incomplete prefix audit are pending graph-authoring obligations, not a request for observed source data. Other contract violations remain errors.",
                 "Finish proposes a complete workflow, not completed execution. Finish only when every fixed caller requirement and task instruction is met; choose actual final output symbols.",
+                "The finish name is a descriptive workflow label. Naming it after an operation does not add that operation: only accepted append/arguments decisions create actual operation instances.",
                 "Clarify unresolved intent or a missing selector that cannot be inferred from the task or fixed contract; do not invent one. Refuse unavailable capabilities, incompatible constraints or prohibited authority when needed. These terminal choices remain valid at every phase.",
                 "Public research metadata only. No clinical decisions or patient data. A plan grants no source authority.",
             ],
@@ -393,6 +429,7 @@ class IncrementalLocalWorkflowPlanner:
                 if len(receipts) == max_model_calls:
                     return result("budget_exhausted", reason="model_call_limit")
                 decision, receipt = call("choose", {"type": "object", "anyOf": branches}, {"phase": "choose_next_action"})
+                finish_proposal = None
                 try:
                     ended = terminal(decision, receipt)
                     if ended:
@@ -401,7 +438,9 @@ class IncrementalLocalWorkflowPlanner:
                         raise WorkflowValidationError("incremental action must be an object")
                     if decision.get("action") == "finish" and set(decision) == {"action", "name", "outputs"}:
                         proposal = {"name": decision["name"], "steps": steps, "outputs": decision["outputs"]}
+                        finish_proposal = proposal
                         plan = compile_workflow_plan(proposal, self.catalog, task=task, requirements=contract)
+                        finish_proposal = None
                         receipt.update(status="accepted", action="finish")
                         return result("planned", plan=plan.to_dict())
                     if (set(decision) != {"action", "operation"} or decision["action"] != "append"
@@ -414,6 +453,16 @@ class IncrementalLocalWorkflowPlanner:
                 except (ValueError, KeyError, TypeError):
                     receipt["error_code"] = "invalid_action_or_final_contract"
                     feedback = {"code": receipt["error_code"], "instruction": "Choose a valid action. Accepted steps are unchanged; satisfy the immutable task contract before finish."}
+                    if finish_proposal is not None:
+                        diagnostic = _finish_diagnostics(finish_proposal, self.catalog, contract)
+                        audit = diagnostic["requirements_audit"]
+                        receipt["finish_diagnostics"] = {
+                            "diagnostics_digest": content_digest(diagnostic),
+                            "structure_valid": diagnostic["structure_valid"],
+                            "requirements_audit_state": diagnostic["requirements_audit_state"],
+                            "blocking_issue_count": len(audit["blocking_issues"]) if audit is not None else None,
+                            "deferred_argument_count": len(audit["deferred_arguments"]) if audit is not None else None}
+                        feedback["finish_diagnostics"] = diagnostic
             if selected is None:
                 return result("budget_exhausted", reason="decision_attempt_limit")
             schema = _arguments_schema(by_id[selected]["input_schema"], symbols)

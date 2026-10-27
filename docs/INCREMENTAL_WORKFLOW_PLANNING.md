@@ -117,7 +117,7 @@ binding. Both phases retain the complete caller contract and accepted steps; com
 still uses the full catalogue. Context bytes and request digests record this deliberate
 premeasurement protocol choice.
 
-Decision protocol version 0.2 explicitly distinguishes **authoring a future workflow**
+Decision protocol version 0.2 introduced an explicit distinction between **authoring a future workflow**
 from answering a research question after execution. Every call labels an empty or partial
 draft, records that execution has not started by design, and describes symbols as future
 outputs. Missing observed values do not prevent the model from binding an earlier planned
@@ -140,6 +140,16 @@ preserve clarification for a genuinely unspecified selector and refusal for unav
 capabilities, incompatible constraints or prohibited authority. They prohibit invented
 selectors and observed values. Whether a local model follows these instructions requires
 prospective positive cases and intent controls; fixture acceptance cannot establish it.
+
+Version 0.3 retains that authoring state and adds fixed, generic JSON Schema guidance.
+An `items.enum` describes admissible individual array members, not an obligation to select
+every member. `required` names object properties. The SDK's existing normalization fills
+declared top-level argument defaults when those properties are omitted; explicit values
+must still satisfy the schema and immutable caller contract. A scalar `const`, full-set
+caller equality requirement, or array bound remains mandatory. The guidance does not
+remove or rewrite defaults, change schemas, choose a subset, or add support for container
+constants. Its fixed serialized text is below 1,600 UTF-8 bytes in the fixture check;
+the entire request remains subject to the existing 2,000,000-byte context bound.
 
 Only previously accepted symbols appear in the reference and control-edge enums. The
 protocol independently rejects unknown, self and forward symbols, invalid pointer syntax,
@@ -168,6 +178,24 @@ immutable caller requirements. A rejected finish leaves the prefix unchanged; it
 automatically fills missing steps or selects outputs. The caller contract and its digest
 are retained, including exact 0.2 native-root/target-path constraints. Any constraints that
 remain deferred continue to be enforced by the existing executor.
+
+If a model-selected finish is rejected, version 0.3 recomputes native proposal validation
+and, when the structure permits, the exact native requirement audit for the **submitted
+final outputs**. These diagnostics distinguish a workflow's descriptive `name` from actual
+operation instances: naming a workflow after an operation never appends that operation.
+The next model request receives the unchanged audit, actual instances and output symbols.
+This diagnostic pass does not accept, repair, append, select outputs or invoke an executor.
+The original compiler still decides acceptance and every caller requirement stays fixed.
+
+A structural rejection carries `requirements_audit: null` and an explicit not-run state,
+rather than a fabricated empty or successful audit. An audit's false/unknown result and
+deferred arguments remain intact. Receipts retain compact diagnostic digests, structural
+state, and issue/deferred counts; counts are null when an audit could not run. Full native
+diagnostics enter the next validation-feedback context within the same total byte gate;
+they are never silently truncated. This avoids duplicating a potentially large audit in
+every receipt. Decoder actions, their order and availability are unchanged: an incomplete
+draft can still propose finish and have it rejected, clarify or refuse. No terminal
+response triggers an automatic retry.
 
 ## Schema subset and bounds
 
@@ -259,3 +287,13 @@ The retained task artifacts are `aurora-authoring-semantics-evaluation.json` (re
 `da4a37ba8b5a7c0944eb61a2c60f1e4235f31b93a0f4fb328c67a6f89744c6a3`). These
 are retained evidence for this developer-authored comparison, not independently collected
 benchmarks, automatic NLP requirement extraction, scientific validation or human review.
+
+Those observations concern version 0.2. Version 0.3's combined schema/finish clarification
+is **unmeasured** for live local-model fidelity until a fresh prospective comparison is
+reviewed and frozen. Fixture tests reach legal subset/default handling, a genuine scalar
+constant/full-set obligation, premature finish with an operation-shaped workflow name,
+actual final-output coverage and the prompt byte boundary. They establish these SDK
+invariants only. A new paired probe must include genuine full-set and intent controls,
+preserve rejected/nonplanned outcomes, and disclose matched budgets and actual provider
+conditions. It must not rerun the earlier frozen cases or attribute a combined-protocol
+result separately to either clarification component.

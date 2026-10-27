@@ -11,7 +11,7 @@ from prism_sdk.workflow_incremental_planner import (
     IncrementalLocalWorkflowPlanner, IncrementalWorkflowPlanningError,
 )
 from prism_sdk.workflow_integrations import WorkflowOperation, WorkflowOperationCatalog
-from prism_sdk.workflow_requirements import compile_workflow_requirements
+from prism_sdk.workflow_requirements import audit_workflow_requirements, compile_workflow_requirements
 
 
 def _catalog(input_schema=None):
@@ -115,7 +115,7 @@ def test_empty_and_partial_drafts_expose_future_authoring_with_exact_unmodified_
     assert result.status == "planned" and result.to_dict()["source_dispatches"] == 0
     contexts = [json.loads(request.messages[0]["content"]) for request in requests]
     empty, partial = contexts[0], contexts[2]
-    assert empty["protocol"] == "aurora-incremental-workflow-decisions/0.2"
+    assert empty["protocol"] == "aurora-incremental-workflow-decisions/0.3"
     assert empty["accepted_plan_symbols"] == [] and empty["prefix_audit"] is None
     assert empty["authoring_state"]["draft"] == "empty"
     assert empty["authoring_state"]["pending_contract_obligations"] == [
@@ -215,6 +215,138 @@ def test_rejected_finish_is_not_promoted_by_temporary_prefix_outputs():
     assert prefix["temporary_audit_outputs"] == ["s1"] and prefix["final_outputs_selected"] is False
     assert prefix["requirements_audit"]["contract_satisfied"] is False
     assert result.to_dict()["requirements_digest"] == contract.requirements_digest
+
+
+def _selection_catalog():
+    return _catalog({"type": "object", "properties": {
+        "choices": {"type": "array", "items": {"type": "string", "enum": ["cedar", "elm", "pine"]},
+            "minItems": 1, "maxItems": 3, "uniqueItems": True, "default": ["cedar", "elm", "pine"]},
+        "mode": {"type": "string", "const": "metadata"}},
+        "required": ["mode"], "additionalProperties": False})
+
+
+def _selection_arguments(arguments):
+    return {"action": "arguments", "arguments": arguments, "additional_dependencies": []}
+
+
+@pytest.mark.parametrize("explicit", [True, False])
+def test_enum_members_are_admissible_choices_and_omitted_defaults_keep_native_semantics(explicit):
+    task = "Select elm only." if explicit else "Use the declared default selection."
+    chosen = ["elm"] if explicit else ["cedar", "elm", "pine"]
+    contract = compile_workflow_requirements(task, required_operations=["fixture.alpha"],
+        output_operations=["fixture.alpha"],
+        argument_rules=[{"operation": "fixture.alpha", "path": "/choices", "comparison": "equals", "value": chosen}])
+    arguments = {"mode": "metadata", **({"choices": chosen} if explicit else {})}
+    planner, catalog, requests = _planner([_append(), _selection_arguments(arguments), _finish()], catalog=_selection_catalog())
+    result = planner.build(task, approve_provider_call=True, requirements=contract)
+    assert result.status == "planned"
+    native = result.plan.to_dict()
+    assert native["steps"][0]["arguments"] == {"choices": chosen, "mode": "metadata"}
+    context = json.loads(requests[1].messages[0]["content"])
+    assert context["selected_operation_descriptor"]["input_schema"] == catalog.resolve("fixture.alpha").to_dict()["input_schema"]
+    assert context["selected_operation_descriptor"]["input_schema"]["required"] == ["mode"]
+    assert len(context["schema_semantics"]) == 4 and len(json.dumps(context["schema_semantics"]).encode()) < 1600
+    assert requests[1].response_schema["anyOf"][0]["properties"]["arguments"]["properties"]["mode"]["const"] == "metadata"
+    assert result.plan.plan_digest == compile_workflow_plan(
+        {key: native[key] for key in ("name", "steps", "outputs")}, catalog, task=task, requirements=contract).plan_digest
+
+
+def test_true_full_set_caller_obligation_rejects_a_schema_valid_subset_without_weakening_defaults():
+    task = "Select the complete cedar, elm and pine set explicitly."
+    complete = ["cedar", "elm", "pine"]
+    contract = compile_workflow_requirements(task, required_operations=["fixture.alpha"],
+        output_operations=["fixture.alpha"], argument_rules=[
+            {"operation": "fixture.alpha", "path": "/choices", "comparison": "equals", "value": complete}])
+    planner, catalog, requests = _planner([_append(),
+        _selection_arguments({"mode": "metadata", "choices": ["elm"]}),
+        _selection_arguments({"mode": "metadata", "choices": complete}), _finish()], catalog=_selection_catalog())
+    assert catalog.validate_arguments("fixture.alpha", {"mode": "metadata", "choices": ["elm"]})["choices"] == ["elm"]
+    result = planner.build(task, approve_provider_call=True, requirements=contract)
+    assert result.status == "planned" and len(requests) == 4
+    assert result.to_dict()["decisions"][1]["error_code"] == "invalid_arguments_binding_or_prefix_contract"
+    assert json.loads(requests[2].messages[0]["content"])["accepted_plan_symbols"] == []
+    assert result.plan.to_dict()["steps"][0]["arguments"]["choices"] == complete
+    assert result.plan.to_dict()["requirements"] == contract.to_dict()
+    assert catalog.resolve("fixture.alpha").to_dict()["input_schema"]["properties"]["choices"]["default"] == complete
+
+
+@pytest.mark.parametrize("arguments", [{"choices": ["elm"], "mode": "summary"}, {"choices": ["elm"]}])
+def test_const_and_required_properties_remain_native_obligations_after_schema_clarification(arguments):
+    planner, _, requests = _planner([_append(), _selection_arguments(arguments)], catalog=_selection_catalog())
+    result = planner.build("Choose metadata mode and elm.", approve_provider_call=True, max_decision_attempts=1)
+    assert result.status == "budget_exhausted" and result.plan is None
+    assert result.to_dict()["accepted_partial_steps"] == [] and len(requests) == 2
+    assert result.to_dict()["decisions"][-1]["error_code"] == "invalid_arguments_binding_or_prefix_contract"
+
+
+def test_workflow_name_cannot_instantiate_a_missing_operation_and_native_finish_feedback_preserves_that_fact():
+    task = "Transform a future record and pass it through the second operation."
+    contract = compile_workflow_requirements(task,
+        required_operations=["fixture.alpha", "fixture.beta"], output_operations=["fixture.beta"],
+        max_calls_by_operation={"fixture.alpha": 1, "fixture.beta": 1},
+        data_links=[{"source_operation": "fixture.alpha", "target_operation": "fixture.beta"}])
+    misleading_name = {"action": "finish", "name": "fixture.beta", "outputs": ["s1"]}
+    planner, catalog, requests = _planner([_append(), _arguments(), misleading_name,
+        _append("fixture.beta"), _arguments({"$symbol": "s1", "pointer": "/text"}), _finish(["s2"])])
+    result = planner.build(task, approve_provider_call=True, requirements=contract)
+    assert result.status == "planned" and len(requests) == 6
+    context = json.loads(requests[3].messages[0]["content"])
+    diagnostic = context["validation_feedback"]["finish_diagnostics"]
+    assert diagnostic["structure_valid"] is True and diagnostic["finish_accepted"] is False and diagnostic["repairs_applied"] is False
+    assert diagnostic["operation_instances"] == [{"symbol": "s1", "operation": "fixture.alpha"}]
+    assert diagnostic["selected_output_symbols"] == ["s1"]
+    audit = diagnostic["requirements_audit"]
+    proposal = {"name": "fixture.beta", "steps": context["accepted_plan_symbols"], "outputs": ["s1"]}
+    assert audit == audit_workflow_requirements(proposal, contract, catalog)
+    assert audit["blocking_issues"] == [{"code": "required_operation_missing", "operation": "fixture.beta"},
+        {"code": "required_output_missing", "operation": "fixture.beta"}]
+    assert result.to_dict()["decisions"][2]["finish_diagnostics"]["diagnostics_digest"] == content_digest(diagnostic)
+    assert [branch["properties"]["action"]["enum"][0] for branch in requests[3].response_schema["anyOf"]] == ["clarify", "refuse", "append", "finish"]
+    assert [step["operation"] for step in result.plan.to_dict()["steps"]] == ["fixture.alpha", "fixture.beta"]
+
+
+def test_finish_feedback_audits_actual_model_outputs_instead_of_temporary_prefix_outputs():
+    task = "Transform a record twice and return both operation outputs."
+    contract = compile_workflow_requirements(task, required_operations=["fixture.alpha", "fixture.beta"],
+        output_operations=["fixture.alpha", "fixture.beta"])
+    planner, _, requests = _planner([_append(), _arguments(), _append("fixture.beta"),
+        _arguments({"$symbol": "s1", "pointer": "/text"}), _finish(["s2"]), _finish(["s1", "s2"])])
+    result = planner.build(task, approve_provider_call=True, requirements=contract)
+    assert result.status == "planned"
+    context = json.loads(requests[5].messages[0]["content"])
+    diagnostic = context["validation_feedback"]["finish_diagnostics"]
+    assert context["prefix_audit"]["requirements_audit"]["contract_satisfied"] is True
+    assert diagnostic["requirements_audit"]["contract_satisfied"] is False
+    assert diagnostic["requirements_audit"]["blocking_issues"] == [{"code": "required_output_missing", "operation": "fixture.alpha"}]
+    assert result.plan.to_dict()["outputs"] == ["s1", "s2"]
+
+
+def test_structural_finish_rejection_does_not_fabricate_an_empty_or_successful_requirements_audit():
+    task = "Return two independent transformations."
+    contract = compile_workflow_requirements(task, required_operations=["fixture.alpha", "fixture.beta"])
+    planner, _, requests = _planner([_append(), _arguments(), _append("fixture.beta"), _arguments(),
+        _finish(["s2"]), _finish(["s1", "s2"])])
+    result = planner.build(task, approve_provider_call=True, requirements=contract)
+    assert result.status == "planned"
+    diagnostic = json.loads(requests[5].messages[0]["content"])["validation_feedback"]["finish_diagnostics"]
+    assert diagnostic["structure_valid"] is False and diagnostic["requirements_audit"] is None
+    assert diagnostic["requirements_audit_state"] == "not_run_due_to_native_structure_rejection"
+    summary = result.to_dict()["decisions"][4]["finish_diagnostics"]
+    assert summary["blocking_issue_count"] is None and summary["deferred_argument_count"] is None
+
+
+def test_finish_diagnostics_cannot_bypass_the_total_prompt_byte_bound_before_a_retry(monkeypatch):
+    from prism_sdk import workflow_incremental_planner as incremental
+    task = "Use both transformations."
+    contract = compile_workflow_requirements(task, required_operations=["fixture.alpha", "fixture.beta"])
+    def bound_after_rejected_finish(request):
+        if len(requests) == 3:
+            current = len(json.dumps({"messages": request.messages, "response_schema": request.response_schema}, ensure_ascii=False).encode())
+            monkeypatch.setattr(incremental, "MAX_WORKFLOW_PLANNING_CONTEXT_BYTES", current + 1)
+    planner, _, requests = _planner([_append(), _arguments(), _finish()], callback=bound_after_rejected_finish)
+    with pytest.raises(IncrementalWorkflowPlanningError, match="context exceeds its byte bound"):
+        planner.build(task, approve_provider_call=True, requirements=contract)
+    assert len(requests) == 3
 
 
 def test_immutable_exact_contract_is_final_authority_and_preserves_existing_plan_digest():
