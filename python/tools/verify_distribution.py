@@ -179,7 +179,17 @@ def main() -> int:
                 "'glioma_molecular_workflow_proposal', 'WorkflowConnectionContext', "
                 "'WorkflowConnectionResource', 'WorkflowConnectionSession', 'WorkflowConnectionError', "
                 "'WorkflowArtifactSink', 'PreparedWorkflowArtifact', 'SQLiteWorkflowArtifactAuthorizationStore', "
-                "'WorkflowArtifactError', 'WorkflowArtifactCancelled', 'audit_workflow_reference_paths'); "
+                "'WorkflowArtifactError', 'WorkflowArtifactCancelled', 'audit_workflow_reference_paths', "
+                "'ReviewedGdcGeneMutationRetrievalConfig', 'ReviewedGdcGeneMutationRetrievalPlan', "
+                "'ReviewedGdcGeneMutationRetrievalAdapter', 'validate_reviewed_gdc_gene_mutation_bundle', "
+                "'EnsemblGeneRetrievalConfig', 'EnsemblGeneHttpResponse', 'retrieve_ensembl_gene_references', "
+                "'validate_ensembl_gene_bundle', 'register_ensembl_gene_operations', 'register_gdc_gene_mutation_operations', "
+                "'analyze_glioma_mutation_counts', 'validate_glioma_mutation_analysis', 'glioma_mutation_review_handoff', "
+                "'validate_glioma_mutation_handoff', 'register_glioma_mutation_workflow_operations', "
+                "'compile_glioma_mutation_workflow', 'analyze_glioma_gene_references', "
+                "'validate_glioma_gene_reference_analysis', 'glioma_gene_reference_review_handoff', "
+                "'validate_glioma_gene_reference_handoff', 'register_glioma_gene_reference_workflow_operations', "
+                "'compile_glioma_gene_reference_workflow'); "
                 "assert all(name in prism_sdk.__all__ and callable(getattr(prism_sdk, name)) "
                 "and type(getattr(prism_sdk, name)).__name__ != '_UnavailableFeature' "
                 "for name in workflow_exports), 'new workflow exports must be real installed APIs'; "
@@ -267,15 +277,36 @@ def main() -> int:
                 "glioma.molecular.coverage", "glioma.molecular.review_handoff"}:
             raise RuntimeError("installed molecular workflow does not compose its real reviewed source operations")
 
+        fixed_templates = {
+            "mutations": {"gdc.gene_mutation_counts", "glioma.mutation.analyze", "glioma.mutation.review_handoff"},
+            "gene-references": {"ensembl.gene_references", "ncbi_gene.summary", "glioma.gene_references.analyze", "glioma.gene_references.review_handoff"},
+        }
+        for name, expected_operations in fixed_templates.items():
+            path = temporary_root / (name + "-plan.json")
+            run([str(executable), "workflow-template", "--template", name, "--task", "Review fixed public TP53 sources",
+                 "--out", str(path)], cwd=temporary_root, env=clean_env)
+            plan = json.loads(path.read_text(encoding="utf-8"))
+            if ({step["operation"] for step in plan["steps"]} != expected_operations
+                    or plan["requirements"]["schema"] != "aurora-workflow-requirements/0.2"
+                    or plan["requirements"]["max_steps"] != len(expected_operations)
+                    or plan["outputs"] != ["review"]):
+                raise RuntimeError("installed fixed source template lost its exact retained contract")
+
         application_root = temporary_root / "application"
         application_root.mkdir()
-        def worker_call(request: dict) -> dict:
-            result = run([str(interpreter), "-m", "prism_sdk.workflow_api_worker", "--root", str(application_root)],
+        def worker_call(request: dict, flags: tuple[str, ...] = ()) -> dict:
+            result = run([str(interpreter), "-m", "prism_sdk.workflow_api_worker", "--root", str(application_root), *flags],
                          cwd=temporary_root, env=clean_env, input_text=json.dumps(request))
             envelope = json.loads(result.stdout)
             if envelope.get("schema") != "aurora-workflow-api-response/0.1" or envelope.get("ok") is not True:
                 raise RuntimeError("installed application worker did not emit its successful protocol envelope")
             return envelope["data"]
+        for planner, flag, expected_steps in (("glioma-mutations", "--glioma-mutations", 3), ("gene-references", "--gene-references", 4)):
+            fixed_plan = worker_call({"action": "plan", "planner": planner, "task": "Review fixed public TP53 sources"}, (flag,))
+            if (fixed_plan["source_dispatch"] is not False or len(fixed_plan["plan"]["steps"]) != expected_steps
+                    or fixed_plan["interpretation"]["provider_calls"] != 0
+                    or fixed_plan["interpretation"]["question_used_as_query"] is not False):
+                raise RuntimeError("installed fixed source worker planner changed its no-model scope")
         application_plan = worker_call({"action": "plan", "planner": "glioma-intent",
             "task": "Review glioma evidence using PubMed only; exclude trials and TCGA."})
         if application_plan["source_dispatch"] is not False or application_plan["plan"]["requirements"]["schema"] != "aurora-workflow-requirements/0.2":
