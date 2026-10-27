@@ -376,4 +376,4 @@ def test_onboarded_reader_keeps_default_catalogue_and_has_explicit_current_regis
     base = builtin_workflow_operation_catalog()
     assert base.catalog_digest == "53e11ef585fa6d65736ecc77d5042962a9276fac8fbe7b39bde1efccfec5e5b2"
     counts = reviewed_workflow_provider_registry(base).to_dict()["counts"]
-    assert counts["implemented_reader_paths"] == 20 and counts["declared_reviewed_service_groups"] == 17
+    assert counts["implemented_reader_paths"] == 21 and counts["declared_reviewed_service_groups"] == 18

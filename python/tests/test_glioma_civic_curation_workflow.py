@@ -415,7 +415,7 @@ def test_optional_review_profile_adds_two_local_operations_without_new_reader_or
     assert all(combined.resolve(operation).implementation == "local" for operation in (
         curation.GLIOMA_CIVIC_CURATION_ANALYSIS_OPERATION, curation.GLIOMA_CIVIC_CURATION_REVIEW_OPERATION))
     registry = reviewed_workflow_provider_registry(combined).to_dict()
-    assert registry["counts"]["implemented_reader_paths"] == 20 and registry["counts"]["declared_reviewed_service_groups"] == 17
+    assert registry["counts"]["implemented_reader_paths"] == 21 and registry["counts"]["declared_reviewed_service_groups"] == 18
     assert registry["counts"]["registered_reviewed_default_readers"] == 9
     assert registry["counts"]["independently_live_verified_providers"]["value"] is None
     value = compile_workflow_capability(QUESTION, combined, profile, enabled_profiles=[profile]).to_dict()

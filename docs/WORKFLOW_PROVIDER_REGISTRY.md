@@ -17,8 +17,8 @@ readers are actually registered.
 
 ## Units and states
 
-Manifest `.4` contains **20 concrete reviewed reader paths in 17 declared API service groups**.
-The unchanged default catalogue registers eight readers in seven groups; twelve optional readers
+Manifest `.5` contains **21 concrete reviewed reader paths in 18 declared API service groups**.
+The unchanged default catalogue registers eight readers in seven groups; thirteen optional readers
 remain `not_registered`. PubMed and NCBI Gene share the NCBI E-utilities group. GDC project
 summaries, fixed TP53 mutation counts and project SSM-data coverage share one GDC group.
 HGNC and NCI EVS add native identifier and terminology readers through fixed
@@ -26,7 +26,10 @@ HGNC and NCI EVS add native identifier and terminology readers through fixed
 contracts but a shared NCI affiliation; their organizational independence remains unassessed.
 The [CIViC reader](CIVIC_GLIOMA_EVIDENCE.md) adds a separate fixed read-only GraphQL POST contract.
 The [Cellosaurus reader](CELLOSAURUS_CELL_LINE_METADATA.md) adds one fixed identity/curation GET
-contract; a prior format capture does not become a live adapter proof. Earlier `.3` manifests
+contract; a prior format capture does not become a live adapter proof. The fixed
+[DataCite DOI metadata reader](DATACITE_TCGA_GBM_COLLECTION_METADATA.md) adds one DataCite
+API group, not a TCIA imaging reader; synthetic admission does not establish live conformance.
+Earlier `.4`/20-path/17-group, `.3` manifests
 and 19-path/16-group evidence, and `.2`/18-path/15-group records, remain tied to their earlier source revisions.
 
 These are application-reviewed API groupings, not independently operated organizations or
