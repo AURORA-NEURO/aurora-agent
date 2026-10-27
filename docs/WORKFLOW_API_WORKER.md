@@ -182,7 +182,11 @@ authorship, semantic correctness, complete extraction or scientific validity.
 An accepted response has `status: "accepted"` and a nonnull `acceptance` containing
 `acceptance_digest`, `accepted_declarations`, `admission`, timestamp and explicit provenance limits.
 Acceptance alone does not imply readiness: only
-`acceptance.admission.status == "ready_for_constrained_authoring"` permits an authoring attempt.
+`acceptance.admission.status == "ready_for_constrained_authoring"` permits an authoring attempt
+subject to the separate [current scalar literal policy](WORKFLOW_LITERAL_POLICY.md). Its
+`current_policy_conflict` result retains the exact report in `interpretation` and the historical
+review, saves no plan/run, and invokes no provider. Older admission/acceptance records remain
+readable and unchanged; the new policy applies only when requesting new authoring.
 Unresolved/unavailable actions and conflicts remain blocking after caller acceptance.
 
 Planning with the paired review reference checks its digest and exact context before constructing

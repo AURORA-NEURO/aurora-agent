@@ -456,6 +456,30 @@ test('a nonplanned result clears an earlier saved plan and source approval befor
   assert.equal(p.calls.filter(call => call.url.endsWith('/runs')).length, 0);
 });
 
+test('a current literal policy conflict shows its exact report and clears prior plan and source authority', async () => {
+  const report = { schema: 'aurora-workflow-literal-policy/0.1', status: 'current_policy_conflict',
+    checks: [{ obligation_id: 'size', state: 'definite_scalar_conflict',
+      diagnostics: [{ code: 'maximum', message: 'value violates maximum=100' }] }],
+    whole_call_validity: 'not_assessed', provider_calls: 0, source_dispatches: 0 };
+  const p = page([planned(), { status: 'current_policy_conflict', interpretation: report,
+    intent_review: { status: 'accepted' }, source_dispatch: false }]);
+  await p.connect(['pubmed.search']);
+  p.$('planner').value = 'local-incremental'; p.$('provider-grant').checked = true;
+  await p.$('plan-form').fire('submit');
+  p.$('source-grant').checked = true; await p.$('source-grant').fire('change');
+  assert.equal(p.$('run').disabled, false);
+  p.$('provider-grant').checked = true;
+  await p.$('plan-form').fire('submit');
+  assert.equal(p.$('plan-workspace').hidden, true);
+  assert.equal(p.$('source-grant').checked, false);
+  assert.equal(p.$('source-grant').disabled, true);
+  assert.equal(p.$('run').disabled, true);
+  assert.match(p.$('interpretation').textContent, /definite_scalar_conflict/);
+  assert.match(p.$('interpretation').textContent, /maximum=100/);
+  assert.match(p.$('error').textContent, /current_policy_conflict.*No executable plan was saved/);
+  assert.equal(p.calls.filter(call => call.url.endsWith('/runs')).length, 0);
+});
+
 for (const failure of [
   { name: 'HTTP 500 with a success-shaped body', reply: { httpResponse: {
     status: 500, ok: false, text: async () => codec.stringify({ ok: true, data: planned() }) } },
