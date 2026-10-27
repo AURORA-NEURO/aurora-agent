@@ -5,6 +5,10 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
   const $ = id => document.getElementById(id);
   const state = { token: '', catalogue: [], plan: null, proposal: null, dirty: true, editRevision: 0, pendingRun: false, planningSettingsDirty: false, run: null, timer: null };
   const endpoint = '/v1/executable-workflows';
+  const templateOperations = {
+    'glioma-mutations': ['gdc.gene_mutation_counts', 'glioma.mutation.analyze', 'glioma.mutation.review_handoff'],
+    'gene-references': ['ensembl.gene_references', 'glioma.gene_references.analyze', 'glioma.gene_references.review_handoff']
+  };
   function error(message) { $('error').textContent = String(message); $('error').hidden = false; }
   function clearError() { $('error').hidden = true; $('error').textContent = ''; $('diagnostics-panel').hidden = true; }
   function diagnostics(value) { if (value) { $('diagnostics-panel').hidden = false; $('diagnostics-panel').open = true; $('diagnostics').textContent = stringify(value); } }
@@ -18,6 +22,14 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
   function action(fn) { return async event => { event?.preventDefault(); clearError(); try { await fn(); } catch (failure) { error(failure.message || failure); diagnostics(failure.diagnostics); } }; }
   function dirty() { state.editRevision += 1; state.dirty = true; $('source-grant').checked = false; $('source-grant').disabled = true; $('run').disabled = true; $('validation-status').textContent = 'Unsaved edits — validate before approval.'; }
   function element(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
+  function updatePlannerAvailability() {
+    const installed = new Set(state.token ? state.catalogue.map(operation => operation.operation_id) : []);
+    for (const [planner, required] of Object.entries(templateOperations)) $('planner').querySelector('option[value="' + planner + '"]').disabled = !required.every(operation => installed.has(operation));
+    if ($('planner').selectedOptions[0]?.disabled) {
+      $('planner').value = 'glioma-intent';
+      if (state.plan) { state.planningSettingsDirty = true; dirty(); }
+    }
+  }
   function renderCatalogue() {
     const filter = $('catalog-filter').value.toLowerCase(); const list = $('catalog-list'); list.replaceChildren();
     for (const operation of state.catalogue.filter(item => (item.operation_id + ' ' + item.description).toLowerCase().includes(filter))) {
@@ -72,8 +84,8 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
     if (!response.ok) { let message = 'The export was refused.'; try { message = parseJson(text).error?.message || message; } catch {} throw new Error(message); }
     const blob = new Blob([text], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = element('a'); link.href = url; link.download = 'aurora-' + id + '-' + kind + '.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  $('connect-form').addEventListener('submit', action(async () => { state.token = $('token').value; $('token').value = ''; $('connection-status').textContent = 'Connecting…'; try { const catalogue = await request('/catalogue'); state.catalogue = catalogue.operations; $('catalog-count').textContent = catalogue.operation_count + ' operations · ' + catalogue.integration_count + ' integration IDs'; $('connection-status').textContent = 'Connected to this local API'; renderCatalogue(); } catch (failure) { state.token = ''; $('connection-status').textContent = 'Disconnected'; throw failure; } }));
-  $('disconnect').addEventListener('click', () => { state.token = ''; clearTimeout(state.timer); $('token').value = ''; $('connection-status').textContent = 'Disconnected'; $('source-grant').checked = false; $('run').disabled = true; });
+  $('connect-form').addEventListener('submit', action(async () => { state.token = $('token').value; $('token').value = ''; $('connection-status').textContent = 'Connecting…'; try { const catalogue = await request('/catalogue'); state.catalogue = catalogue.operations; updatePlannerAvailability(); $('catalog-count').textContent = catalogue.operation_count + ' operations · ' + catalogue.integration_count + ' integration IDs'; $('connection-status').textContent = 'Connected to this local API'; renderCatalogue(); } catch (failure) { state.token = ''; state.catalogue = []; updatePlannerAvailability(); $('connection-status').textContent = 'Disconnected'; throw failure; } }));
+  $('disconnect').addEventListener('click', () => { state.token = ''; state.catalogue = []; updatePlannerAvailability(); clearTimeout(state.timer); $('token').value = ''; $('connection-status').textContent = 'Disconnected'; $('source-grant').checked = false; $('run').disabled = true; });
   $('catalog-filter').addEventListener('input', renderCatalogue);
   $('plan-form').addEventListener('submit', action(async () => { $('build').disabled = true; try { const requestedTask = $('task').value; const requestedPlanner = $('planner').value; const requestedMaximum = Number($('max-steps').value); const data = await request('/plans', { task: requestedTask, planner: requestedPlanner, max_steps: requestedMaximum, approve_provider_call: $('provider-grant').checked }); if ($('task').value !== requestedTask || $('planner').value !== requestedPlanner || Number($('max-steps').value) !== requestedMaximum) throw new Error('The task changed while planning. Build a new plan for the current task.'); acceptPlan(data); } finally { $('build').disabled = false; $('provider-grant').checked = false; } }));
   $('interpret').addEventListener('click', action(async () => showInterpretation(await request('/interpret', { task: $('task').value }))));

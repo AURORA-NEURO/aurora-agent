@@ -20,6 +20,8 @@ fn main() {
     let mut workflow_base_url = "http://127.0.0.1:11434/v1".to_string();
     let mut workflow_research_sources = false;
     let mut workflow_molecular_glioma = false;
+    let mut workflow_glioma_mutations = false;
+    let mut workflow_gene_references = false;
     let mut workflow_options_supplied = false;
     let mut allowed_http_origins = Vec::new();
     let mut mission_state_path = None;
@@ -77,6 +79,14 @@ fn main() {
             "--workflow-molecular-glioma" => {
                 workflow_options_supplied = true;
                 workflow_molecular_glioma = true;
+            }
+            "--workflow-glioma-mutations" => {
+                workflow_options_supplied = true;
+                workflow_glioma_mutations = true;
+            }
+            "--workflow-gene-references" => {
+                workflow_options_supplied = true;
+                workflow_gene_references = true;
             }
             "--allow-http-origin" => {
                 allowed_http_origins.push(value("--allow-http-origin", &mut arguments))
@@ -174,7 +184,7 @@ fn main() {
                      Webhooks: register, poll signed deliveries, retry, and acknowledge.\n\
                      Domain source retrieval makes no outbound HTTP requests by default. Repeat --allow-http-origin <host[:port]> to approve exact plain-HTTP origins; a retained source plan must also opt in and allow the requested host. HTTPS and redirects are refused. The gateway does not terminate inbound TLS or speak gRPC."
                 );
-                println!("\nLocal executable-workflow application (opt-in):\n  --workflow-state <existing absolute directory> --workflow-python <absolute python executable> --workflow-python-path <absolute SDK directory>\n  [--workflow-model <local model>] [--workflow-base-url <loopback Ollama /v1 URL>] [--workflow-research-sources] [--workflow-molecular-glioma]\n  Requires a fixed numeric loopback --bind and >=32-byte bearer token, even on loopback. Prefer --token-env <environment variable> (default AURORA_API_TOKEN) to keep the token out of process arguments.\n  Open /workflows/ and enter the token for this page session. Plans, edits, run controls, and explicit exports use /v1/executable-workflows; the Python SDK owns their validation and execution.");
+                println!("\nLocal executable-workflow application (opt-in):\n  --workflow-state <existing absolute directory> --workflow-python <absolute python executable> --workflow-python-path <absolute SDK directory>\n  [--workflow-model <local model>] [--workflow-base-url <loopback Ollama /v1 URL>] [--workflow-research-sources] [--workflow-molecular-glioma] [--workflow-glioma-mutations] [--workflow-gene-references]\n  Requires a fixed numeric loopback --bind and >=32-byte bearer token, even on loopback. Prefer --token-env <environment variable> (default AURORA_API_TOKEN) to keep the token out of process arguments.\n  Open /workflows/ and enter the token for this page session. Plans, edits, run controls, and explicit exports use /v1/executable-workflows; the Python SDK owns their validation and execution.");
                 return;
             }
             other => {
@@ -218,6 +228,8 @@ fn main() {
                 base_url: workflow_base_url,
                 research_sources: workflow_research_sources,
                 molecular_glioma: workflow_molecular_glioma,
+                glioma_mutations: workflow_glioma_mutations,
+                gene_references: workflow_gene_references,
             })
         }
         None if workflow_options_supplied => {

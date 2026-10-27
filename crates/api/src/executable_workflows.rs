@@ -39,6 +39,8 @@ pub struct WorkflowApplicationConfig {
     pub base_url: String,
     pub research_sources: bool,
     pub molecular_glioma: bool,
+    pub glioma_mutations: bool,
+    pub gene_references: bool,
 }
 
 impl WorkflowApplicationConfig {
@@ -643,6 +645,12 @@ impl WorkflowApplication {
         }
         if self.config.molecular_glioma {
             command.arg("--molecular-glioma");
+        }
+        if self.config.glioma_mutations {
+            command.arg("--glioma-mutations");
+        }
+        if self.config.gene_references {
+            command.arg("--gene-references");
         }
         #[cfg(windows)]
         {

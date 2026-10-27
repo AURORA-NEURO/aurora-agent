@@ -5,9 +5,9 @@ format through the existing bounded Rust HTTP server. The SDK remains the only D
 executor. The separate Rust `/v1/missions` grammar is not used for these plans. This is a
 repository-defined application extension; it does not claim a new blueprint module implementation.
 
-The page provides a public-operation catalogue, task entry, bounded glioma interpretation or local
-model planning, editable step cards and proposal JSON, retained task-contract inspection, saved
-revision validation, exact-plan approval, asynchronous run monitoring, cancellation, explicit
+The page provides a public-operation catalogue, task entry, bounded glioma interpretation, fixed
+public-source templates or local model planning, editable step cards and proposal JSON, retained
+task-contract inspection, saved revision validation, exact-plan approval, asynchronous run monitoring, cancellation, explicit
 resume/retry controls, and explicit output/checkpoint downloads. Execution completion and
 scientific review remain separate states.
 
@@ -36,7 +36,9 @@ the operator environment. Avoid putting the token in command-line arguments or s
   --workflow-base-url http://127.0.0.1:11434/v1 `
   --workflow-model qwen2.5:1.5b `
   --workflow-research-sources `
-  --workflow-molecular-glioma
+  --workflow-molecular-glioma `
+  --workflow-glioma-mutations `
+  --workflow-gene-references
 ```
 
 `--token-env VARIABLE_NAME` selects a different existing environment variable. The default is
@@ -56,6 +58,27 @@ The bounded glioma interpreter needs no model call. An example it accepts is:
 Unsupported clauses produce exact unresolved spans. Local model planning requires the separately
 selected provider-call approval and an operator-configured, already available Ollama model.
 Configuring a model does not establish its planning quality or automatically download weights.
+
+The last two flags independently enable fixed, model-free TP53 templates. Both default to false;
+omitting them leaves the default catalogue unchanged. The page enables a template only after the
+connected catalogue contains its source operation and both local analysis/review operations.
+Browser requests cannot turn on an omitted capability. In these templates, task text is a retained
+research label, not a query interpreted into gene or cohort selectors:
+
+- `--workflow-glioma-mutations` enables **TP53 mutation aggregate review** (`glioma-mutations`):
+  a three-step plan reads fixed public GDC TP53 mutation-affected case aggregates for TCGA-GBM
+  and TCGA-LGG, performs local analysis, and produces a scientific review hold. Missing counts
+  remain unknown. It supplies no gene-specific denominator, prevalence, rates, pooled project
+  count, or clinical conclusion.
+- `--workflow-gene-references` enables **TP53 gene reference review** (`gene-references`):
+  a four-step plan reads reviewed Ensembl TP53 references and NCBI TP53 identity data, compares
+  exact candidate identifier strings locally, and produces a scientific review hold. Ambiguity
+  remains visible; string agreement does not validate identifier equivalence. It joins no
+  measurements, cohorts, mutation aggregates, or outcomes.
+
+These choices need no provider-call approval or model configuration. Execution still requires
+the separate exact-plan source approval. Registration does not establish live source coverage
+or scientific validity.
 
 ## Plan and run authority
 

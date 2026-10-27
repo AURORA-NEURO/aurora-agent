@@ -45,6 +45,8 @@ impl Fixture {
             base_url: "http://127.0.0.1:11435/v1".into(),
             research_sources: false,
             molecular_glioma: false,
+            glioma_mutations: false,
+            gene_references: false,
         };
         Self { root, config }
     }
@@ -181,6 +183,16 @@ fn hostile_origin_host_content_type_and_control_fields_are_refused_before_worker
     no_mime.headers.remove("content-type");
     assert_eq!(router.handle(no_mime).status, 415);
     assert_eq!(router.handle(request("POST", "/v1/executable-workflows/plans", json!({"task":"Review glioma evidence.","planner":"glioma-intent","argv":["forbidden"]}))).status,422);
+    for field in ["glioma_mutations", "gene_references"] {
+        let mut body = json!({"task":"A fixed public research label","planner":"glioma-mutations"});
+        body[field] = json!(true);
+        assert_eq!(
+            router
+                .handle(request("POST", "/v1/executable-workflows/plans", body))
+                .status,
+            422
+        );
+    }
     assert_eq!(router.handle(request("POST", "/v1/executable-workflows/runs", json!({"plan_id":"a".repeat(32),"expected_plan_digest":"b".repeat(64),"approve_source_dispatch":1}))).status,422);
     assert_eq!(
         std::fs::read_dir(&fixture.root).unwrap().count(),
@@ -213,6 +225,100 @@ fn hostile_origin_host_content_type_and_control_fields_are_refused_before_worker
     assert!(!preflight
         .headers
         .contains_key("access-control-allow-origin"));
+}
+
+#[test]
+fn optional_public_template_catalogues_are_operator_owned_and_plan_without_a_model() {
+    for (mutations, references) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut fixture = Fixture::new();
+        fixture.config.glioma_mutations = mutations;
+        fixture.config.gene_references = references;
+        let application = fixture.application();
+        let catalogue = data(
+            application
+                .invoke(&json!({"action":"catalogue"}), Duration::from_secs(30))
+                .unwrap(),
+        );
+        let operations: std::collections::BTreeSet<&str> = catalogue["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|operation| operation["operation_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            operations.len(),
+            10 + usize::from(mutations) * 3 + usize::from(references) * 3
+        );
+        for (enabled, planner, source, analysis, review, steps) in [
+            (
+                mutations,
+                "glioma-mutations",
+                "gdc.gene_mutation_counts",
+                "glioma.mutation.analyze",
+                "glioma.mutation.review_handoff",
+                3,
+            ),
+            (
+                references,
+                "gene-references",
+                "ensembl.gene_references",
+                "glioma.gene_references.analyze",
+                "glioma.gene_references.review_handoff",
+                4,
+            ),
+        ] {
+            for operation in [source, analysis, review] {
+                assert_eq!(operations.contains(operation), enabled);
+            }
+            let task = "A retained public research label; selectors remain fixed";
+            let planned = application
+                .invoke(
+                    &json!({"action":"plan","planner":planner,"task":task}),
+                    Duration::from_secs(30),
+                )
+                .unwrap();
+            if !enabled {
+                assert_eq!(planned["ok"], false);
+                continue;
+            }
+            let planned = data(planned);
+            assert_eq!(planned["task"], task);
+            assert_eq!(planned["source_dispatch"], false);
+            assert_eq!(planned["interpretation"]["provider_calls"], 0);
+            assert_eq!(planned["interpretation"]["question_used_as_query"], false);
+            assert_eq!(planned["plan"]["steps"].as_array().unwrap().len(), steps);
+            assert_eq!(planned["plan"]["steps"][0]["operation"], source);
+            assert_eq!(
+                planned["plan"]["steps"][0]["arguments"],
+                json!({"timeout_ms":30000})
+            );
+            if references && planner == "gene-references" {
+                assert_eq!(
+                    planned["plan"]["steps"][1]["operation"],
+                    "ncbi_gene.summary"
+                );
+                assert_eq!(
+                    planned["plan"]["steps"][1]["arguments"],
+                    json!({"gene_symbols":["TP53"],"timeout_ms":30000})
+                );
+            }
+            assert_eq!(
+                planned["plan"]["requirements"]["max_calls_by_operation"][source],
+                1
+            );
+            assert!(planned["plan"]["requirements"]["required_operations"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(review)));
+            let bounded = application
+                .invoke(
+                    &json!({"action":"plan","planner":planner,"task":task,"max_steps":1}),
+                    Duration::from_secs(30),
+                )
+                .unwrap();
+            assert_eq!(bounded["ok"], false);
+        }
+    }
 }
 
 #[test]
