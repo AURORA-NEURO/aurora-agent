@@ -81,7 +81,7 @@ Missing optional comments remain missing; their absence establishes no absence o
 identity problems. Metadata does not validate authentication, model suitability or disease
 equivalence. Pagination, total count, release identity and scientific relevance remain unassessed.
 
-The [provider registry](WORKFLOW_PROVIDER_REGISTRY.md) version 0.4 binds twenty reviewed reader paths to
+The [provider registry](WORKFLOW_PROVIDER_REGISTRY.md) manifest `reviewed-public-readers/2026-10-27.4` binds twenty reviewed reader paths to
 seventeen explicitly reviewed API service groups, with NCBI and GDC readers deduplicated. The eight
 default readers and their seven groups remain unchanged; twelve readers are optional. It checks
 actual operation/default-executor/component identities, supports source-free request conformance
