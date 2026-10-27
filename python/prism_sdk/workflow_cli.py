@@ -51,6 +51,7 @@ def register_workflow_commands(subparsers: Any) -> None:
         parser.add_argument("--molecular-glioma", action="store_true", help="include local molecular catalogue coverage and review operations")
         parser.add_argument("--glioma-mutations", action="store_true", help="include the fixed public GDC TP53 aggregate count reader and review operations")
         parser.add_argument("--gene-references", action="store_true", help="include the fixed Ensembl TP53 reference reader and source-reference review operations")
+        parser.add_argument("--protein-pathways", action="store_true", help="include fixed public TP53 UniProt/Reactome annotation readers and local review operations")
         if name not in {"workflow-build", "workflow-run"}:
             parser.add_argument("--model", help="local model identity, required with --grounded-glioma")
             parser.add_argument("--base-url", default="http://127.0.0.1:11434/v1")
@@ -60,7 +61,7 @@ def register_workflow_commands(subparsers: Any) -> None:
     for name in ("workflow-build", "workflow-run"):
         build = commands[name]
         build.add_argument("--task", required=True)
-        build.add_argument("--planner", choices=("local-model", "glioma-intent"), default="local-model", help="local model proposal or bounded typed glioma request compiler")
+        build.add_argument("--planner", choices=("local-model", "local-incremental", "glioma-intent"), default="local-model", help="whole-graph model proposal, bounded incremental local decisions, or typed glioma request compiler")
         build.add_argument("--model", help="installed local Ollama model ID; required for local-model planning or grounded synthesis")
         build.add_argument("--base-url", default="http://127.0.0.1:11434/v1")
         build.add_argument("--timeout", type=float, default=120.0)
@@ -69,9 +70,12 @@ def register_workflow_commands(subparsers: Any) -> None:
         build.add_argument("--max-steps", type=int, default=16)
         build.add_argument("--requirements", help="operator-authored workflow requirements JSON input")
         build.add_argument("--planning-attempts", type=int, choices=range(1, 5), default=1, help="maximum local model planning calls, from one to four")
+        build.add_argument("--model-call-budget", type=int, choices=range(1, 129), default=64, help="incremental planner total call cap; at least two calls per step plus finish")
+        build.add_argument("--decision-attempts", type=int, choices=range(1, 5), default=2, help="incremental planner per-decision attempt cap")
+        build.add_argument("--planning-receipt", help="optional incremental planning result destination, including bounded failures")
         build.add_argument("--out", required=True, help="reviewable plan destination, saved before source dispatch")
     template = commands["workflow-template"]
-    template.add_argument("--template", choices=("evidence", "molecular", "mutations", "gene-references"), default="evidence")
+    template.add_argument("--template", choices=("evidence", "molecular", "mutations", "gene-references", "protein-pathways"), default="evidence")
     template.add_argument("--task", required=True)
     template.add_argument("--no-tcga", action="store_true")
     template.add_argument("--literature-limit", type=int, help="evidence template literature limit, default 10")
@@ -182,6 +186,8 @@ def _preflight_paths(args: argparse.Namespace) -> tuple[dict[str, Any], ...]:
         paths.extend([(f"config_{index}", Path(file_name), False), (f"specification_{index}", spec, False)])
     if args.command in {"workflow-build", "workflow-template", "workflow-run"}:
         paths.append(("plan_output", Path(args.out), True))
+    if getattr(args, "planning_receipt", None):
+        paths.append(("planning_receipt", Path(args.planning_receipt), True))
     if args.command == "workflow-execute":
         if args.resume and not args.checkpoint_store:
             raise WorkflowValidationError("workflow resume requires a checkpoint store")
@@ -260,6 +266,13 @@ def workflow_cli_catalog(args: argparse.Namespace, *, runtime: LLMRuntime | None
         from .glioma_gene_reference_workflow import register_glioma_gene_reference_workflow_operations
         register_ensembl_gene_operations(catalog)
         register_glioma_gene_reference_workflow_operations(catalog)
+    if getattr(args, "protein_pathways", False) or getattr(args, "template", None) == "protein-pathways":
+        from .reviewed_uniprot_retrieval import register_uniprot_operations
+        from .reviewed_reactome_retrieval import register_reactome_operations
+        from .glioma_protein_pathway_workflow import register_glioma_protein_pathway_workflow_operations
+        register_uniprot_operations(catalog)
+        register_reactome_operations(catalog)
+        register_glioma_protein_pathway_workflow_operations(catalog)
     if args.grounded_glioma:
         from .glioma_workflow_synthesis import register_glioma_synthesis_operations
         register_glioma_synthesis_operations(catalog, runtime=runtime if runtime is not None else _local_runtime(args),
@@ -291,7 +304,7 @@ def execute_workflow_command(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "workflow-template" and args.template == "molecular" and args.grounded_glioma:
         raise WorkflowValidationError("molecular catalogue templates do not implement model synthesis")
     if args.command == "workflow-template":
-        if args.template in {"mutations", "gene-references"} and (args.grounded_glioma or args.no_tcga or args.no_gwas
+        if args.template in {"mutations", "gene-references", "protein-pathways"} and (args.grounded_glioma or args.no_tcga or args.no_gwas
                 or any(getattr(args, key) is not None for key in ("literature_limit", "trial_page_size", "trial_max_pages", "association_page_size", "gwas_page_size", "gwas_max_pages"))):
             raise WorkflowValidationError("fixed TP53 review templates do not accept evidence, molecular or synthesis options")
         if args.template == "molecular" and (args.no_tcga or any(getattr(args, key) is not None for key in ("literature_limit", "trial_page_size", "trial_max_pages"))):
@@ -299,6 +312,10 @@ def execute_workflow_command(args: argparse.Namespace) -> dict[str, Any]:
         if args.template == "evidence" and (args.no_gwas or any(getattr(args, key) is not None for key in ("association_page_size", "gwas_page_size", "gwas_max_pages"))):
             raise WorkflowValidationError("molecular template source options cannot be applied to an evidence template")
     if args.command in {"workflow-build", "workflow-run"}:
+        if args.planner == "local-incremental" and args.planning_attempts != 1:
+            raise WorkflowValidationError("incremental planning uses --decision-attempts and --model-call-budget")
+        if args.planner != "local-incremental" and (args.planning_receipt or args.decision_attempts != 2 or args.model_call_budget != 64):
+            raise WorkflowValidationError("incremental controls require --planner local-incremental")
         if not 1 <= args.max_steps <= 32:
             raise WorkflowValidationError("workflow step bound must be between one and thirty-two")
         if args.operation is not None and (not 1 <= len(args.operation) <= 128 or len(set(args.operation)) != len(args.operation)):
@@ -318,7 +335,7 @@ def execute_workflow_command(args: argparse.Namespace) -> dict[str, Any]:
         intent = interpret_glioma_workflow_request(args.task)
         if intent.status != "ready":
             return {"command": args.command, "status": "needs_clarification", "interpretation": intent.to_dict(), "source_dispatch": False}
-    needs_runtime = args.grounded_glioma or (args.command in {"workflow-build", "workflow-run"} and args.planner == "local-model")
+    needs_runtime = args.grounded_glioma or (args.command in {"workflow-build", "workflow-run"} and args.planner in {"local-model", "local-incremental"})
     runtime = _local_runtime(args) if needs_runtime else None
     catalog = workflow_cli_catalog(args, runtime=runtime) if args.grounded_glioma else workflow_cli_catalog(args)
     existing_ids = {operation.operation_id for operation in catalog.operations()}
@@ -335,6 +352,7 @@ def execute_workflow_command(args: argparse.Namespace) -> dict[str, Any]:
 
 def _execute_prepared_workflow_command(args, catalog, retrieved_at, requirements, runtime, *, intent=None):
     intent_receipt = None
+    planning_metadata = {}
     if args.command == "workflow-catalogue":
         return {"command": args.command, **catalog.to_dict()}
     if args.command in {"workflow-template", "workflow-build", "workflow-run"}:
@@ -346,6 +364,9 @@ def _execute_prepared_workflow_command(args, catalog, retrieved_at, requirements
             elif args.template == "gene-references":
                 from .glioma_gene_reference_workflow import compile_glioma_gene_reference_workflow
                 plan = compile_glioma_gene_reference_workflow(args.task, catalog, requirements=requirements)
+            elif args.template == "protein-pathways":
+                from .glioma_protein_pathway_workflow import compile_glioma_protein_pathway_workflow
+                plan = compile_glioma_protein_pathway_workflow(args.task, catalog, requirements=requirements)
             elif args.template == "molecular":
                 if args.grounded_glioma:
                     raise WorkflowValidationError("molecular catalogue templates do not implement model synthesis")
@@ -379,6 +400,21 @@ def _execute_prepared_workflow_command(args, catalog, retrieved_at, requirements
                 from .workflow_requirements import merge_workflow_requirements
                 combined = merge_workflow_requirements(args.task, data["requirements"], requirements, catalog=catalog)
                 plan = compile_workflow_plan({key: data[key] for key in ("name", "steps", "outputs")}, catalog, task=args.task, requirements=combined)
+        elif args.planner == "local-incremental":
+            from .workflow_incremental_planner import IncrementalLocalWorkflowPlanner
+            planning = IncrementalLocalWorkflowPlanner(catalog, runtime, model=args.model).build(
+                args.task, approve_provider_call=args.approve_provider_call, operation_ids=args.operation,
+                max_steps=args.max_steps, requirements=requirements,
+                max_model_calls=args.model_call_budget, max_decision_attempts=args.decision_attempts)
+            if args.planning_receipt:
+                save_workflow_checkpoint(args.planning_receipt, planning.to_dict())
+            data = planning.to_dict()
+            planning_metadata = {"model_calls": data["model_calls"], "planning_result_digest": data["result_digest"],
+                "planning_receipt_file": str(Path(args.planning_receipt).resolve()) if args.planning_receipt else None}
+            plan = planning.plan
+            if plan is None:
+                return {"command": args.command, "status": planning.status, "source_dispatch": False,
+                    **planning_metadata, **{key: data[key] for key in ("message", "reason") if key in data}}
         else:
             plan = LocalWorkflowBuilder(catalog, runtime, model=args.model).build(
                 args.task, approve_provider_call=args.approve_provider_call, operation_ids=args.operation, max_steps=args.max_steps,
@@ -387,6 +423,7 @@ def _execute_prepared_workflow_command(args, catalog, retrieved_at, requirements
         if args.command != "workflow-run":
             return {"command": args.command, "status": "planned", "plan_digest": plan.plan_digest,
                     "plan_file": str(Path(args.out).resolve()), "step_count": len(plan.to_dict()["steps"]), "source_dispatch": False,
+                    **planning_metadata,
                     **({"interpretation": intent_receipt} if intent_receipt is not None else {})}
     if args.command not in {"workflow-execute", "workflow-run"}:
         raise WorkflowValidationError("unknown workflow command")
@@ -417,6 +454,7 @@ def _execute_prepared_workflow_command(args, catalog, retrieved_at, requirements
     result = {"command": args.command, **run.to_dict(), "checkpoint_file": args.checkpoint_store, "outputs_file": args.outputs_file,
               "output_review_statuses": _output_review_statuses(run.outputs)}
     if args.command == "workflow-run":
+        result.update(planning_metadata)
         result["plan_file"] = str(Path(args.out).resolve())
         if intent_receipt is not None:
             result["interpretation"] = intent_receipt
@@ -430,12 +468,14 @@ def _output_review_statuses(outputs: dict[str, Any]) -> dict[str, dict[str, Any]
     from .glioma_workflow import GLIOMA_REVIEW_HANDOFF_SCHEMA
     from .glioma_mutation_workflow import GLIOMA_MUTATION_REVIEW_SCHEMA
     from .glioma_gene_reference_workflow import GLIOMA_GENE_REFERENCE_REVIEW_SCHEMA
+    from .glioma_protein_pathway_workflow import GLIOMA_PROTEIN_PATHWAY_REVIEW_SCHEMA
     reviewed_schemas = {
         GLIOMA_DRAFT_AUDIT_SCHEMA: {"needs_evidence", "blocked", "held_for_scientific_human_review"},
         GLIOMA_MOLECULAR_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
         GLIOMA_REVIEW_HANDOFF_SCHEMA: {"needs_evidence", "awaiting_human_review"},
         GLIOMA_MUTATION_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
         GLIOMA_GENE_REFERENCE_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
+        GLIOMA_PROTEIN_PATHWAY_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
     }
     statuses = {}
     for step_id, value in outputs.items():

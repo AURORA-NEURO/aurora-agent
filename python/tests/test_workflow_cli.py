@@ -130,6 +130,68 @@ def test_approved_build_compiles_model_json_with_exact_operation_allowlist_witho
     assert [operation["operation_id"] for operation in instructions["operations"]] == ["fixture.retrieve"]
 
 
+def _incremental_provider(monkeypatch, decisions):
+    requests, iterator = [], iter(decisions)
+    runtime = LLMRuntime()
+    def handler(request):
+        requests.append(request)
+        return json.dumps(next(iterator))
+    runtime.register_in_memory_provider("ollama", handler)
+    monkeypatch.setattr(workflow_cli, "_local_runtime", lambda _args: runtime)
+    return requests
+
+
+def test_incremental_build_retains_separate_receipt_and_compiler_accepted_plan_without_source_calls(monkeypatch, tmp_path):
+    factory, calls, _ = _fixture_catalog(monkeypatch)
+    requests = _incremental_provider(monkeypatch, [
+        {"action": "append", "operation": "fixture.retrieve"},
+        {"action": "arguments", "arguments": {"payload": PUBLIC_VALUE}, "additional_dependencies": []},
+        {"action": "finish", "name": "Review public metadata", "outputs": ["s1"]}])
+    plan_path, receipt_path = tmp_path / "plan.json", tmp_path / "planning.json"
+    code, payload, errors = _invoke("workflow-build", "--planner", "local-incremental", "--task", "Review public metadata",
+        "--model", "fixture-model", "--approve-provider-call", "--operation", "fixture.retrieve",
+        "--model-call-budget", "3", "--out", str(plan_path), "--planning-receipt", str(receipt_path))
+    assert code == 0 and not errors and payload["status"] == "planned" and len(requests) == 3 and not calls
+    receipt = json.loads(receipt_path.read_text())
+    assert receipt["status"] == "planned" and receipt["source_dispatches"] == 0
+    assert validate_workflow_plan(json.loads(plan_path.read_text()), factory()).plan_digest == payload["plan_digest"]
+    assert PUBLIC_VALUE not in json.dumps(payload)
+
+
+@pytest.mark.parametrize("action,status", [("clarify", "clarification_required"), ("refuse", "refused")])
+def test_incremental_nonplanned_state_writes_only_result_receipt_and_never_runs_sources(monkeypatch, tmp_path, action, status):
+    _, calls, _ = _fixture_catalog(monkeypatch)
+    requests = _incremental_provider(monkeypatch, [{"action": action, "message": "Need a source scope"}])
+    plan, receipt = tmp_path / "plan.json", tmp_path / "receipt.json"
+    code, payload, errors = _invoke("workflow-run", "--planner", "local-incremental", "--task", "Review public metadata",
+        "--model", "fixture-model", "--approve-provider-call", "--approve-source-dispatch", "--out", str(plan),
+        "--planning-receipt", str(receipt))
+    assert code == 0 and not errors and payload["status"] == status and payload["source_dispatch"] is False
+    assert payload["message"] == "Need a source scope"
+    assert len(requests) == 1 and not calls and not plan.exists()
+    assert "plan" not in json.loads(receipt.read_text())
+
+
+def test_incremental_receipt_path_alias_is_refused_before_provider_dispatch(monkeypatch, tmp_path):
+    _, calls, _ = _fixture_catalog(monkeypatch)
+    requests = _incremental_provider(monkeypatch, [])
+    path = tmp_path / "plan.json"
+    code, payload, errors = _invoke("workflow-build", "--planner", "local-incremental", "--task", "Review public metadata",
+        "--model", "fixture-model", "--approve-provider-call", "--out", str(path), "--planning-receipt", str(path))
+    assert code == 2 and payload is None and errors and requests == calls == [] and not path.exists()
+
+
+def test_fixed_protein_pathway_template_auto_enables_only_its_opt_in_readers_without_model_or_source(monkeypatch, tmp_path):
+    monkeypatch.setattr(workflow_cli, "_local_runtime", Mock(side_effect=AssertionError("no model")))
+    path = tmp_path / "protein.json"
+    code, result, errors = _invoke("workflow-template", "--template", "protein-pathways", "--task", "Review TP53 annotation context", "--out", str(path))
+    assert code == 0 and not errors and result["source_dispatch"] is False and result["step_count"] == 4
+    plan = json.loads(path.read_text())
+    assert {step["operation"] for step in plan["steps"]} == {
+        "uniprot.protein_annotation", "reactome.pathway_annotations", "glioma.protein_pathways.analyze", "glioma.protein_pathways.review_handoff"}
+    assert plan["requirements"]["schema"].endswith("/0.2")
+
+
 @pytest.mark.parametrize("base_url", ["https://example.org/v1", "http://10.0.0.1/v1", "file:///tmp/model"])
 def test_build_rejects_nonloopback_model_endpoints_before_model_calls(monkeypatch, tmp_path, base_url):
     _fixture_catalog(monkeypatch)

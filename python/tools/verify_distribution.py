@@ -190,7 +190,15 @@ def main() -> int:
                 "'validate_glioma_gene_reference_analysis', 'glioma_gene_reference_review_handoff', "
                 "'validate_glioma_gene_reference_handoff', 'register_glioma_gene_reference_workflow_operations', "
                 "'compile_glioma_gene_reference_workflow', 'WorkflowDecoderSchema', "
-                "'WorkflowDecoderSchemaError', 'prepare_workflow_decoder_schema'); "
+                "'WorkflowDecoderSchemaError', 'prepare_workflow_decoder_schema', "
+                "'ReviewedPublicHttpConfig', 'ReviewedPublicHttpClient', 'ReviewedPublicHttpResponse', "
+                "'UniProtRetrievalConfig', 'retrieve_uniprot_annotations', 'validate_uniprot_annotation_bundle', "
+                "'register_uniprot_operations', 'ReactomeRetrievalConfig', 'retrieve_reactome_pathways', "
+                "'validate_reactome_pathway_bundle', 'register_reactome_operations', "
+                "'analyze_glioma_protein_pathways', 'validate_glioma_protein_pathway_analysis', "
+                "'glioma_protein_pathway_review_handoff', 'validate_glioma_protein_pathway_handoff', "
+                "'compile_glioma_protein_pathway_workflow', 'register_glioma_protein_pathway_workflow_operations', "
+                "'IncrementalLocalWorkflowPlanner', 'IncrementalWorkflowResult'); "
                 "assert all(name in prism_sdk.__all__ and callable(getattr(prism_sdk, name)) "
                 "and type(getattr(prism_sdk, name)).__name__ != '_UnavailableFeature' "
                 "for name in workflow_exports), 'new workflow exports must be real installed APIs'; "
@@ -285,6 +293,7 @@ def main() -> int:
         fixed_templates = {
             "mutations": {"gdc.gene_mutation_counts", "glioma.mutation.analyze", "glioma.mutation.review_handoff"},
             "gene-references": {"ensembl.gene_references", "ncbi_gene.summary", "glioma.gene_references.analyze", "glioma.gene_references.review_handoff"},
+            "protein-pathways": {"uniprot.protein_annotation", "reactome.pathway_annotations", "glioma.protein_pathways.analyze", "glioma.protein_pathways.review_handoff"},
         }
         for name, expected_operations in fixed_templates.items():
             path = temporary_root / (name + "-plan.json")
@@ -306,7 +315,7 @@ def main() -> int:
             if envelope.get("schema") != "aurora-workflow-api-response/0.1" or envelope.get("ok") is not True:
                 raise RuntimeError("installed application worker did not emit its successful protocol envelope")
             return envelope["data"]
-        for planner, flag, expected_steps in (("glioma-mutations", "--glioma-mutations", 3), ("gene-references", "--gene-references", 4)):
+        for planner, flag, expected_steps in (("glioma-mutations", "--glioma-mutations", 3), ("gene-references", "--gene-references", 4), ("protein-pathways", "--protein-pathways", 4)):
             fixed_plan = worker_call({"action": "plan", "planner": planner, "task": "Review fixed public TP53 sources"}, (flag,))
             if (fixed_plan["source_dispatch"] is not False or len(fixed_plan["plan"]["steps"]) != expected_steps
                     or fixed_plan["interpretation"]["provider_calls"] != 0

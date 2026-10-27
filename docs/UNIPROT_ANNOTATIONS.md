@@ -165,6 +165,9 @@ source and transport errors; rate-limit metadata without retries; deadlines; rep
 stable default registrations; nonced callback identities; catalogue schema checking; and checkpoint
 resume with no repeated source dispatch.
 
-These fixtures are implementation evidence only. No live UniProt observation has been made for
-this adapter at this documentation stage. Service-count claims require a separately recorded,
-approved actual source execution; operation count and transport capacity are not service coverage.
+These fixtures are implementation evidence only. A subsequent approved fixed workflow on
+2026-10-27 used one GET through this adapter and one Reactome GET. UniProt returned four protein
+name rows and two gene-name candidates. The composed workflow retained 53 citations, paused after
+each source, resumed locally and replayed its completed checkpoint without further source calls.
+This is one bounded observation, not continuous availability, name-equivalence proof or evidence
+of many connected services. Operation count and transport capacity are not service coverage.

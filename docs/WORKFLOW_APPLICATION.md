@@ -38,7 +38,8 @@ the operator environment. Avoid putting the token in command-line arguments or s
   --workflow-research-sources `
   --workflow-molecular-glioma `
   --workflow-glioma-mutations `
-  --workflow-gene-references
+  --workflow-gene-references `
+  --workflow-protein-pathways
 ```
 
 `--token-env VARIABLE_NAME` selects a different existing environment variable. The default is
@@ -59,11 +60,16 @@ Unsupported clauses produce exact unresolved spans. Local model planning require
 selected provider-call approval and an operator-configured, already available Ollama model.
 Configuring a model does not establish its planning quality or automatically download weights.
 
-The last two flags independently enable fixed, model-free TP53 templates. Both default to false;
+The last three flags independently enable fixed, model-free TP53 templates. All default to false;
 omitting them leaves the default catalogue unchanged. The page enables a template only after the
 connected catalogue contains its source operation and both local analysis/review operations.
 Browser requests cannot turn on an omitted capability. In these templates, task text is a retained
 research label, not a query interpreted into gene or cohort selectors:
+
+- `--workflow-protein-pathways` enables **TP53 protein/pathway annotation context**
+  (`protein-pathways`): a four-step plan independently reads fixed UniProt names and Reactome
+  pathway annotations, replays their native inputs and produces a scientific review hold.
+  General human annotation does not measure glioma activity, enrichment, alteration or causality.
 
 - `--workflow-glioma-mutations` enables **TP53 mutation aggregate review** (`glioma-mutations`):
   a three-step plan reads fixed public GDC TP53 mutation-affected case aggregates for TCGA-GBM
@@ -79,6 +85,11 @@ research label, not a query interpreted into gene or cohort selectors:
 These choices need no provider-call approval or model configuration. Execution still requires
 the separate exact-plan source approval. Registration does not establish live source coverage
 or scientific validity.
+
+The opt-in `local-incremental` planner needs at least two model calls per accepted step plus a
+finish decision, within its visible total-call and per-decision limits. Clarification, refusal and
+exhausted budgets contain no executable plan and cannot create a run. The default whole-graph
+planner remains available; protocol checks alone do not establish task fidelity.
 
 ## Plan and run authority
 

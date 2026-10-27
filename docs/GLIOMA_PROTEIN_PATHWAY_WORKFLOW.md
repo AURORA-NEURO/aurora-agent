@@ -28,10 +28,17 @@ All analysis/handoff fields replay from retained native source inputs. Completed
 clinical or laboratory actions. Sources and their self-computed digests are not independent proof.
 
 ```console
-aurora workflow-template --template protein-pathways --task "Inspect public glioma TP53 annotation context" --out plan.json
-aurora workflow-execute --protein-pathways --plan plan.json --approve-source-dispatch --checkpoint-store checkpoint.json --outputs-file outputs.json
+aurora-agent workflow-template --template protein-pathways --task "Inspect public glioma TP53 annotation context" --out plan.json
+aurora-agent workflow-execute --protein-pathways --plan plan.json --approve-source-dispatch --checkpoint-store checkpoint.json --outputs-file outputs.json
 ```
 
 The CLI flag and worker operator flag `--protein-pathways` install two real source reader paths
 and two local operations. Local operations are not external integrations. The eight-reader default
 catalogue remains unchanged. No model call occurs for the explicit template.
+
+A bounded live validation on 2026-10-27 completed with two source GETs: UniProt returned four
+protein-name rows and two gene-name candidates, and Reactome returned 46 pathway annotations.
+All 53 candidate citations fit the cap. The graph paused after each source, resumed the two local
+stages with zero dispatch, and replayed the completed checkpoint without further source requests.
+The output remained `awaiting_scientific_human_review`; activity and source completeness remained
+unmeasured/unassessed. This is one observation per reader, not a scientific benchmark.

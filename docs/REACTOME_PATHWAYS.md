@@ -39,5 +39,8 @@ catalog = register_reactome_operations(WorkflowOperationCatalog())
 ```
 
 Offline tests use native-shape fixtures. The exploratory API-contract request observed 46 rows;
-that request preceded the adapter and is not verification of this transport. Later live validation,
-when performed, is reported separately with exact acquisition artifacts and source counts.
+that request preceded the adapter and is not verification of this transport. A subsequent approved
+fixed workflow on 2026-10-27 used one GET through this adapter and one UniProt GET. It retained
+46 Reactome rows and 53 combined citations, paused after each source, resumed locally and replayed
+the completed checkpoint without further dispatch. That bounded observation establishes neither
+continuous availability, source completeness nor glioma pathway activity.

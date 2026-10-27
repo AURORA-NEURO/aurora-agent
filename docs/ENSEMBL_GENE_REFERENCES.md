@@ -144,8 +144,11 @@ reviewed requests and retained 644 response-body bytes. Ensembl returned TP53 fe
 `ENSG00000141510` and one EntrezGene candidate, `7157`. Validator replay passed without another
 request. This is one observed request pair, not a continuous availability measurement, an
 independent scientific crosswalk validation or evidence of many connected services.
-That observation used the earlier transport policy. The framing-policy update itself makes no
-new live request; its evidence is the offline wire verification below.
+That initial observation used the earlier transport policy. The framing-policy implementation
+was checked with offline wire fixtures. A subsequent bounded fixed gene-reference workflow used
+the hardened reader for its two Ensembl requests plus one NCBI request, retained three citations,
+resumed local stages and replayed its completed checkpoint without further dispatch. Neither
+observation establishes a scientific crosswalk or continuous availability.
 
 Focused local verification uses deterministic fixtures and mocked transport boundaries:
 

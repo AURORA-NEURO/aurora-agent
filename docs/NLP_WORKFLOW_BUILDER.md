@@ -65,6 +65,14 @@ enables bounded repair with the same fixed contract. SDK providers must set `max
 so transport retries cannot exceed the planning budget. See the
 [recorded small-model limitations](WORKFLOW_DEVELOPMENT_PLAN.md#observed-local-model-limits).
 
+The opt-in [incremental planner](INCREMENTAL_WORKFLOW_PLANNING.md) makes separate bounded model
+decisions for an operation, its literal arguments/prior-symbol bindings, and final outputs. Use
+`--planner local-incremental --model-call-budget 12 --decision-attempts 2` with the ordinary local
+model and provider grant. An optional `--planning-receipt FILE` records accepted prefixes and
+failures separately from the executable `--out` plan. Only a compiler-accepted finish produces a
+plan; clarification, refusal and budget exhaustion cannot fall through to source execution.
+At least two calls per accepted step plus finish are required. The default planner stays unchanged.
+
 ## Durable public-value checkpoints
 
 An explicit checkpoint contains completed public values, original receipts, their digests,

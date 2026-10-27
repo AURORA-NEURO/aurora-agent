@@ -9,14 +9,14 @@ platform descriptors nor fixture registration counts establish integration cover
 | --- | --- | --- |
 | Natural-language authoring | Local model -> schema/DAG validation; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Held-out general multi-step task fidelity, broader intent extraction and clarification UX, graph editing, branching and bounded iteration |
 | Execution | Sequential read-only DAG, per-call budgets, public-value checkpoints, explicit retry, digest-checked resume; durable cooperative cancellation and separate release grant | Scheduling, concurrent independent branches, shared-worker fencing, effectful execution through the existing effect ledger, compensation/reconciliation policies |
-| Integration breadth | Thirteen concrete reviewed research adapter paths, including fixed GDC TP53 aggregates and Ensembl TP53 references; reviewed GET OpenAPI imports; reviewed tools from caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; recorded capabilities, availability, pagination, rate limits and failure behavior for each operation |
+| Integration breadth | Fifteen concrete reviewed research adapter paths, including fixed GDC TP53 aggregates, Ensembl TP53 references and UniProt/Reactome annotations; shared strict public HTTPS transport; reviewed GET OpenAPI imports and caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; recorded capabilities, availability, pagination, rate limits and failure behavior for each operation |
 | Authentication | Credentialless public readers; typed application-attested connection sessions bind subject/resource scope and revocable credential handles into imported HTTP catalogue identity; caller-owned MCP sessions | Provider-authenticated account onboarding, protected OAuth/token refresh, persistent account connections and tenant-bound private-response retention |
-| Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular catalogues and association metadata; fixed TP53 mutation-affected case aggregates and Ensembl/NCBI reference comparison with native replay and review holds | Broader molecular measurements and independently validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
+| Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular catalogues and association metadata; fixed TP53 aggregates, Ensembl/NCBI reference comparison and UniProt/Reactome annotation context with native replay and review holds | Broader molecular measurements and independently validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
 | Evidence quality | Metadata provenance/omissions, explicit unknown states, preserved source partitions | Independent relevance/quality evaluation, contradiction and negative-result handling, cohort-overlap checks, freshness policies, source-specific quality failures |
 | Product interfaces | Dependency-free SDK/CLI; opt-in authenticated local editor and HTTP routes through the existing Rust server and fixed Python worker, with retained task contracts, exact approval, run controls and explicit exports | Broader usability/accessibility evaluation, provider onboarding, release installation and production service operation |
 | Reliability | Focused invariants, installed-wheel/API smoke, Python regressions, separate live source checks, contract checks on normalized dispatch and resume | Provider/source outage campaigns, process-termination recovery, task-quality and cost/latency measurements, cross-SDK contract support and release/deployment validation |
 
-The thirteen-path count names implemented reviewed readers, not thirteen independent providers or
+The fifteen-path count names implemented reviewed readers, not fifteen independent providers or
 an assertion that every source is always available. PubMed and NCBI Gene, for example, share NCBI
 infrastructure. Approved one-record live queries verified OpenAlex, Crossref and Zenodo in the
 [research-source increment](RESEARCH_SOURCE_INTEGRATIONS.md); earlier live checks exercised the
@@ -34,7 +34,21 @@ continuous availability nor thirteen independent providers.
 The three additional readers are explicitly registered in the SDK or selected with the CLI's
 `--research-sources` option. The default catalogue remains stable for existing saved plans.
 The two TP53 paths are separately opt-in through `--glioma-mutations` and `--gene-references`;
-their exact CLI templates also register the required operations without dispatch.
+their exact CLI templates also register the required operations without dispatch. A further pair,
+[UniProt](UNIPROT_ANNOTATIONS.md) and [Reactome](REACTOME_PATHWAYS.md), provides fixed public
+human P04637 name/pathway annotation context through [reviewed public HTTPS](REVIEWED_PUBLIC_HTTP.md).
+The opt-in `--protein-pathways` composition keeps general source annotations separate from
+glioma measurements, activity, enrichment and causal claims. A bounded live composition used two
+GETs, retained four protein-name rows, two gene-name candidates, 46 pathway annotations and 53
+citations, and replayed the completed checkpoint without further dispatch. All fifteen reader
+paths now have bounded observations; this does not imply fifteen independent providers, continuous
+availability, scientific validation or hundreds of services.
+
+An opt-in [incremental local planner](INCREMENTAL_WORKFLOW_PLANNING.md) chooses one operation
+then its arguments/bindings, and finishes with model-selected outputs. Generated step symbols do
+not choose the workflow. Its final graph passes the unchanged caller-contract compiler; partial
+prefixes carry no executable plan. Bounded clarification, refusal and budget exhaustion preserve
+receipts without substituting a template. This is a new protocol, not evidence of broad NLP success.
 
 The [MCP bridge](WORKFLOW_MCP.md) registers only tools explicitly reviewed on an already connected
 client. Its 225-tool local stdio fixture demonstrates protocol discovery, schema checking and

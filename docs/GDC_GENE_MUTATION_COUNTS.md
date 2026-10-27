@@ -114,7 +114,11 @@ numbers describe that retrieval, are not a prevalence estimate, and may change w
 That observation used the original transport. Transport version 2 adds bounded outstanding DNS,
 absolute receive deadlines, and strict header/framing checks; its changed transport policy digest
 prevents an old prepared source plan from silently adopting the new policy. This hardening was
-verified offline with parsed fake TLS wire responses and was not followed by another live query.
+verified offline with parsed fake TLS wire responses. Subsequent bounded workflow validation used
+the hardened reader, including an unchanged model-authored graph on 2026-10-27; that run observed
+the same two source counts, retained native inputs/citations, resumed local stages and replayed the
+completed checkpoint with zero further dispatches. These later observations do not establish
+continuous availability, denominators or prevalence.
 
 Focused tests run offline with standard-library fixtures and mocked transport boundaries:
 
