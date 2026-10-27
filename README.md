@@ -149,7 +149,7 @@ The optional [CIViC curation review](docs/GLIOMA_CIVIC_CURATION_WORKFLOW.md) com
 local analysis and a research-review handoff. It retains source categories and exact native source-ID
 groups without ranking scientific support or treating those groups as independent publications.
 Cellosaurus preserves source names, accessions, taxonomy, disease assertions and the admitted
-problematic-cell-line comment category; it establishes neither model suitability nor authentication.
+problematic-cell-line comment category; it establishes neither model suitability nor authenticity.
 The [provider registry](docs/WORKFLOW_PROVIDER_REGISTRY.md) inspects exact reader bindings,
 deduplicated API service groups and separate unmeasured live coverage through the CLI and editor.
 Reviewed [capability profiles](docs/WORKFLOW_CAPABILITIES.md) enable fixed groups of concrete
