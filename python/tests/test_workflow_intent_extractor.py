@@ -340,7 +340,7 @@ def test_offline_validation_binds_exact_task_and_selected_operation_ids():
     assert len(requests) == 1 and sources == []
 
 
-def test_protocol_0_3_exposes_complete_native_contracts_as_future_outputs_without_source_observations():
+def test_default_protocol_0_2_exposes_complete_native_contracts_as_future_outputs_without_source_observations():
     catalog, sources = _catalog()
     output = {"type": "object", "required": ["schema", "items"], "additionalProperties": False,
               "properties": {"schema": {"const": "fixture-source-bundle/0.1"},
@@ -351,7 +351,7 @@ def test_protocol_0_3_exposes_complete_native_contracts_as_future_outputs_withou
     extractor, requests, _ = _extractor(catalog=catalog)
     result = extractor.extract(TASK, approve_provider_call=True)
     context = json.loads(requests[0].messages[0]["content"])
-    assert context["protocol"] == result.to_dict()["protocol"] == "aurora-workflow-intent-extraction-protocol/0.3"
+    assert context["protocol"] == result.to_dict()["protocol"] == "aurora-workflow-intent-extraction-protocol/0.2"
     assert context["operations"] == [operation.to_dict() for operation in catalog.operations()]
     assert all(set(row) == {"schema", "operation_id", "description", "input_schema", "output_schema",
                            "integration_id", "auth_mode", "read_only", "implementation"}
@@ -431,7 +431,7 @@ def test_available_future_read_fixture_preserves_input_literals_and_output_but_r
     ({"id": "mode", "kind": "argument_equals", "span": {"text": "raw mode", "occurrence": 0},
       "operation": "fixture.read", "path": "/mode", "value": "raw"}, "literal_schema_conflict"),
 ], ids=["unsupported-essential-write", "incompatible-exact-const"])
-def test_future_work_role_does_not_remove_unavailable_work_or_replace_conflicting_literals(row, expected_code):
+def test_default_extraction_does_not_remove_unavailable_work_or_replace_conflicting_literals(row, expected_code):
     catalog, sources = _catalog()
     extractor, requests, _ = _extractor(_candidate(_row(), row), catalog=catalog)
     result = extractor.extract(TASK, approve_provider_call=True)
@@ -483,6 +483,49 @@ def _full_contract_fixture_catalog():
         operation = WorkflowOperation(**{key: value for key, value in descriptor.items() if key != "schema"})
         catalog.register(operation, lambda *_args, **_kwargs: pytest.fail("legacy fixture invoked a source"))
     return catalog
+
+
+def _actual_future_role_terminal_fixture():
+    return json.loads((Path(__file__).parent / "fixtures/workflow_intent_extraction_protocol_0_3_actual_terminal.json").read_text(encoding="utf-8"))
+
+
+def _actual_future_role_fixture_catalog():
+    catalog = WorkflowOperationCatalog()
+    for descriptor in _actual_future_role_terminal_fixture()["operation_descriptors"]:
+        operation = WorkflowOperation(**{key: value for key, value in descriptor.items() if key != "schema"})
+        catalog.register(operation, lambda *_args, **_kwargs: pytest.fail("actual terminal replay invoked a source"))
+    return catalog
+
+
+def test_actual_protocol_0_3_acknowledgement_does_not_become_declarations_after_default_revert(monkeypatch):
+    from prism_sdk.workflow_intent_extractor import WORKFLOW_INTENT_EXTRACTION_PROTOCOL, _request_value
+    fixture, catalog = _actual_future_role_terminal_fixture(), _actual_future_role_fixture_catalog()
+    monkeypatch.setattr(LLMRuntime, "invoke", lambda *_args, **_kwargs: pytest.fail("actual terminal replay invoked a model"))
+    assert WORKFLOW_INTENT_EXTRACTION_PROTOCOL == "aurora-workflow-intent-extraction-protocol/0.2"
+    assert fixture["captured_source_head"] == "25c6816b4012c7c4152c2e62393e955bc0883a82"
+    assert fixture["catalog_digest"] == catalog.catalog_digest
+    original = fixture["extraction"]
+    request = _request_value(fixture["task"], catalog.catalog_digest, original["model"], catalog.operations(), original["protocol"])
+    assert canonical_json(request) == canonical_json(fixture["request_value"])
+    assert content_digest(request) == original["request_digest"]
+    assert len(canonical_json(request).encode("utf-8")) == original["context_bytes_including_schema"]
+    checked = validate_workflow_intent_extraction(original, task=fixture["task"], catalog=catalog).to_dict()
+    assert canonical_json(checked) == canonical_json(original)
+    assert checked["protocol"] == "aurora-workflow-intent-extraction-protocol/0.3"
+    assert checked["status"] == "needs_clarification" and checked["obligations"] is None and checked["span_resolution"] == []
+    assert checked["message"] == "I will execute both operations with the exact parameters specified. Each operation's complete future returned value will be provided as a separate final output."
+    assert checked["accepted"] is False and checked["plan_created"] is False and checked["source_dispatches"] == 0
+    assert checked["task_interpretation_completeness"] == "unassessed"
+
+
+@pytest.mark.parametrize("protocol", ["aurora-workflow-intent-extraction-protocol/0.1",
+                                     "aurora-workflow-intent-extraction-protocol/0.2"])
+def test_actual_protocol_0_3_terminal_cannot_be_restamped_as_an_older_request(protocol):
+    fixture, catalog = _actual_future_role_terminal_fixture(), _actual_future_role_fixture_catalog()
+    data = fixture["extraction"]
+    data["protocol"] = protocol
+    with pytest.raises(WorkflowIntentExtractionError, match="retained extraction"):
+        validate_workflow_intent_extraction(_restamp_extraction(data), task=fixture["task"], catalog=catalog)
 
 
 @pytest.mark.parametrize("case_index", [0, 1], ids=["candidate", "refusal"])
@@ -555,7 +598,7 @@ def test_persisted_legacy_candidate_review_reloads_and_accepts_separately_withou
 
 
 @pytest.mark.parametrize("protocol", ["aurora-workflow-intent-extraction-protocol/0.1",
-    "aurora-workflow-intent-extraction-protocol/0.2", "unknown", None])
+    "aurora-workflow-intent-extraction-protocol/0.3", "unknown", None])
 def test_new_request_cannot_be_relabelled_as_another_protocol_by_restamping_when_catalogue_is_supplied(protocol):
     catalog, sources = _catalog()
     extractor, requests, _ = _extractor(catalog=catalog)

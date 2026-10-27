@@ -157,9 +157,11 @@ operations through one repeated operator option, including a native three-source
 review. Browser requests cannot enable another profile; source agreement and ontology relations
 remain separate from validated scientific equivalence and cohort evidence.
 Optional [local NLP intent suggestions](docs/WORKFLOW_INTENT_EXTRACTION.md) retain unreviewed
-mandatory-action candidates before graph authoring. Extraction protocol 0.3 supplies complete native
-input/output contracts and an explicit future-work interpretation role. It replays protocols 0.1
-and 0.2 without upgrading their evidence. General NLP quality remains unestablished. The editor's explicit caller-declaration
+mandatory-action candidates before graph authoring. Default extraction protocol 0.2 supplies
+complete native input/output contracts; protocols 0.1, 0.2 and 0.3 retain exact historical replay.
+A six-call comparison found no supported-work candidate in either arm and lost one strict
+negative-control recognition under 0.3, so the default returned to 0.2. General NLP quality
+remains unestablished. The editor's explicit caller-declaration
 review binds task spans, literal requirements and acceptance through edits, restart and separate
 evidence exports. Candidate syntax and caller acceptance do not establish complete interpretation
 or scientific validity; unavailable actions and literal conflicts remain blocking.

@@ -27,7 +27,7 @@ invoke a catalogue executor, compile a plan, authorize source dispatch or accept
 
 ## Protocol and retained provenance
 
-New suggestions use `aurora-workflow-intent-extraction-protocol/0.3`. It supplies exact task text,
+New suggestions use `aurora-workflow-intent-extraction-protocol/0.2`. It supplies exact task text,
 the actual catalogue digest and every selected operation's complete native `to_dict()` descriptor:
 descriptor schema, operation identity, description, input schema, output schema, integration
 identity, authentication mode, read-only flag and implementation label. Nested schemas, optional
@@ -42,13 +42,15 @@ implicit result wrapper, new output-field predicate or permission to invent sour
 Requested details that the contract cannot establish remain unresolved. These are instructions
 to the model, not guarantees that it will interpret them correctly.
 
-Protocol 0.3 adds two generic role instructions: interpret mandatory work for a future workflow
+Historical protocol 0.3 added two generic role instructions: interpret mandatory work for a future workflow
 run by a separate executor, and distinguish the model's own lack of callable tools, network
 access or credentials from the catalogue's declared operation contracts. That distinction does
 not establish live reachability, authentication state, execution grants or scientific validity.
 Essential unsupported work and incompatible literals must still remain visible; clarification
 and refusal remain available. The change adds no operation-specific examples, new message roles,
-automatic acceptance, response repair or execution ability.
+automatic acceptance, response repair or execution ability. The small paired probe below did
+not show a supported-work gain and lost one strict negative-control recognition. The producer
+therefore defaults to 0.2 again; 0.3 remains reconstructable for exact historical replay.
 
 The extractor does not silently rank or truncate the selection. One to 128 visible operations
 and the existing two-million-byte context bound, including complete output schemas, are enforced
@@ -57,7 +59,7 @@ exceeds those bounds. This byte bound does not verify a particular model's token
 establish that a server processed every token. Token allocation and model observations require
 separate prospective checks.
 
-Retained protocols 0.1 and 0.2 remain replayable with their original protocol and request bytes.
+Retained protocols 0.1, 0.2 and 0.3 remain replayable with their original protocol and request bytes.
 Version 0.1 exposed only identity, description, input schema and read-only flag. Version 0.2
 exposed complete contracts with future-output instructions, without the two new role rules.
 Validation never upgrades an old record into evidence of different contract exposure or role
@@ -136,8 +138,56 @@ declared work after seeing the full native contract. Its retained response cited
 lack of execution access. Confusing the interpretation role with execution access is a
 hypothesis motivating the two protocol 0.3 rules, not an established cause or measured remedy.
 Neither task was rerun or repaired. Offline replay preserves both refusals and their original
-request versions. No actual-model protocol 0.3 result is established here. General NLP fidelity,
-scientific validity and independent live integration availability remain unassessed.
+request versions. General NLP fidelity, scientific validity and independent live integration
+availability remain unassessed.
+
+## Frozen six-call protocol comparison
+
+A single developer-designed probe compared unchanged protocol 0.2 at source `a1fbd565` with
+protocol 0.3 at `25c6816b`, using the same three native descriptors, exact task pairs,
+`qwen3.5:9b` digest `56671c2ab9385f9cfcb404638e32cd62d88e3501d44822208363c010179a3c90`,
+Ollama 0.40.4, 4,096 output tokens and one provider attempt per condition. Thinking mode was
+unspecified. The three scenarios were supported Europe PMC/GDC composition with exact input
+literals and both outputs, essential unavailable Slack channel creation plus posting, and a
+ClinicalTrials.gov `page_size=150` request against the native maximum of 100. They are known
+structural-family robustness scenarios, not held-out independent benchmark classes.
+Separate coding-agent content reviews applied the prospective semantic criteria; the native
+parser and automatic output/literal screens did not supply these semantic judgments.
+
+| Frozen semantic axis | Protocol 0.2 | Protocol 0.3 |
+| --- | --- | --- |
+| Supported composition with complete native declarations | 0/1 | 0/1 |
+| Strict recognition of the two negative controls | 2/2 | 1/2 |
+
+Neither arm produced a candidate for any scenario. The supported-work replies selected
+`clarify` but only acknowledged future execution; they supplied neither a question nor native
+obligation rows. Protocol 0.2 recognized both missing Slack creation/posting and the numeric
+conflict. Protocol 0.3 recognized the numeric conflict, but its Slack clarification described
+posting and omitted mandatory channel creation. Terminal-control recognition required both
+creation and posting; preserving the requested channel name was a candidate-coverage criterion,
+not an additional terminal criterion. Terminal recognition supplies no declaration coverage or
+accepted plan. This small result does not demonstrate a role-treatment gain and does not
+establish a general reliability difference.
+
+All six responses ended with `stop`. Reasoning-token counters were missing, not assumed zero.
+All twelve pre/post-condition model-state snapshots reported a 16,384-token allocation; the
+OpenAI-compatible request itself did not pin allocation throughout inference. The run retained
+six audited inference POST attempts, 16 metadata GET attempts and separate load/unload POSTs.
+Source, acceptance, plan and run execution remained zero; final model state was empty and all
+protected files and both source arms matched their frozen identities. The original report,
+raw replies, independent reviews and earlier failures remain unchanged. There was no repair,
+fallback or repeated model attempt.
+
+This is the retained report digest, not a new result from the default rollback:
+`eeae9891282f4a411545e6b0ef13e39f1256818b8b791cd0632c65cb4494c04b`.
+The earlier full Python suite of 4,706 tests and 165 subtests belongs to `25c6816b`; it does not
+validate a later source revision. The rollback has separately recorded focused checks.
+
+The current response grammar accepts any bounded nonempty `message` alongside `action=clarify`.
+It therefore preserves an acknowledgement as a clarification terminal; it does not establish
+that a real question was asked. Tightening clarification meaning or changing terminal structure
+is future design work requiring versioned request/schema/parser replay. No new grammar, semantic
+repair, forced candidate choice or automatic continuation is implemented here.
 
 ## Prospective evaluation limits
 

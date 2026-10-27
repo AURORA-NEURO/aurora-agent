@@ -7,7 +7,7 @@ platform descriptors nor fixture registration counts establish integration cover
 
 | Area | Current evidence | Required before claiming the requested end state |
 | --- | --- | --- |
-| Natural-language authoring | Local model -> schema/DAG validation; optional unreviewed NLP obligation suggestions with complete native input/output contracts, explicit future-work role instructions and durable caller acceptance; exact versioned request replay; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Controlled actual-model evaluation, held-out complete intent extraction and general multi-step fidelity, broader clarification UX, branching and bounded iteration |
+| Natural-language authoring | Local model -> schema/DAG validation; optional unreviewed NLP obligation suggestions default to extraction protocol 0.2 with complete native input/output contracts and durable caller acceptance; exact historical 0.1/0.2/0.3 request replay; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Controlled actual-model evaluation, held-out complete intent extraction and general multi-step fidelity, broader clarification UX, branching and bounded iteration |
 | Execution | Sequential read-only DAG, per-call budgets, public-value checkpoints, explicit retry, digest-checked resume; durable cooperative cancellation and separate release grant | Scheduling, concurrent independent branches, shared-worker fencing, effectful execution through the existing effect ledger, compensation/reconciliation policies |
 | Integration breadth | Twenty concrete reviewed research adapter paths across seventeen declared API service groups; fixed operator-selected capability profiles; a versioned API-service/reader registry bound to actual executors; strict public GET, fixed read-only GraphQL POST and reviewed OpenAPI HTTPS transports; caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; protected account onboarding, availability, pagination, rate limits and failure behavior for each operation |
 | Authentication | Credentialless public readers; typed application-attested connection sessions bind subject/resource scope and revocable credential handles into imported HTTP catalogue identity; caller-owned MCP sessions | Provider-authenticated account onboarding, protected OAuth/token refresh, persistent account connections and tenant-bound private-response retention |
@@ -177,7 +177,7 @@ effects, compensation, effect retries and power-loss durability remain unproven 
    Verify requested output stages, exact limits and source boundaries rather than only JSON shape.
    Keep planning failures and semantic omissions visible; do not turn a valid graph into a success
    claim for an unfulfilled task.
-   A fresh paired 0.2/0.3 protocol probe accepted 1/5 versus 4/5 constrained positive cases,
+   An earlier incremental-authoring 0.2/0.3 protocol probe accepted 1/5 versus 4/5 constrained positive cases,
    including a synthetic schema fixture, but full intent controls regressed from 2/3 to 1/3.
    Both protocols could compile an available reader while omitting an essential unavailable
    writer; 0.3 also silently substituted a permitted mode for an essential incompatible request.
@@ -188,12 +188,20 @@ effects, compensation, effect retries and power-loss durability remain unproven 
    exact protocol version. The prior available-HGNC refusal under protocol 0.1 remains failed;
    omitted output contracts were a context gap, not a proven cause. A separate protocol 0.2
    Cellosaurus task also refused available declared work after seeing the full contract,
-   citing the model's own execution access. Protocol 0.3 adds generic instructions to interpret
-   future workflow work independently of the model's current callable tools. Role confusion is
-   a hypothesis, and this change establishes no remedy or general reliability gain. Both
-   refusals retain their original versions and bytes. Semantic controls and independent
-   evaluation remain required; candidate syntax and a blocked unsupported action are separate
-   from full task coverage, caller acceptance and successful workflow execution.
+   citing the model's own execution access. A separately frozen six-call extraction comparison
+   tested generic future-work role instructions in protocol 0.3 against unchanged 0.2. Supported
+   composition declaration coverage was 0/1 in each arm; strict negative-control recognition was
+   2/2 versus 1/2. Neither arm produced any candidate. The 0.3 Slack reply recognized unavailable
+   posting but omitted mandatory channel creation. These developer-designed known-family
+   robustness scenarios are distinct from the earlier incremental-authoring comparison and
+   establish no general reliability result. The extraction default therefore returned to 0.2;
+   exact 0.3 request reconstruction remains for history. Both earlier refusals and all six
+   comparison replies retain their original versions and bytes. Role confusion remains a
+   hypothesis; the added rules demonstrated no supported-work gain in this probe. Semantic
+   controls and independent evaluation remain required; candidate syntax and a blocked
+   unsupported action are separate from full task coverage, caller acceptance and successful
+   workflow execution. Clarification messages can still be acknowledgements without a genuine
+   question; versioned grammar/meaning improvements remain design-only.
 2. Extend the [implemented local glioma synthesis and audit](GLIOMA_WORKFLOW_SYNTHESIS.md) to richer
    reviewed evidence planes. Preserve exact citation closure, source identity, missingness,
    context omissions and explicit unassessed scientific support. Public human cohort summaries

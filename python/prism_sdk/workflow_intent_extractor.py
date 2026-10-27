@@ -29,11 +29,12 @@ from .workflow_intent_obligations import (
 )
 
 WORKFLOW_INTENT_EXTRACTION_SCHEMA = "aurora-workflow-intent-extraction/0.1"
-WORKFLOW_INTENT_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.3"
+WORKFLOW_INTENT_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.2"
 _LEGACY_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.1"
 _FULL_CONTRACT_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.2"
+_FUTURE_ROLE_EXTRACTION_PROTOCOL = "aurora-workflow-intent-extraction-protocol/0.3"
 _SUPPORTED_EXTRACTION_PROTOCOLS = (
-    _LEGACY_EXTRACTION_PROTOCOL, _FULL_CONTRACT_EXTRACTION_PROTOCOL, WORKFLOW_INTENT_EXTRACTION_PROTOCOL,
+    _LEGACY_EXTRACTION_PROTOCOL, _FULL_CONTRACT_EXTRACTION_PROTOCOL, _FUTURE_ROLE_EXTRACTION_PROTOCOL,
 )
 MAX_INTENT_EXTRACTION_ROWS = 32
 MAX_INTENT_EXTRACTION_RESPONSE_BYTES = 128_000
@@ -69,7 +70,7 @@ def _request_value(task: str, catalog_digest: str, model: str, operations: Seque
             "An output=true required_operation requests the operation's whole future returned value as a final plan output. A requested returned artifact does not require an input flag unless the native input contract defines one. Do not invent arguments from output fields or assume an implicit result wrapper.",
             "Descriptor implementation and auth_mode are catalogue declarations, not execution grants, measured source availability or scientific validity. Requested output details not established by the contract remain unresolved; do not invent observed values or repair the task.",
         ]
-    if protocol == WORKFLOW_INTENT_EXTRACTION_PROTOCOL:
+    if protocol == _FUTURE_ROLE_EXTRACTION_PROTOCOL:
         rules[0:0] = [
             "Interpret the task as mandatory declarations for a future workflow run by a separate executor. This turn does not execute sources or build a plan.",
             "Your lack of callable tools, network access or credentials in this turn does not by itself make a catalogue-defined future action unsupported. Match requested work to declared contracts; never infer live reachability, authentication state, execution grants or scientific validity from catalogue labels.",
