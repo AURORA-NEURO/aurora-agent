@@ -1,0 +1,451 @@
+"""The fixed application worker retains contracts and never confuses metadata with evidence."""
+from copy import deepcopy
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+from threading import Event, Thread
+import time
+from unittest.mock import Mock
+
+import pytest
+
+from prism_sdk import llm_runtime
+from prism_sdk.authoring import content_digest
+from prism_sdk.llm_runtime import LLMRuntime
+from prism_sdk.workflow_api_worker import (
+    MAX_WORKFLOW_API_REQUEST_BYTES, WorkflowAPIError, WorkflowAPIWorker, _error,
+)
+from prism_sdk.workflow_builder import load_workflow_checkpoint, save_workflow_checkpoint
+from prism_sdk.workflow_requirements import compile_workflow_requirements
+from test_workflow_cli import ERROR_DETAIL, PUBLIC_VALUE, _fixture_catalog, _proposal
+
+
+TASK = "Review glioma evidence using PubMed only; exclude trials and TCGA."
+
+
+def _invoke(root, request, *, raw=False):
+    environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    process = subprocess.run([sys.executable, "-m", "prism_sdk.workflow_api_worker", "--root", str(root)],
+        input=request if raw else json.dumps(request), text=True, encoding="utf-8", capture_output=True,
+        env=environment, timeout=30, cwd=root.parent)
+    return process, json.loads(process.stdout)
+
+
+def _typed(worker):
+    return worker.handle({"action": "plan", "task": TASK, "planner": "glioma-intent"})
+
+
+def _create(worker, plan):
+    return worker.handle({"action": "create_run", "plan_id": plan["plan_id"],
+                          "expected_plan_digest": plan["plan_digest"]})
+
+
+def _execute(worker, run, **kwargs):
+    return worker.handle({"action": "execute", "run_id": run["run_id"],
+        "expected_plan_digest": run["plan_digest"], "approve_source_dispatch": True, **kwargs})
+
+
+def _fixture(monkeypatch, tmp_path, *, second=True, contract=None):
+    factory, calls, state = _fixture_catalog(monkeypatch)
+    worker = WorkflowAPIWorker(tmp_path / "application", model="fixture-model")
+    worker.catalog = factory()
+    requests = []
+    runtime = LLMRuntime()
+    def provider(request):
+        requests.append(request)
+        return json.dumps(_proposal(second=second))
+    runtime.register_in_memory_provider("ollama", provider)
+    monkeypatch.setattr(runtime, "register_provider", lambda config: None)
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", lambda: runtime)
+    request = {"action": "plan", "task": "Review public metadata", "planner": "local-model",
+               "approve_provider_call": True, "max_steps": 2}
+    if contract is not None:
+        request["requirements"] = contract.to_dict()
+    plan = worker.handle(request)
+    return worker, calls, state, requests, plan
+
+
+def test_actual_subprocess_roundtrip_retains_typed_task_and_fixed_contract_across_processes(tmp_path):
+    root = tmp_path / "owned"
+    process, response = _invoke(root, {"action": "plan", "task": TASK, "planner": "glioma-intent"})
+    assert process.returncode == 0 and process.stderr == "" and response["ok"] is True
+    plan = response["data"]
+    assert plan["task"] == TASK and plan["source_dispatch"] is False
+    assert plan["plan"]["requirements"]["forbidden_operations"] == ["clinical_trials.search", "gdc.projects"]
+    process, loaded = _invoke(root, {"action": "get_plan", "plan_id": plan["plan_id"]})
+    assert process.returncode == 0 and loaded["data"] == plan
+    process, run = _invoke(root, {"action": "create_run", "plan_id": plan["plan_id"],
+                                "expected_plan_digest": plan["plan_digest"]})
+    assert process.returncode == 0 and run["data"]["status"] == "queued"
+    process, held = _invoke(root, {"action": "execute", "run_id": run["data"]["run_id"],
+        "expected_plan_digest": plan["plan_digest"], "approve_source_dispatch": False})
+    assert process.returncode == 0 and held["data"]["status"] == "approval_required"
+    assert held["data"]["checkpoint"]["attempts"] == {}
+
+
+@pytest.mark.parametrize("raw", [
+    '{"action":"catalogue","action":"execute"}',
+    '{"action":"catalogue"} {"action":"catalogue"}',
+    '{"action":"catalogue","secret":NaN}',
+    '[' + '[' * 1200 + '0' + ']' * 1200 + ']',
+    '{"action":"catalogue","padding":"' + 'x' * MAX_WORKFLOW_API_REQUEST_BYTES + '"}',
+], ids=["duplicate_fields", "multiple_values", "nonfinite", "deep", "oversized"])
+def test_actual_subprocess_refuses_ambiguous_nonfinite_deep_or_oversized_json_without_tracebacks(tmp_path, raw):
+    process, result = _invoke(tmp_path / "owned", raw, raw=True)
+    assert process.returncode == 2 and process.stderr == ""
+    assert result["ok"] is False and set(result["error"]) == {"code", "message"}
+    assert "Traceback" not in process.stdout
+
+
+def test_pure_interpretation_and_catalogue_do_not_construct_a_provider(monkeypatch, tmp_path):
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", Mock(side_effect=AssertionError("pure boundary")))
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    catalog = worker.handle({"action": "catalogue"})
+    assert catalog["operation_count"] == len(catalog["operations"])
+    assert {op["implementation"] for op in catalog["operations"]} <= {"local", "live_adapter"}
+    result = worker.handle({"action": "interpret", "task": TASK})
+    assert result["status"] == "ready" and result["provider_calls"] == 0
+
+
+def test_unsupported_typed_clause_returns_exact_clarification_and_no_plan(tmp_path):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    result = worker.handle({"action": "plan", "task": "Review glioma evidence after 2024.", "planner": "glioma-intent"})
+    assert result["status"] == "needs_clarification" and result["source_dispatch"] is False
+    assert result["interpretation"]["unresolved_spans"] and not list((worker.root / "plans").iterdir())
+
+
+def test_valid_edit_keeps_original_task_contract_and_invalidates_old_run_approval(tmp_path):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    original = _typed(worker)
+    run = _create(worker, original)
+    proposal = {key: deepcopy(original["plan"][key]) for key in ("name", "steps", "outputs")}
+    proposal["name"] = "Edited name with identical evidence contract"
+    edited = worker.handle({"action": "validate", "plan_id": original["plan_id"],
+        "expected_plan_digest": original["plan_digest"], "proposal": proposal})
+    assert edited["plan_digest"] != original["plan_digest"] and edited["task"] == TASK
+    assert edited["plan"]["requirements"] == original["plan"]["requirements"]
+    with pytest.raises(WorkflowAPIError, match="approval"):
+        _execute(worker, run)
+    assert not (worker.root / "runs" / run["run_id"] / "checkpoint.json").exists()
+    with pytest.raises(WorkflowAPIError) as error:
+        worker.handle({"action": "validate", "plan_id": original["plan_id"],
+            "expected_plan_digest": original["plan_digest"], "proposal": proposal})
+    assert error.value.code == "revision_conflict"
+
+
+def test_retained_contract_consistency_does_not_coerce_literal_true_to_integer_one(tmp_path):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    plan = _typed(worker)
+    path = worker.root / "plans" / plan["plan_id"] / "plan.json"
+    retained = json.loads(path.read_text(encoding="utf-8"))
+    retained["requirements"]["max_calls_by_operation"]["pubmed.search"] = True
+    retained["record_digest"] = content_digest({key: value for key, value in retained.items() if key != "record_digest"})
+    save_workflow_checkpoint(path, retained)
+    with pytest.raises(WorkflowAPIError, match="contract"):
+        worker.handle({"action": "get_plan", "plan_id": plan["plan_id"]})
+
+
+def test_idle_inspection_holds_execution_lock_while_reading_run_and_checkpoint(monkeypatch, tmp_path):
+    worker, _, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    _execute(worker, run)
+    original = worker._run
+    observations = []
+    def checked_read(run_id):
+        with pytest.raises(WorkflowAPIError) as error:
+            with worker._lock(worker._path("runs", run_id, "execute.lock")):
+                raise AssertionError("idle inspection must own the observation lock")
+        observations.append(error.value.code)
+        return original(run_id)
+    monkeypatch.setattr(worker, "_run", checked_read)
+    result = worker.handle({"action": "inspect", "run_id": run["run_id"]})
+    assert result["status"] == "completed" and result["active"] is False
+    assert observations == ["resource_busy"]
+
+
+@pytest.mark.parametrize("change", ["source_limit", "source_query", "source_operation", "drop_handoff", "replace_contract"])
+def test_edit_cannot_weaken_retained_source_scope_arguments_flow_or_task_contract(tmp_path, change):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    original = _typed(worker)
+    proposal = {key: deepcopy(original["plan"][key]) for key in ("name", "steps", "outputs")}
+    source = proposal["steps"][0]
+    if change == "source_limit":
+        source["arguments"]["per_specialty_limit"] = 1
+    elif change == "source_query":
+        source["arguments"]["specialty_lanes"] = ["not_glioma"]
+    elif change == "source_operation":
+        source["operation"] = "clinical_trials.search"
+    elif change == "drop_handoff":
+        proposal["steps"] = [source]
+        proposal["outputs"] = [source["id"]]
+    else:
+        proposal["requirements"] = compile_workflow_requirements(TASK).to_dict()
+    with pytest.raises((ValueError, TypeError, KeyError)):
+        worker.handle({"action": "validate", "plan_id": original["plan_id"],
+            "expected_plan_digest": original["plan_digest"], "proposal": proposal})
+    assert worker.handle({"action": "get_plan", "plan_id": original["plan_id"]}) == original
+
+
+def test_model_planning_requires_separate_literal_approval_before_runtime_creation(monkeypatch, tmp_path):
+    runtime = Mock(side_effect=AssertionError("approval predates provider"))
+    monkeypatch.setattr(llm_runtime, "LLMRuntime", runtime)
+    worker = WorkflowAPIWorker(tmp_path / "owned", model="test")
+    for approval in (False, 1, "true"):
+        with pytest.raises(WorkflowAPIError):
+            worker.handle({"action": "plan", "task": "Review metadata", "planner": "local-model",
+                           "approve_provider_call": approval})
+    assert runtime.call_count == 0
+
+
+def test_model_plan_retains_caller_contract_and_step_budget_through_edits(monkeypatch, tmp_path):
+    contract = compile_workflow_requirements("Review public metadata", argument_rules=[
+        {"operation": "fixture.retrieve", "path": "/payload", "comparison": "equals", "value": PUBLIC_VALUE}])
+    worker, calls, _, requests, plan = _fixture(monkeypatch, tmp_path, contract=contract)
+    assert len(requests) == 1 and calls == []
+    assert plan["plan"]["requirements"]["max_steps"] == 2
+    assert contract.to_dict()["argument_rules"][0] in plan["plan"]["requirements"]["argument_rules"]
+    proposal = {key: deepcopy(plan["plan"][key]) for key in ("name", "steps", "outputs")}
+    proposal["steps"][0]["arguments"]["payload"] = "broadened"
+    with pytest.raises(ValueError):
+        worker.handle({"action": "validate", "plan_id": plan["plan_id"],
+            "expected_plan_digest": plan["plan_digest"], "proposal": proposal})
+    assert calls == []
+
+
+def test_exact_approval_and_new_run_admission_cannot_implicitly_replay_a_previous_run(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    with pytest.raises(WorkflowAPIError):
+        _execute(worker, dict(run, plan_digest="0" * 64))
+    assert calls == []
+    first = _execute(worker, run, max_step_calls=1)
+    assert first["status"] == "paused" and len(calls) == 1
+    with pytest.raises(WorkflowAPIError) as error:
+        _execute(worker, run)
+    assert error.value.code == "resume_required" and len(calls) == 1
+    complete = _execute(worker, run, resume=True)
+    assert complete["status"] == "completed" and len(calls) == 2
+    assert complete["checkpoint"]["attempts"] == {"first": 1, "second": 1}
+
+
+def test_polling_and_execution_metadata_omit_public_values_and_source_receipts_but_explicit_exports_retain_them(monkeypatch, tmp_path):
+    worker, _, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    result = _execute(worker, run)
+    polled = worker.handle({"action": "inspect", "run_id": run["run_id"]})
+    assert result == polled and PUBLIC_VALUE not in json.dumps(polled)
+    assert "local_transport_fixture" not in json.dumps(polled)
+    assert all("value" not in row and "receipt" not in row for row in polled["checkpoint"]["results"].values())
+    exported = worker.handle({"action": "export", "run_id": run["run_id"], "kind": "outputs"})
+    assert exported["outputs"] == {"second": {"public_value": PUBLIC_VALUE}}
+    checkpoint = worker.handle({"action": "export", "run_id": run["run_id"], "kind": "checkpoint"})["checkpoint"]
+    assert checkpoint["results"]["first"]["receipt"] == {"source": "local_transport_fixture"}
+
+
+def test_cancel_before_first_dispatch_is_durable_until_separate_explicit_release(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    worker.handle({"action": "cancel", "run_id": run["run_id"]})
+    assert _execute(worker, run)["status"] == "cancelled" and calls == []
+    assert _execute(worker, run, resume=True)["status"] == "cancelled" and calls == []
+    complete = _execute(worker, run, resume=True, resume_cancelled=True)
+    assert complete["status"] == "completed" and len(calls) == 2
+    assert complete["cancel_requested"] is False
+
+
+def test_inflight_cancel_drains_real_observation_and_resume_preserves_first_attempt(monkeypatch, tmp_path):
+    worker, calls, state, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    entered, release = Event(), Event()
+    state["before_execute"] = lambda: (entered.set(), release.wait(10))
+    result = []
+    thread = Thread(target=lambda: result.append(_execute(worker, run)))
+    thread.start()
+    try:
+        assert entered.wait(10)
+        inspected = worker.handle({"action": "inspect", "run_id": run["run_id"]})
+        assert inspected["active"] is True and inspected["checkpoint"]["in_flight"] == "first"
+        worker.handle({"action": "cancel", "run_id": run["run_id"]})
+    finally:
+        release.set()
+        thread.join(10)
+    assert not thread.is_alive() and result[0]["status"] == "cancelled" and len(calls) == 1
+    first_digest = result[0]["checkpoint"]["results"]["first"]["value_digest"]
+    state["before_execute"] = None
+    complete = _execute(worker, run, resume=True, resume_cancelled=True)
+    assert complete["status"] == "completed" and len(calls) == 2
+    assert complete["checkpoint"]["results"]["first"]["value_digest"] == first_digest
+
+
+def test_source_failure_retains_sanitized_failure_and_needs_distinct_retry_grant(monkeypatch, tmp_path):
+    worker, calls, state, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    state["fail"] = True
+    failed = _execute(worker, run)
+    assert failed["status"] == "failed" and ERROR_DETAIL not in json.dumps(failed)
+    state["fail"] = False
+    assert _execute(worker, run, resume=True)["status"] == "retry_required" and len(calls) == 1
+    assert _execute(worker, run, resume=True, retry_failed=True)["status"] == "completed"
+    assert len(calls) == 3
+
+
+def test_checkpoint_write_failure_prevents_dispatch_and_survives_as_honest_error(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    original = worker._write
+    def fail_checkpoint(path, value):
+        if path.name == "checkpoint.json":
+            raise OSError(ERROR_DETAIL)
+        original(path, value)
+    monkeypatch.setattr(worker, "_write", fail_checkpoint)
+    with pytest.raises(OSError):
+        _execute(worker, run)
+    assert calls == []
+    status = worker.handle({"action": "inspect", "run_id": run["run_id"]})
+    assert status["status"] == "error" and status["error_type"] == "OSError"
+    assert ERROR_DETAIL not in json.dumps(status)
+    with pytest.raises(WorkflowAPIError) as error:
+        _execute(worker, run, resume=True)
+    assert error.value.code == "recovery_required" and calls == []
+
+
+def test_running_record_without_os_lock_reports_interrupted_and_cannot_automatically_replay(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    record = worker._run(run["run_id"])
+    record.update(status="running", execution_count=1)
+    worker._save_run(record)
+    status = worker.handle({"action": "inspect", "run_id": run["run_id"]})
+    assert status["status"] == "interrupted" and status["active"] is False
+    with pytest.raises(WorkflowAPIError) as error:
+        _execute(worker, run, resume=True, retry_failed=True)
+    assert error.value.code == "recovery_required" and calls == []
+
+
+def test_unknown_completion_checkpoint_after_restart_requires_explicit_retry(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    _execute(worker, run, max_step_calls=1)
+    path = worker.root / "runs" / run["run_id"] / "checkpoint.json"
+    checkpoint = load_workflow_checkpoint(path)
+    checkpoint.update(status="running", in_flight="second", attempts={"first": 1, "second": 1})
+    checkpoint["checkpoint_digest"] = content_digest({key: value for key, value in checkpoint.items() if key != "checkpoint_digest"})
+    save_workflow_checkpoint(path, checkpoint)
+    record = worker._run(run["run_id"])
+    record["status"] = "running"
+    worker._save_run(record)
+    assert worker.handle({"action": "inspect", "run_id": run["run_id"]})["status"] == "interrupted"
+    assert _execute(worker, run, resume=True)["status"] == "retry_required" and len(calls) == 1
+    assert _execute(worker, run, resume=True, retry_failed=True)["status"] == "completed"
+    assert len(calls) == 2
+
+
+def test_actual_process_death_releases_activity_lock_and_retains_unknown_dispatch_boundary(monkeypatch, tmp_path):
+    worker, calls, _, _, plan = _fixture(monkeypatch, tmp_path)
+    run = _create(worker, plan)
+    marker = tmp_path / "entered-source.txt"
+    script = """
+import sys, time
+from pathlib import Path
+from pytest import MonkeyPatch
+import prism_sdk.workflow_api_worker as module
+from test_workflow_cli import _fixture_catalog
+patch = MonkeyPatch()
+factory, calls, state = _fixture_catalog(patch)
+module.builtin_workflow_operation_catalog = factory
+module.register_glioma_workflow_operations = lambda catalog: catalog
+def admitted():
+    Path(sys.argv[2]).write_text('source boundary entered', encoding='utf-8')
+    time.sleep(60)
+state['before_execute'] = admitted
+raise SystemExit(module.main(['--root', sys.argv[1]]))
+"""
+    environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    environment["PYTHONPATH"] = os.pathsep.join([str(Path(__file__).resolve().parents[1]), str(Path(__file__).parent)])
+    child = subprocess.Popen([sys.executable, "-c", script, str(worker.root), str(marker)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
+    try:
+        child.stdin.write(json.dumps({"action": "execute", "run_id": run["run_id"],
+            "expected_plan_digest": run["plan_digest"], "approve_source_dispatch": True}).encode("utf-8"))
+        child.stdin.close()
+        deadline = time.monotonic() + 20
+        while not marker.exists() and time.monotonic() < deadline and child.poll() is None:
+            time.sleep(0.05)
+        assert marker.exists() and child.poll() is None
+        running = worker.handle({"action": "inspect", "run_id": run["run_id"]})
+        assert running["active"] is True and running["checkpoint"]["in_flight"] == "first"
+        with pytest.raises(WorkflowAPIError) as error:
+            _execute(worker, run, resume=True)
+        assert error.value.code == "resource_busy" and calls == []
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=10)
+        child.stdout.close()
+        child.stderr.close()
+        if not child.stdin.closed:
+            child.stdin.close()
+    interrupted = worker.handle({"action": "inspect", "run_id": run["run_id"]})
+    assert interrupted["active"] is False and interrupted["status"] == "interrupted"
+    assert interrupted["checkpoint"]["in_flight"] == "first"
+    assert _execute(worker, run, resume=True)["status"] == "retry_required" and calls == []
+    assert _execute(worker, run, resume=True, retry_failed=True)["status"] == "completed"
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("payload", [
+    {"action": "catalogue", "argv": ["program"]},
+    {"action": "interpret", "task": TASK, "env": {}},
+    {"action": "plan", "task": TASK, "planner": "glioma-intent", "mcp": []},
+    {"action": "plan", "task": TASK, "planner": "glioma-intent", "root": "other"},
+    {"action": "plan", "task": TASK, "planner": "glioma-intent", "max_steps": True},
+    {"action": "plan", "task": TASK, "planner": "glioma-intent", "planning_attempts": 2},
+    {"action": "execute", "run_id": "../escape", "expected_plan_digest": "0" * 64, "approve_source_dispatch": True},
+    {"action": "execute", "run_id": "0" * 32, "expected_plan_digest": "0" * 64, "approve_source_dispatch": 1},
+    {"action": "execute", "run_id": "0" * 32, "expected_plan_digest": "0" * 64, "approve_source_dispatch": True, "retry_failed": True},
+    {"action": "execute", "run_id": "0" * 32, "expected_plan_digest": "0" * 64, "approve_source_dispatch": True, "max_step_calls": 0},
+    {"action": "install_connection", "token": "secret"},
+])
+def test_request_fields_cannot_expand_process_path_authority_or_control_bounds(tmp_path, payload):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    with pytest.raises(WorkflowAPIError):
+        worker.handle(payload)
+    assert not list((worker.root / "plans").iterdir()) and not list((worker.root / "runs").iterdir())
+
+
+def test_symlinked_or_hardlinked_storage_is_refused_without_reading_or_replacing_other_files(tmp_path):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    plan = _typed(worker)
+    path = worker.root / "plans" / plan["plan_id"] / "plan.json"
+    alias = tmp_path / "alias.json"
+    try:
+        os.link(path, alias)
+    except OSError:
+        pytest.skip("Hard links are unavailable on this filesystem")
+    with pytest.raises(WorkflowAPIError, match="aliases"):
+        worker.handle({"action": "get_plan", "plan_id": plan["plan_id"]})
+    assert alias.read_bytes() == path.read_bytes()
+
+
+def test_replacing_application_root_identity_is_refused_before_reading_a_plan(tmp_path):
+    worker = WorkflowAPIWorker(tmp_path / "owned")
+    plan = _typed(worker)
+    worker.root.rename(tmp_path / "old-owned")
+    worker.root.mkdir()
+    with pytest.raises(WorkflowAPIError, match="identity"):
+        worker.handle({"action": "get_plan", "plan_id": plan["plan_id"]})
+
+
+def test_error_envelopes_do_not_expose_exception_text_paths_or_source_payloads():
+    for error in (RuntimeError(ERROR_DETAIL), OSError(ERROR_DETAIL), ValueError(ERROR_DETAIL)):
+        response = _error(error)
+        assert response["ok"] is False and ERROR_DETAIL not in json.dumps(response)
+
+
+@pytest.mark.parametrize("endpoint", ["https://example.com/v1", "http://user:secret@localhost/v1", "http://localhost/v1?key=secret", "file:///model"])
+def test_model_configuration_is_operator_loopback_only(tmp_path, endpoint):
+    with pytest.raises(WorkflowAPIError):
+        WorkflowAPIWorker(tmp_path / "owned", base_url=endpoint)
