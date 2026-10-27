@@ -15592,6 +15592,10 @@ from .workflow_builder import (
     save_workflow_checkpoint, load_workflow_checkpoint,
 )
 from .workflow_openapi import OpenApiImportError, OpenApiHttpResponse, import_openapi_operations
+from .workflow_decoder import (
+    WORKFLOW_DECODER_SCHEMA, MAX_WORKFLOW_DECODER_SCHEMA_BYTES,
+    WorkflowDecoderSchema, WorkflowDecoderSchemaError, prepare_workflow_decoder_schema,
+)
 from .glioma_workflow import (
     glioma_evidence_workflow_proposal, register_glioma_workflow_operations,
     reconcile_glioma_evidence, glioma_evidence_review_handoff,
@@ -15670,6 +15674,8 @@ __all__ += [
     "WorkflowCancellationToken", "WORKFLOW_CHECKPOINT_SCHEMA", "WORKFLOW_CHECKPOINT_SCHEMA_V01",
     "execute_workflow_plan", "save_workflow_checkpoint", "load_workflow_checkpoint",
     "OpenApiImportError", "OpenApiHttpResponse", "import_openapi_operations",
+    "WORKFLOW_DECODER_SCHEMA", "MAX_WORKFLOW_DECODER_SCHEMA_BYTES",
+    "WorkflowDecoderSchema", "WorkflowDecoderSchemaError", "prepare_workflow_decoder_schema",
     "glioma_evidence_workflow_proposal", "register_glioma_workflow_operations",
     "reconcile_glioma_evidence", "glioma_evidence_review_handoff",
     "RESEARCH_SOURCE_PLAN_SCHEMA", "RESEARCH_SOURCE_BUNDLE_SCHEMA", "RESEARCH_SOURCE_RECEIPT_SCHEMA",
