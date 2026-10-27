@@ -32,7 +32,7 @@ from .workflow_integrations import (
 )
 
 WORKFLOW_PROVIDER_REGISTRY_SCHEMA = "aurora-workflow-provider-registry/0.1"
-WORKFLOW_PROVIDER_MANIFEST_VERSION = "reviewed-public-readers/2026-10-27.1"
+WORKFLOW_PROVIDER_MANIFEST_VERSION = "reviewed-public-readers/2026-10-27.2"
 WORKFLOW_PROVIDER_REQUEST_SCHEMA = "aurora-workflow-provider-request/0.1"
 WORKFLOW_PROVIDER_OBSERVATION_SCHEMA = "aurora-workflow-provider-observation/0.1"
 MAX_WORKFLOW_PROVIDER_RECORDS = 1_024
@@ -542,9 +542,12 @@ def _reviewed_catalog() -> WorkflowOperationCatalog:
     from .reviewed_ensembl_gene_retrieval import register_ensembl_gene_operations
     from .reviewed_uniprot_retrieval import register_uniprot_operations
     from .reviewed_reactome_retrieval import register_reactome_operations
+    from .reviewed_hgnc_gene_retrieval import register_hgnc_gene_operations
+    from .reviewed_nci_thesaurus_retrieval import register_nci_thesaurus_operations
     catalog = builtin_workflow_operation_catalog()
     for register in (register_research_source_operations, register_gdc_gene_mutation_operations, register_gdc_ssm_coverage_operations,
-                     register_ensembl_gene_operations, register_uniprot_operations, register_reactome_operations):
+                     register_ensembl_gene_operations, register_uniprot_operations, register_reactome_operations,
+                     register_hgnc_gene_operations, register_nci_thesaurus_operations):
         register(catalog)
     return catalog
 
@@ -565,6 +568,8 @@ _SERVICE_RECORDS = (
     ("ensembl", "Ensembl REST", ("https://rest.ensembl.org",), "Fixed public human/core TP53 identity and Entrez candidates; no validated biological crosswalk."),
     ("uniprot", "UniProt", ("https://rest.uniprot.org",), "Fixed public reviewed human P04637 name annotations; no sequence/variant data."),
     ("reactome", "Reactome", ("https://reactome.org",), "Fixed public human P04637 lower-level pathway annotations; no glioma activity inference."),
+    ("hgnc", "HGNC REST", ("https://rest.genenames.org",), "Fixed public TP53 native gene identifier/alias metadata; no validated scientific equivalence."),
+    ("nci_evs", "NCI EVS Thesaurus", ("https://api-evsrest.nci.nih.gov",), "Fixed NCIt glioma concept API, reviewed separately from GDC; shared NCI affiliation does not establish independence."),
 )
 _READER_RECORDS = (
     ("pubmed.search", "ncbi_eutils", "reviewed_pubmed_retrieval", "GLIOMA_WORKFLOW_BUILDER"),
@@ -583,12 +588,14 @@ _READER_RECORDS = (
     ("ensembl.gene_references", "ensembl", "reviewed_ensembl_gene_retrieval", "ENSEMBL_GENE_REFERENCES"),
     ("uniprot.protein_annotation", "uniprot", "reviewed_uniprot_retrieval", "UNIPROT_ANNOTATIONS"),
     ("reactome.pathway_annotations", "reactome", "reviewed_reactome_retrieval", "REACTOME_PATHWAYS"),
+    ("hgnc.gene_references", "hgnc", "reviewed_hgnc_gene_retrieval", "HGNC_GENE_REFERENCES"),
+    ("nci_thesaurus.glioma_ontology", "nci_evs", "reviewed_nci_thesaurus_retrieval", "NCI_THESAURUS"),
 )
 
 
 def reviewed_workflow_provider_registry(catalog: WorkflowOperationCatalog, *,
         evidence_references: Sequence[WorkflowProviderEvidenceReference] = ()) -> WorkflowProviderRegistry:
-    """Bind sixteen actual reviewed public readers without enabling or dispatching any.
+    """Bind eighteen actual reviewed public readers without enabling or dispatching any.
 
     Optional readers stay unregistered in the caller's catalogue. Unknown OpenAPI/MCP/local
     operations remain explicitly unreviewed rather than inheriting provider identity from an ID.
@@ -600,7 +607,7 @@ def reviewed_workflow_provider_registry(catalog: WorkflowOperationCatalog, *,
     readers = []
     for operation_id, provider_id, module_name, document in _READER_RECORDS:
         components = shared | {module_name: _component_digest(module_name)}
-        if provider_id in {"uniprot", "reactome"} or operation_id == "gdc.ssm_project_coverage":
+        if provider_id in {"uniprot", "reactome", "hgnc", "nci_evs"} or operation_id == "gdc.ssm_project_coverage":
             components["reviewed_public_http"] = _component_digest("reviewed_public_http")
         readers.append(WorkflowReaderContract(operation_id, provider_id, reviewed.resolve(operation_id).to_dict(),
                        components, "docs/" + document + ".md"))

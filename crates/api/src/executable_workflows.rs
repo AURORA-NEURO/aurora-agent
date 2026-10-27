@@ -43,6 +43,8 @@ pub struct WorkflowApplicationConfig {
     pub gene_references: bool,
     pub protein_pathways: bool,
     pub denominator_coverage: bool,
+    /// Fixed reviewed Python capability IDs, selected only by the operator at startup.
+    pub capabilities: Vec<String>,
 }
 
 impl WorkflowApplicationConfig {
@@ -121,6 +123,19 @@ impl WorkflowApplicationConfig {
                 || model.bytes().any(|byte| byte < 0x20)
         }) {
             return Err("workflow model must contain 1..=200 non-control characters".into());
+        }
+        if self.capabilities.len() > 32
+            || self.capabilities.iter().enumerate().any(|(index, name)| {
+                name.is_empty()
+                    || name.len() > 64
+                    || !name.as_bytes()[0].is_ascii_lowercase()
+                    || name.bytes().any(|byte| {
+                        !byte.is_ascii_lowercase() && !byte.is_ascii_digit() && byte != b'-'
+                    })
+                    || self.capabilities[..index].contains(name)
+            })
+        {
+            return Err("workflow capabilities require unique bounded reviewed profile IDs".into());
         }
         Ok(())
     }
@@ -663,6 +678,9 @@ impl WorkflowApplication {
         }
         if self.config.denominator_coverage {
             command.arg("--denominator-coverage");
+        }
+        for capability in &self.config.capabilities {
+            command.arg("--capability").arg(capability);
         }
         #[cfg(windows)]
         {

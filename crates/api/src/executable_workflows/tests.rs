@@ -49,6 +49,7 @@ impl Fixture {
             gene_references: false,
             protein_pathways: false,
             denominator_coverage: false,
+            capabilities: Vec::new(),
         };
         Self { root, config }
     }
@@ -346,7 +347,7 @@ fn provider_inspection_http_route_requires_authentication_and_matching_origin_wi
     let response = router.handle(request("GET", path, json!({})));
     assert_eq!(response.status, 200);
     let inspected = data(body(response));
-    assert_eq!(inspected["counts"]["implemented_reader_paths"], 16);
+    assert_eq!(inspected["counts"]["implemented_reader_paths"], 18);
     assert_eq!(
         inspected["counts"]["registered_reviewed_default_readers"],
         8
@@ -374,8 +375,8 @@ fn denominator_flag_and_provider_route_use_actual_worker_without_source_or_model
                 .invoke(&json!({"action":"providers"}), Duration::from_secs(30))
                 .unwrap(),
         );
-        assert_eq!(providers["counts"]["implemented_reader_paths"], 16);
-        assert_eq!(providers["counts"]["declared_reviewed_service_groups"], 13);
+        assert_eq!(providers["counts"]["implemented_reader_paths"], 18);
+        assert_eq!(providers["counts"]["declared_reviewed_service_groups"], 15);
         assert_eq!(providers["network_requests_on_inspection"], 0);
         assert!(providers["counts"]["independently_live_verified_providers"]["value"].is_null());
         let response = application.invoke(&json!({"action":"plan", "task":"Review fixed TP53 denominator evidence", "planner":"denominator-coverage"}), Duration::from_secs(30)).unwrap();
@@ -403,6 +404,71 @@ fn denominator_flag_and_provider_route_use_actual_worker_without_source_or_model
             3
         );
     }
+}
+
+#[test]
+fn reviewed_capability_profiles_reach_actual_worker_without_browser_configuration_or_dispatch() {
+    let mut fixture = Fixture::new();
+    fixture.config.capabilities = vec!["gene-identity".into(), "glioma-ontology".into()];
+    let application = fixture.application();
+    let catalogue = data(
+        application
+            .invoke(&json!({"action":"catalogue"}), Duration::from_secs(30))
+            .unwrap(),
+    );
+    assert_eq!(
+        catalogue["capabilities"]["selected_profiles"],
+        json!(["gene-identity", "glioma-ontology"])
+    );
+    for (profile, count) in [("gene-identity", 5), ("glioma-ontology", 1)] {
+        let planned = data(application.invoke(&json!({"action":"plan", "task":"Inspect fixed source metadata", "planner":format!("capability:{profile}")}), Duration::from_secs(30)).unwrap());
+        assert_eq!(planned["source_dispatch"], false);
+        assert_eq!(planned["interpretation"]["provider_calls"], 0);
+        assert_eq!(planned["plan"]["steps"].as_array().unwrap().len(), count);
+        let refused = application.invoke(&json!({"action":"plan", "task":"Inspect", "planner":format!("capability:{profile}"), "capabilities":[profile]}), Duration::from_secs(30)).unwrap();
+        assert_eq!(refused["ok"], false);
+    }
+    let disabled = Fixture::new();
+    let refused = disabled
+        .application()
+        .invoke(
+            &json!({"action":"plan", "task":"Inspect", "planner":"capability:glioma-ontology"}),
+            Duration::from_secs(30),
+        )
+        .unwrap();
+    assert_eq!(refused["ok"], false);
+    assert!(!fixture
+        .root
+        .join("runs")
+        .read_dir()
+        .unwrap()
+        .any(|entry| entry.is_ok()));
+}
+
+#[test]
+fn capability_configuration_bounds_names_and_refuses_unknown_profiles_in_fixed_worker() {
+    let fixture = Fixture::new();
+    for values in [
+        vec![""],
+        vec!["Bad"],
+        vec!["../gene-identity"],
+        vec!["--model"],
+        vec!["gene-identity", "gene-identity"],
+        vec!["x"; 33],
+    ] {
+        let mut config = fixture.config.clone();
+        config.capabilities = values.into_iter().map(String::from).collect();
+        assert!(config.validate().is_err());
+    }
+    let mut config = fixture.config.clone();
+    config.capabilities = vec!["unknown-profile".into()];
+    let application = WorkflowApplication::new(config).unwrap();
+    let refused = application
+        .invoke(&json!({"action":"catalogue"}), Duration::from_secs(30))
+        .unwrap();
+    assert_eq!(refused["ok"], false);
+    assert!(!fixture.root.join("plans").exists());
+    assert!(!fixture.root.join("runs").exists());
 }
 
 #[test]

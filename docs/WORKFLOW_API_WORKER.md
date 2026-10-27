@@ -232,3 +232,11 @@ Dedicated tests exercise the actual stdio subprocess protocol, retained typed co
 model/source approval separation, real fixture dispatch, cancellation, checkpoint failures,
 revision invalidation, restart uncertainty, metadata projection and explicit exports. Fixture
 calls are not reported as live provider coverage.
+
+Repeated operator startup `--capability gene-identity --capability glioma-ontology` enables fixed
+[reviewed capability profiles](WORKFLOW_CAPABILITIES.md). The catalogue inventory distinguishes
+selection, exact descriptor availability and unmeasured source availability. Plan requests select
+`capability:gene-identity` or `capability:glioma-ontology`; they cannot supply configuration or
+enable another profile. Fixed source contracts conjoin caller requirements and the requested step
+bound. Neither planning nor inspection consumes model/source authority. Run metadata also projects
+native denominator and three-source identifier review holds without claiming scientific approval.

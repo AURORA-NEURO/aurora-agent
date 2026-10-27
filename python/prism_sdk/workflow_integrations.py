@@ -189,6 +189,34 @@ class WorkflowOperationCatalog:
     def operations(self) -> tuple[WorkflowOperation, ...]:
         return tuple(self._operations[name] for name in sorted(self._operations))
 
+    def subset(self, operation_ids: Sequence[str]) -> "WorkflowOperationCatalog":
+        """Retain exact executors for an explicit subset; discovery grants no authority."""
+        if isinstance(operation_ids, (str, bytes)) or not isinstance(operation_ids, Sequence):
+            raise ArgumentError("workflow catalogue subset requires an explicit sequence")
+        if (len(operation_ids) > MAX_WORKFLOW_OPERATIONS or any(type(name) is not str for name in operation_ids)
+                or len(set(operation_ids)) != len(operation_ids)):
+            raise ArgumentError("workflow catalogue subset is duplicated or exceeds its bound")
+        operations = tuple(self.resolve(name) for name in operation_ids)
+        return WorkflowOperationCatalog(operations, {item.operation_id: self._executors[item.operation_id] for item in operations})
+
+    def extended(self, extension: "WorkflowOperationCatalog") -> "WorkflowOperationCatalog":
+        """Combine atomically, refusing descriptor conflicts and preserving existing bindings.
+
+        Matching descriptors never replace a caller-owned executor or establish its conformance.
+        Both input catalogues remain unchanged if validation or capacity checks fail.
+        """
+        if type(extension) is not WorkflowOperationCatalog:
+            raise ArgumentError("workflow catalogue extension requires a concrete catalogue")
+        operations, executors = dict(self._operations), dict(self._executors)
+        for operation in extension.operations():
+            name = operation.operation_id
+            if name in operations:
+                if operations[name].to_dict() != operation.to_dict():
+                    raise ArgumentError("workflow catalogue extension conflicts with an existing descriptor")
+            else:
+                operations[name], executors[name] = operation, extension._executors[name]
+        return WorkflowOperationCatalog(tuple(operations.values()), executors)
+
     def resolve(self, operation_id: str) -> WorkflowOperation:
         _identifier("workflow operation_id", operation_id)
         try:

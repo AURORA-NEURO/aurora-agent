@@ -53,6 +53,7 @@ def register_workflow_commands(subparsers: Any) -> None:
         parser.add_argument("--gene-references", action="store_true", help="include the fixed Ensembl TP53 reference reader and source-reference review operations")
         parser.add_argument("--protein-pathways", action="store_true", help="include fixed public TP53 UniProt/Reactome annotation readers and local review operations")
         parser.add_argument("--denominator-coverage", action="store_true", help="include fixed GDC TP53 counts and associated-SSM coverage assessment; no prevalence")
+        parser.add_argument("--capability", action="append", default=[], help="enable one fixed reviewed capability profile; repeat for additional profiles")
         if name not in {"workflow-build", "workflow-run"}:
             parser.add_argument("--model", help="local model identity, required with --grounded-glioma")
             parser.add_argument("--base-url", default="http://127.0.0.1:11434/v1")
@@ -78,7 +79,7 @@ def register_workflow_commands(subparsers: Any) -> None:
         build.add_argument("--planning-receipt", help="optional incremental planning result destination, including bounded failures")
         build.add_argument("--out", required=True, help="reviewable plan destination, saved before source dispatch")
     template = commands["workflow-template"]
-    template.add_argument("--template", choices=("evidence", "molecular", "mutations", "gene-references", "protein-pathways", "denominator-coverage"), default="evidence")
+    template.add_argument("--template", choices=("evidence", "molecular", "mutations", "gene-references", "protein-pathways", "denominator-coverage", "gene-identity", "glioma-ontology"), default="evidence")
     template.add_argument("--task", required=True)
     template.add_argument("--no-tcga", action="store_true")
     template.add_argument("--literature-limit", type=int, help="evidence template literature limit, default 10")
@@ -252,6 +253,11 @@ def _local_runtime(args: argparse.Namespace) -> LLMRuntime:
 
 
 def workflow_cli_catalog(args: argparse.Namespace, *, runtime: LLMRuntime | None = None):
+    from .workflow_capabilities import WORKFLOW_CAPABILITY_IDS, validate_workflow_capabilities, with_workflow_capabilities
+    selected = list(getattr(args, "capability", []))
+    if getattr(args, "template", None) in WORKFLOW_CAPABILITY_IDS and args.template not in selected:
+        selected.append(args.template)
+    selected = validate_workflow_capabilities(selected)
     catalog = register_glioma_workflow_operations(builtin_workflow_operation_catalog())
     if args.research_sources:
         from .reviewed_research_sources import register_research_source_operations
@@ -282,6 +288,7 @@ def workflow_cli_catalog(args: argparse.Namespace, *, runtime: LLMRuntime | None
         from .glioma_denominator_workflow import register_glioma_denominator_workflow_operations
         register_gdc_ssm_coverage_operations(catalog)
         register_glioma_denominator_workflow_operations(catalog)
+    catalog = with_workflow_capabilities(catalog, selected)
     if args.grounded_glioma:
         from .glioma_workflow_synthesis import register_glioma_synthesis_operations
         register_glioma_synthesis_operations(catalog, runtime=runtime if runtime is not None else _local_runtime(args),
@@ -313,9 +320,9 @@ def execute_workflow_command(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "workflow-template" and args.template == "molecular" and args.grounded_glioma:
         raise WorkflowValidationError("molecular catalogue templates do not implement model synthesis")
     if args.command == "workflow-template":
-        if args.template in {"mutations", "gene-references", "protein-pathways", "denominator-coverage"} and (args.grounded_glioma or args.no_tcga or args.no_gwas
+        if args.template in {"mutations", "gene-references", "protein-pathways", "denominator-coverage", "gene-identity", "glioma-ontology"} and (args.grounded_glioma or args.no_tcga or args.no_gwas
                 or any(getattr(args, key) is not None for key in ("literature_limit", "trial_page_size", "trial_max_pages", "association_page_size", "gwas_page_size", "gwas_max_pages"))):
-            raise WorkflowValidationError("fixed TP53 review templates do not accept evidence, molecular or synthesis options")
+            raise WorkflowValidationError("fixed source templates do not accept evidence, molecular or synthesis options")
         if args.template == "molecular" and (args.no_tcga or any(getattr(args, key) is not None for key in ("literature_limit", "trial_page_size", "trial_max_pages"))):
             raise WorkflowValidationError("evidence template source options cannot be applied to a molecular template")
         if args.template == "evidence" and (args.no_gwas or any(getattr(args, key) is not None for key in ("association_page_size", "gwas_page_size", "gwas_max_pages"))):
@@ -366,11 +373,20 @@ def _execute_prepared_workflow_command(args, catalog, retrieved_at, requirements
         if args.provider_registry:
             from .workflow_provider_registry import reviewed_workflow_provider_registry
             return {"command": args.command, **reviewed_workflow_provider_registry(catalog).to_dict()}
-        return {"command": args.command, **catalog.to_dict()}
+        from .workflow_capabilities import workflow_capability_inventory
+        return {"command": args.command, **catalog.to_dict(),
+                "capabilities": workflow_capability_inventory(catalog, args.capability)}
     if args.command in {"workflow-template", "workflow-build", "workflow-run"}:
         if args.command == "workflow-template":
             proposal_builder = glioma_evidence_workflow_proposal
-            if args.template == "mutations":
+            if args.template in {"gene-identity", "glioma-ontology"}:
+                from .workflow_capabilities import compile_workflow_capability
+                selected = list(args.capability)
+                if args.template not in selected:
+                    selected.append(args.template)
+                plan = compile_workflow_capability(args.task, catalog, args.template,
+                    enabled_profiles=selected, requirements=requirements)
+            elif args.template == "mutations":
                 from .glioma_mutation_workflow import compile_glioma_mutation_workflow
                 plan = compile_glioma_mutation_workflow(args.task, catalog, requirements=requirements)
             elif args.template == "gene-references":
@@ -484,6 +500,8 @@ def _output_review_statuses(outputs: dict[str, Any]) -> dict[str, dict[str, Any]
     from .glioma_mutation_workflow import GLIOMA_MUTATION_REVIEW_SCHEMA
     from .glioma_gene_reference_workflow import GLIOMA_GENE_REFERENCE_REVIEW_SCHEMA
     from .glioma_protein_pathway_workflow import GLIOMA_PROTEIN_PATHWAY_REVIEW_SCHEMA
+    from .glioma_denominator_workflow import GLIOMA_DENOMINATOR_REVIEW_SCHEMA
+    from .glioma_gene_identity_workflow import GLIOMA_GENE_IDENTITY_REVIEW_SCHEMA
     reviewed_schemas = {
         GLIOMA_DRAFT_AUDIT_SCHEMA: {"needs_evidence", "blocked", "held_for_scientific_human_review"},
         GLIOMA_MOLECULAR_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
@@ -491,6 +509,8 @@ def _output_review_statuses(outputs: dict[str, Any]) -> dict[str, dict[str, Any]
         GLIOMA_MUTATION_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
         GLIOMA_GENE_REFERENCE_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
         GLIOMA_PROTEIN_PATHWAY_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
+        GLIOMA_DENOMINATOR_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
+        GLIOMA_GENE_IDENTITY_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
     }
     statuses = {}
     for step_id, value in outputs.items():

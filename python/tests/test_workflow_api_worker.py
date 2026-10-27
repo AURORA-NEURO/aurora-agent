@@ -832,8 +832,8 @@ def test_provider_inspection_is_inert_deduplicates_service_groups_and_refuses_re
     monkeypatch.setattr(llm_runtime, "LLMRuntime", Mock(side_effect=AssertionError("inspection constructs no model")))
     worker = WorkflowAPIWorker(tmp_path / "inspect", denominator_coverage=True)
     value = worker.handle({"action": "providers"})
-    assert value["counts"]["implemented_reader_paths"] == 16
-    assert value["counts"]["declared_reviewed_service_groups"] == 13
+    assert value["counts"]["implemented_reader_paths"] == 18
+    assert value["counts"]["declared_reviewed_service_groups"] == 15
     assert value["counts"]["independently_live_verified_providers"]["value"] is None
     assert value["network_requests_on_inspection"] == 0
     assert not list((worker.root / "plans").iterdir()) and not list((worker.root / "runs").iterdir())

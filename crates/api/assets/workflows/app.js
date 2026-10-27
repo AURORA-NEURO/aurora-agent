@@ -3,7 +3,7 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const state = { token: '', catalogue: [], plan: null, proposal: null, dirty: true, editRevision: 0, pendingRun: false, planningSettingsDirty: false, run: null, timer: null };
+  const state = { token: '', catalogue: [], capabilities: [], plan: null, proposal: null, dirty: true, editRevision: 0, pendingRun: false, planningSettingsDirty: false, run: null, timer: null };
   const endpoint = '/v1/executable-workflows';
   const templateOperations = {
     'glioma-mutations': ['gdc.gene_mutation_counts', 'glioma.mutation.analyze', 'glioma.mutation.review_handoff'],
@@ -27,6 +27,20 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
   function updatePlannerAvailability() {
     const installed = new Set(state.token ? state.catalogue.map(operation => operation.operation_id) : []);
     for (const [planner, required] of Object.entries(templateOperations)) $('planner').querySelector('option[value="' + planner + '"]').disabled = !required.every(operation => installed.has(operation));
+    const selected = $('planner').value;
+    const group = $('capability-templates'); group.replaceChildren();
+    const available = new Set();
+    for (const profile of state.capabilities.slice(0, 32)) {
+      if (!profile || typeof profile.profile_id !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(profile.profile_id) || typeof profile.label !== 'string' || !Array.isArray(profile.required_operations)) continue;
+      const option = element('option', profile.label.slice(0, 200)); option.value = 'capability:' + profile.profile_id;
+      option.disabled = !state.token || profile.operator_enabled !== true || profile.descriptor_available !== true || !profile.required_operations.length || !profile.required_operations.every(id => typeof id === 'string' && installed.has(id));
+      if (!option.disabled) available.add(option.value);
+      group.append(option);
+    }
+    if (selected.startsWith('capability:') && !available.has(selected)) {
+      $('planner').value = 'glioma-intent';
+      if (state.plan) { state.planningSettingsDirty = true; dirty(); }
+    } else { $('planner').value = selected; }
     if ($('planner').selectedOptions[0]?.disabled) {
       $('planner').value = 'glioma-intent';
       if (state.plan) { state.planningSettingsDirty = true; dirty(); }
@@ -116,8 +130,8 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
     if (!response.ok) { let message = 'The export was refused.'; try { message = parseJson(text).error?.message || message; } catch {} throw new Error(message); }
     const blob = new Blob([text], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = element('a'); link.href = url; link.download = 'aurora-' + id + '-' + kind + '.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  $('connect-form').addEventListener('submit', action(async () => { state.token = $('token').value; $('token').value = ''; $('connection-status').textContent = 'Connecting…'; try { const catalogue = await request('/catalogue'); state.catalogue = catalogue.operations; $('provider-coverage').textContent = '';  updatePlannerAvailability(); $('catalog-count').textContent = catalogue.operation_count + ' operations · ' + catalogue.integration_count + ' integration IDs'; $('connection-status').textContent = 'Connected to this local API'; renderCatalogue(); } catch (failure) { state.token = ''; state.catalogue = []; $('provider-coverage').textContent = '';  updatePlannerAvailability(); $('connection-status').textContent = 'Disconnected'; throw failure; } }));
-  $('disconnect').addEventListener('click', () => { state.token = ''; state.catalogue = []; $('provider-coverage').textContent = '';  updatePlannerAvailability(); clearTimeout(state.timer); $('token').value = ''; $('connection-status').textContent = 'Disconnected'; $('source-grant').checked = false; $('run').disabled = true; });
+  $('connect-form').addEventListener('submit', action(async () => { state.token = $('token').value; $('token').value = ''; $('connection-status').textContent = 'Connecting…'; try { const catalogue = await request('/catalogue'); state.catalogue = catalogue.operations; state.capabilities = Array.isArray(catalogue.capabilities?.profiles) ? catalogue.capabilities.profiles : []; $('provider-coverage').textContent = '';  updatePlannerAvailability(); $('catalog-count').textContent = catalogue.operation_count + ' operations · ' + catalogue.integration_count + ' integration IDs'; $('connection-status').textContent = 'Connected to this local API'; renderCatalogue(); } catch (failure) { state.token = ''; state.catalogue = []; state.capabilities = []; $('provider-coverage').textContent = '';  updatePlannerAvailability(); $('connection-status').textContent = 'Disconnected'; throw failure; } }));
+  $('disconnect').addEventListener('click', () => { state.token = ''; state.catalogue = []; state.capabilities = []; $('provider-coverage').textContent = '';  updatePlannerAvailability(); clearTimeout(state.timer); $('token').value = ''; $('connection-status').textContent = 'Disconnected'; $('source-grant').checked = false; $('run').disabled = true; });
   $('catalog-filter').addEventListener('input', renderCatalogue);
   $('inspect-providers').addEventListener('click', action(async () => {
     if (!state.token) throw new Error('Connect this page before inspecting provider coverage.');

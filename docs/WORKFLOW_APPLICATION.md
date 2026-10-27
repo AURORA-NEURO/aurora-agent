@@ -209,3 +209,12 @@ contract enforcement, stale-digest refusal, cancellation across process restarts
 without implicit release, metadata/export separation, strict duplicate fields, and actual TCP
 Host/Origin checks. A deliberately separate process fixture checks pipe overflow, timeout, and
 credential-environment exclusion, and exact large-integer transport; it is not counted as a connected external integration.
+
+Repeated `--workflow-capability gene-identity --workflow-capability glioma-ontology` selects fixed
+[reviewed profiles](WORKFLOW_CAPABILITIES.md) at operator startup. The browser renders the worker's
+profile inventory as inert text and enables only selected profiles with every exact descriptor
+available. These choices add a five-stage HGNC/Ensembl/NCBI metadata review and a one-stage NCIt
+glioma terminology inspection. Disconnect removes their options. Requests cannot change startup
+configuration, and fixed profile plans retain caller contracts, step bounds and separate source
+approval. Profile availability is not provider verification, account authorization or scientific
+support. The existing individual catalogue flags remain supported.

@@ -125,7 +125,10 @@ class WorkflowAPIWorker:
                  molecular_glioma: bool = False, glioma_mutations: bool = False,
                  gene_references: bool = False, protein_pathways: bool = False,
                  denominator_coverage: bool = False,
+                 capabilities: tuple[str, ...] = (),
                  timeout_seconds: int = 120) -> None:
+        from .workflow_capabilities import validate_workflow_capabilities, with_workflow_capabilities
+        self.capabilities = validate_workflow_capabilities(capabilities)
         if any(type(value) is not bool for value in (research_sources, molecular_glioma, glioma_mutations, gene_references, protein_pathways, denominator_coverage)):
             _refuse("invalid_configuration", "Catalogue switches must be literal booleans.")
         if not isinstance(base_url, str):
@@ -177,6 +180,7 @@ class WorkflowAPIWorker:
             from .glioma_denominator_workflow import register_glioma_denominator_workflow_operations
             register_gdc_ssm_coverage_operations(self.catalog)
             register_glioma_denominator_workflow_operations(self.catalog)
+        self.catalog = with_workflow_capabilities(self.catalog, self.capabilities)
 
     @staticmethod
     def _directory_identity(path: Path) -> tuple[int, int]:
@@ -381,7 +385,8 @@ class WorkflowAPIWorker:
 
     def _action_catalogue(self, request: dict[str, Any]) -> dict[str, Any]:
         _fields(request, {"action"})
-        return self.catalog.to_dict()
+        from .workflow_capabilities import workflow_capability_inventory
+        return {**self.catalog.to_dict(), "capabilities": workflow_capability_inventory(self.catalog, self.capabilities)}
 
     def _action_providers(self, request: dict[str, Any]) -> dict[str, Any]:
         _fields(request, {"action"})
@@ -401,7 +406,8 @@ class WorkflowAPIWorker:
         max_steps = _integer(request.get("max_steps", 16), 1, 32)
         attempts = _integer(request.get("planning_attempts", 1), 1, 4)
         planner = request["planner"]
-        if planner not in {"glioma-intent", "local-model", "local-incremental", "glioma-mutations", "gene-references", "protein-pathways", "denominator-coverage"}:
+        if (type(planner) is not str or planner not in {"glioma-intent", "local-model", "local-incremental", "glioma-mutations", "gene-references", "protein-pathways", "denominator-coverage"}
+                | {"capability:" + name for name in self.capabilities}):
             _refuse("invalid_request", "The selected planner is not supported.")
         incremental_fields = {"max_model_calls", "decision_attempts", "operation_ids"}
         if planner != "local-incremental" and incremental_fields & set(request):
@@ -441,6 +447,16 @@ class WorkflowAPIWorker:
                     self.catalog, task=task, requirements=merged)
             if len(plan.to_dict()["steps"]) > max_steps:
                 _refuse("invalid_request", "The typed plan exceeds the requested step bound.")
+        elif planner.startswith("capability:"):
+            if attempts != 1:
+                _refuse("invalid_request", "Fixed source templates have no model repair attempts.")
+            from .workflow_capabilities import compile_workflow_capability
+            profile_id = planner.removeprefix("capability:")
+            plan = compile_workflow_capability(task, self.catalog, profile_id,
+                enabled_profiles=self.capabilities, requirements=contract)
+            interpretation = {"schema": "aurora-workflow-capability-selection/0.1", "profile_id": profile_id,
+                "provider_calls": 0, "question_used_as_query": False, "scope": "operator_enabled_fixed_public_sources",
+                "scientific_validity": "unassessed"}
         elif planner in {"glioma-mutations", "gene-references", "protein-pathways", "denominator-coverage"}:
             if attempts != 1:
                 _refuse("invalid_request", "Fixed source templates have no model repair attempts.")
@@ -725,6 +741,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gene-references", action="store_true")
     parser.add_argument("--protein-pathways", action="store_true")
     parser.add_argument("--denominator-coverage", action="store_true")
+    parser.add_argument("--capability", action="append", default=[])
     parser.add_argument("--timeout-seconds", type=int, default=120)
     args = parser.parse_args(argv)
     try:
@@ -738,6 +755,7 @@ def main(argv: list[str] | None = None) -> int:
             glioma_mutations=args.glioma_mutations, gene_references=args.gene_references,
             protein_pathways=args.protein_pathways,
             denominator_coverage=args.denominator_coverage,
+            capabilities=tuple(args.capability),
             timeout_seconds=args.timeout_seconds)
         response = {"schema": WORKFLOW_API_RESPONSE_SCHEMA, "ok": True, "data": worker.handle(request)}
         encoded = _json(response)

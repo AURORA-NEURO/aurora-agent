@@ -44,7 +44,7 @@ def _reconstruct(registry, **changes):
     return WorkflowProviderRegistry(**fields)
 
 
-def test_sixteen_implemented_readers_are_not_sixteen_providers_or_default_registration(monkeypatch):
+def test_eighteen_implemented_readers_are_not_eighteen_providers_or_default_registration(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: pytest.fail("inspection attempted DNS"))
     monkeypatch.setattr(socket, "create_connection", lambda *_args, **_kwargs: pytest.fail("inspection opened a socket"))
     catalog = builtin_workflow_operation_catalog()
@@ -52,8 +52,8 @@ def test_sixteen_implemented_readers_are_not_sixteen_providers_or_default_regist
     document = reviewed_workflow_provider_registry(catalog).to_dict()
     assert catalog.to_dict() == before
     assert document["counts"] == {
-        "declared_reviewed_service_groups": 13, "implemented_reader_paths": 16,
-        "registered_reviewed_default_readers": 8, "supported_readers_not_registered": 8,
+        "declared_reviewed_service_groups": 15, "implemented_reader_paths": 18,
+        "registered_reviewed_default_readers": 8, "supported_readers_not_registered": 10,
         "registered_unmatched_readers": 0, "registered_reviewed_service_groups": 7,
         "external_evidence_references": 0,
         "independently_live_verified_providers": {"state": "not_established_by_registry", "value": None},
@@ -68,8 +68,8 @@ def test_sixteen_implemented_readers_are_not_sixteen_providers_or_default_regist
 def test_all_real_optional_registrations_bind_without_capacity_counts_or_dispatch(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: pytest.fail("registration attempted DNS"))
     document = reviewed_workflow_provider_registry(_all_catalog()).to_dict()
-    assert document["counts"]["registered_reviewed_default_readers"] == 16
-    assert document["counts"]["registered_reviewed_service_groups"] == 13
+    assert document["counts"]["registered_reviewed_default_readers"] == 18
+    assert document["counts"]["registered_reviewed_service_groups"] == 15
     assert document["counts"]["supported_readers_not_registered"] == 0
     assert all(value["registration_state"] == "registered_reviewed_default" for value in document["readers"])
     assert "225" not in json.dumps(document["counts"])
@@ -139,7 +139,7 @@ def test_unknown_local_mcp_openapi_and_named_aliases_do_not_inherit_reader_cover
     document = reviewed_workflow_provider_registry(catalog).to_dict()
     assert document["unreviewed_operation_ids"] == ["local.report", "mcp.fixture", "openapi.fixture", "pubmed.alias"]
     assert document["counts"]["registered_reviewed_default_readers"] == 8
-    assert document["counts"]["declared_reviewed_service_groups"] == 13
+    assert document["counts"]["declared_reviewed_service_groups"] == 15
 
 
 def test_reusing_every_reviewed_descriptor_with_fixture_executors_establishes_no_reviewed_runtime_binding():
@@ -151,7 +151,7 @@ def test_reusing_every_reviewed_descriptor_with_fixture_executors_establishes_no
     registry = reviewed_workflow_provider_registry(catalog)
     document = registry.to_dict()
     assert document["counts"]["registered_reviewed_default_readers"] == 0
-    assert document["counts"]["registered_unmatched_readers"] == 16
+    assert document["counts"]["registered_unmatched_readers"] == 18
     assert {value["registration_state"] for value in document["readers"]} == {"registered_executor_not_reviewed_default"}
     with pytest.raises(ArgumentError, match="exact registered"):
         registry.prepare("pubmed.search", {})

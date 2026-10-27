@@ -30,7 +30,7 @@ function page(replies = []) {
   const $ = id => { assert.ok(nodes.has(id), id); return nodes.get(id); };
   Object.assign($('task'), { value: task });
   Object.assign($('planner'), { value: 'glioma-intent', querySelector: selector => options.get(selector.match(/value="([^"]+)"/)[1]) });
-  Object.defineProperty($('planner'), 'selectedOptions', { get() { return [options.get(this.value)]; } });
+  Object.defineProperty($('planner'), 'selectedOptions', { get() { return [options.get(this.value) || $('capability-templates').children.find(option => option.value === this.value)]; } });
   for (const [id, value] of Object.entries({ 'max-steps': '16', 'max-model-calls': '64', 'decision-attempts': '2', 'call-budget': '32' })) $(id).value = value;
   $('source-grant').disabled = $('run').disabled = true;
   $('plan-workspace').hidden = true;
@@ -49,8 +49,8 @@ function page(replies = []) {
   // admission meaningful rather than passing host-realm functions into the VM.
   vm.runInContext(jsonSource.replaceAll('export function ', 'function ') + '\nconst parseJson = parse;', context, { filename: 'json.js' });
   vm.runInContext(app.replace(/^import[^\n]+\r?\n/, ''), context, { filename: 'app.js' });
-  return { $, calls, options, replies, async connect(operations = []) {
-    replies.unshift({ operations: operations.map(operation_id => ({ operation_id, description: 'Offline fixture', input_schema: {}, integration_id: 'fixture', implementation: 'local' })), operation_count: operations.length, integration_count: 1 });
+  return { $, calls, options, replies, async connect(operations = [], profiles = []) {
+    replies.unshift({ operations: operations.map(operation_id => ({ operation_id, description: 'Offline fixture', input_schema: {}, integration_id: 'fixture', implementation: 'local' })), operation_count: operations.length, integration_count: 1, capabilities: { profiles } });
     $('token').value = 'a'.repeat(32); await $('connect-form').fire('submit');
   } };
 }
@@ -60,6 +60,41 @@ function planned() {
     plan: { name: 'Synthetic plan', steps: [{ id: 's1', operation: 'pubmed.search', arguments: { query: 'glioma' }, depends_on: [] }], outputs: ['s1'], requirements: {} },
     interpretation: { status: 'planned', model_calls: 3, source_dispatches: 0, visible_operations: ['pubmed.search'], limits: { max_model_calls: 3, max_decision_attempts: 1 } } };
 }
+
+test('reviewed capability options require operator selection and every native operation', async () => {
+  const profile = { profile_id: 'glioma-ontology', label: '<img src=x> source terminology',
+    required_operations: ['nci_thesaurus.glioma_ontology'], operator_enabled: true, descriptor_available: true };
+  const result = planned(); result.planner = 'capability:glioma-ontology';
+  const p = page([result]);
+  await p.connect([], [profile]);
+  assert.equal(p.$('capability-templates').children[0].disabled, true);
+  await p.connect(profile.required_operations, [{ ...profile, operator_enabled: false }]);
+  assert.equal(p.$('capability-templates').children[0].disabled, true);
+  await p.connect(profile.required_operations, [profile]);
+  const option = p.$('capability-templates').children[0];
+  assert.equal(option.disabled, false);
+  assert.equal(option.textContent, profile.label);
+  p.$('planner').value = option.value;
+  await p.$('plan-form').fire('submit');
+  assert.deepEqual(p.calls.at(-1).body, { task, planner: 'capability:glioma-ontology', max_steps: 16, approve_provider_call: false });
+  assert.equal(p.$('source-grant').checked, false);
+  assert.equal(p.$('run').disabled, true);
+  await p.$('disconnect').fire('click');
+  assert.equal(p.$('capability-templates').children.length, 0);
+  assert.equal(p.$('planner').value, 'glioma-intent');
+  assert.equal(p.$('source-grant').disabled, true);
+});
+
+test('capability catalogue labels remain inert and malformed or changed profiles cannot stay selected', async () => {
+  const p = page();
+  const profile = { profile_id: 'glioma-ontology', label: 'Terminology', required_operations: ['nci_thesaurus.glioma_ontology'], operator_enabled: true, descriptor_available: true };
+  await p.connect(profile.required_operations, [profile, { ...profile, profile_id: 'bad\"]script' }, null]);
+  assert.equal(p.$('capability-templates').children.length, 1);
+  p.$('planner').value = 'capability:glioma-ontology';
+  await p.connect(profile.required_operations, [{ ...profile, descriptor_available: false }]);
+  assert.equal(p.$('planner').value, 'glioma-intent');
+  assert.equal(p.$('capability-templates').children[0].disabled, true);
+});
 
 test('incremental cost controls are explicit and only incremental requests transmit them', async () => {
   const p = page([{ status: 'budget_exhausted', interpretation: { status: 'budget_exhausted', model_calls: 3, source_dispatches: 0 } }]);
