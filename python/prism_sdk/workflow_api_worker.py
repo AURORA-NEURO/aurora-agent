@@ -122,8 +122,9 @@ class WorkflowAPIWorker:
 
     def __init__(self, root: str | Path, *, base_url: str = "http://127.0.0.1:11434/v1",
                  model: str | None = None, research_sources: bool = False,
-                 molecular_glioma: bool = False, timeout_seconds: int = 120) -> None:
-        if type(research_sources) is not bool or type(molecular_glioma) is not bool:
+                 molecular_glioma: bool = False, glioma_mutations: bool = False,
+                 gene_references: bool = False, timeout_seconds: int = 120) -> None:
+        if any(type(value) is not bool for value in (research_sources, molecular_glioma, glioma_mutations, gene_references)):
             _refuse("invalid_configuration", "Catalogue switches must be literal booleans.")
         if not isinstance(base_url, str):
             _refuse("invalid_configuration", "The local model endpoint is invalid.")
@@ -152,6 +153,16 @@ class WorkflowAPIWorker:
         if molecular_glioma:
             from .glioma_molecular_workflow import register_glioma_molecular_workflow_operations
             register_glioma_molecular_workflow_operations(self.catalog)
+        if glioma_mutations:
+            from .reviewed_gdc_gene_mutation_retrieval import register_gdc_gene_mutation_operations
+            from .glioma_mutation_workflow import register_glioma_mutation_workflow_operations
+            register_gdc_gene_mutation_operations(self.catalog)
+            register_glioma_mutation_workflow_operations(self.catalog)
+        if gene_references:
+            from .reviewed_ensembl_gene_retrieval import register_ensembl_gene_operations
+            from .glioma_gene_reference_workflow import register_glioma_gene_reference_workflow_operations
+            register_ensembl_gene_operations(self.catalog)
+            register_glioma_gene_reference_workflow_operations(self.catalog)
 
     @staticmethod
     def _directory_identity(path: Path) -> tuple[int, int]:
@@ -370,7 +381,7 @@ class WorkflowAPIWorker:
         max_steps = _integer(request.get("max_steps", 16), 1, 32)
         attempts = _integer(request.get("planning_attempts", 1), 1, 4)
         planner = request["planner"]
-        if planner not in {"glioma-intent", "local-model"}:
+        if planner not in {"glioma-intent", "local-model", "glioma-mutations", "gene-references"}:
             _refuse("invalid_request", "The selected planner is not supported.")
         contract = request.get("requirements")
         if contract is not None:
@@ -394,6 +405,20 @@ class WorkflowAPIWorker:
                     self.catalog, task=task, requirements=merged)
             if len(plan.to_dict()["steps"]) > max_steps:
                 _refuse("invalid_request", "The typed plan exceeds the requested step bound.")
+        elif planner in {"glioma-mutations", "gene-references"}:
+            if attempts != 1:
+                _refuse("invalid_request", "Fixed source templates have no model repair attempts.")
+            if planner == "glioma-mutations":
+                from .glioma_mutation_workflow import compile_glioma_mutation_workflow
+                plan = compile_glioma_mutation_workflow(task, self.catalog, requirements=contract)
+            else:
+                from .glioma_gene_reference_workflow import compile_glioma_gene_reference_workflow
+                plan = compile_glioma_gene_reference_workflow(task, self.catalog, requirements=contract)
+            if len(plan.to_dict()["steps"]) > max_steps:
+                _refuse("invalid_request", "The fixed source template exceeds the requested step bound.")
+            interpretation = {"schema": "aurora-fixed-research-template-selection/0.1", "template": planner,
+                "provider_calls": 0, "question_used_as_query": False, "fixed_gene_symbol": "TP53",
+                "scope": "operator_enabled_fixed_public_sources", "scientific_validity": "unassessed"}
         else:
             if not approve:
                 _refuse("approval_required", "Local model planning requires explicit provider approval.")
@@ -638,6 +663,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model")
     parser.add_argument("--research-sources", action="store_true")
     parser.add_argument("--molecular-glioma", action="store_true")
+    parser.add_argument("--glioma-mutations", action="store_true")
+    parser.add_argument("--gene-references", action="store_true")
     parser.add_argument("--timeout-seconds", type=int, default=120)
     args = parser.parse_args(argv)
     try:
@@ -648,6 +675,7 @@ def main(argv: list[str] | None = None) -> int:
                              parse_constant=lambda _: _refuse("invalid_request", "Non-finite JSON is refused."))
         worker = WorkflowAPIWorker(args.root, base_url=args.base_url, model=args.model,
             research_sources=args.research_sources, molecular_glioma=args.molecular_glioma,
+            glioma_mutations=args.glioma_mutations, gene_references=args.gene_references,
             timeout_seconds=args.timeout_seconds)
         response = {"schema": WORKFLOW_API_RESPONSE_SCHEMA, "ok": True, "data": worker.handle(request)}
         encoded = _json(response)
