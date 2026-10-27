@@ -228,3 +228,43 @@ def test_oversized_context_refuses_before_provider_instead_of_omitting_output_sc
     with pytest.raises(WorkflowValidationError, match="context exceeds"):
         LocalWorkflowBuilder(catalog, runtime, model="fixture", provider="fixture", constrain_decoder=True).build("Read synthetic metadata.", approve_provider_call=True)
     assert calls == []
+
+
+@pytest.mark.parametrize("child,literal,code", [
+    ({"properties": {"note": {"type": "string"}}}, 7, "untyped_container_keywords_unsupported"),
+    ({"required": ["note"]}, 7, "untyped_container_keywords_unsupported"),
+    ({"additionalProperties": {"type": "string"}}, 7, "untyped_container_keywords_unsupported"),
+    ({"minProperties": 1}, 7, "untyped_container_keywords_unsupported"),
+    ({"maxProperties": 2}, 7, "untyped_container_keywords_unsupported"),
+    ({"items": {"type": "string"}}, 7, "untyped_container_keywords_unsupported"),
+    ({"minItems": 1}, 7, "untyped_container_keywords_unsupported"),
+    ({"maxItems": 2}, 7, "untyped_container_keywords_unsupported"),
+    ({"uniqueItems": True}, 7, "untyped_container_keywords_unsupported"),
+    ({"type": "string", "properties": {}}, "native", "container_keywords_conflict_with_declared_type"),
+    ({"type": "integer", "properties": {}}, 7, "container_keywords_conflict_with_declared_type"),
+    ({"type": "null", "properties": {}}, None, "container_keywords_conflict_with_declared_type"),
+    ({"type": "array", "properties": {}, "items": {"type": "string"}}, ["native"], "container_keywords_conflict_with_declared_type"),
+    ({"type": "object", "items": {"type": "string"}}, {}, "container_keywords_conflict_with_declared_type"),
+])
+def test_native_noncontainer_literals_remain_valid_but_unsupported_container_keyword_adaptation_refuses_before_provider(child, literal, code):
+    consumer = {"type": "object", "properties": {"payload": child}, "required": ["payload"], "additionalProperties": False}
+    value = {"payload": literal}
+    # JSON Schema container keywords do not imply a type and are inert on other native types.
+    assert _checks(consumer, value)
+    catalog, calls = _catalog(consumer), []
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("fixture", lambda request: calls.append(request))
+    builder = LocalWorkflowBuilder(catalog, runtime, model="fixture", provider="fixture", constrain_decoder=True)
+    with pytest.raises(WorkflowDecoderSchemaError, match=code):
+        prepare_workflow_decoder_schema(catalog, ["fixture.consume"])
+    with pytest.raises(WorkflowDecoderSchemaError, match=code):
+        builder.build("Read native literal metadata.", operation_ids=["fixture.consume"], approve_provider_call=True)
+    assert calls == []
+
+
+def test_untyped_native_array_item_container_is_refused_instead_of_partially_adapting_an_optional_branch():
+    consumer = {"type": "object", "properties": {"rows": {"type": "array",
+        "items": {"properties": {"note": {"type": "string"}}}}}, "additionalProperties": False}
+    assert _checks(consumer, {"rows": [7]})
+    with pytest.raises(WorkflowDecoderSchemaError, match="untyped_container_keywords_unsupported"):
+        prepare_workflow_decoder_schema(_catalog(consumer), ["fixture.consume"])

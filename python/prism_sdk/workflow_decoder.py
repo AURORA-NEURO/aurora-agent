@@ -29,6 +29,8 @@ MAX_WORKFLOW_DECODER_TUPLE_LENGTHS = 8
 _STEP = r"[a-zA-Z][a-zA-Z0-9_-]{0,63}"
 _INDEX = re.compile(r"0|[1-9][0-9]*")
 _UNSUPPORTED = frozenset({"allOf", "anyOf", "oneOf", "not", "format"})
+_OBJECT_KEYWORDS = frozenset({"properties", "required", "additionalProperties", "minProperties", "maxProperties"})
+_ARRAY_KEYWORDS = frozenset({"items", "minItems", "maxItems", "uniqueItems"})
 
 
 class WorkflowDecoderSchemaError(ArgumentError):
@@ -108,13 +110,19 @@ def _adapt(schema: Any, overlay: Mapping[str, Any], budget: list[int], positiona
         schema = {}
     if not isinstance(schema, Mapping) or set(schema).intersection(_UNSUPPORTED):
         _fail("decoder_input_schema_feature_unsupported")
+    kind = schema.get("type")
+    if isinstance(kind, list) or kind not in {None, "object", "array", "string", "integer", "number", "boolean", "null"}:
+        _fail("decoder_input_type_unsupported")
+    object_keywords = set(schema).intersection(_OBJECT_KEYWORDS)
+    array_keywords = set(schema).intersection(_ARRAY_KEYWORDS)
+    if kind is None and (object_keywords or array_keywords):
+        _fail("decoder_untyped_container_keywords_unsupported")
+    if (object_keywords and kind != "object") or (array_keywords and kind != "array"):
+        _fail("decoder_container_keywords_conflict_with_declared_type")
     if "leaf" in overlay:
         return _reference(overlay["leaf"].get("source_pointer"))
     children = overlay.get("children", {})
     result = json.loads(canonical_json(dict(schema)))
-    kind = schema.get("type")
-    if isinstance(kind, list) or kind not in {None, "object", "array", "string", "integer", "number", "boolean", "null"}:
-        _fail("decoder_input_type_unsupported")
     if children and ("const" in schema or "enum" in schema):
         _fail("decoder_container_constant_with_reference_descendants")
     if children and kind not in {"object", "array"}:

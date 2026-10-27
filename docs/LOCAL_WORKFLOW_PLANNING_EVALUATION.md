@@ -245,3 +245,24 @@ exercise root/child and whole-arguments references, array position and native le
 preservation, pointer escaping, conflicting overlays, capability/size refusal, immutable
 metadata, unchanged default prompts, and a provider that ignores decoder hints. Those are
 controlled invariant checks, separate from the unsuccessful live workflow measurement.
+
+### Independent correctness review after the frozen experiment
+
+A subsequent offline review found a native-literal preservation defect in the measured helper:
+an input schema containing `properties` could be coerced into an object schema even when its
+native type was absent or explicitly scalar. For example, native
+`{"properties":{"note":{"type":"string"}}}` accepts the scalar `7`; `properties` alone
+does not imply `type="object"`. The earlier transformation incorrectly excluded that value.
+
+The current helper explicitly refuses untyped object/array container-keyword schemas and
+container keywords inconsistent with an explicit type. It also refuses those unsupported
+shapes in nested or optional branches, before provider dispatch. It does not narrow their
+native literal domain or silently emit a partially adapted alternative. Supported explicitly
+typed object and array transformations retain their existing semantics and finite positional
+length union. Default planning is unchanged.
+
+This is an independently reproduced correctness fix after the frozen candidate, not tuning of
+the held-out tasks. The frozen source/report hashes above still identify the code and observations
+actually measured. No real-model or source calls were made for this fix; the two variants remain
+**0 of 2 accepted**, and the corrected helper has no new live fidelity measurement. Offline
+regressions establish pre-provider refusal and native literal admission only.
