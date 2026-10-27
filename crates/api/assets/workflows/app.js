@@ -48,10 +48,28 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
     updatePlanningControls();
   }
   function updatePlanningControls() {
-    const incremental = $('planner').value === 'local-incremental';
+    const planner = $('planner').value;
+    const incremental = planner === 'local-incremental';
+    const modeled = incremental || planner === 'local-model';
     $('incremental-controls').hidden = !incremental;
     for (const id of ['max-model-calls', 'decision-attempts', 'operation-ids']) $(id).disabled = !incremental;
+    $('provider-approval').hidden = !modeled; $('provider-grant').disabled = !modeled;
+    if (!modeled) $('provider-grant').checked = false;
     $('provider-label').textContent = incremental ? 'Approve these bounded local model planning calls' : 'Approve this local model planning call';
+    const fixedScopes = {
+      'glioma-mutations': 'Fixed TP53 mutation counts for TCGA-GBM/LGG; no prevalence or assay coverage.',
+      'gene-references': 'Fixed Ensembl/NCBI TP53 references; source agreement is not scientific identity.',
+      'protein-pathways': 'Fixed TP53 protein/pathway annotations; no glioma activity or enrichment.',
+      'denominator-coverage': 'Fixed TP53 and GDC SSM-data coverage for TCGA-GBM/LGG; no prevalence.'
+    };
+    let scope;
+    if (planner.startsWith('capability:')) {
+      const profile = state.capabilities.find(item => item?.profile_id === planner.slice('capability:'.length));
+      scope = typeof profile?.scope === 'string' ? profile.scope.slice(0, 400) : 'Fixed reviewed source metadata; scientific validity is unassessed.';
+    } else { scope = fixedScopes[planner]; }
+    $('fixed-template-scope').textContent = scope ? scope + ' Task text does not change source queries.'
+      : modeled ? 'Use the local model to propose a plan from installed operations. Model planning and source execution need separate approvals.'
+      : 'Bounded glioma interpretation plans supported sources or asks for clarification. Review the plan before approving source dispatch.';
   }
   function planningSnapshot() {
     return ['task', 'planner', 'max-steps', 'max-model-calls', 'decision-attempts', 'operation-ids'].map(id => $(id).value).join('\u0000');
@@ -67,6 +85,7 @@ import { parse as parseJson, stringify } from '/workflows/json.js';
   }
   function clearPlan() {
     state.plan = null; state.proposal = null; state.dirty = true; state.planningSettingsDirty = false;
+    $('interpretation-panel').hidden = true; $('interpretation-panel').open = false; $('interpretation').textContent = '';
     $('plan-workspace').hidden = true; $('source-grant').checked = false; $('source-grant').disabled = true; $('run').disabled = true;
     $('approval-identity').textContent = 'Build and validate a plan to enable execution.';
   }

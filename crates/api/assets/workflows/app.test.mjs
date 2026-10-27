@@ -43,6 +43,7 @@ function page(replies = []) {
       const reply = replies.shift();
       assert.notEqual(reply, undefined, 'Every UI request needs an explicit offline reply');
       const data = await (typeof reply === 'function' ? reply(calls.at(-1)) : reply);
+      if (data?.httpResponse) return data.httpResponse;
       return { ok: true, text: async () => typeof data === 'string' ? data : codec.stringify({ ok: true, data }) };
     } });
   // Both production modules share one browser realm. Keep the codec's ordinary-object
@@ -94,6 +95,61 @@ test('capability catalogue labels remain inert and malformed or changed profiles
   await p.connect(profile.required_operations, [{ ...profile, descriptor_available: false }]);
   assert.equal(p.$('planner').value, 'glioma-intent');
   assert.equal(p.$('capability-templates').children[0].disabled, true);
+});
+
+test('profile selection shows its inert server scope and clears a previous model approval', async () => {
+  const profile = { profile_id: 'glioma-ontology', label: 'Terminology',
+    scope: 'Fixed NCIt Glioma relationships; <img src=x onerror=alert(1)> is source text.',
+    required_operations: ['nci_thesaurus.glioma_ontology'], operator_enabled: true, descriptor_available: true };
+  const p = page();
+  assert.equal(p.$('provider-approval').hidden, true);
+  assert.equal(p.$('provider-grant').disabled, true);
+  assert.match(p.$('fixed-template-scope').textContent, /Bounded glioma interpretation/);
+  await p.connect(profile.required_operations, [profile]);
+  p.$('planner').value = 'local-model'; await p.$('planner').fire('change');
+  assert.equal(p.$('provider-approval').hidden, false);
+  assert.equal(p.$('provider-grant').disabled, false);
+  assert.match(p.$('fixed-template-scope').textContent, /separate approvals/);
+  p.$('provider-grant').checked = true;
+  p.$('planner').value = 'capability:glioma-ontology'; await p.$('planner').fire('change');
+  assert.equal(p.$('fixed-template-scope').textContent, profile.scope + ' Task text does not change source queries.');
+  assert.equal(p.$('provider-approval').hidden, true);
+  assert.equal(p.$('provider-grant').disabled, true);
+  assert.equal(p.$('provider-grant').checked, false);
+  assert.equal(p.calls.length, 1);
+  p.$('planner').value = 'local-incremental'; await p.$('planner').fire('change');
+  assert.equal(p.$('provider-approval').hidden, false);
+  assert.equal(p.$('provider-grant').disabled, false);
+  assert.equal(p.$('provider-grant').checked, false);
+  assert.match(p.$('provider-label').textContent, /bounded.*calls/);
+  await p.$('disconnect').fire('click');
+  p.$('planner').value = 'glioma-intent'; await p.$('planner').fire('change');
+  assert.equal(p.$('provider-approval').hidden, true);
+  assert.equal(p.$('provider-grant').checked, false);
+  assert.match(p.$('fixed-template-scope').textContent, /Bounded glioma interpretation/);
+});
+
+test('each legacy template presents only its relevant fixed source scope', async () => {
+  const p = page();
+  const scopes = new Map([
+    ['glioma-mutations', /TP53 mutation counts for TCGA-GBM\/LGG/],
+    ['gene-references', /Ensembl\/NCBI TP53 references/],
+    ['protein-pathways', /TP53 protein\/pathway annotations/],
+    ['denominator-coverage', /TP53 and GDC SSM-data coverage for TCGA-GBM\/LGG/]
+  ]);
+  await p.connect(['gdc.gene_mutation_counts', 'glioma.mutation.analyze', 'glioma.mutation.review_handoff',
+    'ensembl.gene_references', 'ncbi_gene.summary', 'glioma.gene_references.analyze', 'glioma.gene_references.review_handoff',
+    ...proteinOperations, 'gdc.ssm_project_coverage', 'glioma.denominator.assess', 'glioma.denominator.review_handoff']);
+  for (const [planner, expected] of scopes) {
+    assert.equal(p.options.get(planner).disabled, false);
+    p.$('planner').value = planner; await p.$('planner').fire('change');
+    assert.match(p.$('fixed-template-scope').textContent, expected);
+    assert.match(p.$('fixed-template-scope').textContent, /Task text does not change source queries/);
+    assert.ok(p.$('fixed-template-scope').textContent.length < 160);
+    assert.equal(p.$('provider-approval').hidden, true);
+    assert.equal(p.$('provider-grant').checked, false);
+  }
+  assert.equal(p.calls.length, 1);
 });
 
 test('incremental cost controls are explicit and only incremental requests transmit them', async () => {
@@ -211,6 +267,60 @@ test('a nonplanned result clears an earlier saved plan and source approval befor
   assert.match(p.$('error').textContent, /No executable plan was saved/);
   assert.equal(p.calls.filter(call => call.url.endsWith('/runs')).length, 0);
 });
+
+for (const failure of [
+  { name: 'HTTP 500 with a success-shaped body', reply: { httpResponse: {
+    status: 500, ok: false, text: async () => codec.stringify({ ok: true, data: planned() }) } },
+    message: /API refused/ },
+  { name: 'a native validation failure', reply: JSON.stringify({ ok: false,
+    error: { code: 'validation_failed', message: 'The new profile exceeds its fixed step bound.',
+      diagnostics: { requirements_audit: { contract_satisfied: false } } } }),
+    message: /fixed step bound/ }
+]) {
+  test(`a new profile clears prior interpretation while pending and after ${failure.name}`, async () => {
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    const previous = planned(); previous.planner = 'capability:glioma-ontology';
+    previous.interpretation = { profile_id: 'glioma-ontology', provider_calls: 0, scientific_validity: 'unassessed' };
+    const profiles = [
+      { profile_id: 'glioma-ontology', label: 'NCI terminology', required_operations: ['nci_thesaurus.glioma_ontology'],
+        operator_enabled: true, descriptor_available: true },
+      { profile_id: 'gene-identity', label: 'Gene identifier review', required_operations: ['hgnc.gene_references',
+        'ensembl.gene_references', 'ncbi_gene.summary', 'glioma.gene_identity.analyze', 'glioma.gene_identity.review_handoff'],
+        operator_enabled: true, descriptor_available: true }
+    ];
+    const p = page([previous, () => pending]);
+    await p.connect(profiles.flatMap(profile => profile.required_operations), profiles);
+    p.$('planner').value = previous.planner; await p.$('planner').fire('change');
+    await p.$('plan-form').fire('submit');
+    assert.equal(p.$('interpretation-panel').hidden, false);
+    assert.equal(p.$('interpretation-panel').open, true);
+    assert.match(p.$('interpretation').textContent, /glioma-ontology/);
+    p.$('source-grant').checked = true; await p.$('source-grant').fire('change');
+    assert.equal(p.$('run').disabled, false);
+    p.$('planner').value = 'capability:gene-identity'; await p.$('planner').fire('change');
+    const building = p.$('plan-form').fire('submit');
+    assert.equal(p.$('interpretation-panel').hidden, true);
+    assert.equal(p.$('interpretation-panel').open, false);
+    assert.equal(p.$('interpretation').textContent, '');
+    assert.equal(p.$('plan-workspace').hidden, true);
+    assert.equal(p.$('source-grant').checked, false);
+    assert.equal(p.$('source-grant').disabled, true);
+    assert.equal(p.$('run').disabled, true);
+    release(failure.reply); await building;
+    assert.match(p.$('error').textContent, failure.message);
+    assert.equal(p.$('interpretation-panel').hidden, true);
+    assert.equal(p.$('interpretation-panel').open, false);
+    assert.equal(p.$('interpretation').textContent, '');
+    assert.equal(p.$('plan-workspace').hidden, true);
+    assert.equal(p.$('source-grant').checked, false);
+    assert.equal(p.$('run').disabled, true);
+    assert.equal(p.$('build').disabled, false);
+    assert.equal(p.calls.at(-1).body.planner, 'capability:gene-identity');
+    assert.equal(p.calls.at(-1).body.approve_provider_call, false);
+    assert.equal(p.calls.filter(call => call.url.endsWith('/runs')).length, 0);
+  });
+}
 
 test('changing a cost bound while planning prevents stale plan acceptance or source approval', async () => {
   let release;
