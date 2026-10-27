@@ -107,6 +107,13 @@ effects, compensation, effect retries and power-loss durability remain unproven 
    reviewed evidence planes. Preserve exact citation closure, source identity, missingness,
    context omissions and explicit unassessed scientific support. Public human cohort summaries
    remain separate from the Rust preclinical worker boundary.
+   A candidate next measurement increment is a separate reader for the documented GDC
+   [`/analysis/top_cases_counts_by_genes` aggregation](https://docs.gdc.cancer.gov/API/Users_Guide/Data_Analysis/#analysis-endpoints),
+   retaining a reviewed gene and TCGA-GBM/LGG project partitions. This is planned, not an
+   implemented or live-verified source. Missing buckets must remain unknown; project-level
+   counts of cases with SSM data do not establish a gene-specific assay denominator, prevalence,
+   independent cohorts, or clinical significance. Existing molecular catalogue schemas remain
+   catalogue-only.
 3. Expand actual integration onboarding through the reviewed OpenAPI and MCP bridges. Count a service only
    after its auth/scopes, actual request/response behavior and failure handling are verified; use
    representative integration families rather than generated labels.
