@@ -173,3 +173,13 @@ def test_exact_template_contract_refuses_selector_native_root_and_review_substit
 @pytest.mark.parametrize("cap", [True,0,1025])
 def test_unbounded_or_nontyped_citation_caps_refuse(cap):
     with pytest.raises(ArgumentError): analyze_glioma_gene_identity(question=TASK,max_citations=cap)
+
+
+@pytest.mark.parametrize("tag", ["Ambiguous", "Ambigous", "Placeholder symbol", "Future source tag"])
+def test_explicit_hgnc_symbol_tag_requires_resolution_despite_matching_reference_strings(tag):
+    source = inputs()
+    source["hgnc_bundle"] = read(Fixture(payload([{**gene(), "symbol_report_tag": tag}])))
+    value = analyze_glioma_gene_identity(question=TASK, **source)
+    assert value["status"] == "needs_identity_resolution"
+    assert value["hgnc_candidate_observations"][0]["ncbi_entrez_id_comparison"]["state"] == "exact_string_agreement"
+    assert glioma_gene_identity_review_handoff(value)["status"] == "needs_identity_resolution"

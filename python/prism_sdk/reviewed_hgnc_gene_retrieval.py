@@ -216,13 +216,17 @@ def _native(payload: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
                 if type(item) is str: _text(item)
                 elif type(item) is int: _count(item, 10**24)
                 elif item is not None: _fail("peripheral_metadata_shape")
-        symbol, status, identifier = (observations[field] for field in ("symbol", "status", "hgnc_id"))
+        symbol, status, identifier, tag = (observations[field] for field in ("symbol", "status", "hgnc_id", "symbol_report_tag"))
         state = ("missing_identity" if identifier["state"] != "observed" else
             "missing_symbol" if symbol["state"] != "observed" else
             "selector_value_mismatch" if symbol["value"] != "TP53" else
             "missing_status" if status["state"] != "observed" else
             "withdrawn" if status["value"] == "Entry Withdrawn" else
-            "unreviewed_status" if status["value"] != "Approved" else "approved_source_record")
+            "unreviewed_status" if status["value"] != "Approved" else
+            "ambiguous_source_tag" if tag["value"] in {"Ambiguous", "Ambigous"} else
+            "placeholder_source_tag" if tag["value"] == "Placeholder symbol" else
+            "unreviewed_source_tag" if tag["state"] == "observed" and tag["value"] != "Stable symbol" else
+            "approved_source_record")
         records.append({"record_index": index, "native_pointer": path, "state": state,
             "field_observations": observations, "peripheral_native_fields": peripheral,
             "peripheral_semantics": "retained_uninterpreted_metadata", "native_record": row})
@@ -243,7 +247,9 @@ def _selection(payload: dict[str, Any], rows: list[dict[str, Any]]) -> str:
 
 
 _DEFAULT_BINDING = content_digest({"schema": HGNC_GENE_BUNDLE_SCHEMA, "url": _URL,
-    "public_http_policy_digest": REVIEWED_PUBLIC_HTTP_POLICY_DIGEST, "rate_policy": "per_process_refuse_start_interval_below_0.1_seconds"})
+    "public_http_policy_digest": REVIEWED_PUBLIC_HTTP_POLICY_DIGEST,
+    "identity_readiness_policy": "approved_exact_symbol_without_explicit_ambiguous_placeholder_or_unreviewed_nonempty_tag",
+    "rate_policy": "per_process_refuse_start_interval_below_0.1_seconds"})
 
 
 def _bundle(config: HgncGeneRetrievalConfig, *, body: bytes, retrieved_at: str, mode: str, binding: str) -> dict[str, Any]:

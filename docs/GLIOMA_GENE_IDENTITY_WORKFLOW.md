@@ -68,7 +68,7 @@ Analysis status preserves the reason a review cannot proceed:
 | State | Meaning |
 | --- | --- |
 | `needs_evidence` | A source acquisition or required comparison field is absent/unobserved. |
-| `needs_identity_resolution` | HGNC source selection is non-ready, including absent, withdrawn, ambiguous or partial source records. |
+| `needs_identity_resolution` | HGNC source selection is non-ready, including absent, withdrawn, ambiguous or partial source records, or an explicit ambiguous/placeholder/unreviewed symbol tag. |
 | `metadata_discrepancy_for_review` | Admitted identifier strings disagree. |
 | `source_assertions_ready_for_review` | Admitted comparison strings agree and the required source record is ready for review. |
 

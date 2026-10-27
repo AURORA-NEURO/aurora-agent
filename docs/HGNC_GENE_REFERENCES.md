@@ -67,6 +67,10 @@ The native `responseHeader` and `response` container are checked. `numFound`, `s
 optional `numFoundExact` and all returned documents remain visible. The source selection
 state distinguishes no records, multiple records, partial windows, explicitly approximate
 totals, selector mismatch, missing identity/status, withdrawn status and unreviewed status.
+The documented `symbol_report_tag` also stays decisive: `Ambiguous` (including the primary
+documentation's `Ambigous` spelling), `Placeholder symbol` and unreviewed nonempty tags are
+non-ready source states. An absent/null/empty tag does not invent ambiguity; `Stable symbol`
+does not independently validate identity. Tags retain exact spelling and value.
 `source_identity_ready` describes a sole approved source record only. When `numFoundExact`
 is absent, this field can be true while count exactness remains unknown; it is not a
 scientific identity or exhaustiveness claim.

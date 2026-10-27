@@ -190,3 +190,22 @@ def test_mutated_typed_response_is_readmitted(field, value):
     def changed(url, *, http_config):
         response = fixture(url, http_config=http_config); object.__setattr__(response, field, value); return response
     with pytest.raises((source.HgncGeneRetrievalError, ReviewedPublicHttpError)): read(changed)
+
+
+@pytest.mark.parametrize("tag,state", [("Ambiguous", "ambiguous_source_tag"),
+    ("Ambigous", "ambiguous_source_tag"), ("Placeholder symbol", "placeholder_source_tag"),
+    ("Future source tag", "unreviewed_source_tag"), ("ambiguous", "unreviewed_source_tag")])
+def test_explicit_nonready_symbol_tag_cannot_promote_approved_record_to_ready_identity(tag, state):
+    value = read(Fixture(payload([{**gene(), "symbol_report_tag": tag}])))
+    assert value["records"][0]["state"] == value["coverage"]["selection_state"] == state
+    assert value["coverage"]["source_identity_ready"] is False
+    assert value["records"][0]["field_observations"]["symbol_report_tag"]["value"] == tag
+    assert source.validate_hgnc_gene_reference_bundle(value) == value
+
+
+@pytest.mark.parametrize("tag", [None, "", "Stable symbol"])
+def test_missing_information_is_not_invented_from_null_empty_or_stable_source_tag(tag):
+    value = read(Fixture(payload([{**gene(), "symbol_report_tag": tag}])))
+    assert value["coverage"]["selection_state"] == "single_approved_source_record"
+    assert value["records"][0]["field_observations"]["symbol_report_tag"]["value"] == tag
+    assert value["coverage"]["scientific_identifier_equivalence"] == "unestablished"
