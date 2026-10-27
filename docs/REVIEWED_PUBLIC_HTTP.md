@@ -54,6 +54,11 @@ hosts, deadlines, response/header/framing limits, accepted media types and the v
 and client expose `transport_policy_digest`; `configuration.to_metadata()` returns a defensive
 copy of the reviewed configuration and its digest. These are consistency identifiers, not code
 attestation, signed provider provenance or authorization inferred from a hash.
+Each dispatch revalidates all current configuration values against its registration snapshot before
+DNS. It then uses a detached validated copy throughout the request, so even a trusted callback
+mutating the original object cannot alter its wire request or receipt binding. Deliberate Python
+reflection that substitutes configuration values or the encoded snapshot is refused on admission;
+these consistency checks do not sandbox arbitrary same-process Python code.
 
 ## Admission and transport limits
 
@@ -90,10 +95,12 @@ Body bytes default to 1,000,000 and can be configured from 1 through 4,000,000. 
 to 65,536, with a configurable range of 128 through 65,536. Framing bytes default to 65,536, with a
 range of 16 through 65,536. These are independent per-response limits. Total received wire bytes
 are bounded by their sum. The HTTP parser requires HTTP/1.0 or HTTP/1.1 status lines, CRLF headers,
-unique valid headers, and unambiguous framing. Content-Length must be bounded and match the body.
+unique valid headers, a real CRLF blank header terminator (including interim 100 responses), and
+unambiguous framing. Content-Length must be bounded and match the body.
 Chunked responses require HTTP/1.1, bounded hexadecimal sizes, exact CRLF delimiters and a final
 empty trailer line. Chunk extensions, trailers, redirects, unsupported encodings and malformed
 headers refuse the request. Close-delimited bodies retain the same deadline and byte limits.
+Policy version `2` explicitly includes bounded EOF framing in its deterministic policy identity.
 
 ## Values, failures and verification
 

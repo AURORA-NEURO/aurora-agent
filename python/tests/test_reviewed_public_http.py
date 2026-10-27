@@ -113,7 +113,7 @@ def test_actual_wire_parser_returns_exact_successful_utf8_bytes_and_policy_metad
     context.return_value.wrap_socket.assert_called_once_with(raw, server_hostname=HOST)
     request = bytes(secured.sent)
     assert request == (f"GET /annotations/TP53?format=json HTTP/1.1\r\nHost: {HOST}\r\nAccept: application/json\r\n"
-        "Accept-Encoding: identity\r\nUser-Agent: aurora-reviewed-public-http/1\r\nConnection: close\r\n\r\n").encode()
+        f"Accept-Encoding: identity\r\nUser-Agent: aurora-reviewed-public-http/{public.REVIEWED_PUBLIC_HTTP_POLICY_VERSION}\r\nConnection: close\r\n\r\n").encode()
     assert b"Authorization" not in request and b"never-inherited" not in request
 
 
@@ -150,6 +150,79 @@ def test_configuration_snapshots_are_immutable_deterministic_and_bound_to_every_
                    {"max_framing_bytes": 16}, {"accepted_content_types": ("application/problem+json",)},
                    {"reviewed_routes": {"tp53": URL + "&fields=id"}}):
         assert config(**change).config_digest != expected
+
+
+@pytest.mark.parametrize("field,value", [
+    ("reviewed_routes", {"tp53": "https://unreviewed.example.org/other"}),
+    ("allowed_hosts", ("unreviewed.example.org",)), ("timeout_ms", 30001),
+    ("max_response_bytes", 4000001), ("max_header_bytes", 127),
+    ("max_framing_bytes", 15), ("accepted_content_types", ("text/plain",)),
+    ("_encoded", "{}"),
+])
+@pytest.mark.parametrize("stage", ["before_registration", "after_registration"])
+def test_reflection_changed_configuration_refuses_before_dns_or_socket(field, value, stage):
+    cfg = config()
+    with patch.object(public.socket, "getaddrinfo") as dns, patch.object(public.socket, "socket") as create_socket:
+        if stage == "before_registration":
+            object.__setattr__(cfg, field, value)
+            with pytest.raises(public.ReviewedPublicHttpError, match="configuration_changed"):
+                public.ReviewedPublicHttpClient(cfg)
+        else:
+            client = public.ReviewedPublicHttpClient(cfg)
+            object.__setattr__(cfg, field, value)
+            with pytest.raises(public.ReviewedPublicHttpError, match="configuration_changed"):
+                client.get("tp53", approve_source_dispatch=True)
+        dns.assert_not_called(); create_socket.assert_not_called()
+
+
+def test_replacing_the_entire_typed_client_configuration_cannot_change_its_registration():
+    with transport([wire()]) as (client, _raw, secured, dns, _context, create_socket):
+        object.__setattr__(client, "config", config(reviewed_routes={"tp53": URL + "&changed=true"}))
+        with pytest.raises(public.ReviewedPublicHttpError, match="configuration_changed"):
+            client.get("tp53", approve_source_dispatch=True)
+        dns.assert_not_called(); create_socket.assert_not_called()
+        assert not secured.sent
+
+
+def test_after_admission_foreign_callback_mutation_cannot_change_wire_or_receipt_binding():
+    cfg = config()
+    expected = cfg.config_digest
+    with transport([wire()], configuration=cfg) as (client, _raw, secured, dns, _context, _create_socket):
+        def mutate(*_args, **_kwargs):
+            object.__setattr__(cfg, "reviewed_routes", {"tp53": "https://unreviewed.example.org/other"})
+            object.__setattr__(cfg, "accepted_content_types", ("text/plain",))
+            object.__setattr__(cfg, "max_response_bytes", 1)
+            return [ADDRESS]
+        dns.side_effect = mutate
+        result = client.get("tp53", approve_source_dispatch=True)
+    assert result.request_url == URL and result.config_digest == expected
+    assert bytes(secured.sent).startswith(b"GET /annotations/TP53?format=json HTTP/1.1\r\nHost: research.example.org\r\n")
+    assert b"Accept: application/json\r\n" in bytes(secured.sent)
+    with patch.object(public.socket, "getaddrinfo") as dns:
+        with pytest.raises(public.ReviewedPublicHttpError, match="configuration_changed"):
+            client.get("tp53", approve_source_dispatch=True)
+        dns.assert_not_called()
+
+
+def test_policy_digest_explicitly_binds_close_delimited_framing():
+    assert "bounded_eof" in public._POLICY["framing"]
+    assert public.REVIEWED_PUBLIC_HTTP_POLICY_VERSION == "2"
+    assert public.REVIEWED_PUBLIC_HTTP_POLICY_DIGEST == public._digest(public._POLICY)
+
+
+@pytest.mark.parametrize("payload", [
+    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n",
+    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 0\r\n",
+    b"HTTP/1.1 100 Continue\r\nInterim: value\r\n",
+    b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: application/json\r\n",
+])
+def test_eof_cannot_replace_the_actual_blank_header_terminator(payload):
+    with pytest.raises(public.ReviewedPublicHttpError, match="response_header_framing_invalid"):
+        get(payload)
+
+
+def test_a_complete_interim_header_block_followed_by_complete_final_headers_is_valid():
+    assert get(b"HTTP/1.1 100 Continue\r\nInterim: value\r\n\r\n" + wire()).body == b'{"gene":"TP53"}'
 
 
 @pytest.mark.parametrize("url", ["http://research.example.org/data", "https://evil.example.org/data",

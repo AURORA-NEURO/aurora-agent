@@ -26,7 +26,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 
 
 REVIEWED_PUBLIC_HTTP_POLICY_ID = "aurora.reviewed-public-https"
-REVIEWED_PUBLIC_HTTP_POLICY_VERSION = "1"
+REVIEWED_PUBLIC_HTTP_POLICY_VERSION = "2"
 REVIEWED_PUBLIC_HTTP_CONFIG_SCHEMA = "aurora-reviewed-public-http-config/0.1"
 MAX_REVIEWED_PUBLIC_HTTP_DNS_JOBS = 4
 MAX_REVIEWED_PUBLIC_HTTP_RESPONSE_BYTES = 4_000_000
@@ -54,7 +54,7 @@ _POLICY = {"policy_id": REVIEWED_PUBLIC_HTTP_POLICY_ID, "policy_version": REVIEW
     "headers": "fixed_accept_user_agent_identity_encoding_no_credentials", "proxies": "not_used",
     "dns": "all_answers_public_numeric_pinned_tls_original_hostname", "dns_jobs_max": 4,
     "deadline": "absolute_dns_connect_tls_each_send_recv_and_http_framing",
-    "framing": "strict_crlf_unique_headers_exact_length_or_http11_chunks_no_extensions_or_trailers",
+    "framing": "strict_crlf_unique_headers_exact_length_or_bounded_eof_or_http11_chunks_no_extensions_or_trailers",
     "redirects": "refused", "success_status": 200, "charset": "strict_utf8",
     "json_tree_validation": "source_adapter_owned", "automatic_retry": False}
 REVIEWED_PUBLIC_HTTP_POLICY_DIGEST = _digest(_POLICY)
@@ -207,6 +207,24 @@ class ReviewedPublicHttpConfig:
     def to_metadata(self) -> dict[str, Any]:
         return json.loads(self._encoded) | {"config_digest": self.config_digest}
 
+    def _validated_copy(self, expected_encoded: str | None = None) -> ReviewedPublicHttpConfig:
+        # Frozen dataclasses protect ordinary application code. Recheck their complete value
+        # against the sealed registration snapshot, then use only a detached copy during I/O.
+        # This also prevents a trusted callback changing the original config mid-request.
+        try:
+            if type(self._encoded) is not str or (expected_encoded is not None and self._encoded != expected_encoded):
+                _fail("reviewed_configuration_changed")
+            current = ReviewedPublicHttpConfig(self.allowed_hosts, self.reviewed_routes,
+                self.timeout_ms, self.max_response_bytes, self.max_header_bytes,
+                self.max_framing_bytes, self.accepted_content_types)
+            if current._encoded != self._encoded:
+                _fail("reviewed_configuration_changed")
+            return current
+        except ReviewedPublicHttpError:
+            raise ReviewedPublicHttpError("reviewed_configuration_changed") from None
+        except Exception:
+            raise ReviewedPublicHttpError("reviewed_configuration_changed") from None
+
 
 @dataclass(frozen=True, slots=True)
 class ReviewedPublicHttpResponse:
@@ -323,7 +341,7 @@ class _DeadlineReader:
             self.header_bytes += len(value)
             if self.header_bytes > self.config.max_header_bytes:
                 _fail("response_header_bound")
-            if value and (not value.endswith(b"\r\n") or value[:1] in (b" ", b"\t")):
+            if not value or not value.endswith(b"\r\n") or value[:1] in (b" ", b"\t"):
                 _fail("response_header_framing_invalid")
         else:
             self.account_framing(len(value))
@@ -429,10 +447,13 @@ class ReviewedPublicHttpClient:
     """No URL, payload, header, credentials, proxy, redirect or retry selector exists at dispatch."""
 
     config: ReviewedPublicHttpConfig
+    _encoded_config: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if type(self.config) is not ReviewedPublicHttpConfig:
             _fail("client_requires_reviewed_config")
+        snapshot = self.config._validated_copy()
+        object.__setattr__(self, "_encoded_config", snapshot._encoded)
 
     @property
     def transport_policy_digest(self) -> str:
@@ -441,11 +462,14 @@ class ReviewedPublicHttpClient:
     def get(self, route_id: str, *, approve_source_dispatch: bool = False) -> ReviewedPublicHttpResponse:
         if approve_source_dispatch is not True:
             _fail("explicit_source_dispatch_approval_required")
-        if not isinstance(route_id, str) or not _ROUTE_ID.fullmatch(route_id) or route_id not in self.config.reviewed_routes:
+        if type(self.config) is not ReviewedPublicHttpConfig:
+            _fail("reviewed_configuration_changed")
+        config = self.config._validated_copy(self._encoded_config)
+        if not isinstance(route_id, str) or not _ROUTE_ID.fullmatch(route_id) or route_id not in config.reviewed_routes:
             _fail("route_is_not_installed")
-        url = self.config.reviewed_routes[route_id]
+        url = config.reviewed_routes[route_id]
         parsed = urlsplit(url)
-        deadline = time.monotonic() + self.config.timeout_ms / 1000
+        deadline = time.monotonic() + config.timeout_ms / 1000
         raw = tls = response = None
         completed = False
         try:
@@ -457,8 +481,8 @@ class ReviewedPublicHttpClient:
             tls = context.wrap_socket(raw, server_hostname=parsed.hostname)
             target = parsed.path + (("?" + parsed.query) if "?" in url else "")
             request = (f"GET {target} HTTP/1.1\r\nHost: {parsed.netloc}\r\n"
-                f"Accept: {', '.join(self.config.accepted_content_types)}\r\nAccept-Encoding: identity\r\n"
-                "User-Agent: aurora-reviewed-public-http/1\r\nConnection: close\r\n\r\n").encode("ascii")
+                f"Accept: {', '.join(config.accepted_content_types)}\r\nAccept-Encoding: identity\r\n"
+                f"User-Agent: aurora-reviewed-public-http/{REVIEWED_PUBLIC_HTTP_POLICY_VERSION}\r\nConnection: close\r\n\r\n").encode("ascii")
             sent = 0
             while sent < len(request):
                 tls.settimeout(_remaining(deadline))
@@ -467,7 +491,7 @@ class ReviewedPublicHttpClient:
                 if type(count) is not int or not 1 <= count <= len(request) - sent:
                     _fail("request_send_failed")
                 sent += count
-            response_socket = _ResponseSocket(tls, deadline, self.config)
+            response_socket = _ResponseSocket(tls, deadline, config)
             response = _BoundedHttpResponse(response_socket)
             response.begin(); response_socket.reader.reading_headers = False
             headers = _headers(response)
@@ -483,21 +507,21 @@ class ReviewedPublicHttpClient:
                 _fail("response_content_encoding_unsupported")
             length = headers.get("content-length")
             if length is not None and (not re.fullmatch(r"[0-9]{1,10}", length)
-                                       or int(length) > self.config.max_response_bytes):
+                                       or int(length) > config.max_response_bytes):
                 _fail("response_declared_byte_bound")
             if response.status != 200:
                 code = "source_rate_limited" if response.status == 429 else "redirect_refused" if 300 <= response.status < 400 else "source_http_failure"
                 raise ReviewedPublicHttpError(code, status_code=response.status,
                     retry_after_seconds=_retry_after(headers.get("retry-after")) if response.status == 429 else None)
-            media = _content_type(headers.get("content-type"), self.config.accepted_content_types)
-            body = response.read(self.config.max_response_bytes + 1)
+            media = _content_type(headers.get("content-type"), config.accepted_content_types)
+            body = response.read(config.max_response_bytes + 1)
             _remaining(deadline)
-            if len(body) > self.config.max_response_bytes:
+            if len(body) > config.max_response_bytes:
                 _fail("response_byte_bound")
             if length is not None and len(body) != int(length):
                 _fail("response_declared_length_mismatch")
             result = ReviewedPublicHttpResponse(200, bytes(body), url, len(body), hashlib.sha256(body).hexdigest(),
-                REVIEWED_PUBLIC_HTTP_POLICY_DIGEST, self.config.config_digest, media)
+                REVIEWED_PUBLIC_HTTP_POLICY_DIGEST, config.config_digest, media)
             _remaining(deadline)
             completed = True
             return result
