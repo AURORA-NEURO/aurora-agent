@@ -125,7 +125,7 @@ def test_explicit_profiles_extend_only_concrete_operations_and_keep_default_cata
     before = base.to_dict()
     expanded = with_workflow_capabilities(base, WORKFLOW_CAPABILITY_IDS)
     assert base.to_dict() == before == builtin_workflow_operation_catalog().to_dict()
-    assert len(expanded.operations()) == 14  # eight defaults plus four identity, one ontology and one CIViC operation
+    assert len(expanded.operations()) == 16  # eight defaults, four identity, one ontology, one CIViC reader and two curation locals
     again = with_workflow_capabilities(expanded, WORKFLOW_CAPABILITY_IDS)
     assert again.catalog_digest == expanded.catalog_digest
     inventory = workflow_capability_inventory(expanded, WORKFLOW_CAPABILITY_IDS)
@@ -136,7 +136,7 @@ def test_explicit_profiles_extend_only_concrete_operations_and_keep_default_cata
     assert inventory["inventory_unit"].endswith("not_a_provider_count")
 
 
-@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1)])
+@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1), ("civic-curation-review", 3)])
 def test_profile_compilation_requires_operator_selection_and_binds_fixed_native_contract(profile_id, steps):
     task = "Inspect the documented fixed public metadata"
     catalog = with_workflow_capabilities(builtin_workflow_operation_catalog(), [profile_id])
@@ -195,7 +195,7 @@ def test_civic_profile_has_one_fixed_step_and_does_not_enable_source_authority()
     assert inventory["execution_authority"].startswith("none;")
 
 
-@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1)])
+@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1), ("civic-curation-review", 3)])
 def test_worker_offers_only_startup_enabled_profiles_and_saves_native_plan_without_a_grant(tmp_path, monkeypatch, profile_id, steps):
     from prism_sdk import llm_runtime
     from prism_sdk.workflow_api_worker import WorkflowAPIWorker, WorkflowAPIError
@@ -234,7 +234,7 @@ def test_plan_request_cannot_supply_a_capability_configuration_or_weaken_step_bo
     assert not list((worker.root / "plans").iterdir()) and not list((worker.root / "runs").iterdir())
 
 
-@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1)])
+@pytest.mark.parametrize("profile_id,steps", [("gene-identity", 5), ("glioma-ontology", 1), ("civic-glioblastoma-evidence", 1), ("civic-curation-review", 3)])
 def test_cli_fixed_template_selects_reviewed_profile_without_provider_or_source_grants(tmp_path, profile_id, steps):
     import json
     from test_workflow_cli import _invoke

@@ -503,6 +503,7 @@ def _output_review_statuses(outputs: dict[str, Any]) -> dict[str, dict[str, Any]
     from .glioma_protein_pathway_workflow import GLIOMA_PROTEIN_PATHWAY_REVIEW_SCHEMA
     from .glioma_denominator_workflow import GLIOMA_DENOMINATOR_REVIEW_SCHEMA
     from .glioma_gene_identity_workflow import GLIOMA_GENE_IDENTITY_REVIEW_SCHEMA
+    from .glioma_civic_curation_workflow import GLIOMA_CIVIC_CURATION_REVIEW_SCHEMA
     reviewed_schemas = {
         GLIOMA_DRAFT_AUDIT_SCHEMA: {"needs_evidence", "blocked", "held_for_scientific_human_review"},
         GLIOMA_MOLECULAR_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
@@ -512,6 +513,7 @@ def _output_review_statuses(outputs: dict[str, Any]) -> dict[str, dict[str, Any]
         GLIOMA_PROTEIN_PATHWAY_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
         GLIOMA_DENOMINATOR_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
         GLIOMA_GENE_IDENTITY_REVIEW_SCHEMA: {"needs_evidence", "awaiting_scientific_human_review"},
+        GLIOMA_CIVIC_CURATION_REVIEW_SCHEMA: {"needs_evidence", "awaiting_curation_metadata_research_review"},
     }
     statuses = {}
     for step_id, value in outputs.items():

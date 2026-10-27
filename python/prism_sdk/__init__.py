@@ -15881,6 +15881,7 @@ from .glioma_civic_curation_workflow import (
     analyze_glioma_civic_curation, validate_glioma_civic_curation_analysis,
     glioma_civic_curation_review_handoff, validate_glioma_civic_curation_handoff,
     register_glioma_civic_curation_workflow_operations,
+    glioma_civic_curation_workflow_proposal, compile_glioma_civic_curation_workflow,
 )
 __all__ += [
     "GLIOMA_CIVIC_CURATION_SCOPE", "GLIOMA_CIVIC_CURATION_ANALYSIS_SCHEMA", "GLIOMA_CIVIC_CURATION_REVIEW_SCHEMA",
@@ -15889,4 +15890,5 @@ __all__ += [
     "analyze_glioma_civic_curation", "validate_glioma_civic_curation_analysis",
     "glioma_civic_curation_review_handoff", "validate_glioma_civic_curation_handoff",
     "register_glioma_civic_curation_workflow_operations",
+    "glioma_civic_curation_workflow_proposal", "compile_glioma_civic_curation_workflow",
 ]

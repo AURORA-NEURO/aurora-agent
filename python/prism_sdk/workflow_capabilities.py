@@ -16,7 +16,7 @@ from .workflow_integrations import WorkflowOperationCatalog, builtin_workflow_op
 
 WORKFLOW_CAPABILITIES_SCHEMA = "aurora-workflow-capabilities/0.1"
 MAX_WORKFLOW_CAPABILITY_SELECTIONS = 32
-WORKFLOW_CAPABILITY_IDS = ("gene-identity", "glioma-ontology", "civic-glioblastoma-evidence")
+WORKFLOW_CAPABILITY_IDS = ("gene-identity", "glioma-ontology", "civic-glioblastoma-evidence", "civic-curation-review")
 _PROFILES = {
     "gene-identity": {
         "label": "TP53 gene identifier evidence review",
@@ -33,6 +33,11 @@ _PROFILES = {
         "label": "CIViC glioblastoma-name evidence metadata",
         "scope": "One fixed accepted evidence metadata page; source categories/counts are not scientific support, clinical advice or patient/cohort/assay denominators.",
         "required_operations": ["civic.glioblastoma_evidence_metadata"],
+    },
+    "civic-curation-review": {
+        "label": "CIViC curation metadata research review",
+        "scope": "Fixed native source page, local curation inspection and research handoff; no quality, publication independence or denominator inference.",
+        "required_operations": ["civic.glioblastoma_evidence_metadata", "glioma.civic_curation.analyze", "glioma.civic_curation.review_handoff"],
     },
 }
 
@@ -60,9 +65,12 @@ def _extension(profile_id: str) -> WorkflowOperationCatalog:
     elif profile_id == "glioma-ontology":
         from .reviewed_nci_thesaurus_retrieval import register_nci_thesaurus_operations
         register_nci_thesaurus_operations(catalog)
-    elif profile_id == "civic-glioblastoma-evidence":
+    elif profile_id in {"civic-glioblastoma-evidence", "civic-curation-review"}:
         from .reviewed_civic_evidence_retrieval import register_civic_evidence_operations
         register_civic_evidence_operations(catalog)
+        if profile_id == "civic-curation-review":
+            from .glioma_civic_curation_workflow import register_glioma_civic_curation_workflow_operations
+            register_glioma_civic_curation_workflow_operations(catalog)
     else:
         raise ArgumentError("workflow capability is not reviewed")
     if {item.operation_id for item in catalog.operations()} != set(_PROFILES[profile_id]["required_operations"]):
@@ -120,6 +128,9 @@ def compile_workflow_capability(task: str, catalog: WorkflowOperationCatalog, pr
     if profile_id == "gene-identity":
         from .glioma_gene_identity_workflow import compile_glioma_gene_identity_workflow
         return compile_glioma_gene_identity_workflow(task, catalog, requirements=requirements)
+    if profile_id == "civic-curation-review":
+        from .glioma_civic_curation_workflow import compile_glioma_civic_curation_workflow
+        return compile_glioma_civic_curation_workflow(task, catalog, requirements=requirements)
     from .workflow_builder import compile_workflow_plan
     from .workflow_requirements import compile_workflow_requirements, merge_workflow_requirements
     operation, name, step_id = {

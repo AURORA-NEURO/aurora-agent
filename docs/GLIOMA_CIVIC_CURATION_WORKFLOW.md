@@ -100,3 +100,42 @@ abstracts are absent from the fixed reader. The composition adds none of them. O
 terms, ontology descendants, statuses, later pages, retraction status, publication quality and
 release/snapshot equivalence remain unassessed. No source availability, model comprehension or
 scientific validity is established by synthetic fixtures or local replay.
+
+## Fixed workflow and optional profile
+
+`glioma_civic_curation_workflow_proposal` and `compile_glioma_civic_curation_workflow`
+compose the existing `civic.glioblastoma_evidence_metadata` reader with
+`glioma.civic_curation.analyze` and `glioma.civic_curation.review_handoff`. The template selects
+the research handoff as its sole output. The native contract requires that output and permits
+additional existing step outputs, such as the source bundle; it does not enforce a sole-output
+restriction. Native immutable requirements retain all three operations, one call per
+operation, the exact 30,000 ms source timeout, the exact task label, and both whole-value links:
+source root to `/civic_bundle`, then analysis root to `/analysis`. Edits cannot replace those
+roots with subtrees or literal placeholders, bypass the handoff, substitute a different label,
+or weaken the retained call/step budget. Additional caller requirements are conjoined.
+
+The optional `civic-curation-review` profile installs these two local operations and the existing
+reader. The existing one-step `civic-glioblastoma-evidence` profile and default catalogue remain
+unchanged. Overlapping selection reuses the same reader; it does not add another integration.
+
+```python
+from prism_sdk import builtin_workflow_operation_catalog
+from prism_sdk import with_workflow_capabilities, compile_workflow_capability
+
+profile = "civic-curation-review"
+catalog = with_workflow_capabilities(builtin_workflow_operation_catalog(), [profile])
+plan = compile_workflow_capability(
+    "Inspect fixed CIViC curation metadata", catalog, profile, enabled_profiles=[profile],
+)
+```
+
+```console
+aurora-agent workflow-template --template civic-curation-review --task "Inspect fixed CIViC curation metadata" --out civic-review-plan.json
+```
+
+Registration and compilation make no model or source request. Execution still needs its separate
+explicit approval. A completed graph retains `awaiting_curation_metadata_research_review` in
+CLI and worker review summaries; graph completion never becomes scientific approval. Checkpoint
+fixtures pause after the single synthetic caller-fetcher request, reload native bytes, resume
+the two local steps and replay completion without refetching. These are synthetic durability
+checks, not a live CIViC acquisition, browser observation or actual-model planning measurement.

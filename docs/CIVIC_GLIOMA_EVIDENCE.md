@@ -89,3 +89,8 @@ These are code inventory units, not live availability, independent organizations
 evidence counts. Earlier manifest `.2` and retained 18-path/15-group observations describe their
 own source revisions; this increment does not rewrite or upgrade them. No live acquisition or
 model inference is established by implementation or synthetic tests.
+
+The optional [local curation metadata research review](GLIOMA_CIVIC_CURATION_WORKFLOW.md)
+replays this bundle into item-level inspection and an explicit research handoff. It adds two
+local operations and a three-step profile, without adding readers, following pages, joining
+publications, or upgrading curation categories into scientific quality.

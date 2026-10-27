@@ -257,3 +257,34 @@ def register_glioma_civic_curation_workflow_operations(catalog: Any) -> Any:
                 "handoff_digest": {"type": "string"}, "analysis": {"type": "object"}, "status": {"enum": ["needs_evidence", "awaiting_curation_metadata_research_review"]}}},
         integration, implementation="local"), review)
     return catalog
+
+
+def glioma_civic_curation_workflow_proposal(question: str) -> dict[str, Any]:
+    question = _question(question)
+    return {"name": "CIViC glioblastoma-name curation metadata research review", "steps": [
+        {"id": "civic", "operation": CIVIC_EVIDENCE_OPERATION_ID,
+            "arguments": {"timeout_ms": 30_000}, "depends_on": []},
+        {"id": "analysis", "operation": GLIOMA_CIVIC_CURATION_ANALYSIS_OPERATION,
+            "arguments": {"question": question, "civic_bundle": {"$ref": "civic#"}}, "depends_on": ["civic"]},
+        {"id": "review", "operation": GLIOMA_CIVIC_CURATION_REVIEW_OPERATION,
+            "arguments": {"analysis": {"$ref": "analysis#"}}, "depends_on": ["analysis"]}], "outputs": ["review"]}
+
+
+def compile_glioma_civic_curation_workflow(task: str, catalog: Any, requirements: Any = None) -> Any:
+    """Bind the one source call and both exact native-root links without acquiring evidence."""
+    from .workflow_builder import compile_workflow_plan
+    from .workflow_requirements import compile_workflow_requirements, merge_workflow_requirements
+    proposal = glioma_civic_curation_workflow_proposal(task)
+    operations = [step["operation"] for step in proposal["steps"]]
+    native = compile_workflow_requirements(task, required_operations=operations,
+        output_operations=[GLIOMA_CIVIC_CURATION_REVIEW_OPERATION], max_steps=3,
+        max_calls_by_operation={operation: 1 for operation in operations},
+        argument_rules=[{"operation": CIVIC_EVIDENCE_OPERATION_ID, "path": "", "comparison": "equals", "value": {"timeout_ms": 30_000}},
+                        {"operation": GLIOMA_CIVIC_CURATION_ANALYSIS_OPERATION, "path": "/question", "comparison": "equals", "value": task}],
+        data_links=[{"source_operation": CIVIC_EVIDENCE_OPERATION_ID, "target_operation": GLIOMA_CIVIC_CURATION_ANALYSIS_OPERATION,
+                     "source_pointer": "", "target_path": "/civic_bundle"},
+                    {"source_operation": GLIOMA_CIVIC_CURATION_ANALYSIS_OPERATION, "target_operation": GLIOMA_CIVIC_CURATION_REVIEW_OPERATION,
+                     "source_pointer": "", "target_path": "/analysis"}])
+    if requirements is not None:
+        native = merge_workflow_requirements(task, native, requirements, catalog=catalog)
+    return compile_workflow_plan(proposal, catalog, task=task, requirements=native)

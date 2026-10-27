@@ -286,3 +286,150 @@ def test_registration_is_inert_local_and_atomic_on_duplicate_or_capacity_failure
     with pytest.raises(ArgumentError, match="capacity"):
         curation.register_glioma_civic_curation_workflow_operations(empty)
     assert not empty.operations()
+
+
+def compiled_catalog(fetcher=None):
+    catalog = civic.register_civic_evidence_operations(WorkflowOperationCatalog(), fetcher=fetcher)
+    return curation.register_glioma_civic_curation_workflow_operations(catalog)
+
+
+def test_fixed_three_step_compilation_binds_every_operation_native_root_task_arguments_and_call_cap():
+    catalog = compiled_catalog()
+    value = curation.compile_glioma_civic_curation_workflow(QUESTION, catalog).to_dict()
+    source, analysis, review = civic.CIVIC_EVIDENCE_OPERATION_ID, curation.GLIOMA_CIVIC_CURATION_ANALYSIS_OPERATION, curation.GLIOMA_CIVIC_CURATION_REVIEW_OPERATION
+    assert [row["operation"] for row in value["steps"]] == [source, analysis, review]
+    assert value["steps"][0]["arguments"] == {"timeout_ms": 30_000}
+    assert value["steps"][1]["arguments"] == {"question": QUESTION, "civic_bundle": {"$ref": "civic#"}}
+    assert value["steps"][2]["arguments"] == {"analysis": {"$ref": "analysis#"}}
+    assert [row["depends_on"] for row in value["steps"]] == [[], ["civic"], ["analysis"]]
+    contract = value["requirements"]
+    assert set(contract["required_operations"]) == {source, analysis, review} and contract["output_operations"] == [review]
+    assert contract["max_steps"] == 3 and contract["max_calls_by_operation"] == {source: 1, analysis: 1, review: 1}
+    assert contract["data_links"] == [
+        {"source_operation": source, "target_operation": analysis, "source_pointer": "", "target_path": "/civic_bundle"},
+        {"source_operation": analysis, "target_operation": review, "source_pointer": "", "target_path": "/analysis"}]
+    assert value["outputs"] == ["review"]
+
+
+def test_native_contract_keeps_required_handoff_but_allows_additional_existing_step_outputs():
+    from prism_sdk.workflow_builder import compile_workflow_plan
+    catalog = compiled_catalog()
+    original = curation.compile_glioma_civic_curation_workflow(QUESTION, catalog).to_dict()
+    proposal = {key: copy.deepcopy(original[key]) for key in ("name", "steps", "outputs")}
+    proposal["outputs"] = ["civic", "review"]
+    edited = compile_workflow_plan(proposal, catalog, task=QUESTION, requirements=original["requirements"])
+    assert edited.to_dict()["outputs"] == ["civic", "review"]
+    assert edited.to_dict()["requirements"] == original["requirements"]
+
+
+@pytest.mark.parametrize("change", ["timeout", "source_subtree", "literal_bundle", "analysis_subtree", "question", "review_bypass", "drop_operation", "duplicate_source"])
+def test_fixed_contract_refuses_unsupported_source_reference_argument_or_handoff_edits(change):
+    from prism_sdk.workflow_builder import compile_workflow_plan
+    catalog = compiled_catalog()
+    original = curation.compile_glioma_civic_curation_workflow(QUESTION, catalog).to_dict()
+    proposal = {key: copy.deepcopy(original[key]) for key in ("name", "steps", "outputs")}
+    if change == "timeout": proposal["steps"][0]["arguments"]["timeout_ms"] = 100
+    elif change == "source_subtree": proposal["steps"][1]["arguments"]["civic_bundle"] = {"$ref": "civic#/coverage"}
+    elif change == "literal_bundle": proposal["steps"][1]["arguments"]["civic_bundle"] = {}
+    elif change == "analysis_subtree": proposal["steps"][2]["arguments"]["analysis"] = {"$ref": "analysis#/source_inputs"}
+    elif change == "question": proposal["steps"][1]["arguments"]["question"] = "different label"
+    elif change == "review_bypass": proposal["outputs"] = ["analysis"]
+    elif change == "drop_operation":
+        proposal["steps"].pop()
+        proposal["outputs"] = ["analysis"]
+    elif change == "duplicate_source":
+        extra = copy.deepcopy(proposal["steps"][0]); extra["id"] = "extra"
+        proposal["steps"].append(extra)
+    with pytest.raises(ArgumentError):
+        compile_workflow_plan(proposal, catalog, task=QUESTION, requirements=original["requirements"])
+
+
+def test_caller_contract_is_conjoined_instead_of_weakening_the_fixed_review():
+    from prism_sdk.workflow_requirements import compile_workflow_requirements
+    catalog = compiled_catalog()
+    caller = compile_workflow_requirements(QUESTION, max_steps=2)
+    with pytest.raises(ArgumentError):
+        curation.compile_glioma_civic_curation_workflow(QUESTION, catalog, requirements=caller)
+
+
+def test_synthetic_one_fetch_checkpoint_reload_resume_and_completed_replay_keep_research_hold(tmp_path, monkeypatch):
+    from prism_sdk.workflow_builder import execute_workflow_plan, save_workflow_checkpoint, load_workflow_checkpoint, validate_workflow_plan
+    from prism_sdk.workflow_cli import _output_review_statuses
+    monkeypatch.setattr(WorkflowOperationCatalog, "execute", _CATALOG_EXECUTE)
+    raw = canonical_json(native(2)).encode()
+    calls = []
+    def fetch(url, *, http_config):
+        calls.append(url)
+        return civic.CivicEvidenceHttpResponse(200, raw, url, len(raw), hashlib.sha256(raw).hexdigest(),
+            http_config.transport_policy_digest, http_config.config_digest, "application/json")
+    catalog = compiled_catalog(fetch)
+    plan = curation.compile_glioma_civic_curation_workflow(QUESTION, catalog)
+    assert execute_workflow_plan(plan, catalog).status == "approval_required" and calls == []
+    first = execute_workflow_plan(plan, catalog, approved=True, max_step_calls=1, retrieved_at=NOW)
+    assert first.status == "paused" and calls == [civic._URL]
+    receipt = first.checkpoint["results"]["civic"]["receipt"]
+    assert receipt["source_request_count"] == 1 and receipt["transport_mode"] == "caller_supplied"
+    checkpoint_path = tmp_path / "synthetic-checkpoint.json"
+    save_workflow_checkpoint(checkpoint_path, first.checkpoint)
+    loaded = load_workflow_checkpoint(checkpoint_path)
+    assert loaded == first.checkpoint
+    retained = loaded["results"]["civic"]["value"]["source_inputs"][0]
+    assert base64.b64decode(retained["response_body_base64"], validate=True) == raw
+    cloned = catalog.subset([operation.operation_id for operation in catalog.operations()])
+    restored_plan = validate_workflow_plan(json.loads(canonical_json(plan.to_dict())), cloned)
+    denied = execute_workflow_plan(restored_plan, cloned, approved=False, checkpoint=loaded)
+    assert denied.status == "approval_required" and calls == [civic._URL]
+    second = execute_workflow_plan(restored_plan, cloned, approved=True, checkpoint=loaded, max_step_calls=1)
+    assert second.status == "paused" and calls == [civic._URL]
+    save_workflow_checkpoint(checkpoint_path, second.checkpoint)
+    completed = execute_workflow_plan(restored_plan, cloned, approved=True, checkpoint=load_workflow_checkpoint(checkpoint_path))
+    assert completed.status == "completed" and calls == [civic._URL]
+    assert completed.checkpoint["attempts"] == {"civic": 1, "analysis": 1, "review": 1}
+    assert curation.validate_glioma_civic_curation_handoff(completed.outputs["review"])["human_review_required"] is True
+    summary = _output_review_statuses(completed.outputs)["review"]
+    assert summary["status"] == "awaiting_curation_metadata_research_review" and summary["scientific_support_established"] is False
+    replay = execute_workflow_plan(restored_plan, cloned, approved=False, checkpoint=completed.checkpoint)
+    assert replay.status == "completed" and replay.outputs == completed.outputs and calls == [civic._URL]
+
+
+def test_source_only_profile_and_default_catalogue_retain_their_precomposition_golden_digests():
+    from prism_sdk.workflow_capabilities import with_workflow_capabilities, compile_workflow_capability
+    from prism_sdk.workflow_integrations import builtin_workflow_operation_catalog
+    base = builtin_workflow_operation_catalog()
+    profile = "civic-glioblastoma-evidence"
+    catalog = with_workflow_capabilities(base, [profile])
+    plan = compile_workflow_capability(QUESTION, catalog, profile, enabled_profiles=[profile])
+    assert base.catalog_digest == "53e11ef585fa6d65736ecc77d5042962a9276fac8fbe7b39bde1efccfec5e5b2"
+    assert catalog.catalog_digest == "611976a1458a0a1f4e54d855aa356e4530232be0d4e4abc9327c1efc4af55bf1"
+    assert plan.plan_digest == "3b67cd418ddfb303cdac9571363868b708cf7d283ee58d7882175926c2773c6a"
+
+
+def test_optional_review_profile_adds_two_local_operations_without_new_reader_or_service_counts():
+    from prism_sdk.workflow_capabilities import with_workflow_capabilities, compile_workflow_capability
+    from prism_sdk.workflow_integrations import builtin_workflow_operation_catalog
+    from prism_sdk.workflow_provider_registry import reviewed_workflow_provider_registry
+    base = builtin_workflow_operation_catalog()
+    profile = "civic-curation-review"
+    combined = with_workflow_capabilities(base, ["civic-glioblastoma-evidence", profile])
+    assert len(combined.operations()) == len(base.operations()) + 3
+    assert all(combined.resolve(operation).implementation == "local" for operation in (
+        curation.GLIOMA_CIVIC_CURATION_ANALYSIS_OPERATION, curation.GLIOMA_CIVIC_CURATION_REVIEW_OPERATION))
+    registry = reviewed_workflow_provider_registry(combined).to_dict()
+    assert registry["counts"]["implemented_reader_paths"] == 19 and registry["counts"]["declared_reviewed_service_groups"] == 16
+    assert registry["counts"]["registered_reviewed_default_readers"] == 9
+    assert registry["counts"]["independently_live_verified_providers"]["value"] is None
+    value = compile_workflow_capability(QUESTION, combined, profile, enabled_profiles=[profile]).to_dict()
+    assert len(value["steps"]) == 3 and value["outputs"] == ["review"]
+
+
+@pytest.mark.parametrize("schema,status", [("aurora-glioma-civic-curation-review/0.1", "needs_evidence"),
+    ("aurora-glioma-civic-curation-review/0.1", "awaiting_curation_metadata_research_review"),
+    ("aurora-glioma-gene-identity-review/0.1", "awaiting_scientific_human_review"),
+    ("aurora-glioma-denominator-review/0.1", "awaiting_scientific_human_review")])
+def test_run_summary_retains_old_and_new_explicit_review_holds_and_never_promotes_unknown_status(schema, status):
+    from prism_sdk.workflow_cli import _output_review_statuses
+    value = {"schema": schema, "status": status, "human_review_required": True,
+             "scientific_support_established": False, "clinical_actions_authorized": False}
+    assert _output_review_statuses({"review": value}) == {"review": value}
+    value["status"] = "approved"
+    assert "status" not in _output_review_statuses({"review": value})["review"]
