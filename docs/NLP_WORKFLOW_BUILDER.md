@@ -54,8 +54,10 @@ are unavailable in that planning pass. This is not a measured relevance or task-
 The local model receives a structural output schema, then the compiler validates its proposal.
 Schema validity does not prove that a plan fulfills the natural-language task. The small-model
 live check produced a usable single-source plan; an attempted larger plan contained disconnected,
-redundant reads. The compiler now rejects unused steps, but arbitrary multi-step task fidelity
-remains unmeasured. Use the reviewed template for the composed glioma workflow.
+redundant reads. The compiler rejects unused steps. Small prospective multi-step probes have
+retained failures and do not establish broad task fidelity; see the
+[local planning evaluation](LOCAL_WORKFLOW_PLANNING_EVALUATION.md). The reviewed templates
+provide fixed compositions for their documented research scopes.
 
 Caller-authored [requirements](WORKFLOW_REQUIREMENTS.md) can bind exact operations, outputs,
 arguments, value flow and attempt caps into a plan. `--requirements FILE --planning-attempts 2`

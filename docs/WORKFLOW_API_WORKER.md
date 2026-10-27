@@ -27,6 +27,13 @@ those digests do not authenticate an attacker with write access to application s
 `--research-sources` adds the three separately reviewed public metadata readers.
 `--molecular-glioma` registers the two local molecular coverage/review operations. These
 registration switches do not establish live service coverage or authorize any dispatch.
+`--glioma-mutations` registers the fixed GDC TP53 aggregate reader and its two local review
+operations. `--gene-references` registers the fixed Ensembl TP53 reader and its two local
+comparison/review operations; NCBI Gene is already in the default catalogue. All switches
+default to false and preserve the legacy catalogue when omitted. The `glioma-mutations` and
+`gene-references` planners select exact three/four-stage templates without a model call.
+Task text labels those fixed queries and does not change their source selection. Operator
+registration, exact retained contracts and explicit source approval remain separate checks.
 `--timeout-seconds` bounds the configured local-model transport timeout to 1–300 seconds.
 The default is 120 seconds. The model endpoint must be loopback and cannot contain userinfo,
 query parameters or fragments. The worker never obtains an OpenAI key.

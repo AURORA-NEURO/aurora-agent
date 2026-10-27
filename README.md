@@ -132,8 +132,14 @@ The Python SDK now exposes an executable local-model workflow builder through
 `workflow-catalogue`, `workflow-build`, `workflow-run`, `workflow-template`, and
 `workflow-execute`. It validates a proposed operation DAG before dispatch, supports public-value
 checkpoint/resume, and composes a glioma literature/trial/TCGA evidence review. Eight reviewed
-public-source adapters are executable; an explicit OpenAPI GET importer supports adding reviewed
-services without treating catalogue capacity as verified integration coverage. See the
+public-source adapters are registered by default; five opt-in paths add OpenAlex, Crossref,
+Zenodo, fixed GDC TP53 mutation-affected case aggregates and Ensembl TP53 references. These
+thirteen paths are not thirteen independent providers or hundreds of connected services.
+Separate [aggregate review](docs/GLIOMA_MUTATION_WORKFLOW.md) and
+[gene-reference comparison](docs/GLIOMA_GENE_REFERENCES.md) templates preserve native citations,
+missingness and scientific review holds. The [local workflow editor](docs/WORKFLOW_APPLICATION.md)
+uses the same retained contracts and explicit source grants. An OpenAPI GET importer supports
+adding reviewed services without treating catalogue capacity as verified integration coverage. See the
 [workflow builder](docs/NLP_WORKFLOW_BUILDER.md) and the remaining
 [development plan](docs/WORKFLOW_DEVELOPMENT_PLAN.md).
 
@@ -1076,7 +1082,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,368,161 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,368,287 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 

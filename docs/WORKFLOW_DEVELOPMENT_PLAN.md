@@ -9,24 +9,32 @@ platform descriptors nor fixture registration counts establish integration cover
 | --- | --- | --- |
 | Natural-language authoring | Local model -> schema/DAG validation; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Held-out general multi-step task fidelity, broader intent extraction and clarification UX, graph editing, branching and bounded iteration |
 | Execution | Sequential read-only DAG, per-call budgets, public-value checkpoints, explicit retry, digest-checked resume; durable cooperative cancellation and separate release grant | Scheduling, concurrent independent branches, shared-worker fencing, effectful execution through the existing effect ledger, compensation/reconciliation policies |
-| Integration breadth | Eleven concrete reviewed research adapters, including OpenAlex, Crossref and Zenodo; reviewed GET OpenAPI imports; reviewed tools from caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; recorded capabilities, availability, pagination, rate limits and failure behavior for each operation |
+| Integration breadth | Thirteen concrete reviewed research adapter paths, including fixed GDC TP53 aggregates and Ensembl TP53 references; reviewed GET OpenAPI imports; reviewed tools from caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; recorded capabilities, availability, pagination, rate limits and failure behavior for each operation |
 | Authentication | Credentialless public readers; typed application-attested connection sessions bind subject/resource scope and revocable credential handles into imported HTTP catalogue identity; caller-owned MCP sessions | Provider-authenticated account onboarding, protected OAuth/token refresh, persistent account connections and tenant-bound private-response retention |
-| Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular-profile catalogues, Entrez identities and Open Targets/GWAS association metadata with native replay and review holds | Actual molecular measurements and validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and independent replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
+| Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular catalogues and association metadata; fixed TP53 mutation-affected case aggregates and Ensembl/NCBI reference comparison with native replay and review holds | Broader molecular measurements and independently validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
 | Evidence quality | Metadata provenance/omissions, explicit unknown states, preserved source partitions | Independent relevance/quality evaluation, contradiction and negative-result handling, cohort-overlap checks, freshness policies, source-specific quality failures |
 | Product interfaces | Dependency-free SDK/CLI; opt-in authenticated local editor and HTTP routes through the existing Rust server and fixed Python worker, with retained task contracts, exact approval, run controls and explicit exports | Broader usability/accessibility evaluation, provider onboarding, release installation and production service operation |
 | Reliability | Focused invariants, installed-wheel/API smoke, Python regressions, separate live source checks, contract checks on normalized dispatch and resume | Provider/source outage campaigns, process-termination recovery, task-quality and cost/latency measurements, cross-SDK contract support and release/deployment validation |
 
-The eleven-adapter count names implemented reviewed readers, not eleven independent providers or
+The thirteen-path count names implemented reviewed readers, not thirteen independent providers or
 an assertion that every source is always available. PubMed and NCBI Gene, for example, share NCBI
 infrastructure. Approved one-record live queries verified OpenAlex, Crossref and Zenodo in the
 [research-source increment](RESEARCH_SOURCE_INTEGRATIONS.md); earlier live checks exercised the
 composed PubMed/ClinicalTrials.gov/GDC lane. A later bounded molecular workflow observed
 cBioPortal, NCBI Gene, Open Targets and GWAS Catalog; Europe PMC was separately observed.
-All eleven current adapter paths therefore have bounded live observations. These are observations
-of those requests, not a continuous availability guarantee or eleven independent providers.
+Those eleven adapter paths have bounded live observations. Two new paths add the
+[GDC TP53 aggregate reader](GDC_GENE_MUTATION_COUNTS.md) and
+[Ensembl TP53 reference reader](ENSEMBL_GENE_REFERENCES.md). Their fixed compositions completed
+bounded live runs: one GDC request yielded two project citations; two Ensembl requests plus one
+NCBI Gene request yielded three source-reference citations. Both resumed local stages from retained
+source results and replayed completed checkpoints with zero additional dispatches. The GDC count
+reader shares its provider with the existing project reader. These observations establish neither
+continuous availability nor thirteen independent providers.
 
 The three additional readers are explicitly registered in the SDK or selected with the CLI's
 `--research-sources` option. The default catalogue remains stable for existing saved plans.
+The two TP53 paths are separately opt-in through `--glioma-mutations` and `--gene-references`;
+their exact CLI templates also register the required operations without dispatch.
 
 The [MCP bridge](WORKFLOW_MCP.md) registers only tools explicitly reviewed on an already connected
 client. Its 225-tool local stdio fixture demonstrates protocol discovery, schema checking and
@@ -107,13 +115,15 @@ effects, compensation, effect retries and power-loss durability remain unproven 
    reviewed evidence planes. Preserve exact citation closure, source identity, missingness,
    context omissions and explicit unassessed scientific support. Public human cohort summaries
    remain separate from the Rust preclinical worker boundary.
-   A candidate next measurement increment is a separate reader for the documented GDC
-   [`/analysis/top_cases_counts_by_genes` aggregation](https://docs.gdc.cancer.gov/API/Users_Guide/Data_Analysis/#analysis-endpoints),
-   retaining a reviewed gene and TCGA-GBM/LGG project partitions. This is planned, not an
-   implemented or live-verified source. Missing buckets must remain unknown; project-level
-   counts of cases with SSM data do not establish a gene-specific assay denominator, prevalence,
-   independent cohorts, or clinical significance. Existing molecular catalogue schemas remain
-   catalogue-only.
+   The documented GDC aggregation is now implemented as the separate
+   [fixed TP53 mutation-count composition](GLIOMA_MUTATION_WORKFLOW.md), retaining TCGA-GBM/LGG
+   partitions and exact native count pointers. Missing buckets remain unknown; counts do not
+   establish a gene-specific assay denominator, prevalence, independent cohorts or clinical
+   significance. The [source-reference comparison](GLIOMA_GENE_REFERENCES.md) retains every
+   Ensembl Entrez candidate and exact NCBI identifier agreement/mismatch without validating
+   scientific identifier equivalence or joining measurement planes. Existing molecular catalogue
+   schemas remain catalogue-only. Next increments need richer independently reviewed measurements,
+   explicit denominators and source-release/identifier validation before cross-source analyses.
 3. Expand actual integration onboarding through the reviewed OpenAPI and MCP bridges. Count a service only
    after its auth/scopes, actual request/response behavior and failure handling are verified; use
    representative integration families rather than generated labels.
