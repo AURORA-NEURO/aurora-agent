@@ -30,6 +30,7 @@ from .errors import ArgumentError
 from .llm_runtime import LLMRuntime, ProviderRequest
 from .tooling import ToolCatalogue, ToolDefinition
 from .workflow_integrations import WorkflowOperationCatalog
+from .workflow_decoder import prepare_workflow_decoder_schema
 from .workflow_requirements import (
     WorkflowRequirements, WorkflowRequirementError, audit_workflow_requirements,
     enforce_workflow_step_requirements, validate_workflow_requirements,
@@ -43,6 +44,7 @@ WORKFLOW_CHECKPOINT_SCHEMA = "aurora-executable-workflow-checkpoint/0.2"
 MAX_WORKFLOW_STEPS = 32
 MAX_WORKFLOW_VALUE_BYTES = 8_000_000
 MAX_WORKFLOW_ATTEMPTS = 3
+MAX_WORKFLOW_PLANNING_CONTEXT_BYTES = 2_000_000
 _ID = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 _REFERENCE = re.compile(r"^([a-zA-Z][a-zA-Z0-9_-]{0,63})#((?:/.*)?)$")
 _CHECKPOINT_STATUSES = frozenset({"ready", "running", "paused", "approval_required", "retry_required", "attempt_limit", "blocked", "failed", "completed", "cancelled"})
@@ -699,15 +701,19 @@ class LocalWorkflowBuilder:
     """Turn natural language into a checked DAG through an explicitly registered local model."""
 
     def __init__(self, catalog: WorkflowOperationCatalog, runtime: LLMRuntime, *, model: str,
-                 provider: str = "ollama", max_visible_operations: int = 32) -> None:
+                 provider: str = "ollama", max_visible_operations: int = 32,
+                 constrain_decoder: bool = False, decoder_prefix_items: bool = False) -> None:
         if not isinstance(catalog, WorkflowOperationCatalog) or not isinstance(runtime, LLMRuntime):
             raise WorkflowValidationError("workflow builder requires a catalogue and LLMRuntime")
         if not isinstance(model, str) or not model.strip() or len(model) > 200:
             raise WorkflowValidationError("workflow builder requires a bounded local model identity")
         if type(max_visible_operations) is not int or not 1 <= max_visible_operations <= 128:
             raise WorkflowValidationError("workflow visible-operation budget is outside its bound")
+        if type(constrain_decoder) is not bool or type(decoder_prefix_items) is not bool:
+            raise WorkflowValidationError("workflow decoder options must be literal booleans")
         self.catalog, self.runtime, self.model, self.provider = catalog, runtime, model, provider
         self.max_visible_operations = max_visible_operations
+        self.constrain_decoder, self.decoder_prefix_items = constrain_decoder, decoder_prefix_items
         self._provider_digest = content_digest(self._local_provider_metadata())
 
     def _local_provider_metadata(self) -> dict[str, Any]:
@@ -808,6 +814,10 @@ class LocalWorkflowBuilder:
                 "outputs": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": _ID.pattern}},
             },
         }
+        if self.constrain_decoder:
+            decoder = prepare_workflow_decoder_schema(self.catalog, [operation.operation_id for operation in operations],
+                requirements=contract, max_steps=max_steps, prefix_items_supported=self.decoder_prefix_items)
+            schema = decoder.response_schema
         messages = (
             {"role": "system", "content": json.dumps(instructions, ensure_ascii=False)},
             {"role": "user", "content": task},
@@ -818,6 +828,8 @@ class LocalWorkflowBuilder:
             if self.catalog.catalog_digest != digest or content_digest(self._local_provider_metadata()) != self._provider_digest:
                 raise WorkflowValidationError("workflow catalogue or provider changed while planning")
             repair_messages = (({"role": "assistant", "content": previous},) if previous else ()) + (({"role": "user", "content": json.dumps(feedback)},) if feedback else ())
+            if self.constrain_decoder and len(json.dumps(messages + repair_messages, ensure_ascii=False).encode("utf-8")) > MAX_WORKFLOW_PLANNING_CONTEXT_BYTES:
+                raise WorkflowValidationError("workflow planning context exceeds its byte bound")
             request = ProviderRequest(model=self.model, messages=messages + repair_messages,
                 require_json=True, response_schema=schema,
                 max_output_tokens=min(4096, max(512, 384 * max_steps)), temperature=0)
