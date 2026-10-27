@@ -12,6 +12,15 @@ condition comparison accepted 0/3 cases for Qwen 2.5 1.5B and 1/3 for 7B. One ad
 audit. Those measurements concern the previous whole-graph builder. They do not measure
 this incremental protocol, automatic requirement extraction or scientific quality.
 
+A later frozen three-case developer-authored probe at 16,384 allocated context tokens
+accepted 3/3 whole-graph proposals and 1/3 incremental plans. The incremental planner
+explicitly refused two cases at its first chooser, referring to missing executed steps
+or source annotations. Both were future workflow-authoring requests: no source execution
+was available or needed to connect planned outputs. Different protocol call/output
+budgets make that probe an operating-point comparison, not a causal reliability estimate.
+Those failures remain evidence against assuming that incremental planning is more reliable.
+The protocol remains opt-in and does not replace the default builder.
+
 The protocol removes model-authored step identifiers and forward edges. The model still
 chooses every operation, supplied literal argument, data binding, control dependency and
 final output. The native compiler preserves reviewed schema defaults for omitted arguments;
@@ -108,6 +117,30 @@ binding. Both phases retain the complete caller contract and accepted steps; com
 still uses the full catalogue. Context bytes and request digests record this deliberate
 premeasurement protocol choice.
 
+Decision protocol version 0.2 explicitly distinguishes **authoring a future workflow**
+from answering a research question after execution. Every call labels an empty or partial
+draft, records that execution has not started by design, and describes symbols as future
+outputs. Missing observed values do not prevent the model from binding an earlier planned
+output. An append records future work; a finish proposes a complete graph and makes no
+claim that it ran. This changes context wording and labels, not decoder alternative order,
+schema exposure, operation selection, compiler checks or provider-call budgets. It supplies
+no example graph, automatic append, forced finish, retry after a terminal response or fallback.
+
+`authoring_state.pending_contract_obligations` labels only missing required operations and
+output coverage as unfinished graph obligations. At the empty draft these come directly
+from the unchanged caller contract; after an append they match the native prefix audit's
+pending issues. Without a caller contract the field is null, rather than a fabricated
+successful audit. The original `prefix_audit` remains present without rewriting its digest,
+issues, false/unknown contract result or deferred arguments. An irreversible or unknown
+issue cannot be relabelled as pending. Temporary prefix outputs still do not establish
+the model's final output selection.
+
+Clarification and refusal remain available in every phase. The instructions specifically
+preserve clarification for a genuinely unspecified selector and refusal for unavailable
+capabilities, incompatible constraints or prohibited authority. They prohibit invented
+selectors and observed values. Whether a local model follows these instructions requires
+prospective positive cases and intent controls; fixture acceptance cannot establish it.
+
 Only previously accepted symbols appear in the reference and control-edge enums. The
 protocol independently rejects unknown, self and forward symbols, invalid pointer syntax,
 native `$ref` injection and duplicate/unknown control dependencies. The native compiler
@@ -192,7 +225,7 @@ Focused fixture tests exercise prior-only bindings, generated IDs, derived/contr
 native root and nested array references, contract/call limits, explicit final output
 coverage, non-plan terminal states, identity drift and unsupported/oversize refusal. They
 provide no evidence that an Ollama model follows the protocol or understands a task.
-Live model fidelity remains **unmeasured** until a separate frozen, prospective comparison
-is run. Such a comparison must score full task/graph fidelity separately from decoder
+The revised authoring context's live model fidelity remains **unmeasured** until a separate
+frozen, prospective comparison is run. Such a comparison must score full task/graph fidelity separately from decoder
 acceptance and caller-contract compilation, preserve every failure, and disclose the
 developer-authored cases, call budgets and provider context conditions.

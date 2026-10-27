@@ -35,6 +35,7 @@ from .workflow_requirements import (
 )
 
 INCREMENTAL_WORKFLOW_RESULT_SCHEMA = "aurora-incremental-workflow-planning-result/0.1"
+_AUTHORING_PROTOCOL = "aurora-incremental-workflow-decisions/0.2"
 MAX_INCREMENTAL_MODEL_CALLS = 128
 MAX_INCREMENTAL_SCHEMA_BYTES = 256_000
 _RESERVED = frozenset({"$ref", "$symbol"})
@@ -169,6 +170,37 @@ def _native_arguments(value: Any, symbols: Sequence[str], depth: int = 0) -> Any
     return value
 
 
+def _authoring_state(steps: Sequence[Mapping[str, Any]], prefix_audit: Mapping[str, Any] | None,
+                     contract: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Distinguish unfinished graph obligations from unavailable execution results.
+
+    Native prefix diagnostics remain unchanged. Only the two already-admitted pending
+    issue types may be labelled unfinished authoring; an unexpected issue must never
+    become a harmless-looking progress report. This context chooses no graph elements.
+    """
+    if prefix_audit is not None and prefix_audit["requirements_audit"] is not None:
+        pending = prefix_audit["requirements_audit"]["blocking_issues"]
+    elif contract is not None:
+        pending = [{"code": code, "operation": operation}
+                   for field, code in (("required_operations", "required_operation_missing"),
+                                       ("output_operations", "required_output_missing"))
+                   for operation in contract[field]]
+    else:
+        pending = None
+    if pending is not None and any(issue["code"] not in _PENDING_PREFIX_ISSUES for issue in pending):
+        raise IncrementalWorkflowPlanningError("incremental authoring state contains a non-pending contract violation")
+    return {
+        "purpose": "author_a_future_workflow;not_answer_the_research_question_or_execute_steps",
+        "draft": "empty" if not steps else "partial",
+        "accepted_step_count": len(steps),
+        "execution_status": "not_started_by_design",
+        "observed_source_values": "unavailable_during_plan_authoring;not_required_to_bind_future_outputs",
+        "symbol_meaning": "immutable_unexecuted_step_whose_future_output_can_be_referenced",
+        "pending_contract_obligations": pending,
+        "prefix_audit_meaning": "incomplete_graph_diagnostics;temporary_audit_outputs_are_not_final_outputs;deferred_values_are_checked_at_execution",
+    }
+
+
 class IncrementalLocalWorkflowPlanner:
     """Choose one operation, then its arguments, within an explicit provider-call budget.
 
@@ -259,17 +291,20 @@ class IncrementalLocalWorkflowPlanner:
         prefix_audit = None
         feedback = None
         base = {
-            "protocol": "aurora-incremental-workflow-decisions/0.1",
+            "protocol": _AUTHORING_PROTOCOL,
             "task": task, "catalog_digest": digest, "operations": summaries,
             "fixed_caller_requirements": contract,
             "max_steps": max_steps,
             "rules": [
-                "Choose the next operation, its arguments and bindings yourself. No source has executed.",
-                "Accepted symbols are immutable earlier plan steps, never observed values.",
+                "Author a future workflow. No operation has executed or can execute during this planning conversation. An empty accepted plan is the normal initial state.",
+                "Choose the next operation, its literal arguments, bindings and control dependencies yourself. Appending records a future invocation; it does not require its source results.",
+                "Accepted symbols are immutable earlier unexecuted plan steps. Bind a future consumer to an earlier symbol without waiting for observed values; never invent those values.",
                 "A wire reference has exactly $symbol (prior accepted symbol) and pointer (RFC 6901). Empty pointer selects the complete native output; no implicit wrapper exists.",
                 "Never emit native $ref, step IDs, depends_on, fabricated source observations, credentials or replacement requirements.",
                 "Control dependencies order steps but do not transfer data. Choose data bindings explicitly.",
-                "Finish only when every fixed caller requirement and task instruction is met; choose actual final output symbols. Clarify or refuse when needed.",
+                "Missing operations or outputs in an incomplete prefix audit are pending graph-authoring obligations, not a request for observed source data. Other contract violations remain errors.",
+                "Finish proposes a complete workflow, not completed execution. Finish only when every fixed caller requirement and task instruction is met; choose actual final output symbols.",
+                "Clarify unresolved intent or a missing selector that cannot be inferred from the task or fixed contract; do not invent one. Refuse unavailable capabilities, incompatible constraints or prohibited authority when needed. These terminal choices remain valid at every phase.",
                 "Public research metadata only. No clinical decisions or patient data. A plan grants no source authority.",
             ],
         }
@@ -301,6 +336,7 @@ class IncrementalLocalWorkflowPlanner:
             guard()
             messages = ({"role": "system", "content": json.dumps({**base, **extra,
                 "accepted_plan_symbols": steps, "prefix_audit": prefix_audit,
+                "authoring_state": _authoring_state(steps, prefix_audit, contract),
                 "validation_feedback": feedback}, ensure_ascii=False)},)
             encoded = json.dumps({"messages": messages, "response_schema": schema}, ensure_ascii=False)
             if len(encoded.encode("utf-8")) > MAX_WORKFLOW_PLANNING_CONTEXT_BYTES:

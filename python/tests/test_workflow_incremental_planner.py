@@ -103,6 +103,70 @@ def test_argument_request_uses_only_selected_operation_and_enumerated_prior_symb
     assert "operation" not in request.response_schema["anyOf"][0]["properties"]
 
 
+def test_empty_and_partial_drafts_expose_future_authoring_with_exact_unmodified_prefix_diagnostics():
+    task = "Transform the first future metadata output with the second operation."
+    contract = compile_workflow_requirements(task,
+        required_operations=["fixture.alpha", "fixture.beta"], output_operations=["fixture.beta"],
+        data_links=[{"source_operation": "fixture.alpha", "target_operation": "fixture.beta"}],
+        max_steps=2)
+    planner, _, requests = _planner([_append(), _arguments("future source"),
+        _append("fixture.beta"), _arguments({"$symbol": "s1", "pointer": "/text"}), _finish(["s2"])])
+    result = planner.build(task, approve_provider_call=True, requirements=contract)
+    assert result.status == "planned" and result.to_dict()["source_dispatches"] == 0
+    contexts = [json.loads(request.messages[0]["content"]) for request in requests]
+    empty, partial = contexts[0], contexts[2]
+    assert empty["protocol"] == "aurora-incremental-workflow-decisions/0.2"
+    assert empty["accepted_plan_symbols"] == [] and empty["prefix_audit"] is None
+    assert empty["authoring_state"]["draft"] == "empty"
+    assert empty["authoring_state"]["pending_contract_obligations"] == [
+        {"code": "required_operation_missing", "operation": "fixture.alpha"},
+        {"code": "required_operation_missing", "operation": "fixture.beta"},
+        {"code": "required_output_missing", "operation": "fixture.beta"}]
+    assert partial["authoring_state"]["draft"] == "partial"
+    assert partial["authoring_state"]["accepted_step_count"] == 1
+    audit = partial["prefix_audit"]["requirements_audit"]
+    assert partial["authoring_state"]["pending_contract_obligations"] == audit["blocking_issues"]
+    assert audit["contract_satisfied"] is False and audit["requirements_digest"] == contract.requirements_digest
+    claimed_digest = audit.pop("audit_digest")
+    assert claimed_digest == content_digest(audit)
+    for context, request in zip(contexts, requests):
+        assert context["authoring_state"]["execution_status"] == "not_started_by_design"
+        assert context["authoring_state"]["observed_source_values"].startswith("unavailable_during_plan_authoring")
+        assert context["fixed_caller_requirements"] == contract.to_dict()
+        assert {"clarify", "refuse"}.issubset({branch["properties"]["action"]["enum"][0]
+            for branch in request.response_schema["anyOf"]})
+    assert result.plan.to_dict()["steps"][1]["arguments"] == {"text": {"$ref": "s1#/text"}}
+
+
+@pytest.mark.parametrize("code", ["forbidden_operation_used", "argument_requirement_unsatisfied",
+    "required_value_flow_missing", "future_unknown_issue"])
+def test_authoring_context_never_relabels_irreversible_or_unknown_violations_as_pending(code):
+    from prism_sdk.workflow_incremental_planner import _authoring_state
+    with pytest.raises(IncrementalWorkflowPlanningError, match="non-pending contract violation"):
+        _authoring_state([], {"requirements_audit": {"blocking_issues": [{"code": code}]}}, None)
+
+
+@pytest.mark.parametrize("phase", ["choose", "arguments"])
+@pytest.mark.parametrize("action,status,task,message", [
+    ("clarify", "clarification_required", "Transform the user-selected record, whose name is unspecified. Do not guess a record.",
+     "Which record name should the transformation use?"),
+    ("refuse", "refused", "Transform metadata and send it through the unregistered write service. A local read-only result alone does not satisfy this request.",
+     "The required write service is unavailable in this catalogue, so I cannot author the complete requested workflow."),
+])
+def test_future_authoring_semantics_preserve_missing_selector_and_unavailable_write_terminal_decisions(phase, action, status, task, message):
+    contract = compile_workflow_requirements(task, required_operations=["fixture.alpha"],
+        output_operations=["fixture.alpha"], max_steps=1)
+    decision = {"action": action, "message": message}
+    planner, _, requests = _planner([decision] if phase == "choose" else [_append(), decision])
+    result = planner.build(task, approve_provider_call=True, requirements=contract)
+    assert result.status == status and result.plan is None and "plan" not in result.to_dict()
+    assert result.to_dict()["message"] == message and result.to_dict()["accepted_partial_steps"] == []
+    assert result.to_dict()["source_dispatches"] == 0 and len(requests) == (1 if phase == "choose" else 2)
+    for request in requests:
+        branches = [branch["properties"]["action"]["enum"][0] for branch in request.response_schema["anyOf"]]
+        assert "clarify" in branches and "refuse" in branches
+
+
 @pytest.mark.parametrize("bad", [
     {"$symbol": "s2", "pointer": "/text"},
     {"$symbol": "unknown", "pointer": ""},
