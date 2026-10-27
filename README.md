@@ -136,8 +136,9 @@ public-source adapters are registered by default; twelve opt-in paths add OpenAl
 Zenodo, fixed GDC TP53 mutation-affected case aggregates, Ensembl TP53 references, and fixed
 UniProt/Reactome protein/pathway annotations, GDC project SSM-data coverage, HGNC gene references,
 NCI Thesaurus glioma terminology, [CIViC evidence metadata](docs/CIVIC_GLIOMA_EVIDENCE.md), and
-[Cellosaurus glioblastoma cell-line metadata](docs/CELLOSAURUS_CELL_LINE_METADATA.md).
-These twenty paths span seventeen declared API service groups; those declarations do not establish independent
+[Cellosaurus glioblastoma cell-line metadata](docs/CELLOSAURUS_CELL_LINE_METADATA.md), and fixed
+[DataCite TCGA-GBM DOI metadata](docs/DATACITE_TCGA_GBM_COLLECTION_METADATA.md).
+These twenty-one paths span eighteen declared API service groups; those declarations do not establish independent
 providers or hundreds of connected services.
 Separate [aggregate review](docs/GLIOMA_MUTATION_WORKFLOW.md) and
 [gene-reference comparison](docs/GLIOMA_GENE_REFERENCES.md) templates preserve native citations,
@@ -150,6 +151,8 @@ local analysis and a research-review handoff. It retains source categories and e
 groups without ranking scientific support or treating those groups as independent publications.
 Cellosaurus preserves source names, accessions, taxonomy, disease assertions and the admitted
 problematic-cell-line comment category; it establishes neither model suitability nor authenticity.
+DataCite retains the dataset version, metadata revision and metadata schema identifier as separate
+observations, with raw-response replay; it does not retrieve TCIA images or establish cohort counts.
 The [provider registry](docs/WORKFLOW_PROVIDER_REGISTRY.md) inspects exact reader bindings,
 deduplicated API service groups and separate unmeasured live coverage through the CLI and editor.
 Reviewed [capability profiles](docs/WORKFLOW_CAPABILITIES.md) enable fixed groups of concrete
@@ -165,6 +168,9 @@ remains unestablished. The editor's explicit caller-declaration
 review binds task spans, literal requirements and acceptance through edits, restart and separate
 evidence exports. Candidate syntax and caller acceptance do not establish complete interpretation
 or scientific validity; unavailable actions and literal conflicts remain blocking.
+A separate [current literal policy](docs/WORKFLOW_LITERAL_POLICY.md) checks applicable declared
+scalar types and numeric bounds before new authoring. Historical admissions and caller approvals
+keep their original bytes; an old approval does not bypass the current check.
 An opt-in [incremental Ollama planner](docs/INCREMENTAL_WORKFLOW_PLANNING.md) makes bounded
 model-selected decisions and sends final graphs through the same caller-contract compiler;
 protocol validation does not establish unrestricted NLP fidelity. The [local workflow editor](docs/WORKFLOW_APPLICATION.md)
@@ -1112,7 +1118,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,368,880 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,368,883 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 

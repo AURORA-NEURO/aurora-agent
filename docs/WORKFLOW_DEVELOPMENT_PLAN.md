@@ -7,16 +7,16 @@ platform descriptors nor fixture registration counts establish integration cover
 
 | Area | Current evidence | Required before claiming the requested end state |
 | --- | --- | --- |
-| Natural-language authoring | Local model -> schema/DAG validation; optional unreviewed NLP obligation suggestions default to extraction protocol 0.2 with complete native input/output contracts and durable caller acceptance; exact historical 0.1/0.2/0.3 request replay; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Controlled actual-model evaluation, held-out complete intent extraction and general multi-step fidelity, broader clarification UX, branching and bounded iteration |
+| Natural-language authoring | Local model -> schema/DAG validation; optional unreviewed NLP obligation suggestions default to extraction protocol 0.2 with complete native input/output contracts and durable caller acceptance; exact historical 0.1/0.2/0.3 request replay; separate current scalar type/bounds checks before new authoring preserve old review bytes; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Controlled actual-model evaluation, held-out complete intent extraction and general multi-step fidelity, broader clarification UX, branching and bounded iteration |
 | Execution | Sequential read-only DAG, per-call budgets, public-value checkpoints, explicit retry, digest-checked resume; durable cooperative cancellation and separate release grant | Scheduling, concurrent independent branches, shared-worker fencing, effectful execution through the existing effect ledger, compensation/reconciliation policies |
-| Integration breadth | Twenty concrete reviewed research adapter paths across seventeen declared API service groups; fixed operator-selected capability profiles; a versioned API-service/reader registry bound to actual executors; strict public GET, fixed read-only GraphQL POST and reviewed OpenAPI HTTPS transports; caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; protected account onboarding, availability, pagination, rate limits and failure behavior for each operation |
+| Integration breadth | Twenty-one concrete reviewed research adapter paths across eighteen declared API service groups; fixed operator-selected capability profiles; a versioned API-service/reader registry bound to actual executors; strict public GET, fixed read-only GraphQL POST and reviewed OpenAPI HTTPS transports; caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; protected account onboarding, availability, pagination, rate limits and failure behavior for each operation |
 | Authentication | Credentialless public readers; typed application-attested connection sessions bind subject/resource scope and revocable credential handles into imported HTTP catalogue identity; caller-owned MCP sessions | Provider-authenticated account onboarding, protected OAuth/token refresh, persistent account connections and tenant-bound private-response retention |
-| Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular catalogues and association metadata; fixed TP53 aggregates, Ensembl/NCBI reference comparison, UniProt/Reactome annotation context, CIViC curation review and Cellosaurus metadata with native replay and review holds | Broader molecular measurements and independently validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
+| Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular catalogues and association metadata; fixed TP53 aggregates, Ensembl/NCBI reference comparison, UniProt/Reactome annotation context, CIViC curation review, Cellosaurus metadata and fixed DataCite dataset-citation metadata with native replay and review holds | Broader molecular measurements and independently validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
 | Evidence quality | Metadata provenance/omissions, explicit unknown states, preserved source partitions | Independent relevance/quality evaluation, contradiction and negative-result handling, cohort-overlap checks, freshness policies, source-specific quality failures |
 | Product interfaces | Dependency-free SDK/CLI; opt-in authenticated local editor and HTTP routes through the existing Rust server and fixed Python worker, with retained task contracts, exact approval, run controls and explicit exports | Broader usability/accessibility evaluation, provider onboarding, release installation and production service operation |
 | Reliability | Focused invariants, installed-wheel/API smoke, Python regressions, separate live source checks, contract checks on normalized dispatch and resume | Provider/source outage campaigns, process-termination recovery, task-quality and cost/latency measurements, cross-SDK contract support and release/deployment validation |
 
-The twenty-path count names implemented reviewed readers, not twenty independent providers or
+The twenty-one-path count names implemented reviewed readers, not twenty-one independent providers or
 an assertion that every source is always available. PubMed and NCBI Gene, for example, share NCBI
 infrastructure. Approved one-record live queries verified OpenAlex, Crossref and Zenodo in the
 [research-source increment](RESEARCH_SOURCE_INTEGRATIONS.md); earlier live checks exercised the
@@ -40,8 +40,8 @@ human P04637 name/pathway annotation context through [reviewed public HTTPS](REV
 The opt-in `--protein-pathways` composition keeps general source annotations separate from
 glioma measurements, activity, enrichment and causal claims. A bounded live composition used two
 GETs, retained four protein-name rows, two gene-name candidates, 46 pathway annotations and 53
-citations, and replayed the completed checkpoint without further dispatch. All fifteen reader
-paths now have bounded observations; this does not imply fifteen independent providers, continuous
+citations, and replayed the completed checkpoint without further dispatch. At that increment, all fifteen reader
+paths had bounded observations; this does not imply fifteen independent providers, continuous
 availability, scientific validation or hundreds of services.
 
 A sixteenth opt-in path, [GDC project SSM-data coverage](GDC_SSM_COVERAGE.md), retrieves public
@@ -85,9 +85,16 @@ Missing optional comments remain missing; their absence establishes no absence o
 identity problems. Metadata does not validate authenticity, model suitability or disease
 equivalence. Pagination, total count, release identity and scientific relevance remain unassessed.
 
-The [provider registry](WORKFLOW_PROVIDER_REGISTRY.md) manifest `reviewed-public-readers/2026-10-27.4` binds twenty reviewed reader paths to
-seventeen explicitly reviewed API service groups, with NCBI and GDC readers deduplicated. The eight
-default readers and their seven groups remain unchanged; twelve readers are optional. It checks
+A twenty-first optional [DataCite reader](DATACITE_TCGA_GBM_COLLECTION_METADATA.md) retrieves one
+fixed TCGA-GBM DOI metadata object. Exact native identity, publisher string/object alternatives,
+missing values and separate dataset-version, metadata-revision and metadata-schema observations
+replay from retained response bytes. Its one-step capability binds the complete timeout argument
+and output; it does not retrieve TCIA images, subjects or media, join cohorts or infer a current
+release. This is a DataCite API group, separate from any unimplemented TCIA imaging execution.
+
+The [provider registry](WORKFLOW_PROVIDER_REGISTRY.md) manifest `reviewed-public-readers/2026-10-27.5` binds twenty-one reviewed reader paths to
+eighteen explicitly reviewed API service groups, with NCBI and GDC readers deduplicated. The eight
+default readers and their seven groups remain unchanged; thirteen readers are optional. It checks
 actual operation/default-executor/component identities, supports source-free request conformance
 inspection, and retains admitted adapter attempts separately from actual HTTP counts. Application
 reviewed group declarations and referenced evidence never become independently verified provider
@@ -202,6 +209,11 @@ effects, compensation, effect retries and power-loss durability remain unproven 
    unsupported action are separate from full task coverage, caller acceptance and successful
    workflow execution. Clarification messages can still be acknowledgements without a genuine
    question; versioned grammar/meaning improvements remain design-only.
+   The separate [current literal policy](WORKFLOW_LITERAL_POLICY.md) now checks applicable direct
+   scalar types and numeric bounds before new obligation-based authoring. It preserves exact old
+   admission, review and acceptance records while preventing a historical acceptance from
+   bypassing a newly evaluated constraint. Unknown or malformed paths remain unassessed;
+   projected leaf acceptance is not whole-call validity or complete task interpretation.
 2. Extend the [implemented local glioma synthesis and audit](GLIOMA_WORKFLOW_SYNTHESIS.md) to richer
    reviewed evidence planes. Preserve exact citation closure, source identity, missingness,
    context omissions and explicit unassessed scientific support. Public human cohort summaries

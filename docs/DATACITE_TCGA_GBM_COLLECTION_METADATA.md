@@ -16,9 +16,11 @@ the [TCGA-GBM collection page](https://www.cancerimagingarchive.net/collection/t
 [DataCite public REST API documentation](https://support.datacite.org/docs/api), the
 [singleton DOI example](https://support.datacite.org/docs/api-get-doi), and its
 [reference route](https://support.datacite.org/reference/get_dois-id). The example is not a
-complete schema guarantee. No actual TCGA-GBM DataCite response has been captured or admitted
-by this reader in this revision. Tests use synthetic inputs and fixture TLS bytes only;
-they do not establish live shape conformance, source availability or scientific validity.
+complete schema guarantee. Core and onboarding tests use synthetic inputs and fixture TLS
+bytes. Any actual source acquisition is a separate observation with its own source revision,
+clock and retained response. Tests alone do not establish live shape conformance, source
+availability or scientific validity; one admitted response would not establish continuous
+availability or complete source-schema conformance.
 
 ## Fixed authority and local admission
 
