@@ -38,6 +38,8 @@ commands.
 - [Glioma molecular metadata composition](GLIOMA_MOLECULAR_WORKFLOW.md)
 - [Reviewed OpenAlex, Crossref and Zenodo research sources](RESEARCH_SOURCE_INTEGRATIONS.md)
 - [Reviewed OpenAPI workflow integrations](WORKFLOW_OPENAPI.md)
+- [Account-bound application connection sessions](WORKFLOW_CONNECTIONS.md)
+- [Scoped durable local JSON artifact publication](WORKFLOW_ARTIFACT.md)
 - [Reviewed MCP workflow integrations](WORKFLOW_MCP.md)
 - [Autonomous workflow development plan](WORKFLOW_DEVELOPMENT_PLAN.md)
 - [Execution provenance](EXECUTION_PROVENANCE.md)

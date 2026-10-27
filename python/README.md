@@ -21,6 +21,12 @@ plan for separate execution, `workflow-template` builds the glioma evidence work
 [glioma workflow](../docs/GLIOMA_WORKFLOW_BUILDER.md), and
 [reviewed OpenAPI integration](../docs/WORKFLOW_OPENAPI.md) contracts.
 
+SDK applications can bind imported readers to a revocable, scoped
+[application connection session](../docs/WORKFLOW_CONNECTIONS.md). A separate
+[local JSON artifact sink](../docs/WORKFLOW_ARTIFACT.md) uses durable scoped authorization and
+effect reconciliation for exact approved bytes. Account attestation is application-owned;
+OAuth onboarding and effectful operations inside executable workflow plans remain unfinished.
+
 ```python
 from prism_sdk import Client, Workspace
 

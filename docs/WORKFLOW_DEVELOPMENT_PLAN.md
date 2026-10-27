@@ -10,7 +10,7 @@ platform descriptors nor fixture registration counts establish integration cover
 | Natural-language authoring | Local model -> schema/DAG validation; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Held-out general multi-step task fidelity, broader intent extraction and clarification UX, graph editing, branching and bounded iteration |
 | Execution | Sequential read-only DAG, per-call budgets, public-value checkpoints, explicit retry, digest-checked resume; durable cooperative cancellation and separate release grant | Scheduling, concurrent independent branches, shared-worker fencing, effectful execution through the existing effect ledger, compensation/reconciliation policies |
 | Integration breadth | Eleven concrete reviewed research adapters, including OpenAlex, Crossref and Zenodo; reviewed GET OpenAPI imports; reviewed tools from caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; recorded capabilities, availability, pagination, rate limits and failure behavior for each operation |
-| Authentication | Credentialless public research readers; application-owned transient headers for imported HTTP operations and application-owned MCP client credentials; no model-owned secrets | Protected OAuth/account connection lifecycle, scoped grants, token refresh/revocation, tenant isolation and auditable credential resolution |
+| Authentication | Credentialless public readers; typed application-attested connection sessions bind subject/resource scope and revocable credential handles into imported HTTP catalogue identity; caller-owned MCP sessions | Provider-authenticated account onboarding, protected OAuth/token refresh, persistent account connections and tenant-bound private-response retention |
 | Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular-profile catalogues, Entrez identities and Open Targets/GWAS association metadata with native replay and review holds | Actual molecular measurements and validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and independent replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
 | Evidence quality | Metadata provenance/omissions, explicit unknown states, preserved source partitions | Independent relevance/quality evaluation, contradiction and negative-result handling, cohort-overlap checks, freshness policies, source-specific quality failures |
 | Product interfaces | Dependency-free SDK and local CLI commands | An editable workflow UI, authenticated service API, operator views for runs/holds/recovery, accessible errors and installation/onboarding flows |
@@ -69,6 +69,20 @@ scientific human review. A local replay made zero additional source/model reques
 call and retains its actual result or failure. Checkpoint 0.2 retains cancellation through reload;
 releasing it grants neither source authority nor failed-call retry. The CLI supports a separate
 cancel signal file. This is a serial step-boundary control, not remote rollback or effect recovery.
+
+The [connection session](WORKFLOW_CONNECTIONS.md) checks application subject, fixed operation
+resources, expiry, credential availability and revocation before imported requests and catalogue
+replay. Its account identity is application-attested, not verified by a provider. The session
+nonce is independent of credential bytes; replacing a session requires a new plan. Legacy copied
+header mappings have no account verification or revocation lifecycle. Protected OAuth, refresh,
+restart-stable connection identity and private data retention remain required work.
+
+The [local artifact sink](WORKFLOW_ARTIFACT.md) is a concrete independent application API for one
+approved canonical JSON publication. It uses persistent authorization CAS, the SQLite effect
+journal, an OS writer lock and filesystem no-clobber publication. Exact-byte observation can
+settle interrupted completion; absent or conflicting files do not trigger automatic redispatch.
+This is not yet a write operation in executable workflow plans. Distributed ownership, remote
+effects, compensation, effect retries and power-loss durability remain unproven or unimplemented.
 
 ## Next implementation order
 

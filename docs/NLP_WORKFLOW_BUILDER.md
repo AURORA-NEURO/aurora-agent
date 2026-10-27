@@ -100,7 +100,17 @@ fixed HTTPS hosts and application-owned transient auth headers. CLI imports use 
 with exactly `document`, `integration_id`, `server_url`, `allowed_hosts`, and
 `reviewed_operation_ids`; `document` is relative to the config file. Pass repeatable
 `--openapi-config FILE --approve-spec-import` to each command that must reproduce that catalogue.
-The CLI does not collect auth secrets. SDK applications own protected auth resolution.
+The CLI does not collect auth secrets. SDK applications can use
+[typed connection sessions](WORKFLOW_CONNECTIONS.md) to bind an application-attested account,
+subject, fixed resource scope and revocable credential handle into catalogue identity. Account
+attestation is supplied by the application; OAuth and provider identity verification remain
+unimplemented. Legacy header mappings are copied with a per-registration opaque binding;
+mutable header callables are refused.
+
+The independent [local artifact sink](WORKFLOW_ARTIFACT.md) can publish one exact approved JSON
+artifact through persistent scoped grants and the existing SQLite effect journal. This SDK API
+is separate from the read-only DAG executor. Adding an effectful operation to a plan still fails;
+end-to-end write operations, compensation and retry policies remain unfinished.
 
 Capacity is 4,096 executable operation registrations across 1,024 integration identities. Fixture
 tests exercise hundreds of registrations; this is not a claim that hundreds of services are

@@ -15629,6 +15629,15 @@ from .glioma_workflow_intent import (
     GLIOMA_WORKFLOW_INTENT_SCHEMA, MAX_GLIOMA_INTENT_TASK_BYTES, MAX_GLIOMA_INTENT_CLAUSES,
     GliomaWorkflowIntent, interpret_glioma_workflow_request, compile_glioma_workflow_request,
 )
+from .workflow_connections import (
+    WORKFLOW_CONNECTION_SCHEMA, WorkflowConnectionError, WorkflowConnectionContext,
+    WorkflowConnectionResource, WorkflowConnectionSession,
+)
+from .workflow_artifact import (
+    WORKFLOW_ARTIFACT_MANIFEST_SCHEMA, WORKFLOW_ARTIFACT_RECEIPT_SCHEMA,
+    MAX_WORKFLOW_ARTIFACT_BYTES, WorkflowArtifactError, WorkflowArtifactCancelled,
+    PreparedWorkflowArtifact, WorkflowArtifactSink, SQLiteWorkflowArtifactAuthorizationStore,
+)
 __all__ += [
     "WorkflowOperation", "WorkflowOperationCatalog", "WorkflowOperationResult",
     "builtin_workflow_operation_catalog", "LocalWorkflowBuilder", "WorkflowPlan", "WorkflowRun",
@@ -15659,4 +15668,9 @@ __all__ += [
     "register_glioma_molecular_workflow_operations", "glioma_molecular_workflow_proposal",
     "GLIOMA_WORKFLOW_INTENT_SCHEMA", "MAX_GLIOMA_INTENT_TASK_BYTES", "MAX_GLIOMA_INTENT_CLAUSES",
     "GliomaWorkflowIntent", "interpret_glioma_workflow_request", "compile_glioma_workflow_request",
+    "WORKFLOW_CONNECTION_SCHEMA", "WorkflowConnectionError", "WorkflowConnectionContext",
+    "WorkflowConnectionResource", "WorkflowConnectionSession",
+    "WORKFLOW_ARTIFACT_MANIFEST_SCHEMA", "WORKFLOW_ARTIFACT_RECEIPT_SCHEMA",
+    "MAX_WORKFLOW_ARTIFACT_BYTES", "WorkflowArtifactError", "WorkflowArtifactCancelled",
+    "PreparedWorkflowArtifact", "WorkflowArtifactSink", "SQLiteWorkflowArtifactAuthorizationStore",
 ]
