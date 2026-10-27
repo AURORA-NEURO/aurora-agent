@@ -53,6 +53,7 @@ commands.
 - [Reviewed HGNC gene-reference reader](HGNC_GENE_REFERENCES.md)
 - [Glioma three-source gene identifier evidence](GLIOMA_GENE_IDENTITY_WORKFLOW.md)
 - [Reviewed NCI Thesaurus glioma terminology reader](NCI_THESAURUS.md)
+- [Reviewed CIViC glioblastoma evidence metadata](CIVIC_GLIOMA_EVIDENCE.md)
 - [Operator-selected workflow capability profiles](WORKFLOW_CAPABILITIES.md)
 - [Reviewed OpenAlex, Crossref and Zenodo research sources](RESEARCH_SOURCE_INTEGRATIONS.md)
 - [Reviewed OpenAPI workflow integrations](WORKFLOW_OPENAPI.md)

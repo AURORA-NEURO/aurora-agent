@@ -10,6 +10,7 @@ connection, or permission to call a model or source.
 | --- | --- | --- |
 | `gene-identity` | HGNC TP53 references, Ensembl TP53 references, NCBI TP53 summary, native concordance analysis and review handoff | Five stages; metadata agreement remains separate from scientific equivalence |
 | `glioma-ontology` | NCI EVS NCIt Glioma C3059 lookup | One native source output; no descendant retrieval, clinical interpretation or cohort inference |
+| `civic-glioblastoma-evidence` | Fixed CIViC accepted glioblastoma-name evidence metadata window | One bounded first page; curation categories are not scientific support or patient/cohort/assay denominators |
 
 The default eight-reader catalogue and saved-plan digest are unchanged. A selected profile adds
 only its listed concrete operations, including dependencies. Overlapping normalized descriptors
@@ -64,8 +65,9 @@ conformance and unmeasured source availability. The browser builds inert text op
 inventory and enables an option only when the operator selected it and every required operation
 is present. Disconnect clears the dynamic options and invalidates an unavailable selection.
 
-A plan request uses `planner: "capability:gene-identity"` or
-`planner: "capability:glioma-ontology"`. The request cannot supply capability configuration or
+A plan request uses `planner: "capability:gene-identity"`,
+`planner: "capability:glioma-ontology"` or `planner: "capability:civic-glioblastoma-evidence"`.
+The request cannot supply capability configuration or
 enable a disabled profile. The worker compiles the fixed graph with its native requirements,
 conjoins any caller contract and step limit, and retains the exact planner selector in the saved
 plan. Task text labels the review; it does not change fixed source selectors. Model and source
@@ -73,9 +75,9 @@ approval stay separate; inspection and planning grant neither.
 
 ## Limits
 
-These two profiles do not establish hundreds of real integrations, protected account onboarding,
+These three profiles do not establish hundreds of real integrations, protected account onboarding,
 availability, scientific identifier equivalence, glioma classification, clinical support, or
 effectful DAG execution. [HGNC](HGNC_GENE_REFERENCES.md), the
 [three-source identifier composition](GLIOMA_GENE_IDENTITY_WORKFLOW.md), and
-[NCI Thesaurus](NCI_THESAURUS.md) retain their own native evidence and omissions. Real source
+[NCI Thesaurus](NCI_THESAURUS.md) and [CIViC](CIVIC_GLIOMA_EVIDENCE.md) retain their own native evidence and omissions. Real source
 observations, offline replay, fixture tests and model planning measurements remain separate.

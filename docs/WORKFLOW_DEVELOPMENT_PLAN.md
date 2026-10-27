@@ -7,16 +7,16 @@ platform descriptors nor fixture registration counts establish integration cover
 
 | Area | Current evidence | Required before claiming the requested end state |
 | --- | --- | --- |
-| Natural-language authoring | Local model -> schema/DAG validation; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Held-out general multi-step task fidelity, broader intent extraction and clarification UX, graph editing, branching and bounded iteration |
+| Natural-language authoring | Local model -> schema/DAG validation; optional unreviewed NLP obligation suggestions and explicit durable caller acceptance; caller-bound contracts and bounded repair; typed glioma source/limit grammar compiles deterministic multi-step graphs and retains unresolved clauses | Held-out complete intent extraction and general multi-step fidelity, broader clarification UX, branching and bounded iteration |
 | Execution | Sequential read-only DAG, per-call budgets, public-value checkpoints, explicit retry, digest-checked resume; durable cooperative cancellation and separate release grant | Scheduling, concurrent independent branches, shared-worker fencing, effectful execution through the existing effect ledger, compensation/reconciliation policies |
-| Integration breadth | Eighteen concrete reviewed research adapter paths; fixed operator-selected capability profiles; a versioned API-service/reader registry bound to actual executors; strict public and reviewed OpenAPI HTTPS transports; caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; protected account onboarding, availability, pagination, rate limits and failure behavior for each operation |
+| Integration breadth | Nineteen concrete reviewed research adapter paths; fixed operator-selected capability profiles; a versioned API-service/reader registry bound to actual executors; strict public GET, fixed read-only GraphQL POST and reviewed OpenAPI HTTPS transports; caller-connected stdio MCP sessions | Hundreds of independently configured and verified services; protected account onboarding, availability, pagination, rate limits and failure behavior for each operation |
 | Authentication | Credentialless public readers; typed application-attested connection sessions bind subject/resource scope and revocable credential handles into imported HTTP catalogue identity; caller-owned MCP sessions | Provider-authenticated account onboarding, protected OAuth/token refresh, persistent account connections and tenant-bound private-response retention |
 | Glioma research | Literature/trial registry/TCGA reconciliation; bounded local drafts and exact citation audits; separate molecular catalogues and association metadata; fixed TP53 aggregates, Ensembl/NCBI reference comparison and UniProt/Reactome annotation context with native replay and review holds | Broader molecular measurements and independently validated crosswalks; imaging/pathology, longitudinal, single-cell/spatial and replication analyses using the existing typed tools; independent scientific entailment and claim-quality review |
 | Evidence quality | Metadata provenance/omissions, explicit unknown states, preserved source partitions | Independent relevance/quality evaluation, contradiction and negative-result handling, cohort-overlap checks, freshness policies, source-specific quality failures |
 | Product interfaces | Dependency-free SDK/CLI; opt-in authenticated local editor and HTTP routes through the existing Rust server and fixed Python worker, with retained task contracts, exact approval, run controls and explicit exports | Broader usability/accessibility evaluation, provider onboarding, release installation and production service operation |
 | Reliability | Focused invariants, installed-wheel/API smoke, Python regressions, separate live source checks, contract checks on normalized dispatch and resume | Provider/source outage campaigns, process-termination recovery, task-quality and cost/latency measurements, cross-SDK contract support and release/deployment validation |
 
-The eighteen-path count names implemented reviewed readers, not eighteen independent providers or
+The nineteen-path count names implemented reviewed readers, not nineteen independent providers or
 an assertion that every source is always available. PubMed and NCBI Gene, for example, share NCBI
 infrastructure. Approved one-record live queries verified OpenAlex, Crossref and Zenodo in the
 [research-source increment](RESEARCH_SOURCE_INTEGRATIONS.md); earlier live checks exercised the
@@ -59,8 +59,14 @@ than a new launcher switch per adapter. The three-source
 missingness and exact metadata concordance without validating biological equivalence or joining
 measurement planes. NCI ontology relations remain source terminology assertions.
 
-The [provider registry](WORKFLOW_PROVIDER_REGISTRY.md) binds eighteen reviewed reader paths to
-fifteen explicitly reviewed API service groups, with NCBI and GDC readers deduplicated. It checks
+A nineteenth optional [CIViC metadata reader](CIVIC_GLIOMA_EVIDENCE.md) adds accepted
+glioblastoma-name evidence categories and source-publication identifiers through a fixed anonymous
+GraphQL POST. Exact raw bytes, native pointers and missing/null distinctions support offline replay.
+One-page item counts do not establish independent publications or biological denominators;
+implementation and synthetic transport tests establish no live availability.
+
+The [provider registry](WORKFLOW_PROVIDER_REGISTRY.md) binds nineteen reviewed reader paths to
+sixteen explicitly reviewed API service groups, with NCBI and GDC readers deduplicated. It checks
 actual operation/default-executor/component identities, supports source-free request conformance
 inspection, and retains admitted adapter attempts separately from actual HTTP counts. Application
 reviewed group declarations and referenced evidence never become independently verified provider

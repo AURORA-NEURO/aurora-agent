@@ -409,7 +409,11 @@ fn denominator_flag_and_provider_route_use_actual_worker_without_source_or_model
 #[test]
 fn reviewed_capability_profiles_reach_actual_worker_without_browser_configuration_or_dispatch() {
     let mut fixture = Fixture::new();
-    fixture.config.capabilities = vec!["gene-identity".into(), "glioma-ontology".into()];
+    fixture.config.capabilities = vec![
+        "gene-identity".into(),
+        "glioma-ontology".into(),
+        "civic-glioblastoma-evidence".into(),
+    ];
     let application = fixture.application();
     let catalogue = data(
         application
@@ -418,9 +422,17 @@ fn reviewed_capability_profiles_reach_actual_worker_without_browser_configuratio
     );
     assert_eq!(
         catalogue["capabilities"]["selected_profiles"],
-        json!(["gene-identity", "glioma-ontology"])
+        json!([
+            "civic-glioblastoma-evidence",
+            "gene-identity",
+            "glioma-ontology"
+        ])
     );
-    for (profile, count) in [("gene-identity", 5), ("glioma-ontology", 1)] {
+    for (profile, count) in [
+        ("gene-identity", 5),
+        ("glioma-ontology", 1),
+        ("civic-glioblastoma-evidence", 1),
+    ] {
         let planned = data(application.invoke(&json!({"action":"plan", "task":"Inspect fixed source metadata", "planner":format!("capability:{profile}")}), Duration::from_secs(30)).unwrap());
         assert_eq!(planned["source_dispatch"], false);
         assert_eq!(planned["interpretation"]["provider_calls"], 0);

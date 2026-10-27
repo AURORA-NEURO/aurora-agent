@@ -132,10 +132,11 @@ The Python SDK now exposes an executable local-model workflow builder through
 `workflow-catalogue`, `workflow-build`, `workflow-run`, `workflow-template`, and
 `workflow-execute`. It validates a proposed operation DAG before dispatch, supports public-value
 checkpoint/resume, and composes a glioma literature/trial/TCGA evidence review. Eight reviewed
-public-source adapters are registered by default; ten opt-in paths add OpenAlex, Crossref,
+public-source adapters are registered by default; eleven opt-in paths add OpenAlex, Crossref,
 Zenodo, fixed GDC TP53 mutation-affected case aggregates, Ensembl TP53 references, and fixed
 UniProt/Reactome protein/pathway annotations, GDC project SSM-data coverage, HGNC gene references,
-and NCI Thesaurus glioma terminology. These eighteen paths are not eighteen independent
+NCI Thesaurus glioma terminology, and [CIViC evidence metadata](docs/CIVIC_GLIOMA_EVIDENCE.md).
+These nineteen paths are not nineteen independent
 providers or hundreds of connected services.
 Separate [aggregate review](docs/GLIOMA_MUTATION_WORKFLOW.md) and
 [gene-reference comparison](docs/GLIOMA_GENE_REFERENCES.md) templates preserve native citations,
@@ -149,6 +150,11 @@ Reviewed [capability profiles](docs/WORKFLOW_CAPABILITIES.md) enable fixed group
 operations through one repeated operator option, including a native three-source TP53 identifier
 review. Browser requests cannot enable another profile; source agreement and ontology relations
 remain separate from validated scientific equivalence and cohort evidence.
+Optional [local NLP intent suggestions](docs/WORKFLOW_INTENT_EXTRACTION.md) retain unreviewed
+mandatory-action candidates before graph authoring. The editor's explicit caller-declaration
+review binds task spans, literal requirements and acceptance through edits, restart and separate
+evidence exports. Candidate syntax and caller acceptance do not establish complete interpretation
+or scientific validity; unavailable actions and literal conflicts remain blocking.
 An opt-in [incremental Ollama planner](docs/INCREMENTAL_WORKFLOW_PLANNING.md) makes bounded
 model-selected decisions and sends final graphs through the same caller-contract compiler;
 protocol validation does not establish unrestricted NLP fidelity. The [local workflow editor](docs/WORKFLOW_APPLICATION.md)
@@ -1096,7 +1102,7 @@ turn a permitted provider call into an unscoped memory read or evaluation write.
 
 ## Status
 
-**88 crates, 1,368,566 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
+**88 crates, 1,368,874 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 
