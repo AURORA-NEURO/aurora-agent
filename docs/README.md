@@ -54,6 +54,7 @@ commands.
 - [Glioma three-source gene identifier evidence](GLIOMA_GENE_IDENTITY_WORKFLOW.md)
 - [Reviewed NCI Thesaurus glioma terminology reader](NCI_THESAURUS.md)
 - [Reviewed CIViC glioblastoma evidence metadata](CIVIC_GLIOMA_EVIDENCE.md)
+- [Local CIViC curation metadata research review](GLIOMA_CIVIC_CURATION_WORKFLOW.md)
 - [Operator-selected workflow capability profiles](WORKFLOW_CAPABILITIES.md)
 - [Reviewed OpenAlex, Crossref and Zenodo research sources](RESEARCH_SOURCE_INTEGRATIONS.md)
 - [Reviewed OpenAPI workflow integrations](WORKFLOW_OPENAPI.md)
