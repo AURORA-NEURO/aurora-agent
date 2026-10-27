@@ -88,8 +88,15 @@ The initial default GET on 2026-10-27 returned an HTTP200 body (5,650 bytes) wit
 required their terminology/version fields. That failed attempt and its original bytes remain
 preserved. Bundle/receipt schema `0.2` admits the documented compact shape, records the missing
 related metadata explicitly, and changes the default transport binding to prevent old plans
-silently adopting the changed admission policy. Its correction is validated offline; it does not
-retroactively turn the original failed acquisition into a success. A subsequent live acquisition
-has not yet been performed for this correction. No model call has been performed for this reader.
+silently adopting the changed admission policy. Offline reprocessing of those original bytes is
+labelled separately and does not turn the original failed acquisition into a success.
+
+A separate bounded default GET with schema `0.2` subsequently passed on 2026-10-27. It retained
+two definitions and 50 direct relationship records (19 children, two parents, 13 roles and
+16 associations), with root version `26.09d`. The 21 compact child/parent records kept their
+unreported related terminology/version unknown. Exact raw bytes, native pointers and the
+completed checkpoint were checked offline; completed replay made zero additional source calls.
+This is one observed public response, not continuous availability, exhaustive taxonomy coverage
+or scientific validation. Neither acquisition made a model call.
 No patient, sequence, raw variant, controlled-access,
 laboratory or clinical action surface is implemented.

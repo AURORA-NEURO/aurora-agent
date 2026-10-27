@@ -107,3 +107,26 @@ five-step SDK graph with approval hold/local resume/zero-dispatch completed repl
 do not establish live connectivity. This workflow supplies a bounded metadata review for a
 glioma research context; it establishes no disease association, molecular classification,
 assay denominator, cohort compatibility or clinical recommendation, and joins no measurements.
+
+## Bounded live observations
+
+The first live attempt at the five-stage template on 2026-10-27 retained an approved HGNC
+TP53 response and an Ensembl lookup response, then failed during the Ensembl cross-reference
+request. That request entered the transport but returned no retained typed response; its HTTP
+status and precise transport failure are unknown. NCBI, analysis and handoff did not run.
+The original artifacts remain failed. An offline check confirmed that granting approval and
+requesting a retry cannot exceed the original immutable Ensembl call limit of one; it made no
+new dispatch. Durable recovery of that original plan remains unverified.
+
+A distinct four-stage composition reused the validated original HGNC bundle with its original
+clock and provenance, then performed three fresh GETs for Ensembl and NCBI before the two local
+analysis/review stages. It completed with 12 native citations and an
+`awaiting_scientific_human_review` handoff. Offline replay resolved every retained citation and
+reproduced the output without new source or model calls. The legacy Ensembl/NCBI bundles retain
+their existing native data rather than exact raw response bodies, so raw-byte replay for those
+readers is not established. HGNC raw bytes remain retained.
+
+This separate composition neither retried nor completed the original five-stage checkpoint.
+It demonstrates a bounded use of retained source provenance with new acquisitions; metadata
+agreement remains subject to scientific review, source independence and release compatibility
+remain unassessed, and clinical actions remain unauthorized.

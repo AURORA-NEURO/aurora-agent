@@ -177,6 +177,11 @@ effects, compensation, effect retries and power-loss durability remain unproven 
    preserve uncertain external completion across crashes instead of automatically repeating writes.
 5. Add graph editing and operational controls, then concurrency/scheduling and shared execution.
    Validate the installed application and deployment artifacts before claiming production readiness.
+   A live identifier-template failure exposed an immutable source-call cap that correctly blocks
+   another attempt in the same plan. A separately compiled composition can retain validated source
+   evidence and its original acquisition clock; it does not establish recovery of that failed
+   checkpoint. Any future recovery design must preserve the original approval, failed attempt,
+   call accounting and source provenance rather than silently enlarging its budget.
 
 ## Completion evidence
 
